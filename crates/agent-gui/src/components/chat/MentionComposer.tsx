@@ -518,6 +518,51 @@ function insertNodeAtCursor(root: HTMLElement, node: Node) {
   sel?.addRange(range);
 }
 
+function scrollSelectionIntoComposerView(root: HTMLElement) {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) {
+    root.scrollTop = root.scrollHeight;
+    return;
+  }
+
+  const range = sel.getRangeAt(0);
+  if (!root.contains(range.commonAncestorContainer)) {
+    return;
+  }
+
+  const marker = document.createElement("span");
+  marker.textContent = "\u200B";
+  marker.style.display = "inline-block";
+  marker.style.width = "0";
+  marker.style.height = "1em";
+  marker.style.overflow = "hidden";
+
+  const markerRange = range.cloneRange();
+  markerRange.insertNode(marker);
+
+  const markerRect = marker.getBoundingClientRect();
+  const rootRect = root.getBoundingClientRect();
+  const margin = 4;
+  const bottomOverflow = markerRect.bottom - (rootRect.bottom - margin);
+  const topOverflow = rootRect.top + margin - markerRect.top;
+
+  if (bottomOverflow > 0) {
+    root.scrollTop += bottomOverflow;
+  } else if (topOverflow > 0) {
+    root.scrollTop -= topOverflow;
+  }
+
+  marker.remove();
+}
+
+function scheduleComposerSelectionScroll(root: HTMLElement | null) {
+  if (!root) return;
+  window.requestAnimationFrame(() => {
+    if (!root.isConnected) return;
+    scrollSelectionIntoComposerView(root);
+  });
+}
+
 /** Check if cursor is right after a mention chip, return that chip if so. */
 function chipBeforeCursor(root: HTMLElement): HTMLElement | null {
   const sel = window.getSelection();
@@ -1174,6 +1219,7 @@ export const MentionComposer = memo(forwardRef<MentionComposerHandle, MentionCom
         lastCompositionEndAtRef.current = 0;
         e.preventDefault();
         document.execCommand("insertLineBreak");
+        scheduleComposerSelectionScroll(editorRef.current);
         refreshEmptyState();
         refreshMention();
         return;

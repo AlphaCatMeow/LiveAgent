@@ -1,0 +1,699 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+import { createTsModuleLoader } from "../../../agent-gui/test/helpers/load-ts-module.mjs";
+
+const rootDir = fileURLToPath(new URL("../", import.meta.url));
+const uiMessagesLoader = createTsModuleLoader({ rootDir });
+const uiMessages = uiMessagesLoader.loadModule("src/lib/chat/uiMessages.ts");
+const hostedSearch = uiMessagesLoader.loadModule("src/lib/chat/hostedSearch.ts");
+const loader = createTsModuleLoader({
+  rootDir,
+  mocks: {
+    "@/lib/chat/chatPageHelpers": {
+      isAbortLikeError() {
+        return false;
+      },
+    },
+    "@/lib/chat/uploadedFiles": {
+      getUserMessageAttachments() {
+        return [];
+      },
+      getUserMessageDisplayText(message) {
+        if (typeof message.content === "string") return message.content;
+        if (!Array.isArray(message.content)) return "";
+        return message.content
+          .filter((block) => block?.type === "text")
+          .map((block) => block.text ?? "")
+          .join("");
+      },
+    },
+    "@/lib/chat/uiMessages": uiMessages,
+    "@/lib/chat/hostedSearch": hostedSearch,
+  },
+});
+
+const { buildTranscriptItems, pushChatEvent } = loader.loadModule("src/lib/chatUi.ts");
+
+function createDelegateAgent(id, prompt, summary) {
+  return {
+    id,
+    prompt,
+    mode: "readonly",
+    status: "completed",
+    summary,
+    durationMs: 1200,
+    rounds: 2,
+    toolCalls: 3,
+  };
+}
+
+test("web uiMessages summarizes SendMessage calls", () => {
+  const toolCall = {
+    type: "toolCall",
+    id: "send-message",
+    name: "SendMessage",
+    arguments: {
+      to: "parent",
+      channel: "question",
+      subject: "Scope",
+      message: "Should we keep Markdown-only bus?",
+    },
+  };
+
+  assert.equal(
+    uiMessages.summarizeToolCall(toolCall),
+    "SendMessage to=parent channel=question subject=Scope messageChars=33",
+  );
+  assert.deepEqual(uiMessages.toolCallArgsForDisplay(toolCall), {
+    to: "parent",
+    channel: "question",
+    subject: "Scope",
+    messageChars: 33,
+  });
+});
+
+test("buildTranscriptItems assigns stable user ordinals", () => {
+  const items = buildTranscriptItems([
+    {
+      id: "user-1",
+      kind: "user",
+      text: "first",
+      attachments: [],
+    },
+    {
+      id: "assistant-1",
+      kind: "assistant",
+      text: "reply",
+      round: 1,
+    },
+    {
+      id: "user-2",
+      kind: "user",
+      text: "second",
+      attachments: [],
+    },
+    {
+      id: "checkpoint-1",
+      kind: "checkpoint",
+      content: "summary",
+      summaryId: "summary-1",
+      coveredMessageCount: 2,
+      generatedBy: {
+        providerId: "codex",
+        model: "test-model",
+      },
+    },
+    {
+      id: "user-3",
+      kind: "user",
+      text: "third",
+      attachments: [],
+    },
+  ]);
+
+  assert.deepEqual(
+    items.filter((item) => item.kind === "user").map((item) => item.userOrdinal),
+    [0, 1, 2],
+  );
+});
+
+test("pushChatEvent and buildTranscriptItems preserve hosted search events", () => {
+  let entries = [];
+  entries = pushChatEvent(entries, {
+    type: "hosted_search",
+    id: "search-1",
+    provider: "gemini",
+    status: "searching",
+    queries: ["current docs"],
+    sources: [],
+    round: 1,
+  });
+  entries = pushChatEvent(entries, {
+    type: "hosted_search",
+    id: "search-1",
+    provider: "gemini",
+    status: "completed",
+    queries: ["current docs"],
+    sources: [{ url: "https://example.com/docs", title: "Docs" }],
+    round: 1,
+  });
+  entries = pushChatEvent(entries, {
+    type: "token",
+    text: "done",
+    round: 1,
+  });
+
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0].kind, "hosted_search");
+  assert.equal(entries[0].hostedSearch.status, "completed");
+  assert.equal(entries[0].hostedSearch.sources[0].url, "https://example.com/docs");
+
+  const items = buildTranscriptItems(entries);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].kind, "assistant");
+  assert.deepEqual(
+    items[0].rounds[0].blocks.map((block) => block.kind),
+    ["hostedSearch", "text"],
+  );
+});
+
+test("buildTranscriptItems keeps delayed hosted search after streamed text", () => {
+  let entries = [];
+  entries = pushChatEvent(entries, {
+    type: "token",
+    text: "answer before metadata",
+    round: 1,
+  });
+  entries = pushChatEvent(entries, {
+    type: "hosted_search",
+    id: "search-delayed",
+    provider: "codex",
+    status: "completed",
+    queries: ["delayed query"],
+    sources: [{ url: "https://example.com/delayed", title: "Delayed" }],
+    round: 1,
+  });
+
+  const items = buildTranscriptItems(entries);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].kind, "assistant");
+  assert.deepEqual(
+    items[0].rounds[0].blocks.map((block) => block.kind),
+    ["text", "hostedSearch"],
+  );
+  assert.equal(items[0].rounds[0].blocks[0].text, "answer before metadata");
+});
+
+test("buildTranscriptItems anchors delayed hosted search inside the streamed text", () => {
+  let entries = [];
+  entries = pushChatEvent(entries, {
+    type: "token",
+    text: "任务1完成。现在按顺序进行联网检索设计模式定义。任务2完成：设计模式是可复用方案。",
+    round: 1,
+  });
+  entries = pushChatEvent(entries, {
+    type: "hosted_search",
+    id: "search-pattern",
+    provider: "codex",
+    status: "completed",
+    queries: ["设计模式定义"],
+    sources: [{ url: "https://example.com/pattern", title: "设计模式" }],
+    round: 1,
+  });
+
+  const items = buildTranscriptItems(entries);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].kind, "assistant");
+  const blocks = items[0].rounds[0].blocks;
+  assert.deepEqual(
+    blocks.map((block) => block.kind),
+    ["text", "hostedSearch", "text"],
+  );
+  assert.equal(blocks[0].text, "任务1完成。现在按顺序进行联网检索设计模式定义。");
+  assert.equal(blocks[2].text, "任务2完成：设计模式是可复用方案。");
+});
+
+test("pushChatEvent keeps streamed text after hosted search in event order", () => {
+  let entries = [];
+  entries = pushChatEvent(entries, {
+    type: "token",
+    text: "任务1完成。现在开始联网搜索。",
+    round: 1,
+  });
+  entries = pushChatEvent(entries, {
+    type: "hosted_search",
+    id: "search-live-order",
+    provider: "codex",
+    status: "searching",
+    queries: ["LiveAgent web search"],
+    sources: [],
+    round: 1,
+  });
+  entries = pushChatEvent(entries, {
+    type: "token",
+    text: "任务2继续输出，应该出现在搜索卡片之后。",
+    round: 1,
+  });
+  entries = pushChatEvent(entries, {
+    type: "hosted_search",
+    id: "search-live-order",
+    provider: "codex",
+    status: "completed",
+    queries: ["LiveAgent web search"],
+    sources: [{ url: "https://example.com/live-order", title: "Live order" }],
+    round: 1,
+  });
+
+  assert.deepEqual(
+    entries.map((entry) => entry.kind),
+    ["assistant", "hosted_search", "assistant"],
+  );
+  assert.equal(entries[1].hostedSearch.status, "completed");
+  assert.equal(entries[1].hostedSearch.sources[0].url, "https://example.com/live-order");
+
+  const items = buildTranscriptItems(entries);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].kind, "assistant");
+  const blocks = items[0].rounds[0].blocks;
+  assert.deepEqual(
+    blocks.map((block) => block.kind),
+    ["text", "hostedSearch", "text"],
+  );
+  assert.equal(blocks[0].text, "任务1完成。现在开始联网搜索。");
+  assert.equal(blocks[2].text, "任务2继续输出，应该出现在搜索卡片之后。");
+});
+
+test("pushChatEvent does not split a sentence when hosted search arrives mid sentence", () => {
+  let entries = [];
+  entries = pushChatEvent(entries, {
+    type: "token",
+    text: "现在反过来，我先看“谁",
+    round: 1,
+  });
+  entries = pushChatEvent(entries, {
+    type: "hosted_search",
+    id: "search-sentence",
+    provider: "codex",
+    status: "searching",
+    queries: ["AI companion app revenue"],
+    sources: [],
+    round: 1,
+  });
+  entries = pushChatEvent(entries, {
+    type: "token",
+    text: "为什么会掏钱”。然后再看市场。",
+    round: 1,
+  });
+
+  const items = buildTranscriptItems(entries);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].kind, "assistant");
+  const blocks = items[0].rounds[0].blocks;
+  assert.deepEqual(
+    blocks.map((block) => block.kind),
+    ["text", "hostedSearch", "text"],
+  );
+  assert.equal(blocks[0].text, "现在反过来，我先看“谁为什么会掏钱”。");
+  assert.equal(blocks[1].item.id, "search-sentence");
+  assert.equal(blocks[2].text, "然后再看市场。");
+});
+
+test("hosted search finalization keeps stream order across non-text blocks", () => {
+  const search = {
+    type: "hostedSearch",
+    id: "search-mid",
+    provider: "codex",
+    status: "completed",
+    queries: ["middle query"],
+    sources: [{ url: "https://example.com/middle", title: "Middle" }],
+  };
+  const assistant = hostedSearch.applyHostedSearchOrderToAssistant(
+    {
+      role: "assistant",
+      content: [
+        { type: "text", text: "任务1完成。" },
+        {
+          type: "toolCall",
+          id: "call-read",
+          name: "Read",
+          arguments: { path: "README.md" },
+        },
+        { type: "text", text: "任务2继续输出。" },
+        search,
+      ],
+      provider: "codex",
+      model: "gpt-5",
+      api: "openai-responses",
+      stopReason: "stop",
+      timestamp: 2,
+    },
+    [
+      { kind: "text", text: "任务1完成。" },
+      { kind: "hostedSearch", item: search },
+      { kind: "text", text: "任务2继续输出。" },
+    ],
+  );
+
+  assert.deepEqual(
+    assistant.content.map((block) => block.type),
+    ["text", "hostedSearch", "toolCall", "text"],
+  );
+
+  const ui = uiMessages.buildUiMessages([
+    { role: "user", content: "search", timestamp: 1 },
+    assistant,
+  ]);
+  assert.deepEqual(
+    ui[1].rounds[0].blocks.map((block) => block.kind),
+    ["text", "hostedSearch", "tool", "text"],
+  );
+  assert.equal(ui[1].rounds[0].blocks[1].item.id, "search-mid");
+});
+
+test("hosted search finalization does not split a sentence at the stream event offset", () => {
+  const search = {
+    type: "hostedSearch",
+    id: "search-final-sentence",
+    provider: "codex",
+    status: "completed",
+    queries: ["AI companion app revenue 2025 users pay loneliness"],
+    sources: [{ url: "https://example.com/market", title: "Market" }],
+  };
+  const beforeSearch = "对，我前面犯的是工程师病：先造东西，再硬想怎么卖。现在反过来，我先看“谁";
+  const afterSearch = "为什么会掏钱”。然后再分析产品。";
+  const assistant = hostedSearch.applyHostedSearchOrderToAssistant(
+    {
+      role: "assistant",
+      content: [
+        { type: "text", text: beforeSearch + afterSearch },
+        search,
+      ],
+      provider: "codex",
+      model: "gpt-5",
+      api: "openai-responses",
+      stopReason: "stop",
+      timestamp: 2,
+    },
+    [
+      { kind: "text", text: beforeSearch },
+      { kind: "hostedSearch", item: search },
+      { kind: "text", text: afterSearch },
+    ],
+  );
+
+  assert.deepEqual(
+    assistant.content.map((block) => block.type),
+    ["text", "hostedSearch", "text"],
+  );
+  assert.equal(assistant.content[0].text, `${beforeSearch}为什么会掏钱”。`);
+  assert.equal(assistant.content[1].id, "search-final-sentence");
+  assert.equal(assistant.content[2].text, "然后再分析产品。");
+});
+
+test("pushChatEvent keeps streamed text after tool calls in event order", () => {
+  let entries = [];
+  entries = pushChatEvent(entries, {
+    type: "token",
+    text: "先说明工具调用前的内容。",
+    round: 1,
+  });
+  entries = pushChatEvent(entries, {
+    type: "tool_call",
+    id: "call-1",
+    name: "Read",
+    arguments: { path: "README.md" },
+    round: 1,
+  });
+  entries = pushChatEvent(entries, {
+    type: "token",
+    text: "工具调用后的正文应该留在工具卡之后。",
+    round: 1,
+  });
+
+  assert.deepEqual(
+    entries.map((entry) => entry.kind),
+    ["assistant", "tool_call", "assistant"],
+  );
+
+  const items = buildTranscriptItems(entries);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].kind, "assistant");
+  const blocks = items[0].rounds[0].blocks;
+  assert.deepEqual(
+    blocks.map((block) => block.kind),
+    ["text", "tool", "text"],
+  );
+  assert.equal(blocks[0].text, "先说明工具调用前的内容。");
+  assert.equal(blocks[2].text, "工具调用后的正文应该留在工具卡之后。");
+});
+
+test("buildTranscriptItems expands parent Agent aggregate results into Agent cards", () => {
+  const entries = [
+    {
+      id: "assistant-tool-call",
+      kind: "tool_call",
+      round: 1,
+      toolCall: {
+        type: "toolCall",
+        id: "call-agent",
+        name: "Agent",
+        arguments: {
+          agents: [
+            { id: "a", description: "Agent A", prompt: "Inspect A." },
+            { id: "b", description: "Agent B", prompt: "Inspect B." },
+          ],
+        },
+      },
+      summary: "Agent",
+      text: "{}",
+    },
+    {
+      id: "agent-aggregate-result",
+      kind: "tool_result",
+      round: 1,
+      toolResult: {
+        role: "toolResult",
+        toolCallId: "call-agent",
+        toolName: "Agent",
+        content: [{ type: "text", text: "aggregate" }],
+        details: {
+          kind: "delegate_agent",
+          agentCount: 2,
+          concurrency: 2,
+          totalDurationMs: 2400,
+          readOnly: true,
+          mode: "readonly",
+          agents: [
+            createDelegateAgent("a", "Agent A", "A done"),
+            createDelegateAgent("b", "Agent B", "B done"),
+          ],
+        },
+        isError: false,
+        timestamp: 123,
+      },
+      summary: "Agent result",
+      text: "aggregate",
+    },
+  ];
+
+  const items = buildTranscriptItems(entries);
+  assert.equal(items.length, 1);
+  assert.equal(items[0].kind, "assistant");
+  assert.equal(items[0].rounds.length, 1);
+
+  const toolBlocks = items[0].rounds[0].blocks.filter((block) => block.kind === "tool");
+  assert.equal(toolBlocks.length, 2);
+  assert.deepEqual(
+    toolBlocks.map((block) => block.item.toolCall.arguments.delegate_agent_card),
+    [true, true],
+  );
+  assert.deepEqual(
+    toolBlocks.map((block) => block.item.toolResult.details.kind),
+    ["delegate_agent_item", "delegate_agent_item"],
+  );
+  assert.deepEqual(
+    toolBlocks.map((block) => block.item.toolResult.details.agent.summary),
+    ["A done", "B done"],
+  );
+  assert.deepEqual(items[0].rounds[0].runningToolCallIds, []);
+});
+
+test("buildDelegateAgentPlaceholderToolCalls parses agent_spec into stable Agent cards", () => {
+  const placeholders = uiMessages.buildDelegateAgentPlaceholderToolCalls({
+    type: "toolCall",
+    id: "call-agent",
+    name: "Agent",
+    arguments: {
+      concurrency: 8,
+      agent_spec: [
+        "@agent id=player1 mode=readonly",
+        "name: 一号玩家",
+        "role: 发言者",
+        "prompt: 第一轮请给出观点",
+        "---",
+        "@agent id=player2 mode=readonly",
+        "name: 二号玩家",
+        "prompt: 第二轮请反驳",
+      ].join("\n"),
+    },
+  });
+
+  assert.equal(placeholders.length, 2);
+  assert.deepEqual(
+    placeholders.map((item) => item.id),
+    ["call-agent:agent:1", "call-agent:agent:2"],
+  );
+  assert.deepEqual(
+    placeholders.map((item) => item.arguments.name),
+    ["一号玩家", "二号玩家"],
+  );
+  assert.deepEqual(
+    placeholders.map((item) => item.arguments.prompt),
+    ["第一轮请给出观点", "第二轮请反驳"],
+  );
+  assert.deepEqual(
+    placeholders.map((item) => item.arguments.delegate_agent_card),
+    [true, true],
+  );
+});
+
+test("buildTranscriptItems shows Agent placeholders while aggregate result is pending", () => {
+  const parentToolCallEntry = {
+    id: "assistant-tool-call",
+    kind: "tool_call",
+    round: 1,
+    toolCall: {
+      type: "toolCall",
+      id: "call-agent",
+      name: "Agent",
+      arguments: {
+        concurrency: 8,
+        agent_spec: [
+          "@agent id=player1 mode=readonly",
+          "name: 一号玩家",
+          "prompt: 第一轮请给出观点",
+          "---",
+          "@agent id=player2 mode=readonly",
+          "name: 二号玩家",
+          "prompt: 第二轮请反驳",
+        ].join("\n"),
+      },
+    },
+    summary: "Agent",
+    text: "{}",
+  };
+
+  const pendingItems = buildTranscriptItems([parentToolCallEntry]);
+  const pendingBlocks = pendingItems[0].rounds[0].blocks.filter(
+    (block) => block.kind === "tool",
+  );
+  assert.deepEqual(
+    pendingBlocks.map((block) => block.item.toolCall.id),
+    ["call-agent:agent:1", "call-agent:agent:2"],
+  );
+  assert.deepEqual(
+    pendingBlocks.map((block) => block.item.toolCall.arguments.name),
+    ["一号玩家", "二号玩家"],
+  );
+  assert.ok(pendingBlocks.every((block) => !block.item.toolResult));
+  assert.deepEqual(pendingItems[0].rounds[0].runningToolCallIds, [
+    "call-agent:agent:1",
+    "call-agent:agent:2",
+  ]);
+
+  const completedItems = buildTranscriptItems([
+    parentToolCallEntry,
+    {
+      id: "agent-aggregate-result",
+      kind: "tool_result",
+      round: 1,
+      toolResult: {
+        role: "toolResult",
+        toolCallId: "call-agent",
+        toolName: "Agent",
+        content: [{ type: "text", text: "aggregate" }],
+        details: {
+          kind: "delegate_agent",
+          agentCount: 2,
+          concurrency: 2,
+          totalDurationMs: 2400,
+          readOnly: true,
+          mode: "readonly",
+          agents: [
+            createDelegateAgent("player1", "第一轮请给出观点", "一号完成"),
+            createDelegateAgent("player2", "第二轮请反驳", "二号完成"),
+          ],
+        },
+        isError: false,
+        timestamp: 123,
+      },
+      summary: "Agent result",
+      text: "aggregate",
+    },
+  ]);
+  const completedBlocks = completedItems[0].rounds[0].blocks.filter(
+    (block) => block.kind === "tool",
+  );
+  assert.deepEqual(
+    completedBlocks.map((block) => block.item.toolCall.id),
+    ["call-agent:agent:1", "call-agent:agent:2"],
+  );
+  assert.deepEqual(
+    completedBlocks.map((block) => block.item.toolResult.details.agent.summary),
+    ["一号完成", "二号完成"],
+  );
+  assert.deepEqual(completedItems[0].rounds[0].runningToolCallIds, []);
+});
+
+test("buildTranscriptItems uses the stable Agent name supplied by item results", () => {
+  const firstAgent = {
+    ...createDelegateAgent("agent-1", "哲学视角探讨生命的意义", "first"),
+    name: "哲学家 - 苏格拉底",
+  };
+  const secondAgent = {
+    ...createDelegateAgent("agent-1", "哲学家继续回应", "second"),
+    name: "哲学家 - 苏格拉底",
+    role: "哲学视角",
+  };
+  const entries = [
+    {
+      id: "first-result",
+      kind: "tool_result",
+      round: 1,
+      toolResult: {
+        role: "toolResult",
+        toolCallId: "call-agent-first",
+        toolName: "Agent",
+        content: [{ type: "text", text: "first aggregate" }],
+        details: {
+          kind: "delegate_agent",
+          agentCount: 1,
+          concurrency: 1,
+          totalDurationMs: 1200,
+          readOnly: true,
+          mode: "readonly",
+          agents: [firstAgent],
+        },
+        isError: false,
+        timestamp: 1,
+      },
+      summary: "Agent result",
+      text: "first aggregate",
+    },
+    {
+      id: "second-result",
+      kind: "tool_result",
+      round: 2,
+      toolResult: {
+        role: "toolResult",
+        toolCallId: "call-agent-second",
+        toolName: "Agent",
+        content: [{ type: "text", text: "second aggregate" }],
+        details: {
+          kind: "delegate_agent",
+          agentCount: 1,
+          concurrency: 1,
+          totalDurationMs: 1200,
+          readOnly: true,
+          mode: "readonly",
+          agents: [secondAgent],
+        },
+        isError: false,
+        timestamp: 2,
+      },
+      summary: "Agent result",
+      text: "second aggregate",
+    },
+  ];
+
+  const items = buildTranscriptItems(entries);
+  const firstTool = items[0].rounds[0].blocks.find((block) => block.kind === "tool");
+  const secondTool = items[0].rounds[1].blocks.find((block) => block.kind === "tool");
+  assert.equal(firstTool.item.toolResult.details.agent.name, "哲学家 - 苏格拉底");
+  assert.equal(secondTool.item.toolCall.arguments.name, "哲学家 - 苏格拉底");
+  assert.equal(secondTool.item.toolResult.details.agent.name, "哲学家 - 苏格拉底");
+  assert.equal(secondTool.item.toolCall.arguments.role, "哲学视角");
+  assert.equal(secondTool.item.toolResult.details.agent.role, "哲学视角");
+});

@@ -1,0 +1,578 @@
+import { invoke } from "@tauri-apps/api/core";
+
+import { sortSkillsForDisplay } from "./builtin";
+import type { ClawHubSkillCard } from "./clawHub";
+
+const SKILLS_DISCOVERY_UPDATED_EVENT = "liveagent:skills-discovery-updated";
+
+export {
+  isAlwaysEnabledSkillName,
+  isUserSelectableSkill,
+  isUserSelectableSkillName,
+  mergeAlwaysEnabledSkillNames,
+  sortSkillsForDisplay,
+} from "./builtin";
+
+export type SkillSummary = {
+  /** skill metadata name */
+  name: string;
+  /** skill metadata description */
+  description: string;
+  /** relative path to the readable skill file (prefer SKILL.md, fallback skill.json, then README.md) */
+  skillFile: string;
+  /** relative directory of the skill (from app skills root) */
+  baseDir: string;
+  /** full README.md content for fallback skills that do not declare metadata */
+  inlineContent?: string;
+  inlineContentTruncated?: boolean;
+  source?: SkillSourceMetadata | null;
+};
+
+export type SkillSourceMetadata = {
+  registry: string;
+  slug: string;
+  version?: string | null;
+  publishedAt?: number | null;
+};
+
+export type SkillDiscovery = {
+  rootDir: string;
+  skills: SkillSummary[];
+};
+
+type SystemListSkillFilesResponse = {
+  rootDir: string;
+  paths: string[];
+  truncated: boolean;
+};
+type SystemBuiltinSkillSeedResponse = {
+  name: string;
+  target: string;
+  action: string;
+  backup?: string | null;
+};
+type SystemReadSkillMetadataResponse = {
+  name?: string | null;
+  description?: string | null;
+};
+type SystemReadSkillTextResponse = { content: string; truncated: boolean };
+export type SkillInstallResult = {
+  name: string;
+  target: string;
+  backup?: string | null;
+  skillFile: string;
+};
+export type SkillInstallJobSnapshot = {
+  jobId: string;
+  phase: string;
+  source: string;
+  label?: string | null;
+  slug?: string | null;
+  version?: string | null;
+  downloadedBytes: number;
+  totalBytes?: number | null;
+  message?: string | null;
+  error?: string | null;
+  installed?: SkillInstallResult[] | null;
+  startedAt: number;
+  updatedAt: number;
+  finishedAt?: number | null;
+};
+type SystemManageSkillResponse = {
+  action: string;
+  rootDir: string;
+  path?: string | null;
+  content?: string | null;
+  truncated?: boolean | null;
+  startLine?: number | null;
+  numLines?: number | null;
+  skills?: Array<{
+    name: string;
+    description: string;
+    target: string;
+    skillFile: string;
+    baseDir: string;
+    source?: SkillSourceMetadata | null;
+  }> | null;
+  invalid?: Array<{ path: string; error: string }> | null;
+  installed?: SkillInstallResult[] | null;
+  created?: SkillInstallResult | null;
+  validation?: {
+    name: string;
+    target: string;
+    ok: boolean;
+    errors: string[];
+  } | null;
+  package?: {
+    name: string;
+    target: string;
+    archive: string;
+  } | null;
+  seeded?: SystemBuiltinSkillSeedResponse[] | null;
+  installJob?: SkillInstallJobSnapshot | null;
+  clawhubResults?: ClawHubSkillCard[] | null;
+  clawhubNextCursor?: string | null;
+  clawhubSlug?: string | null;
+  clawhubDownloadUrl?: string | null;
+};
+
+type DiscoverSkillsOptions = {
+  force?: boolean;
+};
+
+type SkillDirFiles = {
+  baseDir: string;
+  jsonFile?: string;
+  markdownFile?: string;
+  readmeFile?: string;
+};
+
+const README_INLINE_READ_LENGTH_LINES = 10000;
+
+let cachedDiscovery: SkillDiscovery | null = null;
+let inFlightDiscovery: Promise<SkillDiscovery> | null = null;
+let discoveryCacheEpoch = 0;
+
+function normalizeRelPath(path: string) {
+  return path.replace(/\\/g, "/");
+}
+
+function normalizeDisplayPath(path: string) {
+  const normalized = normalizeRelPath(path);
+  if (normalized.startsWith("//?/UNC/")) {
+    return `//${normalized.slice("//?/UNC/".length)}`;
+  }
+  if (normalized.startsWith("//?/")) {
+    return normalized.slice("//?/".length);
+  }
+  return normalized;
+}
+
+function normalizeSkillSourceMetadata(
+  source: SkillSourceMetadata | null | undefined,
+): SkillSourceMetadata | null {
+  if (!source || typeof source.registry !== "string" || typeof source.slug !== "string") {
+    return null;
+  }
+  return {
+    registry: source.registry,
+    slug: source.slug,
+    version: typeof source.version === "string" ? source.version : null,
+    publishedAt: typeof source.publishedAt === "number" ? source.publishedAt : null,
+  };
+}
+
+function isSkillJsonPath(path: string) {
+  return /(?:^|\/)skill\.json$/i.test(path);
+}
+
+function isSkillMarkdownPath(path: string) {
+  return /(?:^|\/)skill\.md$/i.test(path);
+}
+
+function isSkillReadmePath(path: string) {
+  return /(?:^|\/)readme\.md$/i.test(path);
+}
+
+function getSkillBaseDir(path: string) {
+  return path.replace(/(?:^|\/)(?:skill\.(?:json|md)|readme\.md)$/i, "");
+}
+
+function normalizeSkillNameFromBaseDir(baseDir: string) {
+  const segments = normalizeRelPath(baseDir)
+    .split("/")
+    .filter(Boolean);
+  const segment = segments.length > 0 ? segments[segments.length - 1] : "readme-skill";
+  return segment
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-+/g, "-") || "readme-skill";
+}
+
+function firstReadmeDescriptionLine(content: string) {
+  for (const rawLine of content.replace(/^\uFEFF/, "").split(/\r?\n/)) {
+    const line = rawLine.trim().replace(/^#+\s*/, "").replace(/^[*_`]+|[*_`]+$/g, "").trim();
+    if (line === "---") continue;
+    if (line) return line.slice(0, 280);
+  }
+  return "";
+}
+
+async function buildReadmeFallbackSkill(params: {
+  baseDir: string;
+  skillFile: string;
+}): Promise<SkillSummary> {
+  const readme = await readSkillText({
+    path: params.skillFile,
+    length: README_INLINE_READ_LENGTH_LINES,
+  });
+  const name = normalizeSkillNameFromBaseDir(params.baseDir);
+  const description =
+    firstReadmeDescriptionLine(readme.content) ||
+    `README.md skill instructions for ${name}`;
+  return {
+    name,
+    description,
+    skillFile: params.skillFile,
+    baseDir: params.baseDir,
+    inlineContent: readme.content,
+    inlineContentTruncated: readme.truncated,
+  };
+}
+
+export async function ensureBuiltinSkills() {
+  try {
+    return await invoke<SystemBuiltinSkillSeedResponse[]>("system_ensure_builtin_skills");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("does not implement invoke")) {
+      return [];
+    }
+    throw error;
+  }
+}
+
+export function notifySkillsDiscoveryUpdated() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(SKILLS_DISCOVERY_UPDATED_EVENT));
+}
+
+export function subscribeSkillsDiscoveryUpdated(listener: () => void) {
+  if (typeof window === "undefined") {
+    return () => undefined;
+  }
+  window.addEventListener(SKILLS_DISCOVERY_UPDATED_EVENT, listener);
+  return () => window.removeEventListener(SKILLS_DISCOVERY_UPDATED_EVENT, listener);
+}
+
+export function invalidateSkillsDiscoveryCache() {
+  cachedDiscovery = null;
+  inFlightDiscovery = null;
+  discoveryCacheEpoch += 1;
+}
+
+function sortAndDedupeSkills(skills: SkillSummary[]) {
+  skills.sort((a, b) => a.name.localeCompare(b.name));
+  const seen = new Set<string>();
+  return sortSkillsForDisplay(
+    skills.filter((skill) => {
+      if (seen.has(skill.name)) return false;
+      seen.add(skill.name);
+      return true;
+    }),
+  );
+}
+
+async function maybeAttachReadmeFallbackInline(skill: SkillSummary): Promise<SkillSummary> {
+  if (!isSkillReadmePath(skill.skillFile)) {
+    return skill;
+  }
+
+  try {
+    const metadata = await invoke<SystemReadSkillMetadataResponse>("system_read_skill_metadata", {
+      path: skill.skillFile,
+    } as any);
+    const hasDeclaredMetadata = Boolean(
+      typeof metadata.name === "string" &&
+        metadata.name.trim() &&
+        typeof metadata.description === "string" &&
+        metadata.description.trim(),
+    );
+    if (hasDeclaredMetadata) {
+      return skill;
+    }
+
+    const readme = await readSkillText({
+      path: skill.skillFile,
+      length: README_INLINE_READ_LENGTH_LINES,
+    });
+    return {
+      ...skill,
+      inlineContent: readme.content,
+      inlineContentTruncated: readme.truncated,
+    };
+  } catch {
+    return skill;
+  }
+}
+
+async function managedSkillListToDiscovery(
+  managed: SystemManageSkillResponse,
+): Promise<SkillDiscovery> {
+  const rootDir = normalizeDisplayPath(managed.rootDir ?? "");
+  const skills: SkillSummary[] = [];
+  for (const raw of managed.skills ?? []) {
+    const name = typeof raw.name === "string" ? raw.name.trim() : "";
+    const description = typeof raw.description === "string" ? raw.description.trim() : "";
+    const skillFile = typeof raw.skillFile === "string" ? normalizeRelPath(raw.skillFile) : "";
+    const baseDir = typeof raw.baseDir === "string" ? normalizeRelPath(raw.baseDir) : "";
+    if (!name || !description || !skillFile || !baseDir) continue;
+    skills.push(
+      await maybeAttachReadmeFallbackInline({
+        name,
+        description,
+        skillFile,
+        baseDir,
+        source: normalizeSkillSourceMetadata(raw.source),
+      }),
+    );
+  }
+
+  const discovery: SkillDiscovery = {
+    rootDir,
+    skills: sortAndDedupeSkills(skills),
+  };
+
+  if (discovery.skills.length === 0 && (managed.invalid?.length ?? 0) > 0) {
+    const invalid = managed.invalid?.[0];
+    throw new Error(
+      `发现 Skill 元数据无效：${invalid?.path ?? "unknown"}（${invalid?.error ?? "unknown error"}）`,
+    );
+  }
+
+  return discovery;
+}
+
+async function discoverSkillsViaManagedList(): Promise<SkillDiscovery | null> {
+  try {
+    return await managedSkillListToDiscovery(await manageSkill({ action: "list" }));
+  } catch {
+    return null;
+  }
+}
+
+async function discoverSkillsViaLegacyFileScan(): Promise<SkillDiscovery> {
+  const response = await invoke<SystemListSkillFilesResponse>("system_list_skill_files");
+  const rootDir = normalizeDisplayPath(response.rootDir ?? "");
+  const sourceByBaseDir = new Map<string, SkillSourceMetadata>();
+  const sourceByName = new Map<string, SkillSourceMetadata>();
+  try {
+    const managed = await manageSkill({ action: "list" });
+    for (const skill of managed.skills ?? []) {
+      if (!skill.source) continue;
+      const source = normalizeSkillSourceMetadata(skill.source);
+      if (!source) continue;
+      sourceByBaseDir.set(normalizeRelPath(skill.baseDir), source);
+      sourceByName.set(skill.name, source);
+    }
+  } catch {
+    // Source metadata is best-effort; core discovery still works without it.
+  }
+  const groups = new Map<string, SkillDirFiles>();
+  for (const rawPath of Array.from(response.paths ?? [])) {
+    const path = normalizeRelPath(String(rawPath));
+    const baseDir = getSkillBaseDir(path);
+    const existing = groups.get(baseDir) ?? { baseDir };
+    if (isSkillJsonPath(path)) {
+      existing.jsonFile = existing.jsonFile ?? path;
+    } else if (isSkillMarkdownPath(path)) {
+      existing.markdownFile = existing.markdownFile ?? path;
+    } else if (isSkillReadmePath(path)) {
+      existing.readmeFile = existing.readmeFile ?? path;
+    } else {
+      continue;
+    }
+    groups.set(baseDir, existing);
+  }
+
+  const skills: SkillSummary[] = [];
+  const readErrors: string[] = [];
+  const invalidMetadata: string[] = [];
+  for (const group of Array.from(groups.values())) {
+    const metadataFile = group.jsonFile ?? group.markdownFile ?? group.readmeFile;
+    const skillFile = group.markdownFile ?? group.jsonFile ?? group.readmeFile;
+    if (!metadataFile || !skillFile) continue;
+    try {
+      const metadata = await invoke<SystemReadSkillMetadataResponse>("system_read_skill_metadata", {
+        path: metadataFile,
+      } as any);
+
+      const name = typeof metadata.name === "string" ? metadata.name.trim() : "";
+      const description = typeof metadata.description === "string"
+        ? metadata.description.trim()
+        : "";
+      if (!name || !description) {
+        if (
+          !name &&
+          !description &&
+          metadataFile === group.readmeFile &&
+          skillFile === group.readmeFile
+        ) {
+          skills.push(await buildReadmeFallbackSkill({
+            baseDir: group.baseDir,
+            skillFile,
+          }));
+          continue;
+        }
+        invalidMetadata.push(metadataFile);
+        continue;
+      }
+
+      skills.push({
+        name,
+        description,
+        skillFile,
+        baseDir: group.baseDir,
+        source: sourceByBaseDir.get(group.baseDir) ?? sourceByName.get(name) ?? null,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      readErrors.push(`${metadataFile}: ${message}`);
+    }
+  }
+
+  const discovery: SkillDiscovery = {
+    rootDir,
+    skills: sortAndDedupeSkills(skills),
+  };
+
+  if (discovery.skills.length > 0) {
+    return discovery;
+  }
+
+  if ((response.paths?.length ?? 0) > 0) {
+    if (readErrors.length > 0) {
+      throw new Error(`发现 Skill 文件但读取失败：${readErrors[0]}`);
+    }
+    if (invalidMetadata.length > 0) {
+      throw new Error(
+        `发现 Skill 元数据无效：${invalidMetadata[0]}（需要 name + description）`,
+      );
+    }
+  }
+
+  return discovery;
+}
+
+async function loadSkillsDiscovery(): Promise<SkillDiscovery> {
+  await ensureBuiltinSkills();
+  const managedDiscovery = await discoverSkillsViaManagedList();
+  if (managedDiscovery) return managedDiscovery;
+  return discoverSkillsViaLegacyFileScan();
+}
+
+export async function discoverSkills(
+  options: DiscoverSkillsOptions = {},
+): Promise<SkillDiscovery> {
+  if (options.force) {
+    invalidateSkillsDiscoveryCache();
+  }
+  if (!options.force && cachedDiscovery) {
+    return cachedDiscovery;
+  }
+  if (!options.force && inFlightDiscovery) {
+    return inFlightDiscovery;
+  }
+
+  const requestEpoch = discoveryCacheEpoch;
+  const request = loadSkillsDiscovery().then((discovery) => {
+    if (requestEpoch === discoveryCacheEpoch) {
+      cachedDiscovery = discovery;
+    }
+    return discovery;
+  });
+  inFlightDiscovery = request;
+  try {
+    return await request;
+  } finally {
+    if (inFlightDiscovery === request) {
+      inFlightDiscovery = null;
+    }
+  }
+}
+
+export async function readSkillText(params: {
+  path: string;
+  offset?: number;
+  length?: number;
+}): Promise<SystemReadSkillTextResponse> {
+  return invoke<SystemReadSkillTextResponse>("system_read_skill_text", {
+    path: params.path,
+    offset: params.offset,
+    length: params.length,
+  } as any);
+}
+
+export async function manageSkill(params: Record<string, unknown>): Promise<SystemManageSkillResponse> {
+  const response = await invoke<SystemManageSkillResponse>("system_manage_skill", {
+    payload: params,
+  } as any);
+  const action = typeof params.action === "string" ? params.action : "";
+  if (
+    action === "install" ||
+    action === "create" ||
+    action === "clawhub_install" ||
+    (action === "install_status" && response.installJob?.phase === "done")
+  ) {
+    invalidateSkillsDiscoveryCache();
+  }
+  return response;
+}
+
+export async function startSkillInstallJob(
+  params: Record<string, unknown>,
+): Promise<SkillInstallJobSnapshot> {
+  const response = await manageSkill({ ...params, action: "install_start" });
+  if (!response.installJob) {
+    throw new Error("SkillsManager install_start did not return an install job");
+  }
+  return response.installJob;
+}
+
+export async function getSkillInstallJobStatus(
+  jobId: string,
+): Promise<SkillInstallJobSnapshot> {
+  const response = await manageSkill({ action: "install_status", jobId });
+  if (!response.installJob) {
+    throw new Error("SkillsManager install_status did not return an install job");
+  }
+  return response.installJob;
+}
+
+export function buildSkillsSystemPrompt(params: {
+  rootDir: string;
+  selected: SkillSummary[];
+}): string {
+  const { selected } = params;
+  if (selected.length === 0) return "";
+
+  return [
+    'The following Skills are enabled by the user (discovered from the fixed Skills directory exposed to file tools as root="skills").',
+    "",
+    "Usage Rules (aligned with Claude Code behavior):",
+    "- Skills with metadata use progressive disclosure; their full contents are not automatically injected into context.",
+    "- README.md fallback Skills without metadata are loaded inline below because there is no metadata to disclose progressively.",
+    "- Only the Skills listed below are enabled for this conversation. SkillsManager(action=list) may be used to review the enabled Skills visible to this chat, but it must not be used to enumerate or infer other installed Skills.",
+    "- Only when you determine that a metadata Skill is genuinely needed should you call SkillsManager with action=read to read the full Skill file and then follow its workflow exactly.",
+    "- SkillsManager.path uses the skillFile below. It is relative to the fixed Skills root directory and may point to SKILL.md, skill.md, skill.json, or README.md.",
+    '- For files referenced inside an enabled Skill, use file tools with root="skills" and a path relative to the fixed Skills root, for example Read(root="skills", path="<baseDir>/references/guide.md"), List, Glob, Grep, Write, Edit, or Delete.',
+    "- You may update files inside enabled Skills when the user asks you to optimize or maintain them. Create, install, search/install from ClawHub, validate, or package Skills through SkillsManager actions.",
+    "- Never expand the fixed Skills root into an absolute local path in any tool call. If a path belongs to a Skill, keep it root-relative and set root=\"skills\".",
+    "- If Skill content contains absolute local paths, home-directory paths, drive-letter paths, or shell snippets that read Skill files with cat/ls/find/grep, treat those path fragments as non-portable examples and convert them to root=\"skills\" file-tool calls.",
+    "- Do not guess a Skill's exact instructions or script paths before reading the Skill file.",
+    "- Relative paths inside a Skill (scripts/, references/, assets/, and so on) are resolved relative to baseDir.",
+    "- If a Skill contains the {baseDir} placeholder, interpret it as the baseDir value in the metadata below (relative to the Skills root directory).",
+    "",
+    "Skills:",
+    ...selected.map((s) =>
+      [
+        `- name: ${s.name}`,
+        `  description: ${s.description}`,
+        `  skillFile: ${s.skillFile}`,
+        `  baseDir: ${s.baseDir}`,
+        s.inlineContent !== undefined
+          ? [
+              `  loadedFrom: README.md without metadata`,
+              `  truncated: ${s.inlineContentTruncated ? "true" : "false"}`,
+              "  content:",
+              "<README.md>",
+              s.inlineContent || "(empty README.md)",
+              "</README.md>",
+            ].join("\n")
+          : "",
+      ].join("\n"),
+    ),
+  ].join("\n");
+}

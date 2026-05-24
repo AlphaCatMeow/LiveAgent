@@ -1,0 +1,1125 @@
+import { fileIconSvg, folderIconSvg } from "../icons";
+import { getFileTypeIcon } from "./fileTypeIcons";
+import {
+  forwardRef,
+  memo,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type KeyboardEvent,
+  type RefObject,
+} from "react";
+import { createPortal } from "react-dom";
+import { invoke } from "@tauri-apps/api/core";
+import { extractClipboardFiles } from "../../lib/clipboardFiles";
+import { cn } from "../../lib/shared/utils";
+
+/* ------------------------------------------------------------------ */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
+
+interface MentionFileEntry {
+  path: string;
+  kind: "file" | "dir";
+}
+
+interface MentionListResponse {
+  entries: MentionFileEntry[];
+  truncated: boolean;
+}
+
+type MentionSearchEntry = {
+  entry: MentionFileEntry;
+  searchPath: string;
+};
+
+/** Where the @ trigger lives inside a text node */
+interface MentionContext {
+  query: string;
+  textNode: Text;
+  atOffset: number; // char offset of '@' inside textNode
+}
+
+export interface MentionComposerHandle {
+  getText: () => string;
+  getDraft: () => MentionComposerDraft;
+  hasContent: () => boolean;
+  setText: (text: string) => void;
+  setDraft: (draft: MentionComposerDraft) => void;
+  clear: () => void;
+  focus: () => void;
+}
+
+export type MentionComposerLargePaste = {
+  id: string;
+  label: string;
+  text: string;
+  charCount: number;
+  lineCount: number;
+  preview: string;
+};
+
+export type MentionComposerDraftSegment =
+  | { type: "text"; text: string }
+  | { type: "largePaste"; paste: MentionComposerLargePaste };
+
+export type MentionComposerDraft = {
+  segments: MentionComposerDraftSegment[];
+  text: string;
+  textWithoutLargePastes: string;
+  largePastes: MentionComposerLargePaste[];
+  isEmpty: boolean;
+};
+
+export interface MentionComposerProps {
+  /** Called when user presses Enter (without Shift). */
+  onSend: () => void;
+  /** Called only when empty/non-empty state flips. */
+  onEmptyChange?: (isEmpty: boolean) => void;
+  onBusyChange?: (isBusy: boolean) => void;
+  onPasteFiles?: (files: File[]) => void;
+  disabled?: boolean;
+  placeholder?: string;
+  workdir: string;
+  className?: string;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Constants                                                          */
+/* ------------------------------------------------------------------ */
+
+const MAX_SUGGESTIONS = 20;
+const MENTION_INDEX_MAX_RESULTS = 5000;
+const MENTION_TAG_ATTR = "data-mention-path";
+const MENTION_KIND_ATTR = "data-mention-kind";
+const LARGE_PASTE_TAG_ATTR = "data-large-paste-id";
+const LARGE_PASTE_CHAR_THRESHOLD = 8_000;
+const LARGE_PASTE_LINE_THRESHOLD = 200;
+const LARGE_PASTE_PREVIEW_CHARS = 160;
+
+/* ------------------------------------------------------------------ */
+/*  DOM helpers                                                        */
+/* ------------------------------------------------------------------ */
+
+function escapeMarkdownLinkLabel(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/]/g, "\\]");
+}
+
+function formatMarkdownLinkDestination(value: string) {
+  const normalized = value.replace(/\\/g, "/");
+  if (/[\s()<>]/.test(normalized)) {
+    return `<${normalized.replace(/</g, "%3C").replace(/>/g, "%3E")}>`;
+  }
+  return normalized;
+}
+
+function formatMentionReference(path: string, kind: "file" | "dir") {
+  const normalized = path.replace(/\\/g, "/");
+  const target = kind === "dir" && !normalized.endsWith("/") ? `${normalized}/` : normalized;
+  const labelPath = target.replace(/\/+$/, "");
+  const baseName = labelPath.split("/").pop() || labelPath || target;
+  const label = kind === "dir" ? `${baseName}/` : baseName;
+  return `[${escapeMarkdownLinkLabel(label)}](${formatMarkdownLinkDestination(target)})`;
+}
+
+/** Recursively serialise a contenteditable DOM tree back to plain text.
+ *  Mention chips become Markdown file references. */
+function pushTextSegment(out: MentionComposerDraftSegment[], text: string) {
+  if (!text) return;
+  const last = out[out.length - 1];
+  if (last?.type === "text") {
+    last.text += text;
+    return;
+  }
+  out.push({ type: "text", text });
+}
+
+function serializeChildrenToSegments(
+  parent: Node,
+  largePastes: Map<string, MentionComposerLargePaste>,
+): MentionComposerDraftSegment[] {
+  const parts: MentionComposerDraftSegment[] = [];
+  parent.childNodes.forEach((child) => {
+    if (child.nodeType === Node.TEXT_NODE) {
+      pushTextSegment(parts, child.textContent || "");
+    } else if (child.nodeType === Node.ELEMENT_NODE) {
+      const el = child as HTMLElement;
+      const mentionPath = el.getAttribute(MENTION_TAG_ATTR);
+      if (mentionPath) {
+        const kind = el.getAttribute(MENTION_KIND_ATTR);
+        pushTextSegment(parts, formatMentionReference(mentionPath, kind === "dir" ? "dir" : "file"));
+      } else {
+        const largePasteId = el.getAttribute(LARGE_PASTE_TAG_ATTR);
+        const largePaste = largePasteId ? largePastes.get(largePasteId) : undefined;
+        if (largePaste) {
+          parts.push({ type: "largePaste", paste: largePaste });
+          return;
+        }
+        if (el.tagName === "BR") {
+          pushTextSegment(parts, "\n");
+        } else {
+          // Block-level wrappers (DIV / P) inserted by the browser on Enter
+          if (el.tagName === "DIV" || el.tagName === "P") {
+            if (parts.length > 0) pushTextSegment(parts, "\n");
+          }
+          for (const segment of serializeChildrenToSegments(el, largePastes)) {
+            if (segment.type === "text") {
+              pushTextSegment(parts, segment.text);
+            } else {
+              parts.push(segment);
+            }
+          }
+        }
+      }
+    }
+  });
+  return parts;
+}
+
+function serializeChildren(
+  parent: Node,
+  largePastes: Map<string, MentionComposerLargePaste>,
+): string {
+  return serializeChildrenToSegments(parent, largePastes)
+    .map((segment) => (segment.type === "largePaste" ? segment.paste.text : segment.text))
+    .join("");
+}
+
+function editorTextIsEmpty(editor: HTMLElement) {
+  const raw = (editor.textContent || "").replace(/\u00A0/g, " ");
+  return raw.trim().length === 0;
+}
+
+function normalizeMentionQuery(query: string) {
+  return query.trim().replace(/\\/g, "/").toLowerCase();
+}
+
+function normalizeLargePastePreview(text: string) {
+  return text.trim().replace(/\s+/g, " ").slice(0, LARGE_PASTE_PREVIEW_CHARS);
+}
+
+function countLargePasteLines(text: string) {
+  if (!text) return 0;
+  return text.split(/\r\n|\r|\n/).length;
+}
+
+function isLargePasteText(text: string) {
+  if (text.length >= LARGE_PASTE_CHAR_THRESHOLD) return true;
+  return countLargePasteLines(text) >= LARGE_PASTE_LINE_THRESHOLD;
+}
+
+function formatLargePasteCount(value: number) {
+  return new Intl.NumberFormat().format(value);
+}
+
+function createMentionIcon(svgMarkup: string) {
+  const template = document.createElement("template");
+  template.innerHTML = svgMarkup.trim();
+  const parsed = template.content.firstElementChild;
+  const icon =
+    parsed instanceof SVGElement && parsed.tagName.toLowerCase() === "svg"
+      ? (parsed.cloneNode(true) as SVGSVGElement)
+      : document.createElementNS("http://www.w3.org/2000/svg", "svg");
+
+  icon.setAttribute("width", "12");
+  icon.setAttribute("height", "12");
+  icon.style.flexShrink = "0";
+  icon.style.opacity = "0.7";
+  return icon;
+}
+
+/** Find the nearest previous leaf node (for checking what precedes @). */
+function prevLeaf(node: Node, root: Node): Node | null {
+  let cur: Node | null = node;
+  while (cur && cur !== root) {
+    if (cur.previousSibling) {
+      cur = cur.previousSibling;
+      // Descend to rightmost leaf
+      while (cur.lastChild) cur = cur.lastChild;
+      return cur;
+    }
+    cur = cur.parentNode;
+  }
+  return null;
+}
+
+function rightmostTextNode(node: Node | null): Text | null {
+  let cur = node;
+  while (cur) {
+    if (cur.nodeType === Node.TEXT_NODE) {
+      return cur as Text;
+    }
+    cur = cur.lastChild;
+  }
+  return null;
+}
+
+function selectionTextPosition(root: HTMLElement): { textNode: Text; offset: number } | null {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return null;
+
+  const { startContainer: node, startOffset: offset } = sel.getRangeAt(0);
+  if (!root.contains(node)) return null;
+  if (node.nodeType === Node.TEXT_NODE) {
+    return { textNode: node as Text, offset };
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    return null;
+  }
+
+  const element = node as HTMLElement;
+  const childBefore = element.childNodes[offset - 1] ?? null;
+  const textNode = rightmostTextNode(childBefore);
+  if (textNode) {
+    return { textNode, offset: (textNode.textContent || "").length };
+  }
+  return null;
+}
+
+/** Detect an in-progress @mention at the cursor position. */
+function detectMention(root: HTMLElement): MentionContext | null {
+  const position = selectionTextPosition(root);
+  if (!position) return null;
+
+  const { textNode: node, offset } = position;
+  const text = node.textContent || "";
+  const before = text.slice(0, offset);
+
+  let atIdx = -1;
+  for (let i = before.length - 1; i >= 0; i--) {
+    if (before[i] === "@") { atIdx = i; break; }
+    if (/\s/.test(before[i])) break;
+  }
+  if (atIdx < 0) return null;
+
+  // @ must be preceded by whitespace or be the very first character
+  if (atIdx > 0) {
+    if (!/\s/.test(before[atIdx - 1])) return null;
+  } else {
+    // atIdx === 0 — check previous leaf
+    const prev = prevLeaf(node, root);
+    if (prev) {
+      if (prev.nodeType === Node.TEXT_NODE) {
+        const pt = prev.textContent || "";
+        if (pt.length > 0 && !/\s/.test(pt[pt.length - 1])) return null;
+      }
+      // Element node (e.g. mention chip) acts as word boundary → OK
+    }
+  }
+
+  return { query: before.slice(atIdx + 1), textNode: node as Text, atOffset: atIdx };
+}
+
+/** Replace the @query text with a styled mention chip. */
+function insertMentionChip(ctx: MentionContext, path: string, kind: "file" | "dir") {
+  const { textNode, atOffset, query } = ctx;
+  const text = textNode.textContent || "";
+  const parent = textNode.parentNode!;
+
+  const beforeText = text.slice(0, atOffset);
+  const afterRaw = text.slice(atOffset + 1 + query.length);
+
+  const chip = document.createElement("span");
+  chip.setAttribute(MENTION_TAG_ATTR, path);
+  chip.setAttribute(MENTION_KIND_ATTR, kind);
+  chip.contentEditable = "false";
+  chip.className =
+    kind === "dir"
+      ? "mention-chip inline-flex items-center gap-1 rounded bg-amber-500/15 px-1.5 mx-0.5 text-amber-700 dark:text-amber-300 align-baseline whitespace-nowrap select-none"
+      : "mention-chip inline-flex items-center gap-1 rounded bg-blue-500/15 px-1.5 mx-0.5 text-blue-700 dark:text-blue-300 align-baseline whitespace-nowrap select-none";
+  chip.title = path;
+
+  chip.appendChild(createMentionIcon(kind === "dir" ? folderIconSvg : fileIconSvg));
+
+  const fileName = path.split("/").pop() || path;
+  chip.appendChild(document.createTextNode(fileName));
+
+  // Ensure a space after the chip so the cursor has somewhere to land
+  const afterText = afterRaw.length === 0 || !/^\s/.test(afterRaw) ? "\u00A0" + afterRaw : afterRaw;
+  const afterNode = document.createTextNode(afterText);
+
+  // Only insert beforeNode if it has content (avoid empty text nodes)
+  if (beforeText) {
+    parent.insertBefore(document.createTextNode(beforeText), textNode);
+  }
+  parent.insertBefore(chip, textNode);
+  parent.insertBefore(afterNode, textNode);
+  parent.removeChild(textNode);
+
+  // Place cursor right after the space
+  const range = document.createRange();
+  range.setStart(afterNode, 1);
+  range.collapse(true);
+  const sel = window.getSelection()!;
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+function createLargePasteChip(paste: MentionComposerLargePaste) {
+  const chip = document.createElement("span");
+  chip.setAttribute(LARGE_PASTE_TAG_ATTR, paste.id);
+  chip.contentEditable = "false";
+  chip.className =
+    "mention-chip inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 mx-0.5 text-emerald-700 dark:text-emerald-300 align-baseline whitespace-nowrap select-none";
+  chip.title = paste.preview
+    ? `${paste.label}\n${paste.preview}`
+    : `${paste.label} (${paste.charCount} chars)`;
+
+  chip.appendChild(createMentionIcon(fileIconSvg));
+
+  chip.appendChild(
+    document.createTextNode(
+      `${paste.label} · ${formatLargePasteCount(paste.charCount)} chars · ${formatLargePasteCount(paste.lineCount)} lines`,
+    ),
+  );
+  return chip;
+}
+
+function insertNodeAtCursor(root: HTMLElement, node: Node) {
+  const afterNode = document.createTextNode("\u00A0");
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount > 0) {
+    const range = sel.getRangeAt(0);
+    if (root.contains(range.commonAncestorContainer)) {
+      range.deleteContents();
+      range.insertNode(afterNode);
+      range.insertNode(node);
+      range.setStart(afterNode, 1);
+      range.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(range);
+      return;
+    }
+  }
+
+  root.appendChild(node);
+  root.appendChild(afterNode);
+  const range = document.createRange();
+  range.setStart(afterNode, 1);
+  range.collapse(true);
+  sel?.removeAllRanges();
+  sel?.addRange(range);
+}
+
+/** Check if cursor is right after a mention chip, return that chip if so. */
+function chipBeforeCursor(root: HTMLElement): HTMLElement | null {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return null;
+
+  const { startContainer: node, startOffset: offset } = sel.getRangeAt(0);
+  if (!root.contains(node)) return null;
+
+  // Case 1: cursor at offset 0 of a text node — check previousSibling
+  if (node.nodeType === Node.TEXT_NODE && offset === 0) {
+    const prev = node.previousSibling;
+    if (prev && prev.nodeType === Node.ELEMENT_NODE) {
+      const el = prev as HTMLElement;
+      if (el.hasAttribute(MENTION_TAG_ATTR) || el.hasAttribute(LARGE_PASTE_TAG_ATTR)) return el;
+    }
+  }
+
+  // Case 2: cursor inside the contenteditable element itself (not a text node),
+  // offset points to a child index — check the child before that index
+  if (node === root || (node.nodeType === Node.ELEMENT_NODE && root.contains(node))) {
+    const el = node as HTMLElement;
+    const childBefore = el.childNodes[offset - 1];
+    if (childBefore && childBefore.nodeType === Node.ELEMENT_NODE) {
+      const ce = childBefore as HTMLElement;
+      if (ce.hasAttribute(MENTION_TAG_ATTR) || ce.hasAttribute(LARGE_PASTE_TAG_ATTR)) return ce;
+    }
+  }
+
+  return null;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Popup sub-component                                                */
+/* ------------------------------------------------------------------ */
+
+function Popup({
+  anchorRef,
+  suggestions,
+  highlightIndex,
+  isLoading,
+  error,
+  showEmpty,
+  onSelect,
+}: {
+  anchorRef: RefObject<HTMLElement | null>;
+  suggestions: MentionFileEntry[];
+  highlightIndex: number;
+  isLoading: boolean;
+  error: string | null;
+  showEmpty: boolean;
+  onSelect: (path: string, kind: "file" | "dir") => void;
+}) {
+  const popupRef = useRef<HTMLDivElement>(null);
+  const hlRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    hlRef.current?.scrollIntoView({ block: "nearest" });
+  }, [highlightIndex]);
+
+  useLayoutEffect(() => {
+    const anchor = anchorRef.current;
+    const popup = popupRef.current;
+    if (!anchor || !popup) return;
+
+    const update = () => {
+      const rect = anchor.getBoundingClientRect();
+      popup.style.left = `${rect.left}px`;
+      popup.style.bottom = `${Math.max(8, window.innerHeight - rect.top + 8)}px`;
+      popup.style.width = `${rect.width}px`;
+    };
+
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(anchor);
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [anchorRef]);
+
+  return createPortal(
+    <div
+      ref={popupRef}
+      className={cn(
+        "mention-popup-enter fixed z-[100] overflow-hidden rounded-2xl",
+        "border border-white/55 bg-white/75 shadow-[0_18px_48px_-12px_rgba(15,23,42,0.22),0_2px_8px_-2px_rgba(15,23,42,0.06)]",
+        "backdrop-blur-2xl backdrop-saturate-[180%]",
+        "dark:border-white/[0.08] dark:bg-slate-900/65 dark:shadow-[0_18px_48px_-10px_rgba(0,0,0,0.55)]",
+      )}
+    >
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-4 top-0 h-px rounded-full bg-gradient-to-r from-transparent via-white/85 to-transparent dark:via-white/15"
+      />
+      <div className="mention-popup-scroll relative max-h-[260px] overflow-y-auto py-1">
+        {isLoading && (
+          <div className="px-3 py-2 text-xs text-muted-foreground">Indexing files...</div>
+        )}
+        {error && !isLoading && (
+          <div className="px-3 py-2 text-xs text-destructive">{error}</div>
+        )}
+        {suggestions.map((entry, i) => {
+          const isDir = entry.kind === "dir";
+          const parts = entry.path.split("/");
+          const fileName = parts.pop() || "";
+          const dirPath = parts.join("/");
+          const Icon = getFileTypeIcon(entry.path, entry.kind);
+          return (
+            <div
+              key={entry.path}
+              ref={i === highlightIndex ? hlRef : undefined}
+              className={cn(
+                "mention-popup-item group mx-1.5 flex cursor-pointer items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-sm transition-all",
+                i === highlightIndex
+                  ? "bg-foreground/[0.08] text-foreground shadow-[inset_0_0_0_1px_rgba(15,23,42,0.06)] dark:bg-white/[0.08] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]"
+                  : "text-foreground/85 hover:bg-foreground/[0.04] dark:text-foreground/90 dark:hover:bg-white/[0.04]",
+              )}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onSelect(entry.path, entry.kind);
+              }}
+            >
+              <span
+                className={cn(
+                  "flex h-6 w-6 shrink-0 items-center justify-center rounded-lg",
+                  isDir
+                    ? "bg-amber-500/10 dark:bg-amber-400/15"
+                    : "bg-foreground/[0.04] dark:bg-white/[0.05]",
+                )}
+              >
+                <Icon width={14} height={14} />
+              </span>
+              <span className="min-w-0 flex-1 truncate">
+                <span className="font-medium tracking-tight text-foreground/95">{fileName}</span>
+                {dirPath && (
+                  <span className="ml-1.5 text-[11px] text-muted-foreground/85">{dirPath}/</span>
+                )}
+              </span>
+              {isDir && (
+                <span className="shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground/60">
+                  dir
+                </span>
+              )}
+            </div>
+          );
+        })}
+        {showEmpty && !isLoading && !error && suggestions.length === 0 && (
+          <div className="px-3 py-2 text-xs text-muted-foreground">No matching files</div>
+        )}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  MentionComposer                                                    */
+/* ------------------------------------------------------------------ */
+
+export const MentionComposer = memo(forwardRef<MentionComposerHandle, MentionComposerProps>(function MentionComposer({
+  onSend,
+  onEmptyChange,
+  onBusyChange,
+  onPasteFiles,
+  disabled = false,
+  placeholder = "",
+  workdir,
+  className,
+}: MentionComposerProps, ref) {
+  const editorRef = useRef<HTMLDivElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [isEmpty, setIsEmpty] = useState(true);
+  const lastIsEmptyRef = useRef(true);
+  const isComposingRef = useRef(false);
+  const busyReleaseTimerRef = useRef<number | null>(null);
+  const isBusyRef = useRef(false);
+  const largePastesRef = useRef(new Map<string, MentionComposerLargePaste>());
+  const largePasteCounterRef = useRef(0);
+
+  const setBusy = useCallback(
+    (nextBusy: boolean) => {
+      if (isBusyRef.current === nextBusy) return;
+      isBusyRef.current = nextBusy;
+      onBusyChange?.(nextBusy);
+    },
+    [onBusyChange],
+  );
+
+  const scheduleBusyRelease = useCallback(() => {
+    if (busyReleaseTimerRef.current !== null) {
+      window.clearTimeout(busyReleaseTimerRef.current);
+    }
+    busyReleaseTimerRef.current = window.setTimeout(() => {
+      busyReleaseTimerRef.current = null;
+      setBusy(false);
+    }, 140);
+  }, [setBusy]);
+
+  // ---- File list ----
+  const normalizedWorkdir = workdir.trim();
+  const [mentionSessionEntries, setMentionSessionEntries] = useState<MentionFileEntry[]>([]);
+  const [mentionSessionLoading, setMentionSessionLoading] = useState(false);
+  const [mentionSessionError, setMentionSessionError] = useState<string | null>(null);
+  const mentionSessionRequestSeqRef = useRef(0);
+  const mentionActiveRef = useRef(false);
+  const mentionSessionQueryRef = useRef("");
+
+  // ---- Mention state ----
+  const [mentionCtx, setMentionCtx] = useState<MentionContext | null>(null);
+  const [highlightIdx, setHighlightIdx] = useState(0);
+
+  const resetMentionSession = useCallback(() => {
+    mentionSessionRequestSeqRef.current += 1;
+    mentionSessionQueryRef.current = "";
+    setMentionSessionEntries([]);
+    setMentionSessionLoading(false);
+    setMentionSessionError(null);
+  }, []);
+
+  const closeMentionSession = useCallback(() => {
+    mentionActiveRef.current = false;
+    setMentionCtx(null);
+    setHighlightIdx(0);
+    resetMentionSession();
+  }, [resetMentionSession]);
+
+  const startMentionSession = useCallback(
+    (ctx: MentionContext) => {
+      const requestSeq = ++mentionSessionRequestSeqRef.current;
+      mentionSessionQueryRef.current = ctx.query;
+      setMentionSessionEntries([]);
+      setMentionSessionLoading(Boolean(normalizedWorkdir));
+      setMentionSessionError(null);
+
+      if (!normalizedWorkdir) {
+        return;
+      }
+
+      invoke<MentionListResponse>("fs_mention_list", {
+        workdir: normalizedWorkdir,
+        max_results: MENTION_INDEX_MAX_RESULTS,
+        query: ctx.query,
+      })
+        .then((resp) => {
+          if (requestSeq !== mentionSessionRequestSeqRef.current) return;
+          setMentionSessionEntries(resp.entries);
+        })
+        .catch(() => {
+          if (requestSeq !== mentionSessionRequestSeqRef.current) return;
+          setMentionSessionEntries([]);
+          setMentionSessionError("Could not index files");
+        })
+        .finally(() => {
+          if (requestSeq !== mentionSessionRequestSeqRef.current) return;
+          setMentionSessionLoading(false);
+        });
+    },
+    [normalizedWorkdir],
+  );
+
+  const mentionSessionSearchIndex = useMemo<MentionSearchEntry[]>(
+    () =>
+      mentionSessionEntries.map((entry) => ({
+        entry,
+        searchPath: entry.path.toLowerCase(),
+      })),
+    [mentionSessionEntries],
+  );
+
+  useEffect(() => {
+    closeMentionSession();
+  }, [normalizedWorkdir, closeMentionSession]);
+
+  useEffect(() => {
+    return () => {
+      mentionSessionRequestSeqRef.current += 1;
+      if (busyReleaseTimerRef.current !== null) {
+        window.clearTimeout(busyReleaseTimerRef.current);
+      }
+      setBusy(false);
+    };
+  }, [setBusy]);
+
+  useEffect(() => {
+    if (!disabled) return;
+    closeMentionSession();
+    setBusy(false);
+  }, [disabled, closeMentionSession, setBusy]);
+
+  const normalizedMentionQuery = mentionCtx ? normalizeMentionQuery(mentionCtx.query) : "";
+  const suggestions = useMemo(() => {
+    if (mentionCtx === null) {
+      return [];
+    }
+
+    const next: MentionFileEntry[] = [];
+    for (const item of mentionSessionSearchIndex) {
+      if (normalizedMentionQuery && !item.searchPath.includes(normalizedMentionQuery)) {
+        continue;
+      }
+      next.push(item.entry);
+      if (next.length >= MAX_SUGGESTIONS) {
+        break;
+      }
+    }
+    return next;
+  }, [mentionCtx, mentionSessionSearchIndex, normalizedMentionQuery]);
+
+  useEffect(() => {
+    setHighlightIdx((current) => {
+      if (suggestions.length === 0) return 0;
+      return Math.min(current, suggestions.length - 1);
+    });
+  }, [suggestions.length]);
+
+  const popupLoading = mentionSessionLoading;
+  const popupError = suggestions.length === 0 ? mentionSessionError : null;
+  const showEmpty =
+    mentionCtx !== null &&
+    !popupLoading &&
+    !popupError &&
+    suggestions.length === 0;
+  const popupVisible =
+    mentionCtx !== null &&
+    (popupLoading || Boolean(popupError) || suggestions.length > 0 || showEmpty);
+
+  const applyEmptyState = useCallback(
+    (nextEmpty: boolean) => {
+      if (lastIsEmptyRef.current === nextEmpty) return;
+      lastIsEmptyRef.current = nextEmpty;
+      setIsEmpty(nextEmpty);
+      onEmptyChange?.(nextEmpty);
+    },
+    [onEmptyChange],
+  );
+
+  const refreshEmptyState = useCallback(() => {
+    const el = editorRef.current;
+    if (!el) return;
+    applyEmptyState(editorTextIsEmpty(el));
+  }, [applyEmptyState]);
+
+  const buildDraft = useCallback((): MentionComposerDraft => {
+    const el = editorRef.current;
+    if (!el) {
+      return {
+        segments: [],
+        text: "",
+        textWithoutLargePastes: "",
+        largePastes: [],
+        isEmpty: true,
+      };
+    }
+
+    const segments = serializeChildrenToSegments(el, largePastesRef.current);
+    const largePastes: MentionComposerLargePaste[] = [];
+    const textParts: string[] = [];
+    const textWithoutLargePastesParts: string[] = [];
+    for (const segment of segments) {
+      if (segment.type === "text") {
+        textParts.push(segment.text);
+        textWithoutLargePastesParts.push(segment.text);
+      } else {
+        largePastes.push(segment.paste);
+        textParts.push(segment.paste.text);
+      }
+    }
+
+    const text = textParts.join("").replace(/\u00A0/g, " ");
+    const textWithoutLargePastes = textWithoutLargePastesParts.join("").replace(/\u00A0/g, " ");
+    return {
+      segments,
+      text,
+      textWithoutLargePastes,
+      largePastes,
+      isEmpty: editorTextIsEmpty(el),
+    };
+  }, []);
+
+  const createLargePaste = useCallback((text: string): MentionComposerLargePaste => {
+    const index = largePasteCounterRef.current + 1;
+    largePasteCounterRef.current = index;
+    return {
+      id: `large-paste-${Date.now()}-${crypto.randomUUID()}`,
+      label: `Pasted text ${index}`,
+      text,
+      charCount: text.length,
+      lineCount: countLargePasteLines(text),
+      preview: normalizeLargePastePreview(text),
+    };
+  }, []);
+
+  const insertLargePaste = useCallback(
+    (text: string) => {
+      const el = editorRef.current;
+      if (!el) return;
+      const paste = createLargePaste(text);
+      largePastesRef.current.set(paste.id, paste);
+      insertNodeAtCursor(el, createLargePasteChip(paste));
+      closeMentionSession();
+      refreshEmptyState();
+    },
+    [closeMentionSession, createLargePaste, refreshEmptyState],
+  );
+
+  // ---- Mention detection (called after DOM updates) ----
+  const refreshMention = useCallback(() => {
+    const el = editorRef.current;
+    if (!el) return;
+    const applyContext = (ctx: MentionContext | null) => {
+      if (ctx) {
+        if (!mentionActiveRef.current) {
+          mentionActiveRef.current = true;
+          mentionSessionQueryRef.current = ctx.query;
+          setMentionCtx(ctx);
+          setHighlightIdx(0);
+          startMentionSession(ctx);
+          return;
+        }
+        setMentionCtx(ctx);
+        if (ctx.query !== mentionSessionQueryRef.current) {
+          mentionSessionQueryRef.current = ctx.query;
+          setHighlightIdx(0);
+        }
+      } else if (mentionActiveRef.current) {
+        closeMentionSession();
+      }
+    };
+
+    applyContext(detectMention(el));
+    window.requestAnimationFrame(() => {
+      const nextEl = editorRef.current;
+      if (!nextEl || document.activeElement !== nextEl) return;
+      applyContext(detectMention(nextEl));
+    });
+  }, [closeMentionSession, startMentionSession]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      getText: () => {
+        const el = editorRef.current;
+        if (!el) return "";
+        return serializeChildren(el, largePastesRef.current).replace(/\u00A0/g, " ");
+      },
+      getDraft: buildDraft,
+      hasContent: () => !buildDraft().isEmpty,
+      setText: (text: string) => {
+        const el = editorRef.current;
+        if (!el) return;
+        el.innerHTML = "";
+        largePastesRef.current.clear();
+        if (isLargePasteText(text)) {
+          insertLargePaste(text);
+        } else {
+          el.innerText = text;
+          closeMentionSession();
+          refreshEmptyState();
+        }
+      },
+      setDraft: (draft: MentionComposerDraft) => {
+        const el = editorRef.current;
+        if (!el) return;
+        el.innerHTML = "";
+        largePastesRef.current.clear();
+
+        if (draft.segments.length === 0 && draft.text) {
+          if (isLargePasteText(draft.text)) {
+            insertLargePaste(draft.text);
+            return;
+          }
+          el.innerText = draft.text;
+        } else {
+          for (const segment of draft.segments) {
+            if (segment.type === "largePaste") {
+              largePastesRef.current.set(segment.paste.id, segment.paste);
+              el.appendChild(createLargePasteChip(segment.paste));
+            } else if (segment.text) {
+              el.appendChild(document.createTextNode(segment.text));
+            }
+          }
+          largePasteCounterRef.current = Math.max(
+            largePasteCounterRef.current,
+            largePastesRef.current.size,
+          );
+        }
+
+        closeMentionSession();
+        refreshEmptyState();
+      },
+      clear: () => {
+        const el = editorRef.current;
+        if (!el) return;
+        el.innerHTML = "";
+        largePastesRef.current.clear();
+        closeMentionSession();
+        refreshEmptyState();
+      },
+      focus: () => editorRef.current?.focus(),
+    }),
+    [buildDraft, closeMentionSession, insertLargePaste, refreshEmptyState],
+  );
+
+  // ---- Select suggestion ----
+  const selectSuggestion = useCallback(
+    (path: string, kind: "file" | "dir") => {
+      if (!mentionCtx) return;
+      insertMentionChip(mentionCtx, path, kind);
+      closeMentionSession();
+      refreshEmptyState();
+      editorRef.current?.focus();
+    },
+    [closeMentionSession, mentionCtx, refreshEmptyState],
+  );
+
+  // ---- Event handlers ----
+  const handleInput = useCallback(() => {
+    refreshEmptyState();
+    if (!isComposingRef.current) {
+      refreshMention();
+    }
+  }, [refreshEmptyState, refreshMention]);
+
+  const handleKeyUp = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
+    if (disabled || isComposingRef.current) return;
+    if (
+      e.key === "ArrowDown" ||
+      e.key === "ArrowUp" ||
+      e.key === "Tab" ||
+      e.key === "Enter" ||
+      e.key === "Escape"
+    ) {
+      return;
+    }
+    refreshMention();
+  }, [disabled, refreshMention]);
+
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent<HTMLDivElement>) => {
+      if (disabled) {
+        e.preventDefault();
+        return;
+      }
+      if (e.nativeEvent.isComposing || isComposingRef.current) {
+        return;
+      }
+
+      // Popup navigation
+      if (popupVisible && suggestions.length > 0) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setHighlightIdx((p) => (p + 1) % suggestions.length);
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setHighlightIdx((p) => (p - 1 + suggestions.length) % suggestions.length);
+          return;
+        }
+        if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+          e.preventDefault();
+          if (suggestions[highlightIdx]) {
+            const s = suggestions[highlightIdx];
+            selectSuggestion(s.path, s.kind);
+          }
+          return;
+        }
+      }
+      if (popupVisible && e.key === "Escape") {
+        e.preventDefault();
+        closeMentionSession();
+        return;
+      }
+
+      // Backspace: delete mention chip if cursor is right after one
+      if (e.key === "Backspace") {
+        const chip = chipBeforeCursor(editorRef.current!);
+        if (chip) {
+          e.preventDefault();
+          const largePasteId = chip.getAttribute(LARGE_PASTE_TAG_ATTR);
+          if (largePasteId) {
+            largePastesRef.current.delete(largePasteId);
+          }
+          chip.remove();
+          refreshEmptyState();
+          refreshMention();
+          return;
+        }
+      }
+
+      // Normal Enter → send
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        onSend();
+        return;
+      }
+
+      // Shift+Enter → line break (normalise to <br>)
+      if (e.key === "Enter" && e.shiftKey) {
+        e.preventDefault();
+        document.execCommand("insertLineBreak");
+        refreshEmptyState();
+        refreshMention();
+        return;
+      }
+    },
+    [
+      popupVisible,
+      suggestions,
+      highlightIdx,
+      selectSuggestion,
+      disabled,
+      closeMentionSession,
+      onSend,
+      refreshEmptyState,
+      refreshMention,
+    ],
+  );
+
+  const handlePaste = useCallback(
+    (e: ClipboardEvent<HTMLDivElement>) => {
+      if (e.defaultPrevented) {
+        return;
+      }
+      if (disabled) {
+        e.preventDefault();
+        return;
+      }
+      const clipboardFiles = extractClipboardFiles(e.clipboardData);
+      if (clipboardFiles.length > 0) {
+        e.preventDefault();
+        onPasteFiles?.(clipboardFiles);
+        return;
+      }
+      e.preventDefault();
+      const text = e.clipboardData.getData("text/plain");
+      if (isLargePasteText(text)) {
+        insertLargePaste(text);
+        return;
+      }
+      document.execCommand("insertText", false, text);
+      refreshEmptyState();
+      refreshMention();
+    },
+    [disabled, insertLargePaste, onPasteFiles, refreshEmptyState, refreshMention],
+  );
+
+  const handleCompositionStart = useCallback(() => {
+    isComposingRef.current = true;
+    if (busyReleaseTimerRef.current !== null) {
+      window.clearTimeout(busyReleaseTimerRef.current);
+      busyReleaseTimerRef.current = null;
+    }
+    setBusy(true);
+  }, [setBusy]);
+
+  const handleCompositionEnd = useCallback(() => {
+    isComposingRef.current = false;
+    refreshEmptyState();
+    refreshMention();
+    scheduleBusyRelease();
+  }, [refreshEmptyState, refreshMention, scheduleBusyRelease]);
+
+  const handleBlur = useCallback(() => {
+    isComposingRef.current = false;
+    if (busyReleaseTimerRef.current !== null) {
+      window.clearTimeout(busyReleaseTimerRef.current);
+      busyReleaseTimerRef.current = null;
+    }
+    setBusy(false);
+    closeMentionSession();
+  }, [closeMentionSession, setBusy]);
+
+  return (
+    <div ref={wrapperRef} className="relative w-full min-w-0 max-w-full flex-1">
+      {popupVisible && (
+        <Popup
+          anchorRef={wrapperRef}
+          suggestions={suggestions}
+          highlightIndex={highlightIdx}
+          isLoading={popupLoading}
+          error={popupError}
+          showEmpty={showEmpty}
+          onSelect={selectSuggestion}
+        />
+      )}
+      <div
+        ref={editorRef}
+        contentEditable={!disabled}
+        suppressContentEditableWarning
+        role="textbox"
+        aria-multiline
+        aria-placeholder={placeholder}
+        aria-disabled={disabled}
+        onInput={handleInput}
+        onKeyDown={handleKeyDown}
+        onKeyUp={handleKeyUp}
+        onPaste={handlePaste}
+        onCompositionStart={handleCompositionStart}
+        onCompositionEnd={handleCompositionEnd}
+        onBlur={handleBlur}
+        className={cn(
+          "mention-composer min-h-[70px] max-h-[160px] w-full min-w-0 max-w-full overflow-y-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] outline-hidden",
+          "text-sm",
+          isEmpty && "is-empty",
+          disabled && "cursor-not-allowed opacity-60",
+          className,
+        )}
+        data-placeholder={placeholder}
+      />
+    </div>
+  );
+}));
+
+MentionComposer.displayName = "MentionComposer";

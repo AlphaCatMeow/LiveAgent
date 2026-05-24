@@ -1,0 +1,1496 @@
+@import "tailwindcss";
+@config "../tailwind.config.js";
+
+@font-face {
+  font-family: "OpenAI Sans Semibold";
+  src: url("./assets/font/OpenAISans-Semibold.woff2") format("woff2");
+  font-style: normal;
+  font-weight: normal;
+  font-display: swap;
+}
+
+@layer utilities {
+  .font-openai-chat {
+    font-family:
+      "OpenAI Sans Semibold",
+      "PingFang SC",
+      "Microsoft YaHei",
+      sans-serif;
+  }
+
+  /*
+   * Streamdown Mermaid fullscreen is rendered via a portal to document.body,
+   * and its fullscreen path applies Tailwind utilities like `[&_svg]:w-auto`.
+   * Keep this rule in the utilities layer so it can reliably override those
+   * generated utilities and avoid a blank (white) fullscreen canvas.
+   */
+  [data-streamdown="mermaid"] svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-width: 100%;
+    max-height: 100%;
+  }
+}
+
+@layer base {
+  :root {
+    color-scheme: light;
+
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --primary: 222.2 47.4% 11.2%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 222.2 84% 4.9%;
+
+    --radius: 0.5rem;
+
+    /* Sidebar */
+    --sidebar-bg: 220 14% 96%;
+
+    /* Chip / pill buttons (MCP, Skills, 新对话) */
+    --chip-bg: 220 13% 91%;
+    --chip-bg-hover: 220 13% 86%;
+    /* Send button disabled */
+    --send-disabled-bg: 220 13% 91%;
+
+    /* Chat-specific tokens */
+    --chat-user-bg: 220 9% 91%;
+    --chat-user-fg: 222 84% 5%;
+    --chat-assistant-bg: 0 0% 100%;
+    --chat-assistant-fg: 222.2 84% 4.9%;
+    --chat-tool-bg: 0 0% 100%;
+    --chat-tool-border: 220 13% 91%;
+    --chat-thinking-bg: 220 14% 97%;
+    --chat-thinking-border: 220 13% 90%;
+    --chat-success: 152 60% 42%;
+    --chat-error: 0 72% 51%;
+    --chat-running: 252 56% 57%;
+
+    /* Tool card frosted glass tokens */
+    --tool-card-bg: 0 0% 100% / 0.72;
+    --tool-card-border: 0 0% 0% / 0.06;
+    --tool-bash-accent: 142 70% 45%;
+    --tool-file-accent: 220 70% 55%;
+    --tool-search-accent: 38 92% 50%;
+    --tool-list-accent: 262 52% 56%;
+
+    /* Context checkpoint tokens – macOS frosted glass */
+    --checkpoint-accent: 220 9% 46%;
+    --checkpoint-bg: 0 0% 100% / 0.72;
+    --checkpoint-border: 0 0% 0% / 0.06;
+    --checkpoint-icon-bg: 220 10% 95%;
+    --checkpoint-icon-fg: 220 9% 46%;
+  }
+
+  .dark {
+    color-scheme: dark;
+
+    --background: 224 22% 9%;
+    --foreground: 210 30% 96%;
+
+    --card: 224 22% 10%;
+    --card-foreground: 210 30% 96%;
+
+    --popover: 224 20% 12%;
+    --popover-foreground: 210 30% 96%;
+
+    --primary: 210 30% 96%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+
+    --secondary: 220 18% 17%;
+    --secondary-foreground: 210 30% 96%;
+
+    --muted: 220 18% 17%;
+    --muted-foreground: 215 18% 76%;
+
+    --accent: 220 18% 17%;
+    --accent-foreground: 210 30% 96%;
+
+    --destructive: 0 62.8% 36%;
+    --destructive-foreground: 210 30% 96%;
+
+    --border: 220 14% 26%;
+    --input: 220 14% 26%;
+    --ring: 212.7 26.8% 83.9%;
+
+    /* Chip / pill buttons (dark) */
+    --chip-bg: 220 16% 24%;
+    --chip-bg-hover: 220 16% 30%;
+    /* Send button disabled (dark) */
+    --send-disabled-bg: 220 16% 24%;
+
+    /* Chat-specific tokens (dark) */
+    --sidebar-bg: 224 22% 11%;
+    --chat-user-bg: 220 14% 28%;
+    --chat-user-fg: 210 30% 96%;
+    --chat-assistant-bg: 224 22% 9%;
+    --chat-assistant-fg: 210 30% 96%;
+    --chat-tool-bg: 224 22% 9%;
+    --chat-tool-border: 220 14% 24%;
+    --chat-thinking-bg: 220 18% 13%;
+    --chat-thinking-border: 220 14% 22%;
+    --chat-success: 152 56% 52%;
+    --chat-error: 0 75% 65%;
+    --chat-running: 252 60% 70%;
+
+    /* Tool card frosted glass tokens (dark) */
+    --tool-card-bg: 0 0% 100% / 0.08;
+    --tool-card-border: 0 0% 100% / 0.14;
+    --tool-bash-accent: 142 60% 62%;
+    --tool-file-accent: 220 70% 72%;
+    --tool-search-accent: 38 90% 66%;
+    --tool-list-accent: 262 60% 74%;
+
+    /* Context checkpoint tokens – macOS frosted glass (dark) */
+    --checkpoint-accent: 220 12% 78%;
+    --checkpoint-bg: 0 0% 100% / 0.08;
+    --checkpoint-border: 0 0% 100% / 0.14;
+    --checkpoint-icon-bg: 220 12% 22%;
+    --checkpoint-icon-fg: 220 14% 76%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.2);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.35);
+  }
+
+  /* Upload file list scrollbar */
+  .upload-file-list {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+    transition: scrollbar-color 0.3s;
+  }
+  .upload-file-list:hover {
+    scrollbar-color: hsl(var(--muted-foreground) / 0.25) transparent;
+  }
+  .upload-file-list::-webkit-scrollbar {
+    height: 4px;
+  }
+  .upload-file-list::-webkit-scrollbar-track {
+    background: transparent;
+    margin: 0 8px;
+  }
+  .upload-file-list::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 2px;
+    transition: background 0.3s;
+  }
+  .upload-file-list:hover::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.25);
+  }
+  .upload-file-list:hover::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.4);
+  }
+
+  .tool-text-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+    transition: scrollbar-color 0.2s ease;
+  }
+  .tool-text-scroll:hover {
+    scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+  }
+  .tool-text-scroll::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  .tool-text-scroll::-webkit-scrollbar-track {
+    background: transparent;
+    margin: 6px;
+  }
+  .tool-text-scroll::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: hsl(var(--muted-foreground) / 0.14);
+    transition: background 0.2s ease;
+  }
+  .tool-text-scroll:hover::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.22);
+  }
+  .tool-text-scroll:hover::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.38);
+  }
+}
+
+/* Streamdown content styling via data-streamdown selectors */
+@layer components {
+  .chat-markdown {
+    @apply text-[15px] leading-[1.7] text-foreground;
+  }
+
+  .chat-markdown p {
+    @apply my-3 text-[15px] leading-[1.7] text-foreground;
+  }
+
+  .chat-markdown strong,
+  .chat-markdown [data-streamdown="strong"] {
+    @apply font-semibold text-foreground;
+  }
+
+  .chat-markdown em {
+    @apply text-foreground/90;
+  }
+
+  .chat-markdown--streaming [data-sd-animate] {
+    will-change: opacity, filter, transform;
+  }
+
+  /* Headings */
+  .chat-markdown [data-streamdown="heading-1"] {
+    @apply mb-4 mt-8 text-xl font-semibold tracking-tight text-foreground;
+  }
+  .chat-markdown [data-streamdown="heading-2"] {
+    @apply mb-3 mt-6 text-lg font-semibold text-foreground;
+  }
+  .chat-markdown [data-streamdown="heading-3"] {
+    @apply mb-2 mt-5 text-base font-semibold text-foreground;
+  }
+
+  /* Links */
+  .chat-markdown [data-streamdown="link"] {
+    @apply rounded-xs font-medium text-blue-600 underline decoration-blue-600/30 underline-offset-4 transition-colors hover:text-blue-700 hover:decoration-blue-600 dark:text-blue-400 dark:decoration-blue-400/30 dark:hover:text-blue-300 dark:hover:decoration-blue-300;
+  }
+
+  /* Inline code */
+  .chat-markdown [data-streamdown="inline-code"] {
+    @apply rounded-md border border-border/50 bg-muted/70 px-1.5 py-0.5 font-mono text-[13px] font-medium text-foreground/90;
+  }
+
+  /* Code blocks — container, header, body (safe in components layer) */
+  .chat-markdown [data-streamdown="code-block"] {
+    @apply relative my-4 overflow-hidden rounded-xl border border-border/50 bg-muted/20;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.04);
+  }
+  .chat-markdown [data-streamdown="code-block-header"] {
+    @apply h-auto border-b border-border/60 bg-muted/55 px-3 py-2 text-[11px] uppercase tracking-[0.22em] text-muted-foreground;
+  }
+  .chat-markdown [data-streamdown="code-block-header"] > span {
+    @apply ml-0 font-mono tracking-[0.18em];
+  }
+  .chat-markdown [data-streamdown="code-block-body"] {
+    @apply overflow-x-auto rounded-lg border border-border/40 bg-background/90 p-4 text-[13px] shadow-inner;
+  }
+  .chat-markdown [data-streamdown="code-block-body"] pre {
+    @apply leading-6;
+  }
+  .chat-markdown--streaming [data-streamdown="code-block"][data-incomplete="true"] {
+    @apply relative border-amber-400/40;
+    background:
+      linear-gradient(180deg, hsl(var(--chat-running) / 0.08), transparent 46%),
+      hsl(var(--background));
+  }
+  .chat-markdown--streaming [data-streamdown="code-block"][data-incomplete="true"]::after {
+    content: "STREAMING";
+    position: absolute;
+    top: 0.7rem;
+    right: 3.15rem;
+    border-radius: 9999px;
+    background: hsl(var(--chat-running) / 0.14);
+    color: hsl(var(--chat-running));
+    padding: 0.15rem 0.5rem;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.22em;
+    z-index: 20;
+  }
+  .chat-markdown--streaming
+    [data-streamdown="code-block"][data-incomplete="true"]
+    [data-streamdown="code-block-header"] {
+    @apply border-amber-400/30 bg-amber-100/70 text-amber-700 dark:bg-amber-950/30 dark:text-amber-200;
+  }
+
+  /* Blockquotes */
+  .chat-markdown [data-streamdown="blockquote"] {
+    @apply my-3 border-l-[3px] border-border/60 pl-4 italic text-muted-foreground;
+  }
+  .chat-markdown [data-streamdown="blockquote"] p {
+    @apply my-0;
+  }
+
+  /* Lists */
+  .chat-markdown [data-streamdown="unordered-list"] {
+    @apply my-3 ml-1 list-disc space-y-1 pl-5;
+  }
+  .chat-markdown [data-streamdown="ordered-list"] {
+    @apply my-3 ml-1 list-decimal space-y-1 pl-5;
+  }
+  .chat-markdown [data-streamdown="list-item"] {
+    @apply pl-1 text-[15px] leading-[1.7];
+  }
+  .chat-markdown .contains-task-list {
+    @apply list-none pl-0;
+  }
+  .chat-markdown .task-list-item {
+    @apply flex items-start gap-2 pl-0;
+  }
+  .chat-markdown .task-list-item input[type="checkbox"] {
+    @apply mt-[0.45rem] h-3.5 w-3.5 rounded border border-border align-middle accent-emerald-500;
+  }
+
+  /* Tables */
+  .chat-markdown [data-streamdown="table-wrapper"] {
+    @apply my-3 gap-3 rounded-2xl border border-border/60 bg-muted/20 p-2 shadow-xs;
+  }
+  .chat-markdown [data-streamdown="table-wrapper"] > div:first-child {
+    @apply justify-end gap-1 px-1 pt-0.5;
+  }
+  .chat-markdown [data-streamdown="table-wrapper"] button {
+    @apply rounded-md transition-colors hover:bg-muted hover:text-foreground;
+  }
+  .chat-markdown [data-streamdown="table"] {
+    @apply w-full border-collapse text-sm;
+  }
+  .chat-markdown [data-streamdown="table-header"] {
+    @apply bg-muted/70;
+  }
+  .chat-markdown [data-streamdown="table-header-cell"] {
+    @apply border-b border-border/50 px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground;
+  }
+  .chat-markdown [data-streamdown="table-cell"] {
+    @apply border-b border-border/30 px-4 py-2.5 text-left align-top;
+  }
+  .chat-markdown [data-streamdown="table-body"] [data-streamdown="table-row"]:nth-child(even) {
+    @apply bg-muted/20;
+  }
+  .chat-markdown [data-streamdown="table-row"]:last-child [data-streamdown="table-cell"] {
+    @apply border-b-0;
+  }
+
+  /* Images */
+  .chat-markdown [data-streamdown="image-wrapper"] {
+    @apply my-4 overflow-hidden rounded-2xl border border-border/50 bg-muted/20 shadow-xs;
+  }
+  .chat-markdown [data-streamdown="image"] {
+    @apply block max-h-[28rem] max-w-full rounded-none;
+  }
+
+  /* Horizontal rule */
+  .chat-markdown [data-streamdown="horizontal-rule"] {
+    @apply my-5 border-border/45;
+  }
+
+  /* First/last child margin reset */
+  .chat-markdown > *:first-child {
+    margin-top: 0;
+  }
+  .chat-markdown > *:last-child {
+    margin-bottom: 0;
+  }
+
+  /* Smooth entrance for chat bubbles */
+  .chat-bubble-enter {
+    animation: chatBubbleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /*
+   * User bubble text wrapping rules.
+   * Width constraints live on the parent wrapper (.chat-user-bubble-wrap)
+   * so that percentage max-width resolves against the flex container
+   * (which has a definite width) instead of creating a circular dependency.
+   */
+  .chat-user-bubble {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  @keyframes chatBubbleIn {
+    from {
+      opacity: 0;
+      transform: translateY(6px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  /* Settings page section transitions */
+  .settings-section-enter {
+    animation: settingsSectionIn 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: transform, opacity;
+  }
+
+  .settings-section-title-enter {
+    animation: settingsSectionTitleIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: transform, opacity;
+  }
+
+  .settings-section-shell {
+    position: relative;
+    isolation: isolate;
+  }
+
+  .settings-section-shell::before {
+    content: "";
+    position: absolute;
+    inset: -16px 0 auto;
+    height: 112px;
+    border-radius: 24px;
+    background:
+      radial-gradient(circle at top left, hsl(var(--primary) / 0.12), transparent 58%),
+      linear-gradient(180deg, hsl(var(--primary) / 0.06), transparent 76%);
+    filter: blur(18px);
+    opacity: 0.9;
+    pointer-events: none;
+    z-index: -1;
+  }
+
+  @keyframes settingsSectionIn {
+    from {
+      opacity: 0;
+      transform: translateY(14px) scale(0.985);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes settingsSectionTitleIn {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .settings-section-enter,
+    .settings-section-title-enter {
+      animation: none;
+    }
+
+    .settings-section-shell::before {
+      opacity: 0.45;
+      filter: none;
+    }
+  }
+
+  /* Typing indicator */
+  .typing-dot {
+    animation: typingBounce 1.4s ease-in-out infinite;
+  }
+  .typing-dot:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+  .typing-dot:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+
+  .vibing-status {
+    display: inline-flex;
+    align-items: center;
+    letter-spacing: 0.02em;
+  }
+
+  .vibing-status-char {
+    display: inline-block;
+    animation: vibingBounce 1.4s cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
+    will-change: transform;
+  }
+
+  @keyframes typingBounce {
+    0%, 60%, 100% {
+      transform: translateY(0);
+    }
+    30% {
+      transform: translateY(-4px);
+    }
+  }
+
+  @keyframes vibingBounce {
+    0%, 100% {
+      transform: translateY(0);
+    }
+    30% {
+      transform: translateY(-2px);
+    }
+    55% {
+      transform: translateY(0.5px);
+    }
+  }
+
+  /* Empty state – hero entrance */
+  .hero-entrance {
+    animation: heroFadeInUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .hero-entrance-delay-1 {
+    animation: heroFadeInUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.12s both;
+  }
+  .hero-entrance-delay-2 {
+    animation: heroFadeInUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.24s both;
+  }
+  .hero-entrance-delay-3 {
+    animation: heroFadeInUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.36s both;
+  }
+
+  @keyframes heroFadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(20px) scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  /* Icon float animation */
+  .hero-icon-float {
+    animation: heroFloat 4s ease-in-out infinite;
+  }
+
+  @keyframes heroFloat {
+    0%, 100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-8px);
+    }
+  }
+
+  /* Glow pulse animation */
+  .hero-glow-pulse {
+    animation: heroGlowPulse 5s ease-in-out infinite, heroFadeIn 1.2s ease-out both;
+  }
+
+  @keyframes heroGlowPulse {
+    0%, 100% {
+      opacity: 0.7;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.12);
+    }
+  }
+
+  @keyframes heroFadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 0.7;
+    }
+  }
+
+  /* Mention composer placeholder */
+  .mention-composer.is-empty::before {
+    content: attr(data-placeholder);
+    color: hsl(var(--muted-foreground));
+    pointer-events: none;
+    position: absolute;
+  }
+
+  /* Mention popup animations */
+  @keyframes mentionPopupIn {
+    from {
+      opacity: 0;
+      transform: translateY(6px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes mentionItemIn {
+    from {
+      opacity: 0;
+      transform: translateX(-6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  .mention-popup-enter {
+    animation: mentionPopupIn 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+    transform-origin: bottom center;
+    min-width: min(380px, calc(100vw - 24px));
+  }
+
+  .mention-popup-item {
+    animation: mentionItemIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .mention-popup-item:nth-child(1) { animation-delay: 0ms; }
+  .mention-popup-item:nth-child(2) { animation-delay: 18ms; }
+  .mention-popup-item:nth-child(3) { animation-delay: 36ms; }
+  .mention-popup-item:nth-child(4) { animation-delay: 54ms; }
+  .mention-popup-item:nth-child(5) { animation-delay: 72ms; }
+  .mention-popup-item:nth-child(6) { animation-delay: 90ms; }
+  .mention-popup-item:nth-child(7) { animation-delay: 108ms; }
+  .mention-popup-item:nth-child(8) { animation-delay: 126ms; }
+  .mention-popup-item:nth-child(n+9) { animation-delay: 140ms; }
+
+  /* Composer dropdown (MCP / Skills) animations */
+  @keyframes composerDropdownIn {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes composerDropdownOut {
+    from {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+    to {
+      opacity: 0;
+      transform: translateY(8px) scale(0.96);
+    }
+  }
+
+  @keyframes composerDropdownItemIn {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .composer-dropdown[data-state="open"] {
+    animation: composerDropdownIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    transform-origin: bottom left;
+    /* Override shadcn default animate-in */
+    --tw-enter-opacity: initial;
+    --tw-enter-scale: initial;
+    --tw-enter-translate-y: initial;
+  }
+
+  .composer-dropdown[data-state="closed"] {
+    animation: composerDropdownOut 0.15s cubic-bezier(0.4, 0, 1, 1);
+    transform-origin: bottom left;
+    /* Override shadcn default animate-out */
+    --tw-exit-opacity: initial;
+    --tw-exit-scale: initial;
+    --tw-exit-translate-y: initial;
+  }
+
+  .composer-dropdown[data-state="open"] [role="menuitemcheckbox"],
+  .composer-dropdown[data-state="open"] [role="menuitem"] {
+    animation: composerDropdownItemIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .composer-dropdown[data-state="open"] [role="menuitemcheckbox"]:nth-child(1),
+  .composer-dropdown[data-state="open"] [role="menuitem"]:nth-child(1) { animation-delay: 0.02s; }
+  .composer-dropdown[data-state="open"] [role="menuitemcheckbox"]:nth-child(2),
+  .composer-dropdown[data-state="open"] [role="menuitem"]:nth-child(2) { animation-delay: 0.04s; }
+  .composer-dropdown[data-state="open"] [role="menuitemcheckbox"]:nth-child(3),
+  .composer-dropdown[data-state="open"] [role="menuitem"]:nth-child(3) { animation-delay: 0.06s; }
+  .composer-dropdown[data-state="open"] [role="menuitemcheckbox"]:nth-child(4),
+  .composer-dropdown[data-state="open"] [role="menuitem"]:nth-child(4) { animation-delay: 0.08s; }
+  .composer-dropdown[data-state="open"] [role="menuitemcheckbox"]:nth-child(5),
+  .composer-dropdown[data-state="open"] [role="menuitem"]:nth-child(5) { animation-delay: 0.10s; }
+  .composer-dropdown[data-state="open"] [role="menuitemcheckbox"]:nth-child(n+6),
+  .composer-dropdown[data-state="open"] [role="menuitem"]:nth-child(n+6) { animation-delay: 0.12s; }
+
+  /* Chat header model selector animations */
+  @keyframes modelSelectorDropdownIn {
+    from {
+      opacity: 0;
+      transform: translateY(6px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes modelSelectorDropdownOut {
+    from {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+    to {
+      opacity: 0;
+      transform: translateY(4px) scale(0.985);
+    }
+  }
+
+  @keyframes modelSelectorItemIn {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .model-selector-dropdown[data-state="open"] {
+    animation: modelSelectorDropdownIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+    transform-origin: top left;
+    --tw-enter-opacity: initial;
+    --tw-enter-scale: initial;
+    --tw-enter-translate-y: initial;
+  }
+
+  .model-selector-dropdown[data-state="closed"] {
+    animation: modelSelectorDropdownOut 0.12s cubic-bezier(0.4, 0, 1, 1);
+    transform-origin: top left;
+    --tw-exit-opacity: initial;
+    --tw-exit-scale: initial;
+    --tw-exit-translate-y: initial;
+  }
+
+  .model-selector-dropdown[data-state="open"] .model-selector-item {
+    animation: modelSelectorItemIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* Context checkpoint animations */
+  @keyframes checkpointSlideIn {
+    from {
+      opacity: 0;
+      transform: translateY(8px) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes checkpointExpandIn {
+    from {
+      opacity: 0;
+      max-height: 0;
+    }
+    to {
+      opacity: 1;
+      max-height: 600px;
+    }
+  }
+
+  @keyframes checkpointPulse {
+    0%, 100% {
+      opacity: 0.6;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes checkpointShimmer {
+    0% {
+      background-position: -200% 0;
+    }
+    100% {
+      background-position: 200% 0;
+    }
+  }
+
+  .checkpoint-card {
+    animation: checkpointSlideIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .checkpoint-expand {
+    animation: checkpointExpandIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    overflow: hidden;
+  }
+
+  .checkpoint-status-pulse {
+    animation: checkpointPulse 2s ease-in-out infinite;
+  }
+
+  .checkpoint-shimmer {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      hsl(0 0% 50% / 0.06) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+    animation: checkpointShimmer 2.5s ease-in-out infinite;
+  }
+
+  /* Tool card animations & micro-interactions */
+  @keyframes toolCardIn {
+    from { opacity: 0; transform: translateY(6px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  @keyframes toolExpandIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes toolArgPillIn {
+    from { opacity: 0; transform: scale(0.92); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+
+  .tool-card-enter {
+    animation: toolCardIn 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .tool-trace-group {
+    animation: toolCardIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .tool-trace-group-body {
+    animation: toolExpandIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .tool-expand {
+    animation: toolExpandIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .tool-arg-pill {
+    animation: toolArgPillIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* Stagger pills */
+  .tool-arg-pill:nth-child(1) { animation-delay: 0ms; }
+  .tool-arg-pill:nth-child(2) { animation-delay: 30ms; }
+  .tool-arg-pill:nth-child(3) { animation-delay: 60ms; }
+  .tool-arg-pill:nth-child(4) { animation-delay: 90ms; }
+  .tool-arg-pill:nth-child(5) { animation-delay: 120ms; }
+  .tool-arg-pill:nth-child(n+6) { animation-delay: 150ms; }
+
+  /* Click / open spring animation */
+  .tool-card-enter > summary,
+  .tool-card-grouped > summary {
+    transition: transform 250ms cubic-bezier(0.34, 1.56, 0.64, 1), background-color 150ms ease;
+  }
+  .tool-card-enter > summary:active,
+  .tool-card-grouped > summary:active {
+    transform: scale(0.975);
+    transition: transform 100ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  /* Spring bounce-back on open */
+  .tool-card-enter[open] > summary {
+    animation: toolSummaryBounce 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  @keyframes toolSummaryBounce {
+    0%   { transform: scale(0.975); }
+    50%  { transform: scale(1.008); }
+    100% { transform: scale(1); }
+  }
+
+  /* Focus-visible for keyboard nav */
+  .tool-card-enter:focus-within:has(summary:focus-visible),
+  .tool-card-grouped:focus-within:has(summary:focus-visible) {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+  .tool-card-enter > summary:focus-visible,
+  .tool-card-grouped > summary:focus-visible {
+    outline: none;
+  }
+
+  /* Respect reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    .tool-card-enter,
+    .tool-trace-group,
+    .tool-trace-group-body,
+    .tool-expand,
+    .tool-arg-pill,
+    .tool-card-enter[open] > summary {
+      animation: none !important;
+    }
+    .tool-card-enter > summary:active {
+      transform: none;
+    }
+  }
+
+  /* Notify toast animations */
+  .notify-toast-enter {
+    animation: notifySlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .notify-toast-exit {
+    animation: notifyFadeOut 0.3s ease-out both;
+  }
+
+  @keyframes notifySlideIn {
+    from {
+      opacity: 0;
+      transform: translateX(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes notifyFadeOut {
+    from {
+      opacity: 1;
+      transform: translateX(0);
+    }
+    to {
+      opacity: 0;
+      transform: translateX(20px);
+    }
+  }
+
+  .mention-chip {
+    font-size: 13px;
+    line-height: 1.5;
+    vertical-align: baseline;
+    cursor: default;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  /* Hub page loading and entrance animations */
+
+  @keyframes hubPageIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes hubPanelIn {
+    from { opacity: 0; transform: translateY(14px) scale(0.985); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  @keyframes hubChipIn {
+    from { opacity: 0; transform: translateY(6px) scale(0.94); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  @keyframes hubLoadingProgress {
+    0%   { transform: translateX(-60%) scaleX(0.35); }
+    50%  { transform: translateX(30%) scaleX(0.85); }
+    100% { transform: translateX(145%) scaleX(0.35); }
+  }
+
+  @keyframes hubStatusPulse {
+    0%, 100% { box-shadow: 0 0 0 0 currentColor; opacity: 0.65; }
+    50%      { box-shadow: 0 0 0 4px transparent; opacity: 1; }
+  }
+
+  .hub-page-enter {
+    animation: hubPageIn 260ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .hub-page-enter .hub-header {
+    animation: hubPanelIn 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .hub-page-enter .hub-content-stage {
+    animation: hubPanelIn 420ms cubic-bezier(0.16, 1, 0.3, 1) 70ms both;
+  }
+
+  .hub-panel-enter,
+  .hub-empty-state-enter {
+    animation: hubPanelIn 380ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .hub-panel-enter-delayed {
+    animation-delay: 110ms;
+  }
+
+  .hub-chip-enter {
+    animation: hubChipIn 320ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  }
+  .hub-chip-enter:nth-child(1)  { animation-delay: 0ms; }
+  .hub-chip-enter:nth-child(2)  { animation-delay: 40ms; }
+  .hub-chip-enter:nth-child(3)  { animation-delay: 80ms; }
+  .hub-chip-enter:nth-child(4)  { animation-delay: 120ms; }
+  .hub-chip-enter:nth-child(5)  { animation-delay: 160ms; }
+  .hub-chip-enter:nth-child(n+6) { animation-delay: 200ms; }
+
+  .hub-loading-progress {
+    width: 42%;
+    transform-origin: left center;
+    animation: hubLoadingProgress 1.45s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
+
+  .hub-status-dot {
+    animation: hubStatusPulse 1.6s ease-in-out infinite;
+  }
+
+  /* macOS frosted-glass loading hero — calm, monochrome, minimal */
+
+  @keyframes hubFrostSpinnerFade {
+    0%   { opacity: 1; }
+    100% { opacity: 0.18; }
+  }
+
+  @keyframes hubFrostTrack {
+    0%   { transform: translateX(-105%); }
+    100% { transform: translateX(260%); }
+  }
+
+  @keyframes hubFrostSheen {
+    0%   { transform: translateX(-60%); opacity: 0; }
+    24%  { opacity: 1; }
+    76%  { opacity: 1; }
+    100% { transform: translateX(160%); opacity: 0; }
+  }
+
+  .hub-frost-hero {
+    position: relative;
+    overflow: hidden;
+    border-radius: 14px;
+    border: 1px solid hsl(var(--border) / 0.55);
+    background: linear-gradient(
+      180deg,
+      hsl(var(--background) / 0.82),
+      hsl(var(--background) / 0.55)
+    );
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    backdrop-filter: blur(24px) saturate(180%);
+    box-shadow:
+      0 1px 0 hsl(0 0% 100% / 0.6) inset,
+      0 8px 28px -18px hsl(0 0% 0% / 0.18);
+  }
+  .hub-frost-hero::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    width: 50%;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      hsl(0 0% 100% / 0.22),
+      transparent
+    );
+    animation: hubFrostSheen 2.6s ease-in-out infinite;
+    pointer-events: none;
+  }
+  .dark .hub-frost-hero::after {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      hsl(0 0% 100% / 0.06),
+      transparent
+    );
+  }
+
+  .hub-frost-spinner {
+    position: relative;
+    width: 18px;
+    height: 18px;
+    color: hsl(var(--foreground) / 0.72);
+  }
+  .hub-frost-spinner > i {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 1.6px;
+    height: 5px;
+    margin-left: -0.8px;
+    background: currentColor;
+    border-radius: 1px;
+    transform-origin: 0.8px 9px;
+    animation: hubFrostSpinnerFade 1s linear infinite;
+    opacity: 0;
+  }
+  .hub-frost-spinner > i:nth-child(1)  { transform: rotate(0deg);   animation-delay: -0.917s; }
+  .hub-frost-spinner > i:nth-child(2)  { transform: rotate(30deg);  animation-delay: -0.833s; }
+  .hub-frost-spinner > i:nth-child(3)  { transform: rotate(60deg);  animation-delay: -0.750s; }
+  .hub-frost-spinner > i:nth-child(4)  { transform: rotate(90deg);  animation-delay: -0.667s; }
+  .hub-frost-spinner > i:nth-child(5)  { transform: rotate(120deg); animation-delay: -0.583s; }
+  .hub-frost-spinner > i:nth-child(6)  { transform: rotate(150deg); animation-delay: -0.500s; }
+  .hub-frost-spinner > i:nth-child(7)  { transform: rotate(180deg); animation-delay: -0.417s; }
+  .hub-frost-spinner > i:nth-child(8)  { transform: rotate(210deg); animation-delay: -0.333s; }
+  .hub-frost-spinner > i:nth-child(9)  { transform: rotate(240deg); animation-delay: -0.250s; }
+  .hub-frost-spinner > i:nth-child(10) { transform: rotate(270deg); animation-delay: -0.167s; }
+  .hub-frost-spinner > i:nth-child(11) { transform: rotate(300deg); animation-delay: -0.083s; }
+  .hub-frost-spinner > i:nth-child(12) { transform: rotate(330deg); animation-delay:  0.000s; }
+
+  .hub-frost-track {
+    position: relative;
+    height: 2px;
+    width: 100%;
+    border-radius: 9999px;
+    background: hsl(var(--muted-foreground) / 0.10);
+    overflow: hidden;
+  }
+  .hub-frost-track::before {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    left: 0;
+    width: 38%;
+    border-radius: inherit;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      hsl(var(--foreground) / 0.5),
+      transparent
+    );
+    animation: hubFrostTrack 1.6s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+  }
+
+  .hub-frost-skeleton {
+    position: relative;
+    overflow: hidden;
+    border-radius: 14px;
+    border: 1px solid hsl(var(--border) / 0.35);
+    background: hsl(var(--background) / 0.5);
+    -webkit-backdrop-filter: blur(18px) saturate(170%);
+    backdrop-filter: blur(18px) saturate(170%);
+  }
+  .hub-frost-skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      115deg,
+      transparent 30%,
+      hsl(var(--foreground) / 0.04) 50%,
+      transparent 70%
+    );
+    background-size: 200% 100%;
+    animation: hubLoadingTrackShimmer 2.4s linear infinite;
+    pointer-events: none;
+  }
+
+  @keyframes hubLoadingTrackShimmer {
+    0%   { background-position: 150% 0; }
+    100% { background-position: -50% 0; }
+  }
+
+  /* Skills loading animations */
+
+  @keyframes skillsSkeletonShimmer {
+    0%   { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+
+  @keyframes skillCardIn {
+    from { opacity: 0; transform: translateY(10px) scale(0.97); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  @keyframes skillCardCheckIn {
+    0%   { transform: scale(0); opacity: 0; }
+    60%  { transform: scale(1.15); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+
+  .skills-skeleton-shimmer {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--muted-foreground) / 0.08) 25%,
+      hsl(var(--muted-foreground) / 0.16) 50%,
+      hsl(var(--muted-foreground) / 0.08) 75%
+    );
+    background-size: 200% 100%;
+    animation: skillsSkeletonShimmer 2s ease-in-out infinite;
+  }
+
+  @keyframes skillsSkeletonPulse {
+    0%, 100% { background-color: hsl(var(--muted-foreground) / 0.10); }
+    50%      { background-color: hsl(var(--muted-foreground) / 0.22); }
+  }
+
+  .skills-skeleton-pulse {
+    background-color: hsl(var(--muted-foreground) / 0.10);
+    animation: skillsSkeletonPulse 1.6s ease-in-out infinite;
+  }
+  .skills-skeleton-pulse:nth-child(2)  { animation-delay: 80ms; }
+  .skills-skeleton-pulse:nth-child(3)  { animation-delay: 160ms; }
+  .skills-skeleton-pulse:nth-child(4)  { animation-delay: 240ms; }
+  .skills-skeleton-pulse:nth-child(5)  { animation-delay: 320ms; }
+  .skills-skeleton-pulse:nth-child(6)  { animation-delay: 400ms; }
+
+  .skill-card-enter {
+    animation: skillCardIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .skill-card-enter:nth-child(1)  { animation-delay: 0ms; }
+  .skill-card-enter:nth-child(2)  { animation-delay: 50ms; }
+  .skill-card-enter:nth-child(3)  { animation-delay: 100ms; }
+  .skill-card-enter:nth-child(4)  { animation-delay: 150ms; }
+  .skill-card-enter:nth-child(5)  { animation-delay: 200ms; }
+  .skill-card-enter:nth-child(6)  { animation-delay: 250ms; }
+  .skill-card-enter:nth-child(n+7) { animation-delay: 300ms; }
+
+  .skill-check-enter {
+    animation: skillCardCheckIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  }
+
+  .skills-scan-dot { animation: bounce 1s infinite; }
+  .skills-scan-dot:nth-child(2) { animation-delay: 150ms; }
+  .skills-scan-dot:nth-child(3) { animation-delay: 300ms; }
+
+  /* Skills store preview drawer animations */
+
+  @keyframes skillsDrawerBackdropIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  @keyframes skillsDrawerBackdropOut {
+    from { opacity: 1; }
+    to   { opacity: 0; }
+  }
+
+  @keyframes skillsDrawerPanelIn {
+    from { opacity: 0; transform: translateX(32px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+
+  @keyframes skillsDrawerPanelOut {
+    from { opacity: 1; transform: translateX(0); }
+    to   { opacity: 0; transform: translateX(32px); }
+  }
+
+  .skills-drawer-backdrop {
+    animation: skillsDrawerBackdropIn 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .skills-drawer-backdrop-closing {
+    animation: skillsDrawerBackdropOut 200ms cubic-bezier(0.4, 0, 1, 1) both;
+  }
+  .skills-drawer-panel {
+    animation: skillsDrawerPanelIn 340ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .skills-drawer-panel-closing {
+    animation: skillsDrawerPanelOut 220ms cubic-bezier(0.4, 0, 1, 1) both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hub-page-enter,
+    .hub-page-enter .hub-header,
+    .hub-page-enter .hub-content-stage,
+    .hub-panel-enter,
+    .hub-empty-state-enter,
+    .hub-chip-enter,
+    .hub-loading-progress,
+    .hub-status-dot,
+    .hub-frost-hero::after,
+    .hub-frost-spinner > i,
+    .hub-frost-track::before,
+    .hub-frost-skeleton::after,
+    .skill-card-enter,
+    .skill-check-enter,
+    .skills-skeleton-shimmer,
+    .skills-skeleton-pulse,
+    .skills-drawer-backdrop,
+    .skills-drawer-backdrop-closing,
+    .skills-drawer-panel,
+    .skills-drawer-panel-closing {
+      animation: none !important;
+    }
+    .hub-frost-spinner > i { opacity: 0.4; }
+  }
+
+  @keyframes fileDropOverlayIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes fileDropCardIn {
+    from {
+      opacity: 0;
+      transform: translateY(6px) scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes fileDropBorderPulse {
+    0%, 100% {
+      box-shadow: 0 0 0 0 hsl(var(--foreground) / 0);
+    }
+    50% {
+      box-shadow: 0 0 0 3px hsl(var(--foreground) / 0.04);
+    }
+  }
+
+  .file-drop-overlay {
+    animation: fileDropOverlayIn 0.16s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .file-drop-overlay-card {
+    animation: fileDropCardIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .file-drop-overlay-zone {
+    animation: fileDropBorderPulse 2.4s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .file-drop-overlay,
+    .file-drop-overlay-card,
+    .file-drop-overlay-zone {
+      animation: none !important;
+    }
+  }
+}
+
+/*
+ * Code block copy-button overrides — MUST be outside @layer to beat
+ * the inline Tailwind utilities emitted by the streamdown library
+ * (utilities layer > components layer in Tailwind v4 cascade).
+ *
+ * Use CSS Grid overlap: header and actions wrapper share the same
+ * grid cell (row 1), so the button sits inside the header visually
+ * without absolute positioning.
+ */
+.chat-markdown [data-streamdown="code-block"] {
+  display: grid;
+}
+.chat-markdown [data-streamdown="code-block-header"] {
+  grid-row: 1;
+  grid-column: 1;
+  padding-right: 3rem;
+}
+.chat-markdown [data-streamdown="code-block"] > [data-streamdown="code-block-header"] + div {
+  grid-row: 1;
+  grid-column: 1;
+  position: relative;
+  top: auto;
+  justify-self: end;
+  align-self: center;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+  margin: 0;
+  padding: 0 0.5rem;
+  pointer-events: none;
+}
+.chat-markdown [data-streamdown="code-block-actions"] {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin: 0;
+  padding: 0.125rem;
+  border-radius: 0.375rem;
+  border: 1px solid hsl(var(--border) / 0.5);
+  background: hsl(var(--background) / 0.85);
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+.chat-markdown [data-streamdown="code-block-copy-button"],
+.chat-markdown [data-streamdown="code-block-download-button"] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  color: hsl(var(--muted-foreground));
+  transition: color 0.15s, background-color 0.15s;
+}
+.chat-markdown [data-streamdown="code-block-copy-button"]:hover,
+.chat-markdown [data-streamdown="code-block-download-button"]:hover {
+  background: hsl(var(--muted));
+  color: hsl(var(--foreground));
+}
+.chat-markdown [data-streamdown="code-block-copy-button"]:disabled,
+.chat-markdown [data-streamdown="code-block-download-button"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+.chat-markdown [data-streamdown="code-block-copy-button"] svg,
+.chat-markdown [data-streamdown="code-block-download-button"] svg {
+  width: 14px;
+  height: 14px;
+}
+
+/*
+ * Streamdown mermaid / table fullscreen fix — macOS WebKit (Tauri WKWebView)
+ *
+ * The streamdown library creates fullscreen overlays via createPortal to
+ * document.body. These portals use `backdrop-filter: blur()` + `position: fixed`,
+ * which triggers a known WebKit compositing bug where child elements fail to
+ * paint. Force a new compositing layer on the portal to work around it.
+ *
+ * Also ensure the mermaid SVG inside fullscreen gets proper rendering treatment.
+ */
+body > div:has([data-streamdown="mermaid"]):not(#root) {
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+}
+body > div:has([data-streamdown="table-fullscreen"]):not(#root) {
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+}
+body > div:not(#root) [data-streamdown="mermaid"] svg {
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+}
+
+.chat-history-sidebar,
+.chat-history-row {
+  contain: layout paint style;
+}
+
+@supports (content-visibility: auto) {
+  .chat-history-row {
+    content-visibility: auto;
+    contain-intrinsic-size: 44px;
+  }
+}

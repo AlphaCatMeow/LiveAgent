@@ -1,0 +1,256 @@
+import fs from "node:fs";
+import path from "node:path";
+import vm from "node:vm";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import ts from "typescript";
+
+const DEFAULT_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json"];
+
+function createDefaultMocks() {
+  return {
+    "@mariozechner/pi-ai": {
+      getModel(id, config = {}) {
+        return {
+          id,
+          provider: config.provider ?? "mock",
+          api: config.api ?? "mock",
+          maxTokens: config.maxTokens ?? 128_000,
+          ...config,
+        };
+      },
+    },
+    "@mariozechner/pi-ai/anthropic": {
+      streamAnthropic() {
+        throw new Error("streamAnthropic mock was not expected to be called");
+      },
+    },
+    "@mariozechner/pi-ai/openai-completions": {
+      streamOpenAICompletions() {
+        throw new Error("streamOpenAICompletions mock was not expected to be called");
+      },
+    },
+    "@mariozechner/pi-ai/openai-responses": {
+      streamOpenAIResponses() {
+        throw new Error("streamOpenAIResponses mock was not expected to be called");
+      },
+    },
+    "@mariozechner/pi-ai/google": {
+      streamGoogle() {
+        throw new Error("streamGoogle mock was not expected to be called");
+      },
+    },
+    "@tauri-apps/api/core": {
+      invoke() {
+        throw new Error("tauri invoke mock was not expected to be called");
+      },
+    },
+    "@sinclair/typebox": {
+      Type: {
+        Object(properties = {}) {
+          return { type: "object", properties };
+        },
+        String(options = {}) {
+          return { type: "string", ...options };
+        },
+        Number(options = {}) {
+          return { type: "number", ...options };
+        },
+        Integer(options = {}) {
+          return { type: "integer", ...options };
+        },
+        Null(options = {}) {
+          return { type: "null", ...options };
+        },
+        Any(options = {}) {
+          return { ...options };
+        },
+        Record(key, value, options = {}) {
+          return { type: "object", propertyNames: key, additionalProperties: value, ...options };
+        },
+        Boolean(options = {}) {
+          return { type: "boolean", ...options };
+        },
+        Literal(value, options = {}) {
+          return { const: value, ...options };
+        },
+        Union(anyOf = [], options = {}) {
+          return { anyOf, ...options };
+        },
+        Optional(schema) {
+          return { ...schema, optional: true };
+        },
+        Array(items, options = {}) {
+          return { type: "array", items, ...options };
+        },
+      },
+    },
+    "react/jsx-runtime": {
+      jsx(type, props, key) {
+        return { type, props: props ?? {}, key: key ?? null };
+      },
+      jsxs(type, props, key) {
+        return { type, props: props ?? {}, key: key ?? null };
+      },
+      Fragment: Symbol.for("react.fragment"),
+    },
+  };
+}
+
+function createIconModuleMock(specifier) {
+  if (specifier.endsWith("?raw")) {
+    return {
+      __esModule: true,
+      default: '<svg viewBox="0 0 24 24"><path d="M0 0h24v24H0z"/></svg>',
+    };
+  }
+
+  const iconName = specifier.split("/").pop() || "icon";
+  return {
+    __esModule: true,
+    default(props) {
+      return { type: iconName, props: props ?? {} };
+    },
+  };
+}
+
+function hasExtension(filePath) {
+  return path.extname(filePath).length > 0;
+}
+
+function resolveAsFileOrDirectory(candidate) {
+  if (hasExtension(candidate) && fs.existsSync(candidate)) {
+    return candidate;
+  }
+
+  for (const ext of DEFAULT_EXTENSIONS) {
+    const withExt = `${candidate}${ext}`;
+    if (fs.existsSync(withExt)) return withExt;
+  }
+
+  if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+    for (const ext of DEFAULT_EXTENSIONS) {
+      const indexPath = path.join(candidate, `index${ext}`);
+      if (fs.existsSync(indexPath)) return indexPath;
+    }
+  }
+
+  throw new Error(`Cannot resolve module path: ${candidate}`);
+}
+
+export function createTsModuleLoader(options = {}) {
+  const rootDir = options.rootDir
+    ? path.resolve(options.rootDir)
+    : path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
+  const requireFromRoot = createRequire(path.join(rootDir, "package.json"));
+  const cache = new Map();
+  const mocks = new Map([
+    ...Object.entries(createDefaultMocks()),
+    ...Object.entries(options.mocks ?? {}),
+  ]);
+
+  function resolveLocal(specifier, parentDir = rootDir) {
+    const candidate = path.isAbsolute(specifier)
+      ? specifier
+      : path.resolve(parentDir, specifier);
+    return resolveAsFileOrDirectory(candidate);
+  }
+
+  function resolveMock(specifier, parentDir) {
+    if (specifier.startsWith("~icons/")) return createIconModuleMock(specifier);
+    if (mocks.has(specifier)) return mocks.get(specifier);
+    if (specifier.startsWith(".") || path.isAbsolute(specifier)) {
+      const resolved = resolveLocal(specifier, parentDir);
+      if (mocks.has(resolved)) return mocks.get(resolved);
+    }
+    return undefined;
+  }
+
+  function loadModule(specifier, parentDir = rootDir) {
+    const mock = resolveMock(specifier, parentDir);
+    if (mock !== undefined) return mock;
+
+    const isRootRelative =
+      specifier.startsWith("src/") ||
+      specifier.startsWith("test/") ||
+      specifier.startsWith("src-tauri/");
+
+    if (!isRootRelative && !specifier.startsWith(".") && !path.isAbsolute(specifier)) {
+      return requireFromRoot(specifier);
+    }
+
+    const filePath = resolveLocal(specifier, isRootRelative ? rootDir : parentDir);
+    if (cache.has(filePath)) return cache.get(filePath).exports;
+
+    if (filePath.endsWith(".json")) {
+      const jsonModule = { exports: JSON.parse(fs.readFileSync(filePath, "utf8")) };
+      cache.set(filePath, jsonModule);
+      return jsonModule.exports;
+    }
+
+    const source = fs.readFileSync(filePath, "utf8");
+    const transpiled = ts.transpileModule(source, {
+      fileName: filePath,
+      compilerOptions: {
+        module: ts.ModuleKind.CommonJS,
+        target: ts.ScriptTarget.ES2022,
+        jsx: ts.JsxEmit.ReactJSX,
+        esModuleInterop: true,
+        allowSyntheticDefaultImports: true,
+        moduleResolution: ts.ModuleResolutionKind.Node10 ?? ts.ModuleResolutionKind.NodeJs,
+        resolveJsonModule: true,
+        ignoreDeprecations: "6.0",
+      },
+      reportDiagnostics: true,
+    });
+
+    const diagnostics = transpiled.diagnostics ?? [];
+    const fatalDiagnostics = diagnostics.filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error);
+    if (fatalDiagnostics.length > 0) {
+      const message = ts.formatDiagnosticsWithColorAndContext(fatalDiagnostics, {
+        getCanonicalFileName: (name) => name,
+        getCurrentDirectory: () => rootDir,
+        getNewLine: () => "\n",
+      });
+      throw new Error(message);
+    }
+
+    const module = { exports: {} };
+    cache.set(filePath, module);
+
+    const dirname = path.dirname(filePath);
+    const localRequire = (nextSpecifier) => loadModule(nextSpecifier, dirname);
+    localRequire.resolve = (nextSpecifier) =>
+      nextSpecifier.startsWith(".") || path.isAbsolute(nextSpecifier)
+        ? resolveLocal(nextSpecifier, dirname)
+        : requireFromRoot.resolve(nextSpecifier);
+
+    const wrapped = `(function (exports, require, module, __filename, __dirname) {\n${transpiled.outputText}\n})`;
+    const script = new vm.Script(wrapped, { filename: filePath });
+    const previousWindow = globalThis.window;
+    if (typeof globalThis.window === "undefined") {
+      globalThis.window = {
+        setTimeout,
+        clearTimeout,
+      };
+    }
+
+    try {
+      const compiled = script.runInThisContext();
+      compiled(module.exports, localRequire, module, filePath, dirname);
+    } finally {
+      if (typeof previousWindow === "undefined") {
+        delete globalThis.window;
+      } else {
+        globalThis.window = previousWindow;
+      }
+    }
+    return module.exports;
+  }
+
+  return {
+    rootDir,
+    loadModule,
+    resolveLocal,
+  };
+}

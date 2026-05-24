@@ -1,0 +1,49 @@
+{
+  "name": "@liveagent/gateway-webui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@radix-ui/react-dropdown-menu": "^2.1.16",
+    "@radix-ui/react-scroll-area": "^1.2.10",
+    "@radix-ui/react-select": "^2.2.6",
+    "@radix-ui/react-slot": "^1.2.4",
+    "@sinclair/typebox": "^0.34.49",
+    "@streamdown/cjk": "^1.0.3",
+    "@streamdown/code": "^1.1.1",
+    "@streamdown/math": "^1.0.2",
+    "@streamdown/mermaid": "^1.0.2",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "katex": "^0.16.45",
+    "react": "^19.2.4",
+    "react-complex-tree": "^2.6.1",
+    "react-dom": "^19.2.4",
+    "remark-breaks": "^4.0.0",
+    "streamdown": "^2.5.0",
+    "tailwind-merge": "^3.5.0",
+    "yet-another-react-lightbox": "^3.31.0"
+  },
+  "devDependencies": {
+    "@iconify-json/logos": "^1.2.11",
+    "@iconify-json/lucide": "^1.2.108",
+    "@iconify-json/vscode-icons": "^1.2.50",
+    "@svgr/core": "^8.1.0",
+    "@svgr/plugin-jsx": "^8.1.0",
+    "@tailwindcss/postcss": "4.2.2",
+    "@tailwindcss/typography": "^0.5.19",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "postcss": "^8.5.8",
+    "tailwindcss": "4.2.2",
+    "typescript": "~6.0.2",
+    "unplugin-icons": "^23.0.1",
+    "vite": "^8.0.5"
+  }
+}

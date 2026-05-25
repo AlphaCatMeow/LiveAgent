@@ -29,11 +29,13 @@ const platforms = {};
 function targetForArtifact(filename) {
   if (/macOS-x64\.app\.tar\.gz$/i.test(filename)) return "darwin-x86_64-app";
   if (/macOS-aarch64\.app\.tar\.gz$/i.test(filename)) return "darwin-aarch64-app";
+  if (/Windows-x64-Setup\.exe$/i.test(filename)) return "windows-x86_64-nsis";
+  if (/Windows-x64\.msi$/i.test(filename)) return "windows-x86_64-msi";
   if (/Windows-x64-nsis\.zip$/i.test(filename)) return "windows-x86_64-nsis";
   if (/Windows-x64-msi\.zip$/i.test(filename)) return "windows-x86_64-msi";
-  if (/Linux-x86_64\.AppImage\.tar\.gz$/i.test(filename)) return "linux-x86_64-appimage";
-  if (/Linux-x86_64\.deb\.tar\.gz$/i.test(filename)) return "linux-x86_64-deb";
-  if (/Linux-x86_64\.rpm\.tar\.gz$/i.test(filename)) return "linux-x86_64-rpm";
+  if (/Linux-x86_64\.AppImage$/i.test(filename)) return "linux-x86_64-appimage";
+  if (/Linux-x86_64\.deb$/i.test(filename)) return "linux-x86_64-deb";
+  if (/Linux-x86_64\.rpm$/i.test(filename)) return "linux-x86_64-rpm";
   return null;
 }
 

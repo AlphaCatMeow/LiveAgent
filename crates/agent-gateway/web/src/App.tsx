@@ -34,7 +34,7 @@ import { McpHubPage } from "@/pages/mcp-hub/McpHubPage";
 import type { SectionId } from "@/pages/settings/types";
 import { useChatSkills } from "@/pages/chat/useChatSkills";
 import { mergeAlwaysEnabledSkillNames } from "@/lib/skills";
-import { buildModelOptions } from "@/lib/chat/chatPageHelpers";
+import { buildModelOptions, sortHistoryItems } from "@/lib/chat/chatPageHelpers";
 import { SettingsPage } from "@/pages/SettingsPage";
 import {
   findProviderModelConfig,
@@ -253,6 +253,7 @@ const PROTECTED_DRAFT_CONVERSATION = "__protected_draft__";
 const HISTORY_LIST_PAGE_SIZE = 80;
 const HISTORY_DETAIL_INITIAL_MAX_MESSAGES = 360;
 const HISTORY_SWITCH_OVERLAY_MIN_MS = 260;
+const SHARED_HISTORY_LIST_PAGE_SIZE = 200;
 const HISTORY_TITLE_POSITION_LOCK_MS = 1200;
 const SECONDS_TIMESTAMP_MAX = 10_000_000_000;
 const DRAFT_HISTORY_ADOPTION_WINDOW_MS = 30_000;
@@ -390,6 +391,26 @@ function resolveConversationTitle(
   fallbackConversationId: string,
 ) {
   return formatConversationTitle(summary, fallbackConversationId);
+}
+
+function toChatHistorySummary(
+  item: ConversationSummary,
+  selectedModel?: SelectedModel | null,
+): ChatHistorySummary {
+  return {
+    id: item.id,
+    title: resolveConversationTitle(item, item.id),
+    providerId: item.provider_id ?? selectedModel?.customProviderId ?? "gateway",
+    model: item.model ?? selectedModel?.model ?? "gateway",
+    sessionId: item.session_id || undefined,
+    cwd: item.cwd || undefined,
+    messageCount: item.message_count,
+    createdAt: item.created_at * 1000,
+    updatedAt: item.updated_at * 1000,
+    isPinned: item.is_pinned === true,
+    pinnedAt: item.pinned_at && item.pinned_at > 0 ? item.pinned_at * 1000 : undefined,
+    isShared: item.is_shared === true,
+  };
 }
 
 function hasLocalDraftConversation(params: {
@@ -608,6 +629,7 @@ export default function App() {
   const [sharedManagerErrors, setSharedManagerErrors] = useState<
     Record<string, string | undefined>
   >({});
+  const [sharedHistoryItems, setSharedHistoryItems] = useState<ChatHistorySummary[]>([]);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [pendingUploadedFiles, setPendingUploadedFiles] = useState<PendingUploadedFile[]>([]);
   const [isUploadingFiles, setIsUploadingFiles] = useState(false);
@@ -637,8 +659,10 @@ export default function App() {
   const historyItemsRef = useRef(historyItems);
   const historyTotalRef = useRef(historyTotal);
   const historyHasMoreRef = useRef(historyHasMore);
-  const loadedHistoryOffsetRef = useRef(0);
+  const nextHistoryPageRef = useRef(1);
   const historyListPageLoadingRef = useRef(false);
+  const sharedHistoryItemsRef = useRef<ChatHistorySummary[]>([]);
+  const sharedHistoryListRequestRef = useRef<Promise<ChatHistorySummary[]> | null>(null);
   const pendingUploadedFilesRef = useRef(pendingUploadedFiles);
   const isUploadingFilesRef = useRef(isUploadingFiles);
   const uploadDragDepthRef = useRef(0);
@@ -653,6 +677,7 @@ export default function App() {
   const attachedConversationControllersRef = useRef<Map<string, AbortController>>(new Map());
   const completedLiveStreamConversationAtRef = useRef<Map<string, number>>(new Map());
   const completedLiveStreamCleanupTimersRef = useRef<Map<string, number>>(new Map());
+  const pendingHistoryRefreshAfterLiveCompletionRef = useRef<Set<string>>(new Set());
   const optimisticTitleConversationIdsRef = useRef<Set<string>>(new Set());
   const titlePositionLockedConversationIdsRef = useRef<Set<string>>(new Set());
   const titlePositionLockTimeoutsRef = useRef<Map<string, number>>(new Map());
@@ -705,15 +730,19 @@ export default function App() {
   }
 
   const commitHistoryListState = useCallback(
-    (conversations: ConversationSummary[], total: number, loadedOffset: number) => {
+    (
+      conversations: ConversationSummary[],
+      total: number,
+      nextPage: number,
+      hasMore?: boolean,
+    ) => {
       const nextTotal = Math.max(0, total);
-      const nextOffset = Math.max(0, loadedOffset);
-      const nextHasMore = nextOffset < nextTotal;
+      const nextHasMore = hasMore ?? conversations.length < nextTotal;
 
       historyItemsRef.current = conversations;
       historyTotalRef.current = nextTotal;
       historyHasMoreRef.current = nextHasMore;
-      loadedHistoryOffsetRef.current = nextOffset;
+      nextHistoryPageRef.current = Math.max(1, nextPage);
       setHistoryItems(conversations);
       setHistoryTotal(nextTotal);
       setHistoryHasMore(nextHasMore);
@@ -729,7 +758,7 @@ export default function App() {
       commitHistoryListState(
         next,
         Math.max(next.length, historyTotalRef.current + delta),
-        loadedHistoryOffsetRef.current + delta,
+        nextHistoryPageRef.current,
       );
     },
     [commitHistoryListState],
@@ -1169,6 +1198,7 @@ export default function App() {
       }
       liveConversationStreamStoresRef.current.get(conversationIdValue)?.reset();
       liveConversationStreamStoresRef.current.delete(conversationIdValue);
+      pendingHistoryRefreshAfterLiveCompletionRef.current.delete(conversationIdValue);
       clearLiveConversationStreamMeta(conversationIdValue);
     },
     [clearLiveConversationStreamMeta],
@@ -1177,6 +1207,7 @@ export default function App() {
   const clearAllConversationLiveStreams = useCallback(() => {
     liveConversationStreamStoresRef.current.forEach((store) => store.reset());
     liveConversationStreamStoresRef.current.clear();
+    pendingHistoryRefreshAfterLiveCompletionRef.current.clear();
     liveConversationStreamMetaRef.current = {};
     setLiveConversationStreamMetaState({});
   }, []);
@@ -1965,6 +1996,25 @@ export default function App() {
     ],
   );
 
+  const refreshHistoryAfterCompletedLiveStream = useCallback(
+    (targetConversationId: string, currentApi = api) => {
+      const conversationIdValue = targetConversationId.trim();
+      if (!currentApi || !conversationIdValue) {
+        return false;
+      }
+      if (!pendingHistoryRefreshAfterLiveCompletionRef.current.has(conversationIdValue)) {
+        return false;
+      }
+
+      pendingHistoryRefreshAfterLiveCompletionRef.current.delete(conversationIdValue);
+      void refreshVisibleConversationHistorySnapshot(conversationIdValue, currentApi, {
+        allowIdle: true,
+      });
+      return true;
+    },
+    [api, refreshVisibleConversationHistorySnapshot],
+  );
+
   const recoverUnavailableConversationStream = useCallback(
     (targetConversationId: string, currentApi = api) => {
       const conversationIdValue = targetConversationId.trim();
@@ -2072,6 +2122,7 @@ export default function App() {
               terminalEventSeen = true;
               markCompletedLiveStream(conversationIdValue);
               commitTerminalConversationLiveStream(conversationIdValue);
+              refreshHistoryAfterCompletedLiveStream(conversationIdValue, currentApi);
               return;
             }
 
@@ -2096,6 +2147,7 @@ export default function App() {
             terminalEventSeen = true;
             markCompletedLiveStream(conversationIdValue);
             commitTerminalConversationLiveStream(conversationIdValue);
+            refreshHistoryAfterCompletedLiveStream(conversationIdValue, currentApi);
           }
         } finally {
           if (attachedConversationControllersRef.current.get(conversationIdValue) === controller) {
@@ -2124,6 +2176,7 @@ export default function App() {
       markCompletedLiveStream,
       markLiveConversationStreamActive,
       recoverUnavailableConversationStream,
+      refreshHistoryAfterCompletedLiveStream,
       refreshVisibleConversationHistorySnapshot,
       setLiveConversationStreamStatus,
     ],
@@ -2249,6 +2302,7 @@ export default function App() {
         !isRemoteConversationRunning &&
         hasRecentlyCompletedLiveStream(targetConversationId)
       ) {
+        pendingHistoryRefreshAfterLiveCompletionRef.current.delete(targetConversationId);
         // The visible transcript already contains the committed live stream;
         // refresh the persisted snapshot so remote observers also receive the
         // user turn that is not part of chat stream events.
@@ -2264,6 +2318,7 @@ export default function App() {
         !isHistoryHydrationBlocked &&
         !localRunningConversationIdsRef.current.has(targetConversationId)
       ) {
+        pendingHistoryRefreshAfterLiveCompletionRef.current.add(targetConversationId);
         attachVisibleConversationLiveStream(targetConversationId, api);
         void refreshVisibleConversationHistorySnapshot(targetConversationId, api);
       }
@@ -2385,6 +2440,7 @@ export default function App() {
       if (isTerminalEvent) {
         markCompletedLiveStream(targetConversationId);
         commitTerminalConversationLiveStream(targetConversationId);
+        refreshHistoryAfterCompletedLiveStream(targetConversationId, api);
       } else {
         markLiveConversationStreamActive(targetConversationId);
       }
@@ -2405,6 +2461,7 @@ export default function App() {
     markCompletedLiveStream,
     markLiveConversationStreamActive,
     recoverUnavailableConversationStream,
+    refreshHistoryAfterCompletedLiveStream,
     setRemoteConversationRunningState,
     setLiveConversationStreamStatus,
     shouldSuppressPendingDraftBroadcast,
@@ -2634,12 +2691,15 @@ export default function App() {
           retainConversationIds: retainedConversationIds,
         },
       );
+      const refreshedNextPage = response.conversations.length > 0 ? 2 : 1;
+      const nextPage = silent
+        ? Math.max(nextHistoryPageRef.current, refreshedNextPage)
+        : refreshedNextPage;
       commitHistoryListState(
         conversations,
         response.total_count,
-        silent
-          ? Math.max(loadedHistoryOffsetRef.current, response.conversations.length)
-          : response.conversations.length,
+        nextPage,
+        response.conversations.length > 0 && conversations.length < response.total_count,
       );
 
       const adoptedPendingDraftConversationId =
@@ -2822,8 +2882,7 @@ export default function App() {
     historyListPageLoadingRef.current = true;
     setHistoryListLoadingMore(true);
     try {
-      const offset = loadedHistoryOffsetRef.current;
-      const pageNumber = Math.floor(offset / HISTORY_LIST_PAGE_SIZE) + 1;
+      const pageNumber = nextHistoryPageRef.current;
       const response = await api.listHistory(pageNumber, HISTORY_LIST_PAGE_SIZE);
       const runningConversationIds = normalizeRunningConversationIds(
         response.running_conversation_ids,
@@ -2842,12 +2901,13 @@ export default function App() {
           retainConversationIds,
         },
       );
+      const nextPage =
+        response.conversations.length === 0 ? pageNumber : pageNumber + 1;
       commitHistoryListState(
         conversations,
         response.total_count,
-        response.conversations.length === 0
-          ? response.total_count
-          : offset + response.conversations.length,
+        nextPage,
+        response.conversations.length > 0 && conversations.length < response.total_count,
       );
       setHistoryError(null);
     } catch (error) {
@@ -3103,6 +3163,7 @@ export default function App() {
             terminalEventSeen = true;
             markCompletedLiveStream(activeConversationId);
             commitTerminalConversationLiveStream(activeConversationId);
+            refreshHistoryAfterCompletedLiveStream(activeConversationId, api);
           } else {
             markLiveConversationStreamActive(activeConversationId);
           }
@@ -3335,13 +3396,7 @@ export default function App() {
       .then((status) => {
         setShareStatus(status);
         setSharedManagerStatuses((current) => ({ ...current, [item.id]: status }));
-        updateHistoryItems((current) =>
-          current.map((conversation) =>
-            conversation.id === item.id
-              ? { ...conversation, is_shared: status.enabled === true }
-              : conversation,
-          ),
-        );
+        markSharedConversation(item.id, status.enabled === true, item);
       })
       .catch((error) => {
         setShareError(asErrorMessage(error, "读取分享状态失败"));
@@ -3372,13 +3427,7 @@ export default function App() {
       .then((status) => {
         setShareStatus(status);
         setSharedManagerStatuses((current) => ({ ...current, [item.id]: status }));
-        updateHistoryItems((current) =>
-          current.map((conversation) =>
-            conversation.id === item.id
-              ? { ...conversation, is_shared: status.enabled === true }
-              : conversation,
-          ),
-        );
+        markSharedConversation(item.id, status.enabled === true, item);
       })
       .catch((error) => {
         setShareError(asErrorMessage(error, enabled ? "开启分享失败" : "关闭分享失败"));
@@ -3401,7 +3450,7 @@ export default function App() {
       .then((status) => {
         setShareStatus(status);
         setSharedManagerStatuses((current) => ({ ...current, [item.id]: status }));
-        markSharedConversation(item.id, status.enabled === true);
+        markSharedConversation(item.id, status.enabled === true, item);
       })
       .catch((error) => {
         setShareError(asErrorMessage(error, "更新分享脱敏设置失败"));
@@ -3439,12 +3488,99 @@ export default function App() {
     });
   }
 
-  function markSharedConversation(id: string, isShared: boolean) {
+  const setSharedHistoryItemsState = useCallback((items: ChatHistorySummary[]) => {
+    const nextItems = sortHistoryItems(
+      items.map((item) => ({ ...item, isShared: true })),
+    );
+    sharedHistoryItemsRef.current = nextItems;
+    setSharedHistoryItems(nextItems);
+  }, []);
+
+  const refreshSharedHistoryItems = useCallback(
+    async (currentApi = api) => {
+      if (!currentApi) {
+        setSharedHistoryItemsState([]);
+        return [];
+      }
+      if (sharedHistoryListRequestRef.current) {
+        return sharedHistoryListRequestRef.current;
+      }
+
+      const request = (async () => {
+        const byId = new Map<string, ChatHistorySummary>();
+        let totalCount = 0;
+        for (let pageNumber = 1; ; pageNumber += 1) {
+          const response = await currentApi.listSharedHistory(
+            pageNumber,
+            SHARED_HISTORY_LIST_PAGE_SIZE,
+          );
+          totalCount = Math.max(0, response.total_count);
+          for (const conversation of response.conversations) {
+            const item = toChatHistorySummary(conversation, settings.selectedModel);
+            byId.set(item.id, { ...item, isShared: true });
+          }
+          if (response.conversations.length === 0 || byId.size >= totalCount) {
+            break;
+          }
+        }
+
+        const nextItems = Array.from(byId.values());
+        setSharedHistoryItemsState(nextItems);
+        return sortHistoryItems(nextItems);
+      })();
+
+      sharedHistoryListRequestRef.current = request;
+      try {
+        return await request;
+      } catch (error) {
+        setHistoryError(asErrorMessage(error, "读取已分享历史列表失败"));
+        return sharedHistoryItemsRef.current;
+      } finally {
+        if (sharedHistoryListRequestRef.current === request) {
+          sharedHistoryListRequestRef.current = null;
+        }
+      }
+    },
+    [api, settings.selectedModel, setSharedHistoryItemsState],
+  );
+
+  useEffect(() => {
+    if (!api) {
+      setSharedHistoryItemsState([]);
+      return;
+    }
+    void refreshSharedHistoryItems(api);
+  }, [api, refreshSharedHistoryItems, setSharedHistoryItemsState]);
+
+  function markSharedConversation(
+    id: string,
+    isShared: boolean,
+    source?: ChatHistorySummary | null,
+  ) {
     updateHistoryItems((current) =>
       current.map((conversation) =>
         conversation.id === id ? { ...conversation, is_shared: isShared } : conversation,
       ),
     );
+    if (!isShared) {
+      setSharedHistoryItemsState(
+        sharedHistoryItemsRef.current.filter((item) => item.id !== id),
+      );
+      return;
+    }
+
+    const sourceSummary = historyItemsRef.current.find((item) => item.id === id);
+    const conversation =
+      source ??
+      (sourceSummary ? toChatHistorySummary(sourceSummary, settings.selectedModel) : null) ??
+      sharedHistoryItemsRef.current.find((item) => item.id === id);
+    if (!conversation) {
+      return;
+    }
+    setSharedHistoryItemsState([
+      { ...conversation, isShared: true },
+      ...sharedHistoryItemsRef.current.filter((item) => item.id !== id),
+    ]);
   }
 
   function handleLoadSharedHistoryStatus(item: ChatHistorySummary) {
@@ -3463,7 +3599,7 @@ export default function App() {
       .getHistoryShare(id)
       .then((status) => {
         setSharedManagerStatuses((current) => ({ ...current, [id]: status }));
-        markSharedConversation(id, status.enabled === true);
+        markSharedConversation(id, status.enabled === true, item);
       })
       .catch((error) => {
         setSharedManagerError(id, asErrorMessage(error, "读取分享状态失败"));
@@ -3474,12 +3610,16 @@ export default function App() {
   }
 
   function handleRefreshSharedHistoryStatuses() {
-    sharedHistoryItems.forEach(handleLoadSharedHistoryStatus);
+    void refreshSharedHistoryItems().then((items) => {
+      items.forEach(handleLoadSharedHistoryStatus);
+    });
   }
 
   function handleOpenSharedHistoryManager() {
     setSharedManagerOpen(true);
-    sharedHistoryItems.forEach(handleLoadSharedHistoryStatus);
+    void refreshSharedHistoryItems().then((items) => {
+      items.forEach(handleLoadSharedHistoryStatus);
+    });
   }
 
   function handleDisableSharedHistory(item: ChatHistorySummary) {
@@ -3498,7 +3638,7 @@ export default function App() {
       .setHistoryShare(id, false)
       .then((status) => {
         setSharedManagerStatuses((current) => ({ ...current, [id]: status }));
-        markSharedConversation(id, status.enabled === true);
+        markSharedConversation(id, status.enabled === true, item);
         if (shareConversation?.id === id) {
           setShareStatus(status);
         }
@@ -3530,7 +3670,7 @@ export default function App() {
       .setHistoryShare(id, true, { redactToolContent })
       .then((status) => {
         setSharedManagerStatuses((current) => ({ ...current, [id]: status }));
-        markSharedConversation(id, status.enabled === true);
+        markSharedConversation(id, status.enabled === true, item);
         if (shareConversation?.id === id) {
           setShareStatus(status);
         }
@@ -3879,8 +4019,10 @@ export default function App() {
     historyItemsRef.current = [];
     historyTotalRef.current = 0;
     historyHasMoreRef.current = false;
-    loadedHistoryOffsetRef.current = 0;
+    nextHistoryPageRef.current = 1;
     historyListPageLoadingRef.current = false;
+    sharedHistoryItemsRef.current = [];
+    sharedHistoryListRequestRef.current = null;
     pendingUploadedFilesRef.current = [];
     draftConversationPinnedRef.current = false;
     protectedConversationRef.current = "";
@@ -3907,6 +4049,7 @@ export default function App() {
     clearHistoryTitlePositionLocks();
     historyItemsRef.current = [];
     setHistoryItems([]);
+    setSharedHistoryItems([]);
     setHistoryTotal(0);
     setHistoryHasMore(false);
     setHistoryError(null);
@@ -4053,25 +4196,8 @@ export default function App() {
   const sidebarItems = useMemo<ChatHistorySummary[]>(
     () =>
       historyItems
-        .map((item) => ({
-          id: item.id,
-          title: resolveConversationTitle(item, item.id),
-          providerId: item.provider_id ?? settings.selectedModel?.customProviderId ?? "gateway",
-          model: item.model ?? settings.selectedModel?.model ?? "gateway",
-          sessionId: item.session_id || undefined,
-          cwd: item.cwd || undefined,
-          messageCount: item.message_count,
-          createdAt: item.created_at * 1000,
-          updatedAt: item.updated_at * 1000,
-          isPinned: item.is_pinned === true,
-          pinnedAt: item.pinned_at && item.pinned_at > 0 ? item.pinned_at * 1000 : undefined,
-          isShared: item.is_shared === true,
-        })),
+        .map((item) => toChatHistorySummary(item, settings.selectedModel)),
     [historyItems, settings.selectedModel],
-  );
-  const sharedHistoryItems = useMemo(
-    () => sidebarItems.filter((item) => item.isShared === true),
-    [sidebarItems],
   );
   const canShareHistory = Boolean(
     api &&
@@ -4556,6 +4682,7 @@ export default function App() {
             })();
           }}
           canShareConversations={canShareHistory}
+          sharedConversationCount={sharedHistoryItems.length}
           onShareConversation={handleOpenShareModal}
           onOpenSharedConversations={handleOpenSharedHistoryManager}
           onDeleteConversation={(id) => {
@@ -4571,6 +4698,9 @@ export default function App() {
                 optimisticTitleConversationIdsRef.current.delete(id);
                 unlockHistoryTitlePosition(id);
                 updateHistoryItems((current) => current.filter((item) => item.id !== id));
+                setSharedHistoryItemsState(
+                  sharedHistoryItemsRef.current.filter((item) => item.id !== id),
+                );
                 if (
                   conversationIdRef.current === id ||
                   selectedHistoryIdRef.current === id

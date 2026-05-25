@@ -243,6 +243,11 @@ async function resolveRequest(client: GatewayWebSocketClient, method: string, pa
         typeof body.page === "number" ? body.page : 0,
         typeof body.page_size === "number" ? body.page_size : 0,
       );
+    case "history.shared_list":
+      return client.listSharedHistory(
+        typeof body.page === "number" ? body.page : 0,
+        typeof body.page_size === "number" ? body.page_size : 0,
+      );
     case "history.get":
       return client.getHistory(String(body.conversation_id ?? ""), {
         maxMessages: typeof body.max_messages === "number" ? body.max_messages : undefined,

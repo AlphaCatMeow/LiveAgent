@@ -2119,6 +2119,75 @@ pub(crate) fn list_chat_history_sync(
     })
 }
 
+pub(crate) fn list_shared_chat_history_sync(
+    conn: &Connection,
+    page: i64,
+    page_size: i64,
+) -> Result<ChatHistoryListResponse, String> {
+    let page = resolve_history_list_page(page)?;
+    let limit = resolve_history_list_page_size(page_size)?;
+    let offset = (page - 1).saturating_mul(limit);
+    let total = conn
+        .query_row(
+            "
+            SELECT COUNT(*)
+            FROM chatHistory h
+            INNER JOIN chatHistoryShare share ON share.conversation_id = h.id
+            WHERE share.enabled = 1 AND share.token IS NOT NULL
+            ",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|e| format!("count shared history list failed: {e}"))?;
+
+    let mut stmt = conn
+        .prepare(
+            "
+            SELECT
+                h.id AS id,
+                h.title AS title,
+                h.provider_id AS provider_id,
+                h.model AS model,
+                h.session_id AS session_id,
+                h.cwd AS cwd,
+                h.total_message_count AS total_message_count,
+                h.created_at AS created_at,
+                h.updated_at AS updated_at,
+                h.is_pinned AS is_pinned,
+                h.pinned_at AS pinned_at,
+                1 AS is_shared
+            FROM chatHistory h
+            INNER JOIN chatHistoryShare share ON share.conversation_id = h.id
+            WHERE share.enabled = 1 AND share.token IS NOT NULL
+            ORDER BY h.is_pinned DESC, h.pinned_at DESC, h.updated_at DESC, h.id ASC
+            LIMIT ?1 OFFSET ?2
+            ",
+        )
+        .map_err(|e| format!("prepare shared history list query failed: {e}"))?;
+
+    let rows = stmt
+        .query_map(params![limit, offset], row_to_summary)
+        .map_err(|e| format!("query shared history list failed: {e}"))?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| format!("read shared history list row failed: {e}"))?);
+    }
+
+    Ok(ChatHistoryListResponse {
+        items: out,
+        total_count: total,
+    })
+}
+
+pub(crate) fn list_shared_chat_history_page_sync(
+    page: i64,
+    page_size: i64,
+) -> Result<ChatHistoryListResponse, String> {
+    let conn = open_db()?;
+    list_shared_chat_history_sync(&conn, page, page_size)
+}
+
 fn history_fts_phrase(input: &str) -> String {
     let escaped = input.replace('"', "\"\"");
     format!("\"{escaped}\"")
@@ -2771,6 +2840,18 @@ pub async fn chat_history_list(
     })
     .await
     .map_err(|e| format!("chat_history_list join 失败：{e}"))?
+}
+
+#[tauri::command]
+pub async fn chat_history_shared_list(
+    page: i64,
+    page_size: i64,
+) -> Result<ChatHistoryListResponse, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        list_shared_chat_history_page_sync(page, page_size)
+    })
+    .await
+    .map_err(|e| format!("chat_history_shared_list join failed: {e}"))?
 }
 
 #[tauri::command]
@@ -3529,6 +3610,30 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["conv-2", "conv-1"]
         );
+    }
+
+    #[test]
+    fn list_shared_history_returns_enabled_shares_only() {
+        let conn = open_test_db().expect("open test db");
+        for index in 0..4 {
+            let mut conversation = sample_conversation();
+            conversation.id = format!("conv-{index}");
+            conversation.updated_at = 1_700_000_000_000 + index;
+            upsert_chat_history_header(&conn, &conversation).expect("upsert header");
+        }
+
+        set_chat_history_share_enabled_sync(&conn, "conv-0", true, None).expect("share conv-0");
+        set_chat_history_share_enabled_sync(&conn, "conv-2", true, None).expect("share conv-2");
+        set_chat_history_share_enabled_sync(&conn, "conv-3", true, None).expect("share conv-3");
+        set_chat_history_share_enabled_sync(&conn, "conv-3", false, None)
+            .expect("disable conv-3 share");
+
+        let page = list_shared_chat_history_sync(&conn, 1, 1).expect("list shared history");
+
+        assert_eq!(page.total_count, 2);
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].id, "conv-2");
+        assert!(page.items[0].is_shared);
     }
 
     #[test]

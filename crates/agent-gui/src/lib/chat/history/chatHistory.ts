@@ -195,6 +195,10 @@ export async function listChatHistory(page: number, pageSize: number) {
   return invoke<ChatHistoryListPage>("chat_history_list", { page, pageSize });
 }
 
+export async function listSharedChatHistory(page: number, pageSize: number) {
+  return invoke<ChatHistoryListPage>("chat_history_shared_list", { page, pageSize });
+}
+
 export async function getChatHistory(id: string, fallbackSystemPrompt?: string) {
   const record = await invoke<ChatHistoryWireRecord>("chat_history_get", { id });
   return normalizeWireRecord(record, fallbackSystemPrompt);

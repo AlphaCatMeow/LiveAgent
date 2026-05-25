@@ -56,22 +56,27 @@ export function useChatHistoryList() {
   const historyItemsRef = useRef<ChatHistorySummary[]>([]);
   const historyTotalRef = useRef(0);
   const historyHasMoreRef = useRef(false);
-  const loadedHistoryOffsetRef = useRef(0);
+  const nextHistoryPageRef = useRef(1);
   const disposedRef = useRef(false);
   const requestInFlightRef = useRef(false);
   const loadMoreInFlightRef = useRef(false);
   const queuedRefreshRef = useRef<{ silent: boolean } | null>(null);
 
   const commitHistoryItems = useCallback(
-    (items: ChatHistorySummary[], total: number, loadedOffset: number) => {
+    (
+      items: ChatHistorySummary[],
+      total: number,
+      nextPage: number,
+      hasMore?: boolean,
+    ) => {
       const nextTotal = Math.max(0, total);
-      const nextOffset = Math.max(0, loadedOffset);
-      const nextHasMore = nextOffset < nextTotal;
+      const loadedPersistedCount = persistedHistoryCount(items);
+      const nextHasMore = hasMore ?? loadedPersistedCount < nextTotal;
 
       historyItemsRef.current = items;
       historyTotalRef.current = nextTotal;
       historyHasMoreRef.current = nextHasMore;
-      loadedHistoryOffsetRef.current = nextOffset;
+      nextHistoryPageRef.current = Math.max(1, nextPage);
       setHistoryItemsState(items);
       setHistoryTotal(nextTotal);
       setHistoryHasMore(nextHasMore);
@@ -84,9 +89,11 @@ export function useChatHistoryList() {
       const current = historyItemsRef.current;
       const next = applyHistoryItemsUpdate(current, update);
       const persistedDelta = persistedHistoryCount(next) - persistedHistoryCount(current);
-      const nextTotal = Math.max(next.length, historyTotalRef.current + persistedDelta);
-      const nextOffset = Math.max(0, loadedHistoryOffsetRef.current + persistedDelta);
-      commitHistoryItems(next, nextTotal, nextOffset);
+      const nextTotal = Math.max(
+        persistedHistoryCount(next),
+        historyTotalRef.current + persistedDelta,
+      );
+      commitHistoryItems(next, nextTotal, nextHistoryPageRef.current);
     },
     [commitHistoryItems],
   );
@@ -125,12 +132,15 @@ export function useChatHistoryList() {
             const nextItems = silent
               ? mergeHistoryPage(historyItemsRef.current, page.items)
               : sortHistoryItems(page.items);
+            const refreshedNextPage = page.items.length > 0 ? 2 : 1;
+            const nextPage = silent
+              ? Math.max(nextHistoryPageRef.current, refreshedNextPage)
+              : refreshedNextPage;
             commitHistoryItems(
               nextItems,
               page.totalCount,
-              silent
-                ? Math.max(loadedHistoryOffsetRef.current, page.items.length)
-                : page.items.length,
+              nextPage,
+              page.items.length > 0 && persistedHistoryCount(nextItems) < page.totalCount,
             );
             setHistoryError(null);
           } catch (err) {
@@ -170,17 +180,18 @@ export function useChatHistoryList() {
     loadMoreInFlightRef.current = true;
     setHistoryLoadingMore(true);
     try {
-      const offset = loadedHistoryOffsetRef.current;
-      const pageNumber = Math.floor(offset / HISTORY_LIST_PAGE_SIZE) + 1;
+      const pageNumber = nextHistoryPageRef.current;
       const page = await listChatHistory(pageNumber, HISTORY_LIST_PAGE_SIZE);
       if (disposedRef.current) {
         return;
       }
       const nextItems = mergeHistoryPage(historyItemsRef.current, page.items);
+      const nextPage = page.items.length === 0 ? pageNumber : pageNumber + 1;
       commitHistoryItems(
         nextItems,
         page.totalCount,
-        page.items.length === 0 ? page.totalCount : offset + page.items.length,
+        nextPage,
+        page.items.length > 0 && persistedHistoryCount(nextItems) < page.totalCount,
       );
       setHistoryError(null);
     } catch (err) {

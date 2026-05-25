@@ -60,6 +60,7 @@ type ChatHistorySidebarProps = {
   onCancelRename: () => void;
   onSetPinned: (id: string, isPinned: boolean) => void;
   canShareConversations: boolean;
+  sharedConversationCount?: number;
   onShareConversation: (item: ChatHistorySummary) => void;
   onOpenSharedConversations: () => void;
   onDeleteConversation: (id: string) => void;
@@ -99,6 +100,7 @@ type HistoryRowProps = {
   isBusy: boolean;
   isRunning: boolean;
   isDeleteDisabled: boolean;
+  canShareConversation: boolean;
   isRenaming: boolean;
   isPendingDelete: boolean;
   isMobileMenuLayout: boolean;
@@ -137,6 +139,7 @@ function areHistoryRowPropsEqual(previous: HistoryRowProps, next: HistoryRowProp
     previous.isBusy === next.isBusy &&
     previous.isRunning === next.isRunning &&
     previous.isDeleteDisabled === next.isDeleteDisabled &&
+    previous.canShareConversation === next.canShareConversation &&
     previous.isRenaming === next.isRenaming &&
     previous.isPendingDelete === next.isPendingDelete &&
     previous.isMobileMenuLayout === next.isMobileMenuLayout &&
@@ -163,6 +166,7 @@ const HistoryRow = memo(function HistoryRow(props: HistoryRowProps) {
     isBusy,
     isRunning,
     isDeleteDisabled,
+    canShareConversation,
     isRenaming,
     isPendingDelete,
     isMobileMenuLayout,
@@ -556,10 +560,12 @@ const HistoryRow = memo(function HistoryRow(props: HistoryRowProps) {
                 <Edit3 className="h-3.5 w-3.5" />
                 修改标题
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={handleShare} className="gap-2">
-                <Share2 className="h-3.5 w-3.5" />
-                分享
-              </DropdownMenuItem>
+              {canShareConversation && !item.isPending ? (
+                <DropdownMenuItem onSelect={handleShare} className="gap-2">
+                  <Share2 className="h-3.5 w-3.5" />
+                  分享
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem
                 disabled={isDeleteDisabled}
                 onSelect={handleRequestDelete}
@@ -623,6 +629,7 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
     onCancelRename,
     onSetPinned,
     canShareConversations,
+    sharedConversationCount: sharedConversationCountProp,
     onShareConversation,
     onOpenSharedConversations,
     onDeleteConversation,
@@ -646,8 +653,8 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
   const handleOpenSharedConversations = useStableEvent(onOpenSharedConversations);
   const handleDeleteConversation = useStableEvent(onDeleteConversation);
   const sharedConversationCount = useMemo(
-    () => items.filter((item) => item.isShared === true).length,
-    [items],
+    () => sharedConversationCountProp ?? items.filter((item) => item.isShared === true).length,
+    [items, sharedConversationCountProp],
   );
   const handleMenuOpenChange = useCallback((id: string, open: boolean) => {
     setOpenMenuId((current) => {
@@ -724,6 +731,7 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
         isBusy={isBusy}
         isRunning={runningConversationIds.has(item.id)}
         isDeleteDisabled={runningConversationIds.has(item.id)}
+        canShareConversation={canShareConversations}
         isRenaming={renamingId === item.id}
         isPendingDelete={pendingDeleteId === item.id}
         isMobileMenuLayout={isMobileMenuLayout}
@@ -754,6 +762,7 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
       handleShareConversation,
       handleStartRenaming,
       isBusy,
+      canShareConversations,
       isMobileMenuLayout,
       menuSide,
       openMenuId,

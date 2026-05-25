@@ -323,6 +323,8 @@ func (c *websocketConnection) dispatch(req websocketRequest) {
 		c.handleFsListDirs(req)
 	case "history.list":
 		c.handleHistoryList(req)
+	case "history.shared_list":
+		c.handleHistorySharedList(req)
 	case "history.get":
 		c.handleHistoryGet(req)
 	case "history.rename":
@@ -543,6 +545,79 @@ func (c *websocketConnection) handleHistoryList(req websocketRequest) {
 		"conversations":            conversations,
 		"total_count":              resp.GetTotalCount(),
 		"running_conversation_ids": c.sm.ActiveChatRunConversationIDs(),
+	})
+}
+
+func (c *websocketConnection) handleHistorySharedList(req websocketRequest) {
+	type payload struct {
+		Page     int `json:"page"`
+		PageSize int `json:"page_size"`
+	}
+
+	var body payload
+	if err := decodeWebSocketPayload(req.Payload, &body); err != nil {
+		_ = c.writeError(req.ID, "invalid history.shared_list payload")
+		return
+	}
+	page := body.Page
+	if page <= 0 {
+		_ = c.writeError(req.ID, "history.shared_list page must be greater than 0")
+		return
+	}
+	pageSize := body.PageSize
+	if pageSize <= 0 {
+		_ = c.writeError(req.ID, "history.shared_list page_size must be greater than 0")
+		return
+	} else if pageSize > maxHistoryListLimit {
+		pageSize = maxHistoryListLimit
+	}
+
+	argsJSON, err := json.Marshal(map[string]any{
+		"page":      page,
+		"page_size": pageSize,
+	})
+	if err != nil {
+		_ = c.writeError(req.ID, "invalid history.shared_list payload")
+		return
+	}
+
+	response, err := c.awaitAgentResponse(req.ID, &gatewayv1.GatewayEnvelope{
+		RequestId: req.ID,
+		Timestamp: time.Now().Unix(),
+		Payload: &gatewayv1.GatewayEnvelope_MemoryManage{
+			MemoryManage: &gatewayv1.MemoryManageRequest{
+				Command:  "history_shared_list",
+				ArgsJson: string(argsJSON),
+			},
+		},
+	})
+	if err != nil {
+		_ = c.writeError(req.ID, websocketErrorMessage(err))
+		return
+	}
+	if errResp := response.GetError(); errResp != nil {
+		_ = c.writeError(req.ID, errResp.GetMessage())
+		return
+	}
+
+	resp := response.GetMemoryManageResp()
+	if resp == nil {
+		_ = c.writeError(req.ID, "unexpected agent response")
+		return
+	}
+
+	var result struct {
+		Conversations []map[string]any `json:"conversations"`
+		TotalCount    int              `json:"total_count"`
+	}
+	if err := json.Unmarshal([]byte(resp.GetResultJson()), &result); err != nil {
+		_ = c.writeError(req.ID, "invalid history.shared_list response")
+		return
+	}
+
+	_ = c.writeResponse(req.ID, map[string]any{
+		"conversations": result.Conversations,
+		"total_count":   result.TotalCount,
 	})
 }
 

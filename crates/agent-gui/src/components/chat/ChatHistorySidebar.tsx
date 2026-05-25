@@ -58,6 +58,7 @@ type ChatHistorySidebarProps = {
   onCancelRename: () => void;
   onSetPinned: (id: string, isPinned: boolean) => void;
   canShareConversations: boolean;
+  sharedConversationCount?: number;
   onShareConversation: (item: ChatHistorySummary) => void;
   onOpenSharedConversations: () => void;
   onDeleteConversation: (id: string) => void;
@@ -387,6 +388,7 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
     onCancelRename,
     onSetPinned,
     canShareConversations,
+    sharedConversationCount: sharedConversationCountProp,
     onShareConversation,
     onOpenSharedConversations,
     onDeleteConversation,
@@ -408,8 +410,8 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
   const handleOpenSharedConversations = useStableEvent(onOpenSharedConversations);
   const handleDeleteConversation = useStableEvent(onDeleteConversation);
   const sharedConversationCount = useMemo(
-    () => items.filter((item) => item.isShared === true).length,
-    [items],
+    () => sharedConversationCountProp ?? items.filter((item) => item.isShared === true).length,
+    [items, sharedConversationCountProp],
   );
   const historyScrollRef = useRef<HTMLDivElement | null>(null);
   const getHistoryItemKey = useCallback(

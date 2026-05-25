@@ -544,6 +544,13 @@ export class GatewayWebSocketClient {
     });
   }
 
+  async listSharedHistory(page: number, pageSize: number): Promise<HistoryList> {
+    return this.requestWithRecovery<HistoryList>("history.shared_list", {
+      page,
+      page_size: pageSize,
+    });
+  }
+
   async getHistory(conversationId: string, options?: HistoryGetOptions): Promise<HistoryDetail> {
     return this.requestWithRecovery<HistoryDetail>("history.get", {
       conversation_id: conversationId,
@@ -1384,6 +1391,7 @@ type GatewayWebSocketClientLike = {
   cronManage(payload: CronManagePayload): Promise<CronManageResponse>;
   memoryManage<T = unknown>(payload: MemoryManagePayload): Promise<T>;
   listHistory(page: number, pageSize: number): Promise<HistoryList>;
+  listSharedHistory(page: number, pageSize: number): Promise<HistoryList>;
   getHistory(conversationId: string, options?: HistoryGetOptions): Promise<HistoryDetail>;
   truncateHistory(
     conversationId: string,
@@ -1798,6 +1806,10 @@ class SharedWorkerGatewayWebSocketClient implements GatewayWebSocketClientLike {
 
   async listHistory(page: number, pageSize: number): Promise<HistoryList> {
     return this.request<HistoryList>("history.list", { page, page_size: pageSize });
+  }
+
+  async listSharedHistory(page: number, pageSize: number): Promise<HistoryList> {
+    return this.request<HistoryList>("history.shared_list", { page, page_size: pageSize });
   }
 
   async getHistory(conversationId: string, options?: HistoryGetOptions): Promise<HistoryDetail> {

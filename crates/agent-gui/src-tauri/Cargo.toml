@@ -1,6 +1,6 @@
 [package]
 name = "liveagent"
-version = "0.1.0"
+version = "0.1.1"
 description = "LiveAgent desktop application"
 authors = ["you"]
 edition = "2021"
@@ -47,3 +47,4 @@ prost = "0.13.5"
 zip = { version = "0.6.6", default-features = false, features = ["deflate"] }
 sha2 = "0.10.9"
 tempfile = "3.23.0"
+tauri-plugin-updater = "2.10.1"

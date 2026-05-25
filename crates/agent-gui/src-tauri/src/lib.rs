@@ -99,6 +99,8 @@ macro_rules! app_invoke_handler {
             commands::settings::settings_save_cron,
             commands::settings::settings_save_remote,
             commands::settings::settings_save_memory,
+            commands::update::app_update_check,
+            commands::update::app_update_install,
             // Hooks
             commands::hook::hook_run_script,
             commands::hook::hook_run_http_requests,
@@ -263,6 +265,7 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_mcp_bridge::init())
         .manage(Arc::new(commands::mcp::McpRuntimeManager::default()))
         .manage(Arc::clone(&memory_store))
@@ -325,10 +328,10 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(move |app, event| match event {
+    app.run(move |_app, event| match event {
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Reopen { .. } => {
-            if let Err(error) = show_main_window(app) {
+            if let Err(error) = show_main_window(_app) {
                 eprintln!("failed to show LiveAgent window from dock reopen: {error}");
             }
         }

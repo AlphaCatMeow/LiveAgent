@@ -1,10 +1,9 @@
 import type { AssistantMessage } from "@mariozechner/pi-ai";
-
-import type { ConversationHookWarning } from "../../lib/hooks/conversationHooks";
-import type { ConversationViewState } from "../../lib/chat/conversation/conversationState";
 import type { CompactionStatus } from "../../lib/chat/compaction/contextCompaction";
+import type { ConversationViewState } from "../../lib/chat/conversation/conversationState";
+import type { ConversationHookWarning } from "../../lib/hooks/conversationHooks";
 import { normalizeErrorMessage } from "../../lib/providers/llm";
-import { HOOK_EVENT_TRANSLATION_KEYS, type AppSettings } from "../../lib/settings";
+import { type AppSettings, HOOK_EVENT_TRANSLATION_KEYS } from "../../lib/settings";
 
 export const MAX_IDLE_CONVERSATION_RUNTIME_CACHE_ENTRIES = 12;
 

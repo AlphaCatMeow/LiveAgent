@@ -1,9 +1,8 @@
-import { type ReactNode } from "react";
-
-import { PanelLeft } from "../icons";
-import { Button } from "../ui/button";
+import type { ReactNode } from "react";
 import { useLocale } from "../../i18n";
 import { cn } from "../../lib/shared/utils";
+import { PanelLeft } from "../icons";
+import { Button } from "../ui/button";
 
 export function HubBackdrop(props: { tone?: "amber" | "violet" | "neutral" }) {
   const { tone = "neutral" } = props;

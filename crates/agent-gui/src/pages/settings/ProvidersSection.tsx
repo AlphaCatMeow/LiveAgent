@@ -201,8 +201,7 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevFetchKey = useRef("");
-  const apiKeyIsRedactedDisplay =
-    initialUsesRedactedApiKey && apiKey === REDACTED_API_KEY_DISPLAY;
+  const apiKeyIsRedactedDisplay = initialUsesRedactedApiKey && apiKey === REDACTED_API_KEY_DISPLAY;
   const apiKeyForRequest = apiKeyIsRedactedDisplay ? "" : apiKey.trim();
   const canFetchModels = baseUrl.trim().length > 0 && apiKeyForRequest.length > 0;
 
@@ -296,9 +295,7 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
   }
 
   function saveModelSettings(nextModel: ProviderModelConfig) {
-    setModels((prev) =>
-      prev.map((item) => (item.id === nextModel.id ? nextModel : item)),
-    );
+    setModels((prev) => prev.map((item) => (item.id === nextModel.id ? nextModel : item)));
     setEditingModel(null);
   }
 
@@ -320,7 +317,7 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
       reasoning:
         providerType === "gemini" && initialData?.reasoning === "xhigh"
           ? "high"
-          : initialData?.reasoning ?? "off",
+          : (initialData?.reasoning ?? "off"),
       promptCachingEnabled: initialData?.promptCachingEnabled ?? providerType === "claude_code",
       nativeWebSearchEnabled: initialData?.nativeWebSearchEnabled ?? true,
     });
@@ -357,11 +354,7 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
         <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
           <div className="space-y-1.5">
             <Label htmlFor="modal-name">{t("settings.providerName")}</Label>
-            <Input
-              id="modal-name"
-              value={name}
-              onChange={(e) => setName(e.currentTarget.value)}
-            />
+            <Input id="modal-name" value={name} onChange={(e) => setName(e.currentTarget.value)} />
           </div>
 
           <div className="space-y-1.5">
@@ -437,9 +430,7 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
                   onClick={() => setVisibleModelsSelected(!allVisibleModelsSelected)}
                   disabled={models.length === 0}
                 >
-                  {allVisibleModelsSelected
-                    ? t("settings.deselectAll")
-                    : t("settings.selectAll")}
+                  {allVisibleModelsSelected ? t("settings.deselectAll") : t("settings.selectAll")}
                 </Button>
                 <Button
                   variant="ghost"
@@ -449,9 +440,7 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
                   disabled={fetchingModels || (isGatewayWebui && !canFetchModels)}
                   title={t("settings.refreshModels")}
                 >
-                  <RefreshCw
-                    className={`h-3.5 w-3.5 ${fetchingModels ? "animate-spin" : ""}`}
-                  />
+                  <RefreshCw className={`h-3.5 w-3.5 ${fetchingModels ? "animate-spin" : ""}`} />
                 </Button>
                 <Button
                   variant="ghost"
@@ -606,7 +595,7 @@ function CustomSettingsDrawer(props: SettingsSectionProps & { onClose: () => voi
         conversationTitleModel:
           value === TITLE_MODEL_FOLLOW_CURRENT_VALUE
             ? undefined
-            : parseModelValue(value) ?? undefined,
+            : (parseModelValue(value) ?? undefined),
       }),
     );
   }
@@ -852,7 +841,9 @@ export function ProvidersSection(props: SettingsSectionProps) {
               type="button"
               onClick={() => setActiveTab(tab)}
               className={`inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1 text-sm font-medium transition-all ${
-                activeTab === tab ? "bg-background text-foreground shadow" : "hover:text-foreground/80"
+                activeTab === tab
+                  ? "bg-background text-foreground shadow"
+                  : "hover:text-foreground/80"
               }`}
             >
               <ProviderBrandIcon type={tab} />

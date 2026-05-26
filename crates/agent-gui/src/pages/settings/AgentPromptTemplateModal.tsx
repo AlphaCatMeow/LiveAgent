@@ -8,7 +8,7 @@ import { Label } from "../../components/ui/label";
 import { Textarea } from "../../components/ui/textarea";
 import { useLocale } from "../../i18n";
 import type { AgentPromptTemplate } from "../../lib/settings";
-import { parseAgentTagsInput, PromptTag, stringifyAgentTags } from "./shared";
+import { PromptTag, parseAgentTagsInput, stringifyAgentTags } from "./shared";
 
 type AgentPromptTemplateModalProps = {
   initialData?: AgentPromptTemplate;

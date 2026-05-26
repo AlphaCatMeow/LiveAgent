@@ -1,21 +1,21 @@
+import { listen } from "@tauri-apps/api/event";
 import {
+  type Dispatch,
+  type SetStateAction,
   useCallback,
   useEffect,
   useRef,
   useState,
-  type Dispatch,
-  type SetStateAction,
 } from "react";
-import { listen } from "@tauri-apps/api/event";
 
 import type { ChatHistorySummary } from "../../lib/chat/history/chatHistory";
 import { listChatHistory } from "../../lib/chat/history/chatHistory";
-import { sortHistoryItems } from "../../lib/chat/page/chatPageHelpers";
 import {
   applyChatHistorySyncEvent,
   CHAT_HISTORY_SYNC_EVENT,
   type ChatHistorySyncEvent,
 } from "../../lib/chat/history/chatHistorySync";
+import { sortHistoryItems } from "../../lib/chat/page/chatPageHelpers";
 
 const HISTORY_LIST_RECONCILE_INTERVAL_MS = 60_000;
 const HISTORY_LIST_PAGE_SIZE = 80;
@@ -35,10 +35,7 @@ function persistedHistoryCount(items: ChatHistorySummary[]) {
   return items.reduce((count, item) => count + (item.isPending ? 0 : 1), 0);
 }
 
-function mergeHistoryPage(
-  current: ChatHistorySummary[],
-  nextPage: ChatHistorySummary[],
-) {
+function mergeHistoryPage(current: ChatHistorySummary[], nextPage: ChatHistorySummary[]) {
   const byId = new Map(current.map((item) => [item.id, item]));
   for (const item of nextPage) {
     byId.set(item.id, item);
@@ -63,12 +60,7 @@ export function useChatHistoryList() {
   const queuedRefreshRef = useRef<{ silent: boolean } | null>(null);
 
   const commitHistoryItems = useCallback(
-    (
-      items: ChatHistorySummary[],
-      total: number,
-      nextPage: number,
-      hasMore?: boolean,
-    ) => {
+    (items: ChatHistorySummary[], total: number, nextPage: number, hasMore?: boolean) => {
       const nextTotal = Math.max(0, total);
       const loadedPersistedCount = persistedHistoryCount(items);
       const nextHasMore = hasMore ?? loadedPersistedCount < nextTotal;
@@ -211,17 +203,14 @@ export function useChatHistoryList() {
   useEffect(() => {
     disposedRef.current = false;
     let cancelled = false;
-    const unlistenPromise = listen<ChatHistorySyncEvent>(
-      CHAT_HISTORY_SYNC_EVENT,
-      (event) => {
-        if (disposedRef.current) {
-          return;
-        }
+    const unlistenPromise = listen<ChatHistorySyncEvent>(CHAT_HISTORY_SYNC_EVENT, (event) => {
+      if (disposedRef.current) {
+        return;
+      }
 
-        setHistoryItems((current) => applyChatHistorySyncEvent(current, event.payload));
-        setHistoryError(null);
-      },
-    );
+      setHistoryItems((current) => applyChatHistorySyncEvent(current, event.payload));
+      setHistoryError(null);
+    });
 
     async function runRefresh(options?: { silent?: boolean }) {
       try {

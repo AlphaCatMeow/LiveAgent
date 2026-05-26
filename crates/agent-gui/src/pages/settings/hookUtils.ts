@@ -1,14 +1,14 @@
 import {
+  type ConversationHookType,
   HOOK_EVENT_DESCRIPTION_TRANSLATION_KEYS,
   HOOK_EVENT_TRANSLATION_KEYS,
-  type ConversationHookType,
   type HookHttpRequest,
   type HookLifecycleEventType,
 } from "../../lib/settings";
 import {
   createEmptyTaskRequestDraft,
-  taskRequestToDraft,
   type TaskHttpRequestDraft,
+  taskRequestToDraft,
 } from "./taskConfigUtils";
 
 export type HookHttpRequestDraft = TaskHttpRequestDraft;
@@ -27,16 +27,10 @@ export function getHookTypeTone(type: ConversationHookType) {
     : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300";
 }
 
-export function getHookEventLabel(
-  t: (key: string) => string,
-  event: HookLifecycleEventType,
-) {
+export function getHookEventLabel(t: (key: string) => string, event: HookLifecycleEventType) {
   return t(HOOK_EVENT_TRANSLATION_KEYS[event]);
 }
 
-export function getHookEventDescription(
-  t: (key: string) => string,
-  event: HookLifecycleEventType,
-) {
+export function getHookEventDescription(t: (key: string) => string, event: HookLifecycleEventType) {
   return t(HOOK_EVENT_DESCRIPTION_TRANSLATION_KEYS[event]);
 }

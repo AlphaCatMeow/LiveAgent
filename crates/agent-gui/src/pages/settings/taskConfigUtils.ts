@@ -67,8 +67,7 @@ function parseRequestHeaders(input: string, invalidMessage: string) {
   const headers: Record<string, string> = {};
   for (const [rawKey, rawValue] of Object.entries(parsed as Record<string, unknown>)) {
     const key = String(rawKey).trim();
-    const value =
-      typeof rawValue === "string" ? rawValue.trim() : String(rawValue ?? "").trim();
+    const value = typeof rawValue === "string" ? rawValue.trim() : String(rawValue ?? "").trim();
     if (!key || !value) continue;
     headers[key] = value;
   }
@@ -76,11 +75,7 @@ function parseRequestHeaders(input: string, invalidMessage: string) {
   return Object.keys(headers).length > 0 ? headers : undefined;
 }
 
-function parseRequestBody(
-  method: HookHttpMethod,
-  input: string,
-  invalidMessage: string,
-) {
+function parseRequestBody(method: HookHttpMethod, input: string, invalidMessage: string) {
   if (!canHookHttpMethodHaveBody(method)) return undefined;
   if (!input.trim()) return undefined;
   try {

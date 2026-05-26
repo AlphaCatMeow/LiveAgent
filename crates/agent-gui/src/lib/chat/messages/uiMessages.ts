@@ -5,29 +5,25 @@ import type {
   ToolResultMessage,
   Usage,
 } from "@mariozechner/pi-ai";
-
-import {
-  getUserMessageAttachments,
-  getUserMessageDisplayText,
-  type PendingUploadedFile,
-} from "./uploadedFiles";
 import { assistantMessageToText } from "../../providers/llm";
-import {
-  GLOBAL_BASH_MAX_TIMEOUT_MS,
-  MIN_BASH_TIMEOUT_MS,
-} from "../../tools/bashTimeoutPolicy";
+import { GLOBAL_BASH_MAX_TIMEOUT_MS, MIN_BASH_TIMEOUT_MS } from "../../tools/bashTimeoutPolicy";
 import type {
   DelegateAgentCardResultDetails,
   DelegateAgentResultDetails,
 } from "../../tools/builtinTypes";
 import {
   enrichHostedSearchContentWithText,
+  type HostedSearchBlock,
   mergeHostedSearchBlocks,
   normalizeHostedSearchBlock,
   resolveHostedSearchTextBoundary,
   splitTextAroundHostedSearch,
-  type HostedSearchBlock,
 } from "./hostedSearch";
+import {
+  getUserMessageAttachments,
+  getUserMessageDisplayText,
+  type PendingUploadedFile,
+} from "./uploadedFiles";
 
 export type ToolTraceItem = {
   toolCall: ToolCall;
@@ -133,26 +129,21 @@ function summarizeBashTimeout(value: unknown) {
     return null;
   }
   const requested = Math.floor(value);
-  const effective = Math.min(
-    GLOBAL_BASH_MAX_TIMEOUT_MS,
-    Math.max(MIN_BASH_TIMEOUT_MS, requested),
-  );
+  const effective = Math.min(GLOBAL_BASH_MAX_TIMEOUT_MS, Math.max(MIN_BASH_TIMEOUT_MS, requested));
   return requested === effective
     ? `timeout_ms=${effective}`
     : `timeout_ms=${effective} (requested ${requested})`;
 }
 
-export function summarizeToolCall(
-  toolCall: ToolCall,
-  options?: { includeName?: boolean },
-) {
+export function summarizeToolCall(toolCall: ToolCall, options?: { includeName?: boolean }) {
   const includeName = options?.includeName ?? true;
   const args = toolCall.arguments || {};
   const name = toolCall.name;
   const path = summarizeToolArg(args.path);
-  const root = typeof args.root === "string" && args.root.trim()
-    ? `root=${summarizeToolArg(args.root)}`
-    : null;
+  const root =
+    typeof args.root === "string" && args.root.trim()
+      ? `root=${summarizeToolArg(args.root)}`
+      : null;
   const imagePaths = Array.isArray(args.paths)
     ? args.paths
         .map((value) => summarizeToolArg(value))
@@ -180,152 +171,176 @@ export function summarizeToolCall(
           imageSources.length > 0
             ? `sources=${imageSources.length}${imageSources[0] ? ` first=${imageSources[0]}` : ""}`
             : imagePaths.length > 0
-            ? `paths=${imagePaths.length}${imagePaths[0] ? ` first=${imagePaths[0]}` : ""}`
-            : imageUrls.length > 0
-              ? `urls=${imageUrls.length}${imageUrls[0] ? ` first=${imageUrls[0]}` : ""}`
-              : imageBase64s > 0
-                ? `base64s=${imageBase64s}`
-                : typeof args.source === "string" && args.source.trim()
-                  ? `source=${summarizeImageSourceArg(args.source)}`
-                  : typeof args.url === "string" && args.url.trim()
-                    ? `url=${summarizeToolArg(args.url)}`
-                    : typeof args.base64 === "string" && args.base64.trim()
-                      ? `base64Chars=${args.base64.length}`
-                      : path
-                        ? `path=${path}`
-                        : null,
+              ? `paths=${imagePaths.length}${imagePaths[0] ? ` first=${imagePaths[0]}` : ""}`
+              : imageUrls.length > 0
+                ? `urls=${imageUrls.length}${imageUrls[0] ? ` first=${imageUrls[0]}` : ""}`
+                : imageBase64s > 0
+                  ? `base64s=${imageBase64s}`
+                  : typeof args.source === "string" && args.source.trim()
+                    ? `source=${summarizeImageSourceArg(args.source)}`
+                    : typeof args.url === "string" && args.url.trim()
+                      ? `url=${summarizeToolArg(args.url)}`
+                      : typeof args.base64 === "string" && args.base64.trim()
+                        ? `base64Chars=${args.base64.length}`
+                        : path
+                          ? `path=${path}`
+                          : null,
         ]
       : name === "Read"
-      ? [
-          root,
-          path ? `path=${path}` : null,
-          typeof args.start_line === "number" ? `start=${args.start_line}` : null,
-          typeof args.limit === "number" ? `limit=${args.limit}` : null,
-          typeof args.page_start === "number" ? `pageStart=${args.page_start}` : null,
-          typeof args.page_limit === "number" ? `pageLimit=${args.page_limit}` : null,
-          typeof args.cell_start === "number" ? `cellStart=${args.cell_start}` : null,
-          typeof args.cell_limit === "number" ? `cellLimit=${args.cell_limit}` : null,
-        ]
-      : name === "SkillsManager"
-        ? [
-            typeof args.action === "string" ? `action=${args.action}` : null,
-            path ? `path=${path}` : null,
-            typeof args.offset === "number" ? `start=${args.offset + 1}` : null,
-            typeof args.length === "number" ? `limit=${args.length}` : null,
-            typeof args.source === "string" ? `source=${summarizeToolArg(args.source)}` : null,
-            typeof args.name === "string" ? `name=${summarizeToolArg(args.name)}` : null,
-            typeof args.conflict === "string" ? `conflict=${summarizeToolArg(args.conflict)}` : null,
-        ]
-      : name === "MemoryManager"
-        ? [
-            typeof args.action === "string" ? `action=${args.action}` : null,
-            typeof args.slug === "string" ? `slug=${summarizeToolArg(args.slug)}` : null,
-            typeof args.scope === "string" ? `scope=${summarizeToolArg(args.scope)}` : null,
-            typeof args.type === "string" ? `type=${summarizeToolArg(args.type)}` : null,
-            typeof args.query === "string" ? `query=${summarizeToolArg(args.query)}` : null,
-        ]
-      : name === "McpManager"
-        ? [
-            typeof args.action === "string" ? `action=${args.action}` : null,
-            typeof args.server_id === "string" ? `server=${summarizeToolArg(args.server_id)}` : null,
-            Array.isArray(args.server_ids) ? `servers=${args.server_ids.length}` : null,
-            typeof args.conflict === "string" ? `conflict=${summarizeToolArg(args.conflict)}` : null,
-            args.include_schema === true ? "includeSchema=true" : null,
-          ]
-        : name === "Agent"
-          ? [
-              typeof args.agent_id === "string" ? `agent=${summarizeToolArg(args.agent_id)}` : null,
-              typeof args.name === "string" ? `name=${summarizeToolArg(args.name)}` : null,
-              typeof args.prompt === "string"
-                ? `prompt=${summarizeToolArg(args.prompt)}`
-                : null,
-              typeof args.agent_spec === "string"
-                ? `agentSpecChars=${args.agent_spec.length}`
-                : null,
-              typeof args.mode === "string" ? `mode=${summarizeToolArg(args.mode)}` : null,
-              typeof args.concurrency === "number" ? `concurrency=${args.concurrency}` : null,
-            ]
-        : name === "SendMessage"
-          ? [
-              typeof args.to === "string" ? `to=${summarizeToolArg(args.to)}` : null,
-              typeof args.channel === "string" ? `channel=${summarizeToolArg(args.channel)}` : null,
-              typeof args.subject === "string" ? `subject=${summarizeToolArg(args.subject)}` : null,
-              typeof args.summary === "string" && typeof args.subject !== "string"
-                ? `summary=${summarizeToolArg(args.summary)}`
-                : null,
-              typeof args.message === "string" ? `messageChars=${args.message.length}` : null,
-            ]
-      : name === "Write"
         ? [
             root,
             path ? `path=${path}` : null,
-            "mode=rewrite",
-            typeof args.content === "string" ? `contentChars=${args.content.length}` : null,
+            typeof args.start_line === "number" ? `start=${args.start_line}` : null,
+            typeof args.limit === "number" ? `limit=${args.limit}` : null,
+            typeof args.page_start === "number" ? `pageStart=${args.page_start}` : null,
+            typeof args.page_limit === "number" ? `pageLimit=${args.page_limit}` : null,
+            typeof args.cell_start === "number" ? `cellStart=${args.cell_start}` : null,
+            typeof args.cell_limit === "number" ? `cellLimit=${args.cell_limit}` : null,
           ]
-        : name === "Edit"
+        : name === "SkillsManager"
           ? [
-              root,
+              typeof args.action === "string" ? `action=${args.action}` : null,
               path ? `path=${path}` : null,
-              typeof args.expected_replacements === "number"
-                ? `expected=${args.expected_replacements}`
+              typeof args.offset === "number" ? `start=${args.offset + 1}` : null,
+              typeof args.length === "number" ? `limit=${args.length}` : null,
+              typeof args.source === "string" ? `source=${summarizeToolArg(args.source)}` : null,
+              typeof args.name === "string" ? `name=${summarizeToolArg(args.name)}` : null,
+              typeof args.conflict === "string"
+                ? `conflict=${summarizeToolArg(args.conflict)}`
                 : null,
-              args.replace_all === true ? "replaceAll=true" : null,
-              typeof args.old_string === "string" ? `oldChars=${args.old_string.length}` : null,
-              typeof args.new_string === "string" ? `newChars=${args.new_string.length}` : null,
             ]
-          : name === "List"
+          : name === "MemoryManager"
             ? [
-                root,
-                path ? `path=${path}` : rootPath,
-                typeof args.depth === "number" ? `depth=${args.depth}` : null,
-                typeof args.offset === "number" ? `offset=${args.offset}` : null,
-                typeof args.max_results === "number" ? `max=${args.max_results}` : null,
+                typeof args.action === "string" ? `action=${args.action}` : null,
+                typeof args.slug === "string" ? `slug=${summarizeToolArg(args.slug)}` : null,
+                typeof args.scope === "string" ? `scope=${summarizeToolArg(args.scope)}` : null,
+                typeof args.type === "string" ? `type=${summarizeToolArg(args.type)}` : null,
+                typeof args.query === "string" ? `query=${summarizeToolArg(args.query)}` : null,
               ]
-            : name === "Glob"
+            : name === "McpManager"
               ? [
-                  root,
-                  typeof args.pattern === "string"
-                    ? `pattern=${summarizeToolArg(args.pattern)}`
+                  typeof args.action === "string" ? `action=${args.action}` : null,
+                  typeof args.server_id === "string"
+                    ? `server=${summarizeToolArg(args.server_id)}`
                     : null,
-                  path ? `path=${path}` : rootPath,
-                  typeof args.offset === "number" ? `offset=${args.offset}` : null,
-                  typeof args.max_results === "number" ? `max=${args.max_results}` : null,
+                  Array.isArray(args.server_ids) ? `servers=${args.server_ids.length}` : null,
+                  typeof args.conflict === "string"
+                    ? `conflict=${summarizeToolArg(args.conflict)}`
+                    : null,
+                  args.include_schema === true ? "includeSchema=true" : null,
                 ]
-              : name === "Grep"
+              : name === "Agent"
                 ? [
-                    root,
-                    typeof args.pattern === "string"
-                      ? `pattern=${summarizeToolArg(args.pattern)}`
+                    typeof args.agent_id === "string"
+                      ? `agent=${summarizeToolArg(args.agent_id)}`
                       : null,
-                    path ? `path=${path}` : rootPath,
-                    typeof args.file_pattern === "string"
-                      ? `filePattern=${summarizeToolArg(args.file_pattern)}`
+                    typeof args.name === "string" ? `name=${summarizeToolArg(args.name)}` : null,
+                    typeof args.prompt === "string"
+                      ? `prompt=${summarizeToolArg(args.prompt)}`
                       : null,
-                    typeof args.output_mode === "string"
-                      ? `mode=${args.output_mode}`
+                    typeof args.agent_spec === "string"
+                      ? `agentSpecChars=${args.agent_spec.length}`
                       : null,
-                    typeof args.ignore_case === "boolean"
-                      ? `ignoreCase=${args.ignore_case}`
-                      : null,
-                    typeof args.context === "number" ? `context=${args.context}` : null,
-                    typeof args.head_limit === "number" ? `head=${args.head_limit}` : null,
-                    args.multiline === true ? "multiline=true" : null,
-                    typeof args.offset === "number" ? `offset=${args.offset}` : null,
+                    typeof args.mode === "string" ? `mode=${summarizeToolArg(args.mode)}` : null,
+                    typeof args.concurrency === "number" ? `concurrency=${args.concurrency}` : null,
                   ]
-                : name === "Delete"
-                  ? [root, path ? `path=${path}` : null]
-                  : name === "Bash"
+                : name === "SendMessage"
+                  ? [
+                      typeof args.to === "string" ? `to=${summarizeToolArg(args.to)}` : null,
+                      typeof args.channel === "string"
+                        ? `channel=${summarizeToolArg(args.channel)}`
+                        : null,
+                      typeof args.subject === "string"
+                        ? `subject=${summarizeToolArg(args.subject)}`
+                        : null,
+                      typeof args.summary === "string" && typeof args.subject !== "string"
+                        ? `summary=${summarizeToolArg(args.summary)}`
+                        : null,
+                      typeof args.message === "string"
+                        ? `messageChars=${args.message.length}`
+                        : null,
+                    ]
+                  : name === "Write"
                     ? [
                         root,
-                        typeof args.cwd === "string"
-                          ? `cwd=${summarizeToolArg(args.cwd)}`
-                          : rootPath,
-                        summarizeBashTimeout(args.timeout_ms),
-                        typeof args.command === "string"
-                          ? `command=${summarizeToolArg(args.command)}`
+                        path ? `path=${path}` : null,
+                        "mode=rewrite",
+                        typeof args.content === "string"
+                          ? `contentChars=${args.content.length}`
                           : null,
                       ]
-                    : [];
+                    : name === "Edit"
+                      ? [
+                          root,
+                          path ? `path=${path}` : null,
+                          typeof args.expected_replacements === "number"
+                            ? `expected=${args.expected_replacements}`
+                            : null,
+                          args.replace_all === true ? "replaceAll=true" : null,
+                          typeof args.old_string === "string"
+                            ? `oldChars=${args.old_string.length}`
+                            : null,
+                          typeof args.new_string === "string"
+                            ? `newChars=${args.new_string.length}`
+                            : null,
+                        ]
+                      : name === "List"
+                        ? [
+                            root,
+                            path ? `path=${path}` : rootPath,
+                            typeof args.depth === "number" ? `depth=${args.depth}` : null,
+                            typeof args.offset === "number" ? `offset=${args.offset}` : null,
+                            typeof args.max_results === "number" ? `max=${args.max_results}` : null,
+                          ]
+                        : name === "Glob"
+                          ? [
+                              root,
+                              typeof args.pattern === "string"
+                                ? `pattern=${summarizeToolArg(args.pattern)}`
+                                : null,
+                              path ? `path=${path}` : rootPath,
+                              typeof args.offset === "number" ? `offset=${args.offset}` : null,
+                              typeof args.max_results === "number"
+                                ? `max=${args.max_results}`
+                                : null,
+                            ]
+                          : name === "Grep"
+                            ? [
+                                root,
+                                typeof args.pattern === "string"
+                                  ? `pattern=${summarizeToolArg(args.pattern)}`
+                                  : null,
+                                path ? `path=${path}` : rootPath,
+                                typeof args.file_pattern === "string"
+                                  ? `filePattern=${summarizeToolArg(args.file_pattern)}`
+                                  : null,
+                                typeof args.output_mode === "string"
+                                  ? `mode=${args.output_mode}`
+                                  : null,
+                                typeof args.ignore_case === "boolean"
+                                  ? `ignoreCase=${args.ignore_case}`
+                                  : null,
+                                typeof args.context === "number" ? `context=${args.context}` : null,
+                                typeof args.head_limit === "number"
+                                  ? `head=${args.head_limit}`
+                                  : null,
+                                args.multiline === true ? "multiline=true" : null,
+                                typeof args.offset === "number" ? `offset=${args.offset}` : null,
+                              ]
+                            : name === "Delete"
+                              ? [root, path ? `path=${path}` : null]
+                              : name === "Bash"
+                                ? [
+                                    root,
+                                    typeof args.cwd === "string"
+                                      ? `cwd=${summarizeToolArg(args.cwd)}`
+                                      : rootPath,
+                                    summarizeBashTimeout(args.timeout_ms),
+                                    typeof args.command === "string"
+                                      ? `command=${summarizeToolArg(args.command)}`
+                                      : null,
+                                  ]
+                                : [];
 
   const summary = parts.filter(Boolean).join(" ");
   if (!summary) return includeName ? name : "";
@@ -349,9 +364,7 @@ function summarizeImageArgValue(key: string, value: unknown) {
     return typeof value === "string" ? `base64Chars=${value.length}` : value;
   }
   if (key === "base64s" && Array.isArray(value)) {
-    return value.map((item) =>
-      typeof item === "string" ? `base64Chars=${item.length}` : item,
-    );
+    return value.map((item) => (typeof item === "string" ? `base64Chars=${item.length}` : item));
   }
   if (key === "source") {
     return summarizeImageSourceArg(value);
@@ -448,11 +461,9 @@ function summarizeAgentArgsForDisplay(args: Record<string, unknown>) {
         ? `${prompt.slice(0, 800)}...（len=${prompt.length}）`
         : prompt,
     mode: args.mode,
-    identityChars:
-      typeof args.identity === "string" ? args.identity.length : undefined,
+    identityChars: typeof args.identity === "string" ? args.identity.length : undefined,
     promptChars: typeof prompt === "string" ? prompt.length : undefined,
-    agentSpecChars:
-      typeof args.agent_spec === "string" ? args.agent_spec.length : undefined,
+    agentSpecChars: typeof args.agent_spec === "string" ? args.agent_spec.length : undefined,
     concurrency: args.concurrency,
   };
   if (args.task_intent !== undefined) summary.task_intent = args.task_intent;
@@ -468,10 +479,14 @@ function redactMcpManagerArgsForDisplay(args: Record<string, unknown>) {
     if (!value || typeof value !== "object" || Array.isArray(value)) return value;
     const server = { ...(value as Record<string, unknown>) };
     if (server.env && typeof server.env === "object" && !Array.isArray(server.env)) {
-      server.env = Object.fromEntries(Object.keys(server.env as Record<string, unknown>).map((key) => [key, "<redacted>"]));
+      server.env = Object.fromEntries(
+        Object.keys(server.env as Record<string, unknown>).map((key) => [key, "<redacted>"]),
+      );
     }
     if (server.headers && typeof server.headers === "object" && !Array.isArray(server.headers)) {
-      server.headers = Object.fromEntries(Object.keys(server.headers as Record<string, unknown>).map((key) => [key, "<redacted>"]));
+      server.headers = Object.fromEntries(
+        Object.keys(server.headers as Record<string, unknown>).map((key) => [key, "<redacted>"]),
+      );
     }
     return server;
   };
@@ -510,9 +525,7 @@ function appendTextLikeBlock(
   return [...blocks, { kind, text: delta }];
 }
 
-function rebalanceHostedSearchTextBoundaries(
-  blocks: UiRoundContentBlock[],
-): UiRoundContentBlock[] {
+function rebalanceHostedSearchTextBoundaries(blocks: UiRoundContentBlock[]): UiRoundContentBlock[] {
   const out: UiRoundContentBlock[] = [];
   for (let index = 0; index < blocks.length; index += 1) {
     const current = blocks[index];
@@ -525,10 +538,7 @@ function rebalanceHostedSearchTextBoundaries(
       const following = blocks[hostedEnd];
       if (hostedEnd > hostedStart && following?.kind === "text") {
         const combinedText = current.text + following.text;
-        const boundary = resolveHostedSearchTextBoundary(
-          combinedText,
-          current.text.length,
-        );
+        const boundary = resolveHostedSearchTextBoundary(combinedText, current.text.length);
         if (boundary > current.text.length) {
           const before = combinedText.slice(0, boundary);
           const after = combinedText.slice(boundary);
@@ -550,10 +560,7 @@ function rebalanceHostedSearchTextBoundaries(
 }
 
 function isDelegateAgentCardToolCall(toolCall: ToolCall) {
-  return (
-    toolCall.name === "Agent" &&
-    toolCall.arguments?.delegate_agent_card === true
-  );
+  return toolCall.name === "Agent" && toolCall.arguments?.delegate_agent_card === true;
 }
 
 function isParentDelegateAgentToolCall(toolCall: ToolCall) {
@@ -610,9 +617,7 @@ function normalizePlaceholderTaskIntent(
 function normalizePlaceholderApplyPolicy(
   value: unknown,
 ): DelegateAgentPlaceholder["applyPolicy"] | undefined {
-  return value === "none" || value === "explicit" || value === "auto"
-    ? value
-    : undefined;
+  return value === "none" || value === "explicit" || value === "auto" ? value : undefined;
 }
 
 function normalizePlaceholderRelativePath(value: string) {
@@ -653,18 +658,14 @@ function normalizePlaceholderPathList(value: unknown): string[] {
 }
 
 function maybePlaceholderOutputPath(value: string) {
-  const text = value
-    .trim()
-    .replace(/^[`"'“”‘’]+|[`"'“”‘’，,。.；;:：)）\]]+$/g, "");
-  if (!text || /[*?\[\]]/.test(text) || /^https?:\/\//i.test(text)) return "";
+  const text = value.trim().replace(/^[`"'“”‘’]+|[`"'“”‘’，,。.；;:：)）\]]+$/g, "");
+  if (!text || /[*?[\]]/.test(text) || /^https?:\/\//i.test(text)) return "";
   if (/\s/.test(text)) return "";
   if (!/\.[a-z0-9]{1,12}$/i.test(text)) return "";
   return normalizePlaceholderRelativePath(text);
 }
 
-function inferPlaceholderAllowedOutputPaths(params: {
-  prompt?: string;
-}): string[] {
+function inferPlaceholderAllowedOutputPaths(params: { prompt?: string }): string[] {
   const text = params.prompt ?? "";
   const out: string[] = [];
   const pushPath = (value: string) => {
@@ -724,9 +725,7 @@ function inferPlaceholderTaskIntent(params: {
 function defaultPlaceholderModeForIntent(
   intent: DelegateAgentPlaceholder["taskIntent"],
 ): DelegateAgentPlaceholder["mode"] {
-  return intent === "implementation" || intent === "document_generation"
-    ? "worktree"
-    : "readonly";
+  return intent === "implementation" || intent === "document_generation" ? "worktree" : "readonly";
 }
 
 function defaultPlaceholderApplyPolicyForTask(params: {
@@ -740,7 +739,10 @@ function defaultPlaceholderApplyPolicyForTask(params: {
 }
 
 function normalizePlaceholderSpecKey(value: string) {
-  const key = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const key = value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
   if (key === "id" || key === "agent" || key === "agent_id_for_resume") return "id";
   if (key === "name" || key === "agent_name") return "name";
   if (key === "agent_id" || key === "template" || key === "template_id") return "agent_id";
@@ -771,7 +773,7 @@ function normalizePlaceholderSpecKey(value: string) {
 function unquotePlaceholderSpecValue(value: string) {
   const text = value.trim();
   if (
-    (text.startsWith("\"") && text.endsWith("\"")) ||
+    (text.startsWith('"') && text.endsWith('"')) ||
     (text.startsWith("'") && text.endsWith("'"))
   ) {
     return text.slice(1, -1);
@@ -797,11 +799,7 @@ function parsePlaceholderSpecAttributes(value: string) {
   return attrs;
 }
 
-function appendPlaceholderSpecField(
-  record: Record<string, unknown>,
-  key: string,
-  value: string,
-) {
+function appendPlaceholderSpecField(record: Record<string, unknown>, key: string, value: string) {
   const normalizedKey = normalizePlaceholderSpecKey(key);
   if (!normalizedKey) return "";
   if (normalizedKey === "allowed_output_paths") {
@@ -864,9 +862,7 @@ function parsePlaceholderSpecBlock(lines: string[]) {
     }
 
     const fieldMatch = /^([a-zA-Z_][\w\s-]{0,40})\s*:\s*(.*)$/.exec(trimmed);
-    const normalizedField = fieldMatch
-      ? normalizePlaceholderSpecKey(fieldMatch[1] ?? "")
-      : "";
+    const normalizedField = fieldMatch ? normalizePlaceholderSpecKey(fieldMatch[1] ?? "") : "";
     if (fieldMatch && normalizedField) {
       const rawValue = (fieldMatch[2] ?? "").trim();
       activeKey = normalizedField;
@@ -903,10 +899,7 @@ function shouldTreatPlaceholderTextAsAgentSpec(value: unknown) {
   const text = optionalText(value);
   if (!text) return false;
   if (/^\s*@agent\b/im.test(text)) return true;
-  return (
-    /^\s*agent\s+\d+\s*:/im.test(text) &&
-    /^\s*(name|role|prompt|task)\s*:/im.test(text)
-  );
+  return /^\s*agent\s+\d+\s*:/im.test(text) && /^\s*(name|role|prompt|task)\s*:/im.test(text);
 }
 
 function normalizePlaceholderAgent(
@@ -971,13 +964,8 @@ function normalizeDelegateAgentPlaceholders(
   const agentSpec = explicitAgentSpec ?? promptAgentSpec;
 
   if (agentSpec) {
-    const specItems = parsePlaceholderSpec(agentSpec).filter(
-      (item) => optionalText(item.prompt),
-    );
-    if (
-      specItems.length === 0 ||
-      specItems.length > DELEGATE_AGENT_PLACEHOLDER_MAX_AGENTS
-    ) {
+    const specItems = parsePlaceholderSpec(agentSpec).filter((item) => optionalText(item.prompt));
+    if (specItems.length === 0 || specItems.length > DELEGATE_AGENT_PLACEHOLDER_MAX_AGENTS) {
       return [];
     }
     return specItems
@@ -1007,9 +995,7 @@ function normalizeDelegateAgentPlaceholders(
   return single ? [single] : [];
 }
 
-export function buildDelegateAgentPlaceholderToolCalls(
-  parentToolCall: ToolCall,
-): ToolCall[] {
+export function buildDelegateAgentPlaceholderToolCalls(parentToolCall: ToolCall): ToolCall[] {
   if (!isParentDelegateAgentToolCall(parentToolCall)) return [];
   const args = asPlainObject(parentToolCall.arguments);
   const agents = normalizeDelegateAgentPlaceholders(args);
@@ -1196,12 +1182,8 @@ export function getRoundToolTrace(round: Pick<UiRound, "blocks">): ToolTraceItem
   return round.blocks.flatMap((block) => (block.kind === "tool" ? [block.item] : []));
 }
 
-export function getRoundHostedSearches(
-  round: Pick<UiRound, "blocks">,
-): HostedSearchBlock[] {
-  return round.blocks.flatMap((block) =>
-    block.kind === "hostedSearch" ? [block.item] : [],
-  );
+export function getRoundHostedSearches(round: Pick<UiRound, "blocks">): HostedSearchBlock[] {
+  return round.blocks.flatMap((block) => (block.kind === "hostedSearch" ? [block.item] : []));
 }
 
 export function hasRoundContent(round: Pick<UiRound, "blocks">) {
@@ -1213,38 +1195,41 @@ export function hasRoundContent(round: Pick<UiRound, "blocks">) {
   );
 }
 
-export function appendTextDeltaToRound<
-  TRound extends Pick<UiRound, "blocks">,
->(round: TRound, delta: string): TRound {
+export function appendTextDeltaToRound<TRound extends Pick<UiRound, "blocks">>(
+  round: TRound,
+  delta: string,
+): TRound {
   return {
     ...round,
-    blocks: rebalanceHostedSearchTextBoundaries(
-      appendTextLikeBlock(round.blocks, "text", delta),
-    ),
+    blocks: rebalanceHostedSearchTextBoundaries(appendTextLikeBlock(round.blocks, "text", delta)),
   };
 }
 
-export function appendThinkingDeltaToRound<
-  TRound extends Pick<UiRound, "blocks">,
->(round: TRound, delta: string): TRound {
+export function appendThinkingDeltaToRound<TRound extends Pick<UiRound, "blocks">>(
+  round: TRound,
+  delta: string,
+): TRound {
   return {
     ...round,
     blocks: appendTextLikeBlock(round.blocks, "thinking", delta),
   };
 }
 
-export function upsertToolCallToRound<
-  TRound extends Pick<UiRound, "blocks">,
->(round: TRound, toolCall: ToolCall): TRound {
+export function upsertToolCallToRound<TRound extends Pick<UiRound, "blocks">>(
+  round: TRound,
+  toolCall: ToolCall,
+): TRound {
   return {
     ...round,
     blocks: upsertToolBlock(round.blocks, toolCall),
   };
 }
 
-export function attachToolResultToRound<
-  TRound extends Pick<UiRound, "blocks">,
->(round: TRound, toolCall: ToolCall, toolResult: ToolResultMessage): TRound {
+export function attachToolResultToRound<TRound extends Pick<UiRound, "blocks">>(
+  round: TRound,
+  toolCall: ToolCall,
+  toolResult: ToolResultMessage,
+): TRound {
   return {
     ...round,
     blocks: upsertToolBlock(round.blocks, toolCall, toolResult),
@@ -1268,10 +1253,7 @@ function findHostedSearchGroupInsertIndex(blocks: UiRoundContentBlock[]) {
   return -1;
 }
 
-function upsertHostedSearchBlock(
-  blocks: UiRoundContentBlock[],
-  hostedSearch: HostedSearchBlock,
-) {
+function upsertHostedSearchBlock(blocks: UiRoundContentBlock[], hostedSearch: HostedSearchBlock) {
   const idx = blocks.findIndex(
     (block) => block.kind === "hostedSearch" && block.item.id === hostedSearch.id,
   );
@@ -1311,9 +1293,7 @@ function upsertHostedSearchBlock(
   return next;
 }
 
-export function upsertHostedSearchToRound<
-  TRound extends Pick<UiRound, "blocks">,
->(
+export function upsertHostedSearchToRound<TRound extends Pick<UiRound, "blocks">>(
   round: TRound,
   hostedSearch: HostedSearchBlock,
 ): TRound {
@@ -1370,11 +1350,7 @@ function buildUiRoundBlocks(
     if (block.type === "toolCall") {
       const toolResult = toolResultById.get(block.id);
       if (isParentDelegateAgentToolCall(block)) {
-        blocks = appendDelegateAgentItemBlocks(
-          blocks,
-          block,
-          toolResult,
-        );
+        blocks = appendDelegateAgentItemBlocks(blocks, block, toolResult);
         continue;
       }
       blocks = upsertToolBlock(blocks, block, toolResult);

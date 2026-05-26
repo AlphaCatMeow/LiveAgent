@@ -1,20 +1,13 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  type Dispatch,
-  type SetStateAction,
-} from "react";
-
-import {
-  createConversationStateFromContext,
-  type ConversationViewState,
-} from "../../lib/chat/conversation/conversationState";
+import { type Dispatch, type SetStateAction, useCallback, useEffect, useRef } from "react";
 import type { CompactionStatus } from "../../lib/chat/compaction/contextCompaction";
 import {
+  type ConversationViewState,
+  createConversationStateFromContext,
+} from "../../lib/chat/conversation/conversationState";
+import {
+  type ConversationRuntimeEntry,
   createConversationRuntimeEntry,
   setConversationRuntimeCacheEntry,
-  type ConversationRuntimeEntry,
 } from "./chatPageRuntime";
 
 type ConversationIdentity = {

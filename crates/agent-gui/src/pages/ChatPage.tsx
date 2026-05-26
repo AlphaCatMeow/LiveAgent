@@ -1,57 +1,71 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
+import type { Context, UserMessage } from "@mariozechner/pi-ai";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import type {
-  Context,
-  UserMessage,
-} from "@mariozechner/pi-ai";
-import { Ban, Upload } from "../components/icons";
-
+import { type SetStateAction, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatHistorySidebar } from "../components/chat/ChatHistorySidebar";
 import { HistoryShareModal } from "../components/chat/HistoryShareModal";
-import { SharedHistoryManagerModal } from "../components/chat/SharedHistoryManagerModal";
 import type {
   MentionComposerDraft,
   MentionComposerHandle,
   MentionComposerLargePaste,
 } from "../components/chat/MentionComposer";
+import { type NotifyItem, NotifyToast } from "../components/chat/NotifyToast";
+import { SharedHistoryManagerModal } from "../components/chat/SharedHistoryManagerModal";
+import { Ban, Upload } from "../components/icons";
 import { useLocale } from "../i18n";
 import {
-  createModelFromConfig,
-  toModelValue,
-} from "../lib/providers/llm";
-import {
-  buildPersistableMessagesFromSnapshot,
-} from "../lib/chat/conversation/chatAbort";
-import {
-  getChatHistory,
-  getChatHistoryShare,
-  listSharedChatHistory,
-  setChatHistoryShare,
-  type ChatHistoryShareStatus,
-  type ChatHistorySummary,
-} from "../lib/chat/history/chatHistory";
-import {
-  appendMessagesToConversation,
-  buildRequestContext,
-  createConversationStateFromContext,
-  type ConversationViewState,
-  type RenderTimelineItem,
-} from "../lib/chat/conversation/conversationState";
-import {
+  type CompactionStatus,
   noteCompactionApplied,
   pruneConversationState,
   runMidTurnCompaction,
   runPreCompactConversation,
   shouldPreCompactConversation,
-  type CompactionStatus,
 } from "../lib/chat/compaction/contextCompaction";
+import { buildPersistableMessagesFromSnapshot } from "../lib/chat/conversation/chatAbort";
 import {
-  buildSkillsSystemPrompt,
-  mergeAlwaysEnabledSkillNames,
-  resolveExplicitSkillMentions,
-} from "../lib/skills";
+  appendMessagesToConversation,
+  buildRequestContext,
+  type ConversationViewState,
+  createConversationStateFromContext,
+  type RenderTimelineItem,
+} from "../lib/chat/conversation/conversationState";
+import {
+  createConversationHookLifecycle,
+  createGatewayBridgeEventController,
+} from "../lib/chat/conversation/run";
+import {
+  type ChatHistoryShareStatus,
+  type ChatHistorySummary,
+  getChatHistory,
+  getChatHistoryShare,
+  listSharedChatHistory,
+  setChatHistoryShare,
+} from "../lib/chat/history/chatHistory";
+import { clearSilentMemoryDecisions } from "../lib/chat/memory/memoryDecisionLog";
+import { clearMemoryExtractorState } from "../lib/chat/memory/memoryExtractor";
+import { buildMemoryOverviewSection } from "../lib/chat/memory/memoryPrompt";
+import {
+  createUserMessageWithUploads,
+  mergePendingUploadedFiles,
+  type PendingUploadedFile,
+  withPastedTextDisplayMetadata,
+} from "../lib/chat/messages/uploadedFiles";
+import {
+  buildFallbackConversationTitle,
+  buildModelOptions,
+  createConversationIdentity,
+  createPendingHistoryItem,
+  getFirstUserMessageText,
+  isAbortLikeError,
+  mergeHistoryItem,
+  PENDING_CONVERSATION_TITLE,
+  sortHistoryItems,
+} from "../lib/chat/page/chatPageHelpers";
+import { createSubagentRuntimeManager } from "../lib/chat/subagent/subagentRuntimeManager";
+import { createStreamDebugLogger } from "../lib/debug/agentDebug";
+import { createConversationHookDispatcher } from "../lib/hooks/conversationHooks";
+import { createModelFromConfig, toModelValue } from "../lib/providers/llm";
 import {
   type AppSettings,
   type ChatRuntimeControls,
@@ -65,40 +79,19 @@ import {
   type SelectedModel,
   type SystemToolId,
   updateChatRuntimeControlsForProvider,
-  updateMemorySettings,
   updateMcp,
+  updateMemorySettings,
   updateSkills,
 } from "../lib/settings";
-import { createConversationHookDispatcher } from "../lib/hooks/conversationHooks";
-import { createStreamDebugLogger } from "../lib/debug/agentDebug";
-import { createSubagentRuntimeManager } from "../lib/chat/subagent/subagentRuntimeManager";
-import { buildMemoryOverviewSection } from "../lib/chat/memory/memoryPrompt";
-import { clearMemoryExtractorState } from "../lib/chat/memory/memoryExtractor";
-import { clearSilentMemoryDecisions } from "../lib/chat/memory/memoryDecisionLog";
 import {
-  buildModelOptions,
-  buildFallbackConversationTitle,
-  getFirstUserMessageText,
-  isAbortLikeError,
-  mergeHistoryItem,
-  createPendingHistoryItem,
-  createConversationIdentity,
-  PENDING_CONVERSATION_TITLE,
-  sortHistoryItems,
-} from "../lib/chat/page/chatPageHelpers";
-import {
-  createUserMessageWithUploads,
-  mergePendingUploadedFiles,
-  withPastedTextDisplayMetadata,
-  type PendingUploadedFile,
-} from "../lib/chat/messages/uploadedFiles";
-import { NotifyToast, type NotifyItem } from "../components/chat/NotifyToast";
+  buildSkillsSystemPrompt,
+  mergeAlwaysEnabledSkillNames,
+  resolveExplicitSkillMentions,
+} from "../lib/skills";
+import type { SkillAccessPolicy } from "../lib/tools/skillAccessPolicy";
+import { ChatComposerBar } from "./chat/ChatComposerBar";
 import { ChatHeader } from "./chat/ChatHeader";
 import { ChatTranscript } from "./chat/ChatTranscript";
-import type { SectionId } from "./settings/types";
-import { ChatComposerBar } from "./chat/ChatComposerBar";
-import { SkillsHubPage } from "./skills-hub/SkillsHubPage";
-import { McpHubPage } from "./mcp-hub/McpHubPage";
 import {
   buildErrorAssistantMessage,
   createConversationRuntimeEntry,
@@ -106,37 +99,35 @@ import {
   pruneIdleConversationRuntimeCaches,
   setConversationRuntimeCacheEntry,
 } from "./chat/chatPageRuntime";
+import { buildPreCompactionStatus } from "./chat/compactionStatusText";
 import {
   buildCompactionContext,
   buildPreparedContext as buildPreparedConversationContext,
   buildResumeContext as buildResumeConversationContext,
 } from "./chat/conversationContextBuilders";
+import { startConversationTitleJob } from "./chat/conversationTitleJob";
+import {
+  type ActiveGatewayBridgeRequest,
+  type EnsureGatewayBridgeConversationReadyOptions,
+  type GatewaySelectedModelEvent,
+  normalizeGatewayProviderType,
+  type SendChatAction,
+} from "./chat/gatewayBridgeTypes";
+import { runAgentConversationTurn } from "./chat/runAgentConversationTurn";
+import { runTextConversationTurn } from "./chat/runTextConversationTurn";
+import { clearSilentMemoryExtractionState } from "./chat/silentMemoryExtraction";
 import { useChatHistoryList } from "./chat/useChatHistoryList";
-import { useChatSkills } from "./chat/useChatSkills";
 import { useChatPageRuntimeStore } from "./chat/useChatPageRuntimeStore";
+import { useChatSkills } from "./chat/useChatSkills";
 import { useConversationHistoryActions } from "./chat/useConversationHistoryActions";
 import { useEditResend } from "./chat/useEditResend";
 import { useGatewayBridgeBatcher } from "./chat/useGatewayBridgeBatcher";
 import { useGatewayBridgeListeners } from "./chat/useGatewayBridgeListeners";
 import { useLiveTranscriptController } from "./chat/useLiveTranscriptController";
 import { MAX_UPLOAD_FILES, usePendingUploads } from "./chat/usePendingUploads";
-import {
-  normalizeGatewayProviderType,
-  type ActiveGatewayBridgeRequest,
-  type EnsureGatewayBridgeConversationReadyOptions,
-  type GatewaySelectedModelEvent,
-  type SendChatAction,
-} from "./chat/gatewayBridgeTypes";
-import { startConversationTitleJob } from "./chat/conversationTitleJob";
-import { buildPreCompactionStatus } from "./chat/compactionStatusText";
-import { runAgentConversationTurn } from "./chat/runAgentConversationTurn";
-import { runTextConversationTurn } from "./chat/runTextConversationTurn";
-import { clearSilentMemoryExtractionState } from "./chat/silentMemoryExtraction";
-import type { SkillAccessPolicy } from "../lib/tools/skillAccessPolicy";
-import {
-  createConversationHookLifecycle,
-  createGatewayBridgeEventController,
-} from "../lib/chat/conversation/run";
+import { McpHubPage } from "./mcp-hub/McpHubPage";
+import type { SectionId } from "./settings/types";
+import { SkillsHubPage } from "./skills-hub/SkillsHubPage";
 
 type ChatPageProps = {
   settings: AppSettings;
@@ -243,10 +234,7 @@ function buildTextFromComposerDraft(
     .replace(/\u00A0/g, " ");
 }
 
-async function importPastedTextsAsFiles(
-  workdir: string,
-  pastes: MentionComposerLargePaste[],
-) {
+async function importPastedTextsAsFiles(workdir: string, pastes: MentionComposerLargePaste[]) {
   const normalizedWorkdir = workdir.trim();
   if (!normalizedWorkdir) {
     throw new Error("请先在设置 -> 系统中配置工作目录后再发送大段粘贴内容。");
@@ -258,16 +246,13 @@ async function importPastedTextsAsFiles(
     };
   }
 
-  const response = await invoke<SystemImportPastedTextsResponse>(
-    "system_import_pasted_texts",
-    {
-      workdir: normalizedWorkdir,
-      texts: pastes.map((paste, index) => ({
-        fileName: buildPastedTextFileName(paste, index),
-        content: paste.text,
-      })),
-    },
-  );
+  const response = await invoke<SystemImportPastedTextsResponse>("system_import_pasted_texts", {
+    workdir: normalizedWorkdir,
+    texts: pastes.map((paste, index) => ({
+      fileName: buildPastedTextFileName(paste, index),
+      content: paste.text,
+    })),
+  });
 
   if (response.files.length !== pastes.length) {
     const skipped = response.skipped.length > 0 ? `\n${response.skipped.join("\n")}` : "";
@@ -328,8 +313,7 @@ function resolveEffectiveChatModelSelection(
 
   const exactProvider = settings.customProviders.find((item) => item.id === customProviderId);
   const provider =
-    exactProvider ??
-    settings.customProviders.find((item) => item.type === providerType);
+    exactProvider ?? settings.customProviders.find((item) => item.type === providerType);
   if (!provider) {
     throw new Error("远程请求所选模型对应的供应商不存在，请先在桌面端配置该类型供应商。");
   }
@@ -377,9 +361,7 @@ function resolveConversationTitleModelSelection(
     return fallback;
   }
 
-  const provider = settings.customProviders.find(
-    (item) => item.id === titleModel.customProviderId,
-  );
+  const provider = settings.customProviders.find((item) => item.id === titleModel.customProviderId);
   if (!provider || !provider.activeModels.includes(titleModel.model)) {
     return fallback;
   }
@@ -421,10 +403,7 @@ function buildProviderRuntimeConfig(
   };
 }
 
-function selectedModelsMatch(
-  left: SelectedModel | undefined,
-  right: SelectedModel | undefined,
-) {
+function selectedModelsMatch(left: SelectedModel | undefined, right: SelectedModel | undefined) {
   return (
     Boolean(left) &&
     Boolean(right) &&
@@ -439,8 +418,8 @@ export function ChatPage(props: ChatPageProps) {
   const initialConversationRef = useRef(createConversationIdentity());
   const initialConversationStateRef = useRef(createConversationStateFromContext(context));
 
-  const [conversationState, setConversationState] = useState<ConversationViewState>(() =>
-    initialConversationStateRef.current,
+  const [conversationState, setConversationState] = useState<ConversationViewState>(
+    () => initialConversationStateRef.current,
   );
   const [compactionStatus, setCompactionStatus] = useState<CompactionStatus>({ phase: "idle" });
   const [isSending, setIsSending] = useState(false);
@@ -452,10 +431,9 @@ export function ChatPage(props: ChatPageProps) {
   const notifyIdCounter = useRef(0);
   const [copiedMessageKey, setCopiedMessageKey] = useState<string | null>(null);
   const [hydratingConversationId, setHydratingConversationIdState] = useState<string | null>(null);
-  const [
-    hydrationFailedConversationId,
-    setHydrationFailedConversationIdState,
-  ] = useState<string | null>(null);
+  const [hydrationFailedConversationId, setHydrationFailedConversationIdState] = useState<
+    string | null
+  >(null);
   const [currentConversationId, setCurrentConversationId] = useState<string>(
     () => initialConversationRef.current.conversationId,
   );
@@ -486,7 +464,7 @@ export function ChatPage(props: ChatPageProps) {
     return activeTemplate?.prompt.trim() ?? "";
   }, [settings.agents]);
   const selectedSkillNames = useMemo(
-    () => skillsEnabled ? mergeAlwaysEnabledSkillNames(settings.skills.selected) : [],
+    () => (skillsEnabled ? mergeAlwaysEnabledSkillNames(settings.skills.selected) : []),
     [skillsEnabled, settings.skills.selected],
   );
   const workdir = settings.system.workdir.trim();
@@ -618,11 +596,7 @@ export function ChatPage(props: ChatPageProps) {
     settings.remote.token,
   ]);
 
-  const {
-    availableSkills,
-    skillsRootDir,
-    refreshSkills,
-  } = useChatSkills({
+  const { availableSkills, skillsRootDir, refreshSkills } = useChatSkills({
     skillsEnabled,
     selectedSkillNames,
     setSettings,
@@ -669,16 +643,12 @@ export function ChatPage(props: ChatPageProps) {
   const currentConversationHistoryUpdatedAtRef = useRef<number | null>(null);
   const locallySyncedHistoryUpdatedAtRef = useRef(new Map<string, number>());
   const startNewConversationActionRef = useRef<() => void>(() => undefined);
-  const loadConversationActionRef = useRef<(id: string) => Promise<void>>(
-    async () => undefined,
-  );
+  const loadConversationActionRef = useRef<(id: string) => Promise<void>>(async () => undefined);
   const commitRenameActionRef = useRef<() => Promise<void>>(async () => undefined);
   const setPinnedActionRef = useRef<(id: string, isPinned: boolean) => Promise<void>>(
     async () => undefined,
   );
-  const deleteConversationActionRef = useRef<(id: string) => Promise<void>>(
-    async () => undefined,
-  );
+  const deleteConversationActionRef = useRef<(id: string) => Promise<void>>(async () => undefined);
   const sendActionRef = useRef<SendChatAction>(async () => undefined);
   const ensureGatewayBridgeConversationReadyRef = useRef<
     (id: string, options?: EnsureGatewayBridgeConversationReadyOptions) => Promise<string>
@@ -686,27 +656,19 @@ export function ChatPage(props: ChatPageProps) {
   const appliedGatewayHistoryTruncationsRef = useRef(new Map<string, string>());
   const stopSendingActionRef = useRef<() => void>(() => undefined);
   const hydratingConversationIdRef = useRef<string | null>(hydratingConversationId);
-  const hydrationFailedConversationIdRef = useRef<string | null>(
-    hydrationFailedConversationId,
-  );
-  const setHydratingConversationId = useCallback(
-    (next: SetStateAction<string | null>) => {
-      const current = hydratingConversationIdRef.current;
-      const resolved = typeof next === "function" ? next(current) : next;
-      hydratingConversationIdRef.current = resolved;
-      setHydratingConversationIdState(resolved);
-    },
-    [],
-  );
-  const setHydrationFailedConversationId = useCallback(
-    (next: SetStateAction<string | null>) => {
-      const current = hydrationFailedConversationIdRef.current;
-      const resolved = typeof next === "function" ? next(current) : next;
-      hydrationFailedConversationIdRef.current = resolved;
-      setHydrationFailedConversationIdState(resolved);
-    },
-    [],
-  );
+  const hydrationFailedConversationIdRef = useRef<string | null>(hydrationFailedConversationId);
+  const setHydratingConversationId = useCallback((next: SetStateAction<string | null>) => {
+    const current = hydratingConversationIdRef.current;
+    const resolved = typeof next === "function" ? next(current) : next;
+    hydratingConversationIdRef.current = resolved;
+    setHydratingConversationIdState(resolved);
+  }, []);
+  const setHydrationFailedConversationId = useCallback((next: SetStateAction<string | null>) => {
+    const current = hydrationFailedConversationIdRef.current;
+    const resolved = typeof next === "function" ? next(current) : next;
+    hydrationFailedConversationIdRef.current = resolved;
+    setHydrationFailedConversationIdState(resolved);
+  }, []);
   const {
     liveTranscriptStore,
     getConversationLiveTranscriptStore,
@@ -766,9 +728,7 @@ export function ChatPage(props: ChatPageProps) {
     setHydrationFailedConversationId(null);
   }
 
-  const isDraftConversation = !historyItems.some(
-    (item) => item.id === currentConversationId,
-  );
+  const isDraftConversation = !historyItems.some((item) => item.id === currentConversationId);
 
   const addNotify = useCallback((type: NotifyItem["type"], message: string) => {
     const id = `notify-${++notifyIdCounter.current}`;
@@ -991,18 +951,13 @@ export function ChatPage(props: ChatPageProps) {
         return;
       }
       const previous = locallySyncedHistoryUpdatedAtRef.current.get(key);
-      if (
-        previous === undefined ||
-        previous === Number.MAX_SAFE_INTEGER ||
-        updatedAt > previous
-      ) {
+      if (previous === undefined || previous === Number.MAX_SAFE_INTEGER || updatedAt > previous) {
         locallySyncedHistoryUpdatedAtRef.current.set(key, updatedAt);
       }
       if (currentConversationIdRef.current === key) {
         const currentSyncedAt = currentConversationHistoryUpdatedAtRef.current ?? 0;
         currentConversationHistoryUpdatedAtRef.current =
-          currentSyncedAt === Number.MAX_SAFE_INTEGER ||
-          updatedAt === Number.MAX_SAFE_INTEGER
+          currentSyncedAt === Number.MAX_SAFE_INTEGER || updatedAt === Number.MAX_SAFE_INTEGER
             ? updatedAt
             : Math.max(currentSyncedAt, updatedAt);
       }
@@ -1101,10 +1056,7 @@ export function ChatPage(props: ChatPageProps) {
     return persistConversation(params);
   }
 
-  async function publishGatewayConversationActivity(
-    conversationId: string,
-    running: boolean,
-  ) {
+  async function publishGatewayConversationActivity(conversationId: string, running: boolean) {
     const targetConversationId = conversationId.trim();
     if (!targetConversationId) {
       return;
@@ -1223,10 +1175,7 @@ export function ChatPage(props: ChatPageProps) {
       return;
     }
 
-    if (
-      !currentConversationId ||
-      (!isSending && !isConversationRunning(currentConversationId))
-    ) {
+    if (!currentConversationId || (!isSending && !isConversationRunning(currentConversationId))) {
       return;
     }
 
@@ -1408,17 +1357,18 @@ export function ChatPage(props: ChatPageProps) {
     },
   });
 
-  const enableManagedSkills = useCallback((names: readonly string[]) => {
-    const normalizedNames = names
-      .map((name) => String(name).trim())
-      .filter(Boolean);
-    if (normalizedNames.length === 0) return;
-    setSettings((prev) => {
-      const selected = appendManagedSkillSelections(prev.skills.selected, normalizedNames);
-      if (selected.join("\n") === prev.skills.selected.join("\n")) return prev;
-      return updateSkills(prev, { selected });
-    });
-  }, [setSettings]);
+  const enableManagedSkills = useCallback(
+    (names: readonly string[]) => {
+      const normalizedNames = names.map((name) => String(name).trim()).filter(Boolean);
+      if (normalizedNames.length === 0) return;
+      setSettings((prev) => {
+        const selected = appendManagedSkillSelections(prev.skills.selected, normalizedNames);
+        if (selected.join("\n") === prev.skills.selected.join("\n")) return prev;
+        return updateSkills(prev, { selected });
+      });
+    },
+    [setSettings],
+  );
 
   async function send(overrides?: {
     textOverride?: string;
@@ -1572,13 +1522,12 @@ export function ChatPage(props: ChatPageProps) {
     let text =
       typeof overrides?.textOverride === "string"
         ? overrides.textOverride.trim()
-        : (composerDraft
-            ? (
-                effectiveIsAgentMode && composerDraft.largePastes.length > 0
-                  ? composerDraft.textWithoutLargePastes
-                  : buildTextFromComposerDraft(composerDraft)
-              ).trim()
-            : "");
+        : composerDraft
+          ? (effectiveIsAgentMode && composerDraft.largePastes.length > 0
+              ? composerDraft.textWithoutLargePastes
+              : buildTextFromComposerDraft(composerDraft)
+            ).trim()
+          : "";
     let uploadedFiles = overrides?.uploadedFilesOverride ?? pendingUploadedFiles;
 
     if (
@@ -1613,12 +1562,9 @@ export function ChatPage(props: ChatPageProps) {
     if (!userMessage) return;
     const pendingUserMessage = userMessage;
     const content =
-      typeof pendingUserMessage.content === "string"
-        ? pendingUserMessage.content
-        : "";
+      typeof pendingUserMessage.content === "string" ? pendingUserMessage.content : "";
 
-    const titleSourceText =
-      text || uploadedFiles.map((file) => file.fileName).join(", ");
+    const titleSourceText = text || uploadedFiles.map((file) => file.fileName).join(", ");
 
     const sessionId = runtimeEntry.sessionId;
     const createdAt = runtimeEntry.createdAt;
@@ -1653,9 +1599,7 @@ export function ChatPage(props: ChatPageProps) {
     });
     const baseConversationState = runtimeEntry.state;
     const isFirstTurn = baseConversationState.meta.totalMessageCount === 0;
-    const existingHistoryItem = historyItemsRef.current.find(
-      (item) => item.id === conversationId,
-    );
+    const existingHistoryItem = historyItemsRef.current.find((item) => item.id === conversationId);
     const shouldCreatePendingHistoryItem = isFirstTurn && !existingHistoryItem;
     const fallbackTitle =
       existingHistoryItem &&
@@ -1717,7 +1661,9 @@ export function ChatPage(props: ChatPageProps) {
 
     clearAbortSnapshot(transcriptStore);
 
-    let nextConversationState = appendMessagesToConversation(baseConversationState, [pendingUserMessage]);
+    let nextConversationState = appendMessagesToConversation(baseConversationState, [
+      pendingUserMessage,
+    ]);
     let conversationRunStarted = false;
     let gatewayActivityPublishChain: Promise<void> = Promise.resolve();
     function queueGatewayConversationActivity(running: boolean) {
@@ -1794,14 +1740,12 @@ export function ChatPage(props: ChatPageProps) {
         void initialPersist;
       }
     }
-    let activeCompactionRollback:
-      | {
-          state: ConversationViewState;
-          composerText?: string;
-          uploadedFiles?: PendingUploadedFile[];
-          persistOnRollback?: boolean;
-        }
-      | null = null;
+    let activeCompactionRollback: {
+      state: ConversationViewState;
+      composerText?: string;
+      uploadedFiles?: PendingUploadedFile[];
+      persistOnRollback?: boolean;
+    } | null = null;
     let skillsPrompt = "";
     let memoryPrompt = "";
     let skillsRootDirForTools = skillsRootDir;
@@ -1951,9 +1895,7 @@ export function ChatPage(props: ChatPageProps) {
         return;
       }
 
-      const selectedSkills = selectedSkillNames
-        .map((n) => byName.get(n)!)
-        .filter(Boolean);
+      const selectedSkills = selectedSkillNames.map((n) => byName.get(n)!).filter(Boolean);
       const allowBuiltinSkillManagement = selectedSkills.some(
         (skill) => skill.name === "skills-creator" || skill.name === "skills-installer",
       );
@@ -2115,20 +2057,18 @@ export function ChatPage(props: ChatPageProps) {
           workingState = prePruned.state;
         }
       }
-      const workingRequestContext =
-        prePruned?.applied
-          ? buildCompactionContext(prePruned.state, params.tools, {
-              includeAbortedMessages: params.includeAbortedMessages,
-              includeUploadedFilesMetadata: params.includeUploadedFilesMetadata,
-            })
-          : params.requestContext;
-      const workingBudgetContext =
-        prePruned?.applied
-          ? buildPreparedContext(prePruned.state, params.tools, {
-              includeAbortedMessages: params.includeAbortedMessages,
-              includeUploadedFilesMetadata: params.includeUploadedFilesMetadata,
-            })
-          : params.budgetContext;
+      const workingRequestContext = prePruned?.applied
+        ? buildCompactionContext(prePruned.state, params.tools, {
+            includeAbortedMessages: params.includeAbortedMessages,
+            includeUploadedFilesMetadata: params.includeUploadedFilesMetadata,
+          })
+        : params.requestContext;
+      const workingBudgetContext = prePruned?.applied
+        ? buildPreparedContext(prePruned.state, params.tools, {
+            includeAbortedMessages: params.includeAbortedMessages,
+            includeUploadedFilesMetadata: params.includeUploadedFilesMetadata,
+          })
+        : params.budgetContext;
 
       armCompactionRollback({
         state: params.state,
@@ -2230,18 +2170,16 @@ export function ChatPage(props: ChatPageProps) {
         }
       }
 
-      const workingRequestContext =
-        prePruned?.applied
-          ? buildCompactionContext(workingState, params.tools ?? params.requestContext.tools, {
-              includeUploadedFilesMetadata: params.includeUploadedFilesMetadata,
-            })
-          : params.requestContext;
-      const workingBudgetContext =
-        prePruned?.applied
-          ? buildPreparedContext(workingState, params.tools ?? params.budgetContext.tools, {
-              includeUploadedFilesMetadata: params.includeUploadedFilesMetadata,
-            })
-          : params.budgetContext;
+      const workingRequestContext = prePruned?.applied
+        ? buildCompactionContext(workingState, params.tools ?? params.requestContext.tools, {
+            includeUploadedFilesMetadata: params.includeUploadedFilesMetadata,
+          })
+        : params.requestContext;
+      const workingBudgetContext = prePruned?.applied
+        ? buildPreparedContext(workingState, params.tools ?? params.budgetContext.tools, {
+            includeUploadedFilesMetadata: params.includeUploadedFilesMetadata,
+          })
+        : params.budgetContext;
       const decision = shouldPreCompactConversation({
         providerId,
         state: workingState,
@@ -2324,9 +2262,7 @@ export function ChatPage(props: ChatPageProps) {
 
         await persistCheckpointState(compacted.state);
         clearCompactionRollback();
-        applyConversationState(
-          appendMessagesToConversation(compacted.state, [pendingUserMessage]),
-        );
+        applyConversationState(appendMessagesToConversation(compacted.state, [pendingUserMessage]));
         markCompactionCompleted(conversationId, "pre-send", compacted.state.activeSegmentIndex);
         gatewayBridgeEvents.queueCheckpoint(compacted.state);
         return true;
@@ -2335,12 +2271,11 @@ export function ChatPage(props: ChatPageProps) {
           throw error;
         }
         clearCompactionRollback();
-        const pruned =
-          prePruned?.applied ? prePruned : pruneConversationState(baseConversationState);
+        const pruned = prePruned?.applied
+          ? prePruned
+          : pruneConversationState(baseConversationState);
         if (pruned.applied) {
-          applyConversationState(
-            appendMessagesToConversation(pruned.state, [pendingUserMessage]),
-          );
+          applyConversationState(appendMessagesToConversation(pruned.state, [pendingUserMessage]));
           markCompactionFailed(conversationId, "pre-send", "压缩失败，已回退到 prune 降级");
           updateGatewayBridgeToolStatus(
             `上下文压缩失败，已裁剪 ${pruned.prunedMessageCount} 个旧工具输出后继续...`,
@@ -2561,23 +2496,22 @@ export function ChatPage(props: ChatPageProps) {
   }, []);
 
   const setSharedHistoryItemsState = useCallback((items: ChatHistorySummary[]) => {
-    const nextItems = sortHistoryItems(
-      items.map((item) => ({ ...item, isShared: true })),
-    );
+    const nextItems = sortHistoryItems(items.map((item) => ({ ...item, isShared: true })));
     sharedHistoryItemsRef.current = nextItems;
     setSharedHistoryItems(nextItems);
   }, []);
 
-  const handleDeleteConversation = useCallback((id: string) => {
-    void deleteConversationActionRef.current(id).then(() => {
-      if (historyItemsRef.current.some((item) => item.id === id)) {
-        return;
-      }
-      setSharedHistoryItemsState(
-        sharedHistoryItemsRef.current.filter((item) => item.id !== id),
-      );
-    });
-  }, [historyItemsRef, setSharedHistoryItemsState]);
+  const handleDeleteConversation = useCallback(
+    (id: string) => {
+      void deleteConversationActionRef.current(id).then(() => {
+        if (historyItemsRef.current.some((item) => item.id === id)) {
+          return;
+        }
+        setSharedHistoryItemsState(sharedHistoryItemsRef.current.filter((item) => item.id !== id));
+      });
+    },
+    [historyItemsRef, setSharedHistoryItemsState],
+  );
 
   const updateSharedManagerIdSet = useCallback(
     (
@@ -2657,9 +2591,7 @@ export function ChatPage(props: ChatPageProps) {
         current.map((item) => (item.id === id ? { ...item, isShared } : item)),
       );
       if (!isShared) {
-        setSharedHistoryItemsState(
-          sharedHistoryItemsRef.current.filter((item) => item.id !== id),
-        );
+        setSharedHistoryItemsState(sharedHistoryItemsRef.current.filter((item) => item.id !== id));
         return;
       }
 
@@ -2846,11 +2778,7 @@ export function ChatPage(props: ChatPageProps) {
     void refreshSharedHistoryItems().then((items) => {
       items.forEach(handleLoadSharedHistoryStatus);
     });
-  }, [
-    handleLoadSharedHistoryStatus,
-    refreshSharedHistoryItems,
-    refreshSharedManagerGatewayUrl,
-  ]);
+  }, [handleLoadSharedHistoryStatus, refreshSharedHistoryItems, refreshSharedManagerGatewayUrl]);
 
   const handleOpenSharedHistoryManager = useCallback(() => {
     setSharedManagerGatewayUrl(settings.remote.gatewayUrl.trim());
@@ -2951,9 +2879,7 @@ export function ChatPage(props: ChatPageProps) {
     return findProviderModelConfig(provider, settings.selectedModel.model).contextWindow;
   })();
   const currentChatProvider = settings.selectedModel
-    ? settings.customProviders.find(
-        (item) => item.id === settings.selectedModel?.customProviderId,
-      )
+    ? settings.customProviders.find((item) => item.id === settings.selectedModel?.customProviderId)
     : undefined;
   const chatRuntimeReasoningOptions = useMemo(
     () =>
@@ -2969,24 +2895,16 @@ export function ChatPage(props: ChatPageProps) {
         providerId: currentChatProvider?.type,
         requestFormat: currentChatProvider?.requestFormat,
       }),
-    [
-      currentChatProvider?.requestFormat,
-      currentChatProvider?.type,
-      settings.chatRuntimeControls,
-    ],
+    [currentChatProvider?.requestFormat, currentChatProvider?.type, settings.chatRuntimeControls],
   );
   const handleChatRuntimeControlsChange = useCallback(
     (patch: Partial<ChatRuntimeControls>) => {
       setSettings((prev) => ({
         ...prev,
-        chatRuntimeControls: updateChatRuntimeControlsForProvider(
-          prev.chatRuntimeControls,
-          patch,
-          {
-            providerId: currentChatProvider?.type,
-            requestFormat: currentChatProvider?.requestFormat,
-          },
-        ),
+        chatRuntimeControls: updateChatRuntimeControlsForProvider(prev.chatRuntimeControls, patch, {
+          providerId: currentChatProvider?.type,
+          requestFormat: currentChatProvider?.requestFormat,
+        }),
       }));
     },
     [currentChatProvider?.requestFormat, currentChatProvider?.type, setSettings],
@@ -3027,10 +2945,7 @@ export function ChatPage(props: ChatPageProps) {
   const fileDropDescription = canDropUpload
     ? t("chat.upload.dropHint")
     : t("chat.upload.dropDisabledHint");
-  const fileDropLimitHint = t("chat.upload.dropLimit").replace(
-    "{max}",
-    String(MAX_UPLOAD_FILES),
-  );
+  const fileDropLimitHint = t("chat.upload.dropLimit").replace("{max}", String(MAX_UPLOAD_FILES));
 
   useEffect(() => {
     let cancelled = false;
@@ -3195,129 +3110,124 @@ export function ChatPage(props: ChatPageProps) {
           />
         ) : (
           <>
-        <div className="relative z-20">
-          <ChatHeader
-            settings={settings}
-            hasModels={hasModels}
-            currentModelLabel={currentModelLabel}
-            modelOptions={modelOptions}
-            selectedValue={selectedValue}
-            sidebarOpen={sidebarOpen}
-            setSettings={setSettings}
-            onOpenSettings={onOpenSettings}
-            onToggleTheme={onToggleTheme}
-            onOpenSidebar={handleOpenSidebar}
-          />
-          <NotifyToast items={notifyItems} onDismiss={dismissNotify} />
-        </div>
-
-        <ChatTranscript
-          conversationId={currentConversationId}
-          workspaceRoot={currentConversationWorkspaceRoot}
-          scrollAreaRef={scrollAreaRef}
-          bottomRef={bottomRef}
-          hasModels={hasModels}
-          historyItems={historyRenderItems}
-          isHistorySwitching={Boolean(historySwitchOverlay)}
-          isSending={isSending}
-          isAgentMode={isAgentMode}
-          showUsage={isAgentDevExecutionMode}
-          usageContextWindow={currentModelContextWindow}
-          liveTranscriptStore={liveTranscriptStore}
-          isCompactionRunning={isCompactionRunning}
-          copiedMessageKey={copiedMessageKey}
-          setCopiedMessageKey={setCopiedMessageKey}
-          onResendFromEdit={handleResendFromEdit}
-          onOpenSettings={onOpenSettings}
-        />
-
-        <ChatComposerBar
-          composerRef={composerRef}
-          isSending={isSending}
-          isUploadingFiles={isUploadingFiles}
-          isInputDisabled={isComposerInputDisabled}
-          inputPlaceholder={composerPlaceholder}
-          workdir={workdir}
-          enabledSkills={enabledComposerSkills}
-          isAgentMode={isAgentMode}
-          chatRuntimeControls={chatRuntimeControlsForCurrentProvider}
-          reasoningOptions={chatRuntimeReasoningOptions}
-          onSend={handleSend}
-          onStop={handleStopSending}
-          onComposerBusyChange={handleComposerBusyChange}
-          onChatRuntimeControlsChange={handleChatRuntimeControlsChange}
-          onPickReadableFiles={pickReadableFiles}
-          onPasteFiles={importReadableFiles}
-          pendingUploadedFiles={pendingUploadedFiles}
-          onRemovePendingUpload={removePendingUpload}
-        />
-        {isFileDropActive ? (
-          <div
-            className="file-drop-overlay pointer-events-none absolute inset-0 z-30 flex items-center justify-center p-4 sm:p-6 bg-white/30 backdrop-blur-md dark:bg-black/30"
-            aria-hidden="true"
-          >
-            <div
-              className={`file-drop-overlay-zone absolute inset-3 sm:inset-4 rounded-2xl border border-dashed ${
-                canDropUpload
-                  ? "border-foreground/20 bg-foreground/[0.015] dark:border-white/15 dark:bg-white/[0.015]"
-                  : "border-destructive/35 bg-destructive/[0.03]"
-              }`}
-            />
-            <div
-              className={`file-drop-overlay-card relative flex w-full max-w-[380px] flex-col items-center gap-5 rounded-2xl border bg-white/70 px-8 py-7 text-center shadow-[0_24px_60px_-20px_rgba(0,0,0,0.25),0_8px_20px_-12px_rgba(0,0,0,0.15)] backdrop-blur-2xl dark:bg-zinc-900/70 dark:shadow-[0_24px_60px_-20px_rgba(0,0,0,0.7),0_8px_20px_-12px_rgba(0,0,0,0.5)] ${
-                canDropUpload
-                  ? "border-black/[0.06] ring-1 ring-inset ring-white/40 dark:border-white/10 dark:ring-white/[0.04]"
-                  : "border-destructive/20 ring-1 ring-inset ring-destructive/10 dark:border-destructive/30"
-              }`}
-            >
-              <div
-                className={`flex h-14 w-14 items-center justify-center rounded-2xl ring-1 ring-inset ${
-                  canDropUpload
-                    ? "bg-foreground/[0.04] text-foreground/85 ring-foreground/10 dark:bg-white/[0.06] dark:text-white/90 dark:ring-white/10"
-                    : "bg-destructive/[0.08] text-destructive/90 ring-destructive/15"
-                }`}
-              >
-                {canDropUpload ? (
-                  <Upload className="h-6 w-6" strokeWidth={1.75} />
-                ) : (
-                  <Ban className="h-6 w-6" strokeWidth={1.75} />
-                )}
-              </div>
-
-              <div className="flex flex-col items-center gap-1.5">
-                <div className="text-[15px] font-semibold leading-tight tracking-tight text-foreground">
-                  {fileDropTitle}
-                </div>
-                <div className="max-w-[280px] text-xs leading-5 text-muted-foreground">
-                  {fileDropDescription}
-                </div>
-              </div>
-
-              <div
-                className="h-px w-12 bg-foreground/10 dark:bg-white/10"
-                aria-hidden="true"
+            <div className="relative z-20">
+              <ChatHeader
+                settings={settings}
+                hasModels={hasModels}
+                currentModelLabel={currentModelLabel}
+                modelOptions={modelOptions}
+                selectedValue={selectedValue}
+                sidebarOpen={sidebarOpen}
+                setSettings={setSettings}
+                onOpenSettings={onOpenSettings}
+                onToggleTheme={onToggleTheme}
+                onOpenSidebar={handleOpenSidebar}
               />
+              <NotifyToast items={notifyItems} onDismiss={dismissNotify} />
+            </div>
 
+            <ChatTranscript
+              conversationId={currentConversationId}
+              workspaceRoot={currentConversationWorkspaceRoot}
+              scrollAreaRef={scrollAreaRef}
+              bottomRef={bottomRef}
+              hasModels={hasModels}
+              historyItems={historyRenderItems}
+              isHistorySwitching={Boolean(historySwitchOverlay)}
+              isSending={isSending}
+              isAgentMode={isAgentMode}
+              showUsage={isAgentDevExecutionMode}
+              usageContextWindow={currentModelContextWindow}
+              liveTranscriptStore={liveTranscriptStore}
+              isCompactionRunning={isCompactionRunning}
+              copiedMessageKey={copiedMessageKey}
+              setCopiedMessageKey={setCopiedMessageKey}
+              onResendFromEdit={handleResendFromEdit}
+              onOpenSettings={onOpenSettings}
+            />
+
+            <ChatComposerBar
+              composerRef={composerRef}
+              isSending={isSending}
+              isUploadingFiles={isUploadingFiles}
+              isInputDisabled={isComposerInputDisabled}
+              inputPlaceholder={composerPlaceholder}
+              workdir={workdir}
+              enabledSkills={enabledComposerSkills}
+              isAgentMode={isAgentMode}
+              chatRuntimeControls={chatRuntimeControlsForCurrentProvider}
+              reasoningOptions={chatRuntimeReasoningOptions}
+              onSend={handleSend}
+              onStop={handleStopSending}
+              onComposerBusyChange={handleComposerBusyChange}
+              onChatRuntimeControlsChange={handleChatRuntimeControlsChange}
+              onPickReadableFiles={pickReadableFiles}
+              onPasteFiles={importReadableFiles}
+              pendingUploadedFiles={pendingUploadedFiles}
+              onRemovePendingUpload={removePendingUpload}
+            />
+            {isFileDropActive ? (
               <div
-                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium ${
-                  canDropUpload
-                    ? "border-foreground/[0.08] bg-foreground/[0.03] text-muted-foreground dark:border-white/10 dark:bg-white/[0.04]"
-                    : "border-destructive/20 bg-destructive/[0.05] text-destructive/80"
-                }`}
+                className="file-drop-overlay pointer-events-none absolute inset-0 z-30 flex items-center justify-center p-4 sm:p-6 bg-white/30 backdrop-blur-md dark:bg-black/30"
+                aria-hidden="true"
               >
-                <span
-                  aria-hidden="true"
-                  className={`inline-flex h-1.5 w-1.5 rounded-full ${
+                <div
+                  className={`file-drop-overlay-zone absolute inset-3 sm:inset-4 rounded-2xl border border-dashed ${
                     canDropUpload
-                      ? "bg-foreground/35 dark:bg-white/50"
-                      : "bg-destructive/55"
+                      ? "border-foreground/20 bg-foreground/[0.015] dark:border-white/15 dark:bg-white/[0.015]"
+                      : "border-destructive/35 bg-destructive/[0.03]"
                   }`}
                 />
-                {fileDropLimitHint}
+                <div
+                  className={`file-drop-overlay-card relative flex w-full max-w-[380px] flex-col items-center gap-5 rounded-2xl border bg-white/70 px-8 py-7 text-center shadow-[0_24px_60px_-20px_rgba(0,0,0,0.25),0_8px_20px_-12px_rgba(0,0,0,0.15)] backdrop-blur-2xl dark:bg-zinc-900/70 dark:shadow-[0_24px_60px_-20px_rgba(0,0,0,0.7),0_8px_20px_-12px_rgba(0,0,0,0.5)] ${
+                    canDropUpload
+                      ? "border-black/[0.06] ring-1 ring-inset ring-white/40 dark:border-white/10 dark:ring-white/[0.04]"
+                      : "border-destructive/20 ring-1 ring-inset ring-destructive/10 dark:border-destructive/30"
+                  }`}
+                >
+                  <div
+                    className={`flex h-14 w-14 items-center justify-center rounded-2xl ring-1 ring-inset ${
+                      canDropUpload
+                        ? "bg-foreground/[0.04] text-foreground/85 ring-foreground/10 dark:bg-white/[0.06] dark:text-white/90 dark:ring-white/10"
+                        : "bg-destructive/[0.08] text-destructive/90 ring-destructive/15"
+                    }`}
+                  >
+                    {canDropUpload ? (
+                      <Upload className="h-6 w-6" strokeWidth={1.75} />
+                    ) : (
+                      <Ban className="h-6 w-6" strokeWidth={1.75} />
+                    )}
+                  </div>
+
+                  <div className="flex flex-col items-center gap-1.5">
+                    <div className="text-[15px] font-semibold leading-tight tracking-tight text-foreground">
+                      {fileDropTitle}
+                    </div>
+                    <div className="max-w-[280px] text-xs leading-5 text-muted-foreground">
+                      {fileDropDescription}
+                    </div>
+                  </div>
+
+                  <div className="h-px w-12 bg-foreground/10 dark:bg-white/10" aria-hidden="true" />
+
+                  <div
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium ${
+                      canDropUpload
+                        ? "border-foreground/[0.08] bg-foreground/[0.03] text-muted-foreground dark:border-white/10 dark:bg-white/[0.04]"
+                        : "border-destructive/20 bg-destructive/[0.05] text-destructive/80"
+                    }`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`inline-flex h-1.5 w-1.5 rounded-full ${
+                        canDropUpload ? "bg-foreground/35 dark:bg-white/50" : "bg-destructive/55"
+                      }`}
+                    />
+                    {fileDropLimitHint}
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        ) : null}
+            ) : null}
           </>
         )}
       </div>

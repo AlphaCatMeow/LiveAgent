@@ -157,7 +157,9 @@ function validatePlanItems(items: readonly SilentMemoryBlockPlanItem[]): string 
         return `block-3 item ${index} append update must target a daily slug`;
       }
       const hasEvidence =
-        stringField(item.confidence) || stringField(item.source_quote) || stringField(item.reasoning);
+        stringField(item.confidence) ||
+        stringField(item.source_quote) ||
+        stringField(item.reasoning);
       if (!stringField(item.body) && !stringField(item.description) && !hasEvidence) {
         return `block-3 item ${index} update needs body, description, or evidence fields`;
       }
@@ -261,9 +263,7 @@ export function parseSilentMemoryProtocol(text: string): SilentMemoryParseResult
     );
   });
   const actionableSlugs = new Set(
-    decisionsRequiringPlan
-      .map((item) => stringField(item.slug))
-      .filter((slug) => slug.length > 0),
+    decisionsRequiringPlan.map((item) => stringField(item.slug)).filter((slug) => slug.length > 0),
   );
   const planCount = blocks.plan.items.length;
   if (planCount < decisionsRequiringPlan.length) {

@@ -1,11 +1,11 @@
-import type { ProviderId } from "../settings";
 import {
-  mergeHostedSearchBlocks,
-  normalizeHostedSearchStatus,
   type HostedSearchBlock,
   type HostedSearchSource,
   type HostedSearchStatus,
+  mergeHostedSearchBlocks,
+  normalizeHostedSearchStatus,
 } from "../chat/messages/hostedSearch";
+import type { ProviderId } from "../settings";
 
 type HostedSearchUpdate = {
   id?: string;
@@ -223,13 +223,9 @@ function emitJsonCandidate(text: string, probe: FetchProbe) {
   }
 }
 
-function consumeTextBuffer(
-  buffer: string,
-  probe: FetchProbe,
-  final = false,
-): string {
+function consumeTextBuffer(buffer: string, probe: FetchProbe, final = false): string {
   const lines = buffer.split(/\r?\n/g);
-  const tail = final ? "" : lines.pop() ?? "";
+  const tail = final ? "" : (lines.pop() ?? "");
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -430,14 +426,14 @@ function collectSources(value: unknown, out = new Map<string, HostedSearchSource
     const type = readString(value.type);
     const sourceType =
       type === "url_citation" ||
-      Boolean(value.cited_text || value.citedText) ||
+      value.cited_text ||
+      value.citedText ||
       existing?.sourceType === "citation"
         ? "citation"
         : "source";
     const title = readString(value.title ?? value.name) || existing?.title;
     const snippet = readString(value.snippet ?? value.description) || existing?.snippet;
-    const citedText =
-      readString(value.cited_text ?? value.citedText) || existing?.citedText;
+    const citedText = readString(value.cited_text ?? value.citedText) || existing?.citedText;
     out.set(directUrl, {
       url: directUrl,
       ...(title ? { title } : {}),
@@ -466,10 +462,7 @@ function findFirstSearchRecordId(
   }
   if (!isRecord(value)) return "";
   if (matches(value)) {
-    const id =
-      readString(value.id) ||
-      readString(value.call_id) ||
-      readString(value.tool_use_id);
+    const id = readString(value.id) || readString(value.call_id) || readString(value.tool_use_id);
     if (id) return id;
   }
   for (const child of Object.values(value)) {
@@ -510,11 +503,9 @@ function readExplicitSearchId(providerId: ProviderId, raw: unknown) {
 function readRawStatus(raw: unknown, sources: HostedSearchSource[]): HostedSearchStatus {
   const record = isRecord(raw) ? raw : {};
   const item = isRecord(record.item) ? record.item : {};
-  const statusText = [
-    readString(record.type),
-    readString(record.status),
-    readString(item.status),
-  ].join(" ").toLowerCase();
+  const statusText = [readString(record.type), readString(record.status), readString(item.status)]
+    .join(" ")
+    .toLowerCase();
 
   if (/fail|error|cancel/.test(statusText)) return "failed";
   if (/complete|completed|done|succeeded|finished/.test(statusText)) return "completed";
@@ -554,14 +545,15 @@ export function createHostedSearchEventAggregator(params: {
   const fallbackId = `hosted-search-${params.providerId}`;
   let lastId = fallbackId;
 
-  const blockSignature = (block: HostedSearchBlock) => safeStringify({
-    type: block.type,
-    id: block.id,
-    provider: block.provider,
-    status: block.status,
-    queries: block.queries,
-    sources: block.sources,
-  });
+  const blockSignature = (block: HostedSearchBlock) =>
+    safeStringify({
+      type: block.type,
+      id: block.id,
+      provider: block.provider,
+      status: block.status,
+      queries: block.queries,
+      sources: block.sources,
+    });
 
   const publish = (block: HostedSearchBlock) => {
     const signature = blockSignature(block);
@@ -573,7 +565,8 @@ export function createHostedSearchEventAggregator(params: {
   };
 
   const emit = (update: HostedSearchUpdate) => {
-    const derivedId = update.id?.trim() ||
+    const derivedId =
+      update.id?.trim() ||
       (update.queries?.length
         ? `hosted-search-${params.providerId}-${stableHash(update.queries.join("|"))}`
         : lastId);

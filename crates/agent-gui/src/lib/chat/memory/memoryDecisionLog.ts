@@ -11,10 +11,10 @@
  */
 
 import type {
-  SilentMemoryParseResult,
   SilentMemoryBlockIdentifyItem,
   SilentMemoryBlockMatchItem,
   SilentMemoryBlockPlanItem,
+  SilentMemoryParseResult,
 } from "./memoryProtocol";
 
 export type SilentMemoryDecisionStatus = "parsed" | "parse-failed" | "skipped";
@@ -143,9 +143,7 @@ export function resetSilentMemoryDecisionLog(): void {
   globalLog.length = 0;
 }
 
-export function subscribeSilentMemoryDecisions(
-  listener: SilentMemoryDecisionListener,
-): () => void {
+export function subscribeSilentMemoryDecisions(listener: SilentMemoryDecisionListener): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }

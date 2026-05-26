@@ -1,5 +1,8 @@
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { invoke } from "@tauri-apps/api/core";
 import {
   memo,
+  type RefObject,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -7,11 +10,9 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
-  type RefObject,
 } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import iconSimpleUrl from "../../../src-tauri/icons/icon-simple.png";
-import { invoke } from "@tauri-apps/api/core";
+import { ImagePreview, type ImagePreviewSlide } from "../../components/chat/ImagePreview";
 import {
   Check,
   CheckCircle2,
@@ -24,33 +25,26 @@ import {
   Settings,
   X,
 } from "../../components/icons";
-
 import { LiveMarkdown, Markdown } from "../../components/Markdown";
-import { ImagePreview, type ImagePreviewSlide } from "../../components/chat/ImagePreview";
 import { ScrollArea } from "../../components/ui/scroll-area";
 import { useLocale } from "../../i18n";
-import { normalizeLiveToolStatus, VIBING_STATUS } from "../../lib/chat/page/chatPageHelpers";
-import { UserMessageContent } from "../../lib/chat/messages/userMessageContent";
+import type {
+  HistoryMessageRef,
+  RenderSummaryCard,
+  RenderTimelineItem,
+} from "../../lib/chat/conversation/conversationState";
+import type { LiveTranscriptStore } from "../../lib/chat/conversation/liveTranscriptStore";
 import { getRoundText } from "../../lib/chat/messages/uiMessages";
 import {
   formatUploadedFileSize,
-  parsePastedTextDisplayReferences,
   type PendingUploadedFile,
+  parsePastedTextDisplayReferences,
 } from "../../lib/chat/messages/uploadedFiles";
+import { UserMessageContent } from "../../lib/chat/messages/userMessageContent";
+import { normalizeLiveToolStatus, VIBING_STATUS } from "../../lib/chat/page/chatPageHelpers";
 import { cn } from "../../lib/shared/utils";
-import type {
-  HistoryMessageRef,
-  RenderTimelineItem,
-  RenderSummaryCard,
-} from "../../lib/chat/conversation/conversationState";
-import type { LiveTranscriptStore } from "../../lib/chat/conversation/liveTranscriptStore";
 import type { SectionId } from "../settings/types";
-import {
-  AssistantAvatar,
-  AssistantBubble,
-  CompactingText,
-  VibingText,
-} from "./AssistantBubble";
+import { AssistantAvatar, AssistantBubble, CompactingText, VibingText } from "./AssistantBubble";
 
 type UploadedImagePreviewResponse = {
   mimeType: string;
@@ -85,17 +79,14 @@ function writeUploadedImagePreviewCache(cacheKey: string, value: string) {
 }
 
 function resolveNearestScrollViewport(element: HTMLElement | null) {
-  return element?.closest("[data-radix-scroll-area-viewport]") as HTMLDivElement | null;
+  return element?.closest("[data-scroll-viewport]") as HTMLDivElement | null;
 }
 
 function resolveScrollAreaViewport(root: HTMLDivElement | null) {
-  return root?.querySelector("[data-radix-scroll-area-viewport]") as HTMLDivElement | null;
+  return root?.querySelector("[data-scroll-viewport]") as HTMLDivElement | null;
 }
 
-async function loadUploadedImagePreview(params: {
-  workspaceRoot: string;
-  absolutePath: string;
-}) {
+async function loadUploadedImagePreview(params: { workspaceRoot: string; absolutePath: string }) {
   const { workspaceRoot, absolutePath } = params;
   const cacheKey = getUploadedImagePreviewCacheKey(workspaceRoot, absolutePath);
   const cached = readUploadedImagePreviewCache(cacheKey);
@@ -131,8 +122,7 @@ async function loadUploadedImagePreview(params: {
 
 function useUploadedImagePreview(absolutePath?: string, workspaceRoot?: string) {
   const normalizedPath = typeof absolutePath === "string" ? absolutePath.trim() : "";
-  const normalizedWorkspaceRoot =
-    typeof workspaceRoot === "string" ? workspaceRoot.trim() : "";
+  const normalizedWorkspaceRoot = typeof workspaceRoot === "string" ? workspaceRoot.trim() : "";
   const cacheKey =
     normalizedPath && normalizedWorkspaceRoot
       ? getUploadedImagePreviewCacheKey(normalizedWorkspaceRoot, normalizedPath)
@@ -214,9 +204,7 @@ function UserImageAttachmentCard({
       title={file.relativePath}
       className={cn(
         "group relative overflow-hidden rounded-xl border border-white/60 bg-white/50 shadow-[0_1px_3px_rgba(0,0,0,0.06),0_1px_2px_rgba(0,0,0,0.04)] backdrop-blur-xl transition-shadow hover:shadow-[0_2px_8px_rgba(0,0,0,0.1)] dark:border-white/[0.12] dark:bg-white/[0.06]",
-        compact
-          ? "min-w-0 basis-[calc(33.333%-5.33px)] grow"
-          : "w-full max-w-[280px]",
+        compact ? "min-w-0 basis-[calc(33.333%-5.33px)] grow" : "w-full max-w-[280px]",
       )}
     >
       {onRemove ? (
@@ -305,9 +293,7 @@ function UserFileAttachmentCard({
       title={file.relativePath}
       className={cn(
         "group relative flex items-center gap-2 rounded-xl border border-white/60 bg-white/50 px-2.5 py-2 text-left shadow-[0_1px_3px_rgba(0,0,0,0.06),0_1px_2px_rgba(0,0,0,0.04)] backdrop-blur-xl transition-shadow hover:shadow-[0_2px_8px_rgba(0,0,0,0.1)] dark:border-white/[0.12] dark:bg-white/[0.06]",
-        compact
-          ? "min-w-0 basis-[calc(33.333%-5.33px)] grow"
-          : "w-full",
+        compact ? "min-w-0 basis-[calc(33.333%-5.33px)] grow" : "w-full",
       )}
     >
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-b from-black/[0.03] to-black/[0.06] dark:from-white/[0.06] dark:to-white/[0.1]">
@@ -455,9 +441,7 @@ function splitUserAttachmentsForDisplay(files: PendingUploadedFile[], text: stri
     };
   }
 
-  const pastedTextPaths = new Set(
-    pastedTextReferences.map((reference) => reference.relativePath),
-  );
+  const pastedTextPaths = new Set(pastedTextReferences.map((reference) => reference.relativePath));
   const pastedTextFiles: PendingUploadedFile[] = [];
   const visibleFiles: PendingUploadedFile[] = [];
 
@@ -567,9 +551,7 @@ const SummaryCard = memo(function SummaryCard(props: { item: RenderSummaryCard }
 
   return (
     <div className="flex justify-center px-2">
-      <div
-        className="checkpoint-card w-full max-w-3xl overflow-hidden rounded-[14px] border border-black/[0.06] bg-white/[0.72] shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.03)] backdrop-blur-xl dark:border-white/[0.1] dark:bg-white/[0.06] dark:shadow-[0_1px_3px_rgba(0,0,0,0.2),0_4px_12px_rgba(0,0,0,0.15)]"
-      >
+      <div className="checkpoint-card w-full max-w-3xl overflow-hidden rounded-[14px] border border-black/[0.06] bg-white/[0.72] shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.03)] backdrop-blur-xl dark:border-white/[0.1] dark:bg-white/[0.06] dark:shadow-[0_1px_3px_rgba(0,0,0,0.2),0_4px_12px_rgba(0,0,0,0.15)]">
         <button
           type="button"
           onClick={() => setExpanded((prev) => !prev)}
@@ -761,10 +743,7 @@ const TranscriptHistory = memo(function TranscriptHistory(props: TranscriptHisto
   const virtualRows = transcriptVirtualizer.getVirtualItems();
 
   return (
-    <div
-      className="relative"
-      style={{ height: transcriptVirtualizer.getTotalSize() }}
-    >
+    <div className="relative" style={{ height: transcriptVirtualizer.getTotalSize() }}>
       {virtualRows.map((virtualRow) => {
         const item = historyItems[virtualRow.index];
         if (!item) return null;
@@ -816,15 +795,9 @@ const TranscriptHistory = memo(function TranscriptHistory(props: TranscriptHisto
                   className={`chat-user-bubble-wrap group relative ml-auto max-w-[min(85%,calc(50em+2rem))] ${compactedClass}`}
                 >
                   <div className="chat-bubble-enter chat-user-bubble rounded-2xl rounded-br-md bg-[hsl(var(--chat-user-bg))] px-4 py-2.5 font-openai-chat text-[14.5px] leading-relaxed text-[hsl(var(--chat-user-fg))]">
-                    <UserAttachmentCards
-                      files={visibleFiles}
-                      workspaceRoot={workspaceRoot}
-                    />
+                    <UserAttachmentCards files={visibleFiles} workspaceRoot={workspaceRoot} />
                     {item.text ? (
-                      <UserMessageContent
-                        text={item.text}
-                        pastedTextFiles={pastedTextFiles}
-                      />
+                      <UserMessageContent text={item.text} pastedTextFiles={pastedTextFiles} />
                     ) : null}
                   </div>
                   <div className="mt-1 flex justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
@@ -902,9 +875,7 @@ const TranscriptHistory = memo(function TranscriptHistory(props: TranscriptHisto
   );
 });
 
-const TranscriptLiveState = memo(function TranscriptLiveState(
-  props: TranscriptLiveStateProps,
-) {
+const TranscriptLiveState = memo(function TranscriptLiveState(props: TranscriptLiveStateProps) {
   const {
     isSending,
     isAgentMode,
@@ -1026,94 +997,94 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
     <div className="relative min-h-0 flex-1">
       <ScrollArea ref={scrollAreaRef} className="h-full">
         <div className="mx-auto w-full max-w-[768px] px-5 py-4">
-        {showNoModelsState ? (
-          <div className="flex min-h-[calc(100vh-220px)] flex-col items-center justify-center">
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden">
-              <div className="hero-glow-pulse h-[360px] w-[360px] rounded-full bg-[radial-gradient(closest-side,hsl(var(--foreground)/0.08),transparent_70%)] blur-3xl" />
-            </div>
-
-            <div className="relative flex flex-col items-center">
-              <div className="hero-entrance hero-icon-float mb-5 flex h-24 w-24 items-center justify-center">
-                <img
-                  src={iconSimpleUrl}
-                  alt=""
-                  aria-hidden="true"
-                  draggable={false}
-                  className="h-[72px] w-[72px] select-none object-contain"
-                />
-              </div>
-              <h2 className="hero-entrance-delay-1 mb-2 bg-gradient-to-b from-foreground to-foreground/65 bg-clip-text text-2xl font-semibold leading-tight tracking-tight text-transparent">
-                {t("chat.welcome")}
-              </h2>
-              <p className="hero-entrance-delay-2 mb-1 text-sm text-muted-foreground">
-                {t("chat.noModelSelected")}
-              </p>
-              <p className="hero-entrance-delay-2 mb-7 text-sm text-muted-foreground">
-                {t("chat.configureModel")}
-              </p>
-              <button
-                type="button"
-                onClick={() => onOpenSettings("providers")}
-                className="hero-entrance-delay-3 group inline-flex items-center gap-2 rounded-full border border-white/70 bg-white/65 px-5 py-2 text-sm font-medium text-foreground/85 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.85)] backdrop-blur-xl transition-all duration-200 hover:-translate-y-[1px] hover:bg-white/80 hover:text-foreground hover:shadow-[0_2px_4px_rgba(0,0,0,0.05),0_12px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.9)] active:translate-y-0 active:shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:border-white/[0.1] dark:bg-white/[0.06] dark:text-foreground/90 dark:shadow-[0_1px_2px_rgba(0,0,0,0.2),0_8px_24px_rgba(0,0,0,0.25),inset_0_1px_0_rgba(255,255,255,0.06)] dark:hover:bg-white/[0.1]"
-              >
-                <Settings className="h-3.5 w-3.5 text-foreground/55 transition-colors group-hover:text-foreground/80" />
-                {t("chat.goToSettings")}
-              </button>
-            </div>
-          </div>
-        ) : showStartChatState ? (
-          <div className="flex min-h-[calc(100vh-220px)] flex-col items-center justify-center">
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden">
-              <div className="hero-glow-pulse h-[360px] w-[360px] rounded-full bg-[radial-gradient(closest-side,hsl(var(--foreground)/0.08),transparent_70%)] blur-3xl" />
-            </div>
-
-            <div className="relative flex flex-col items-center">
-              <div className="hero-entrance hero-icon-float mb-5 flex h-24 w-24 items-center justify-center">
-                <img
-                  src={iconSimpleUrl}
-                  alt=""
-                  aria-hidden="true"
-                  draggable={false}
-                  className="h-[72px] w-[72px] select-none object-contain"
-                />
+          {showNoModelsState ? (
+            <div className="flex min-h-[calc(100vh-220px)] flex-col items-center justify-center">
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden">
+                <div className="hero-glow-pulse h-[360px] w-[360px] rounded-full bg-[radial-gradient(closest-side,hsl(var(--foreground)/0.08),transparent_70%)] blur-3xl" />
               </div>
 
-              <h2 className="hero-entrance-delay-1 mb-2 bg-gradient-to-b from-foreground to-foreground/65 bg-clip-text text-2xl font-semibold leading-tight tracking-tight text-transparent">
-                {t("chat.startChat")}
-              </h2>
-
-              <p className="hero-entrance-delay-2 max-w-[280px] text-center text-sm leading-relaxed text-muted-foreground">
-                {t("chat.startChatDesc")}
-              </p>
+              <div className="relative flex flex-col items-center">
+                <div className="hero-entrance hero-icon-float mb-5 flex h-24 w-24 items-center justify-center">
+                  <img
+                    src={iconSimpleUrl}
+                    alt=""
+                    aria-hidden="true"
+                    draggable={false}
+                    className="h-[72px] w-[72px] select-none object-contain"
+                  />
+                </div>
+                <h2 className="hero-entrance-delay-1 mb-2 bg-gradient-to-b from-foreground to-foreground/65 bg-clip-text text-2xl font-semibold leading-tight tracking-tight text-transparent">
+                  {t("chat.welcome")}
+                </h2>
+                <p className="hero-entrance-delay-2 mb-1 text-sm text-muted-foreground">
+                  {t("chat.noModelSelected")}
+                </p>
+                <p className="hero-entrance-delay-2 mb-7 text-sm text-muted-foreground">
+                  {t("chat.configureModel")}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => onOpenSettings("providers")}
+                  className="hero-entrance-delay-3 group inline-flex items-center gap-2 rounded-full border border-white/70 bg-white/65 px-5 py-2 text-sm font-medium text-foreground/85 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.85)] backdrop-blur-xl transition-all duration-200 hover:-translate-y-[1px] hover:bg-white/80 hover:text-foreground hover:shadow-[0_2px_4px_rgba(0,0,0,0.05),0_12px_32px_rgba(0,0,0,0.08),inset_0_1px_0_rgba(255,255,255,0.9)] active:translate-y-0 active:shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:border-white/[0.1] dark:bg-white/[0.06] dark:text-foreground/90 dark:shadow-[0_1px_2px_rgba(0,0,0,0.2),0_8px_24px_rgba(0,0,0,0.25),inset_0_1px_0_rgba(255,255,255,0.06)] dark:hover:bg-white/[0.1]"
+                >
+                  <Settings className="h-3.5 w-3.5 text-foreground/55 transition-colors group-hover:text-foreground/80" />
+                  {t("chat.goToSettings")}
+                </button>
+              </div>
             </div>
+          ) : showStartChatState ? (
+            <div className="flex min-h-[calc(100vh-220px)] flex-col items-center justify-center">
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden">
+                <div className="hero-glow-pulse h-[360px] w-[360px] rounded-full bg-[radial-gradient(closest-side,hsl(var(--foreground)/0.08),transparent_70%)] blur-3xl" />
+              </div>
+
+              <div className="relative flex flex-col items-center">
+                <div className="hero-entrance hero-icon-float mb-5 flex h-24 w-24 items-center justify-center">
+                  <img
+                    src={iconSimpleUrl}
+                    alt=""
+                    aria-hidden="true"
+                    draggable={false}
+                    className="h-[72px] w-[72px] select-none object-contain"
+                  />
+                </div>
+
+                <h2 className="hero-entrance-delay-1 mb-2 bg-gradient-to-b from-foreground to-foreground/65 bg-clip-text text-2xl font-semibold leading-tight tracking-tight text-transparent">
+                  {t("chat.startChat")}
+                </h2>
+
+                <p className="hero-entrance-delay-2 max-w-[280px] text-center text-sm leading-relaxed text-muted-foreground">
+                  {t("chat.startChatDesc")}
+                </p>
+              </div>
+            </div>
+          ) : null}
+
+          <div className="space-y-6">
+            <TranscriptHistory
+              conversationId={conversationId}
+              workspaceRoot={workspaceRoot}
+              scrollViewport={scrollViewport}
+              historyItems={historyItems}
+              showUsage={showUsage}
+              usageContextWindow={usageContextWindow}
+              copiedMessageKey={copiedMessageKey}
+              setCopiedMessageKey={setCopiedMessageKey}
+              onResendFromEdit={onResendFromEdit}
+              isSending={isSending}
+            />
+
+            <TranscriptLiveState
+              isSending={isSending}
+              isAgentMode={isAgentMode}
+              showUsage={showUsage}
+              usageContextWindow={usageContextWindow}
+              liveTranscriptStore={liveTranscriptStore}
+              isCompactionRunning={isCompactionRunning}
+            />
           </div>
-        ) : null}
 
-        <div className="space-y-6">
-          <TranscriptHistory
-            conversationId={conversationId}
-            workspaceRoot={workspaceRoot}
-            scrollViewport={scrollViewport}
-            historyItems={historyItems}
-            showUsage={showUsage}
-            usageContextWindow={usageContextWindow}
-            copiedMessageKey={copiedMessageKey}
-            setCopiedMessageKey={setCopiedMessageKey}
-            onResendFromEdit={onResendFromEdit}
-            isSending={isSending}
-          />
-
-          <TranscriptLiveState
-            isSending={isSending}
-            isAgentMode={isAgentMode}
-            showUsage={showUsage}
-            usageContextWindow={usageContextWindow}
-            liveTranscriptStore={liveTranscriptStore}
-            isCompactionRunning={isCompactionRunning}
-          />
-        </div>
-
-        <div ref={bottomRef} className={shouldReserveTranscriptBottomSpace ? "h-48" : "h-0"} />
+          <div ref={bottomRef} className={shouldReserveTranscriptBottomSpace ? "h-48" : "h-0"} />
         </div>
       </ScrollArea>
       {isHistorySwitching ? <HistorySwitchLoadingOverlay /> : null}

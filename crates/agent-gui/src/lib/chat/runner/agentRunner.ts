@@ -6,39 +6,26 @@ import type {
   ToolCall,
   ToolResultMessage,
 } from "@mariozechner/pi-ai";
-
+import { buildStreamRequestDebugPayload, type StreamDebugLogger } from "../../debug/agentDebug";
 import {
-  buildProviderRequestMetadata,
-  createModelFromConfig,
-  finalizeProviderStreamOptions,
-  normalizeErrorMessage,
-  resolveProviderCacheRetention,
-  toSimpleStreamReasoning,
-  streamSimpleByApi,
-  buildProviderAuthHeaders,
-  createStreamingTextReconciler,
-  type StreamOptionsEx,
-} from "../../providers/llm";
-import {
-  createHostedSearchProbeId,
   createHostedSearchEventAggregator,
+  createHostedSearchProbeId,
   startHostedSearchFetchProbe,
   withHostedSearchProbeHeader,
 } from "../../providers/hostedSearchEvents";
 import {
-  appendHostedSearchBlocksToAssistant,
-  mergeHostedSearchBlocks,
-  type HostedSearchBlock,
-  type HostedSearchOrderedBlock,
-} from "../messages/hostedSearch";
-import {
-  createDeferredProviderNativeWebSearchStatus,
-  resolveProviderNativeWebSearchStatus,
-} from "../search/providerNativeSearchStatus";
-import {
-  buildStreamRequestDebugPayload,
-  type StreamDebugLogger,
-} from "../../debug/agentDebug";
+  buildProviderAuthHeaders,
+  buildProviderRequestMetadata,
+  createModelFromConfig,
+  createStreamingTextReconciler,
+  finalizeProviderStreamOptions,
+  normalizeErrorMessage,
+  resolveProviderCacheRetention,
+  type StreamOptionsEx,
+  streamSimpleByApi,
+  toSimpleStreamReasoning,
+} from "../../providers/llm";
+import { prepareProxyRequest } from "../../providers/proxy";
 import type {
   CodexRequestFormat,
   ProviderId,
@@ -46,20 +33,26 @@ import type {
   ReasoningLevel,
 } from "../../settings";
 import { withPowerActivity } from "../../system/powerActivity";
-
-import { prepareProxyRequest } from "../../providers/proxy";
-import { summarizeToolCall } from "../messages/uiMessages";
-import { recoverAssistantSeedToolCalls } from "./seedToolCalls";
 import { sanitizeContextForModelRequest } from "../context/requestContextSanitizer";
 import { buildMemoryToolsSuffixSection } from "../memory/memoryPolicy";
 import {
-  createSubagentScheduler,
-  type SubagentScheduler,
-} from "../subagent/subagentScheduler";
+  appendHostedSearchBlocksToAssistant,
+  type HostedSearchBlock,
+  type HostedSearchOrderedBlock,
+  mergeHostedSearchBlocks,
+} from "../messages/hostedSearch";
+import { summarizeToolCall } from "../messages/uiMessages";
+import {
+  createDeferredProviderNativeWebSearchStatus,
+  resolveProviderNativeWebSearchStatus,
+} from "../search/providerNativeSearchStatus";
+import { createSubagentScheduler, type SubagentScheduler } from "../subagent/subagentScheduler";
+import { recoverAssistantSeedToolCalls } from "./seedToolCalls";
 
-function createLinkedAbortSignal(
-  signals: Array<AbortSignal | undefined>,
-): { signal?: AbortSignal; cleanup: () => void } {
+function createLinkedAbortSignal(signals: Array<AbortSignal | undefined>): {
+  signal?: AbortSignal;
+  cleanup: () => void;
+} {
   const activeSignals = Array.from(
     new Set(signals.filter((signal): signal is AbortSignal => Boolean(signal))),
   );
@@ -241,10 +234,14 @@ export function buildToolsSuffix(workdir: string, availableToolNames?: readonly 
         );
       }
       if (hasReadFamily) {
-        lines.push("- Do not run Bash cat/ls/find/grep to read, list, or search workspace or Skill files.");
+        lines.push(
+          "- Do not run Bash cat/ls/find/grep to read, list, or search workspace or Skill files.",
+        );
       }
       if (has("Delete")) {
-        lines.push("- Do not run Bash rm, rmdir, unlink, or find -delete for workspace or Skill files.");
+        lines.push(
+          "- Do not run Bash rm, rmdir, unlink, or find -delete for workspace or Skill files.",
+        );
       }
     }
     sections.push(lines.join("\n"));
@@ -279,10 +276,10 @@ export function buildToolsSuffix(workdir: string, availableToolNames?: readonly 
         "- Bash.cwd is relative to the selected Bash root.",
         '- `Bash.cwd` follows the `root` rules in **Workspace & Paths**. The canonical form for running a Skill script is `root="skills"` with `cwd="<skill-name>/scripts"` plus a relative command.',
         '- To run installed Skill scripts, use root="skills" with cwd="<skill-name>/scripts".',
-        '- The alternative form — passing an absolute path inside the command (e.g. `python ~/.liveagent/skills/<skill-name>/scripts/foo.py`) — is also accepted as long as the referenced Skill is enabled in this conversation. Both forms run the same script; prefer the canonical form for clarity, but you do not need to retry just to switch forms.',
+        "- The alternative form — passing an absolute path inside the command (e.g. `python ~/.liveagent/skills/<skill-name>/scripts/foo.py`) — is also accepted as long as the referenced Skill is enabled in this conversation. Both forms run the same script; prefer the canonical form for clarity, but you do not need to retry just to switch forms.",
         "- For endpoint tests with curl, include an explicit timeout such as `--max-time 30` so a stalled local server or upstream request cannot hold the whole turn indefinitely.",
         "- Background commands using `&` must redirect stdout and stderr to a log file before detaching, for example `nohup command > /tmp/liveagent-task.log 2>&1 < /dev/null &`; otherwise use a dedicated terminal or managed process workflow for dev servers/watchers.",
-        "- For reading, listing, or searching Skill content, always use Read/List/Glob/Grep with `root=\"skills\"` — Bash `cat`/`ls`/`find`/`grep`/`rg`/`sed`/`awk` against `~/.liveagent/skills` is still routed back to the file tools.",
+        '- For reading, listing, or searching Skill content, always use Read/List/Glob/Grep with `root="skills"` — Bash `cat`/`ls`/`find`/`grep`/`rg`/`sed`/`awk` against `~/.liveagent/skills` is still routed back to the file tools.',
         "- Do not guess `skills/` paths inside the workspace; if a Skill is needed, enable it in the chat Skills selector first.",
         "- Do not cd into ~/.liveagent/skills or workspace skills/ guesses.",
       ].join("\n"),
@@ -319,7 +316,7 @@ export function buildToolsSuffix(workdir: string, availableToolNames?: readonly 
       [
         "## ManagedProcess",
         '- Use ManagedProcess(action="start") for dev servers, preview servers, watchers, or other long-running foreground commands that should continue while you run tests.',
-        '- Do not append `&` to ManagedProcess.command. It starts the process in the background, redirects stdout/stderr to a log file, and returns process_id/pid/log_path.',
+        "- Do not append `&` to ManagedProcess.command. It starts the process in the background, redirects stdout/stderr to a log file, and returns process_id/pid/log_path.",
         '- Use ManagedProcess(action="status") to inspect running processes, action="read_log" to inspect recent output, and action="stop" to terminate the process tree.',
         "- Prefer ManagedProcess over Bash for `pnpm dev`, `deno run main.ts`, `vite`, file watchers, local web servers, or commands that otherwise require `nohup` and log redirection.",
       ].join("\n"),
@@ -518,10 +515,7 @@ function getParallelToolBatchStatus(batch: ParallelToolBatch) {
   return `正在并行执行 ${batch.toolCalls.length} 个 ${batch.toolName} 调用...`;
 }
 
-function toMessageToolResult(
-  message: Message,
-  toolCall: ToolCall,
-): ToolResultMessage {
+function toMessageToolResult(message: Message, toolCall: ToolCall): ToolResultMessage {
   if (message.role === "toolResult") return message;
   return {
     role: "toolResult",
@@ -534,12 +528,10 @@ function toMessageToolResult(
   };
 }
 
-type TurnContextOverride =
-  | {
-      context: Context;
-      emittedMessages: Message[];
-    }
-  | null;
+type TurnContextOverride = {
+  context: Context;
+  emittedMessages: Message[];
+} | null;
 
 type ToolExecutionEventContext = {
   parentToolCall: ToolCall;
@@ -563,9 +555,9 @@ function getMessagesSinceBaseline(agent: Agent | null, baselineIndex: number): M
 
 function findLastAssistantMessage(messages: Message[]): AssistantMessage | null {
   return (
-    [...messages].reverse().find(
-      (message): message is AssistantMessage => message.role === "assistant",
-    ) ?? null
+    [...messages]
+      .reverse()
+      .find((message): message is AssistantMessage => message.role === "assistant") ?? null
   );
 }
 
@@ -606,13 +598,10 @@ export async function runAssistantWithTools(params: {
     runtimeContext: Context;
     emittedMessages: Message[];
     signal?: AbortSignal;
-  }) => Promise<
-    | {
-        context: Context;
-        emittedMessages: Message[];
-      }
-    | null
-  >;
+  }) => Promise<{
+    context: Context;
+    emittedMessages: Message[];
+  } | null>;
   onToolStatus?: (status: string | null) => void;
   signal?: AbortSignal;
   debugLogger?: StreamDebugLogger;
@@ -701,10 +690,7 @@ export async function runAssistantWithTools(params: {
               },
               emitToolResult: (emittedToolCall, emittedToolResult) => {
                 toolCallsById.set(emittedToolCall.id, emittedToolCall);
-                toolResultErrorFlags.set(
-                  emittedToolCall.id,
-                  Boolean(emittedToolResult.isError),
-                );
+                toolResultErrorFlags.set(emittedToolCall.id, Boolean(emittedToolResult.isError));
                 params.onToolResult?.(emittedToolCall, emittedToolResult, currentRound);
               },
               emitToolStatus: (status) => params.onToolStatus?.(status),
@@ -745,10 +731,7 @@ export async function runAssistantWithTools(params: {
       };
     };
 
-    const startParallelToolBatchIfNeeded = (
-      batchKey: string,
-      signal?: AbortSignal,
-    ) => {
+    const startParallelToolBatchIfNeeded = (batchKey: string, signal?: AbortSignal) => {
       const batch = parallelToolBatches.get(batchKey);
       if (!batch || batch.started) return batch;
 
@@ -796,13 +779,11 @@ export async function runAssistantWithTools(params: {
     let latestAgentEndMessages: Message[] = [];
     let agentTools: AgentTool<any>[] = [];
     const pendingRecoveredSeedTurnRef: {
-      current:
-        | {
-            round: number;
-            assistant: AssistantMessage;
-            toolCalls: ToolCall[];
-          }
-        | null;
+      current: {
+        round: number;
+        assistant: AssistantMessage;
+        toolCalls: ToolCall[];
+      } | null;
     } = {
       current: null,
     };
@@ -1035,343 +1016,333 @@ export async function runAssistantWithTools(params: {
       },
     }));
 
-  let streamRound = 0;
-  const streamFn = (streamModel: typeof model, streamContext: Context, options?: any) => {
-    const round = ++streamRound;
-    const stateMessages = getAgentMessages(agent);
-    const effectiveContext = sanitizeContextForModelRequest({
-      ...streamContext,
-      systemPrompt:
-        typeof currentSystemPrompt === "string"
-          ? currentSystemPrompt
-          : streamContext.systemPrompt,
-      messages: stateMessages.slice(),
-      tools:
-        streamContext.tools ??
-        ((agent?.state.tools as Context["tools"] | undefined) ?? llmTools),
-    });
-    const fallbackReasoning =
-      params.providerId === "claude_code" || params.providerId === "gemini"
-        ? toSimpleStreamReasoning(params.runtime.reasoning)
-        : streamModel.api === "openai-responses" || streamModel.api === "openai-completions"
+    let streamRound = 0;
+    const streamFn = (streamModel: typeof model, streamContext: Context, options?: any) => {
+      const round = ++streamRound;
+      const stateMessages = getAgentMessages(agent);
+      const effectiveContext = sanitizeContextForModelRequest({
+        ...streamContext,
+        systemPrompt:
+          typeof currentSystemPrompt === "string"
+            ? currentSystemPrompt
+            : streamContext.systemPrompt,
+        messages: stateMessages.slice(),
+        tools:
+          streamContext.tools ?? (agent?.state.tools as Context["tools"] | undefined) ?? llmTools,
+      });
+      const fallbackReasoning =
+        params.providerId === "claude_code" || params.providerId === "gemini"
           ? toSimpleStreamReasoning(params.runtime.reasoning)
-          : undefined;
-    const shouldProbeHostedSearch = Boolean(nativeWebSearchStatus);
-    const hostedSearchProbeId = shouldProbeHostedSearch
-      ? createHostedSearchProbeId(params.providerId)
-      : undefined;
-    let streamOptions: StreamOptionsEx = {
-      ...(options ?? {}),
-      apiKey: options?.apiKey ?? params.runtime.apiKey,
-      headers: withHostedSearchProbeHeader(
-        {
-          ...(options?.headers ?? {}),
-          ...proxyRequest.headers,
-        },
-        hostedSearchProbeId,
-      ),
-      signal: options?.signal,
-      sessionId: options?.sessionId ?? params.sessionId,
-      cacheRetention:
-        options?.cacheRetention ??
-        resolveProviderCacheRetention(
-          params.providerId,
-          params.runtime.promptCachingEnabled,
+          : streamModel.api === "openai-responses" || streamModel.api === "openai-completions"
+            ? toSimpleStreamReasoning(params.runtime.reasoning)
+            : undefined;
+      const shouldProbeHostedSearch = Boolean(nativeWebSearchStatus);
+      const hostedSearchProbeId = shouldProbeHostedSearch
+        ? createHostedSearchProbeId(params.providerId)
+        : undefined;
+      let streamOptions: StreamOptionsEx = {
+        ...(options ?? {}),
+        apiKey: options?.apiKey ?? params.runtime.apiKey,
+        headers: withHostedSearchProbeHeader(
+          {
+            ...(options?.headers ?? {}),
+            ...proxyRequest.headers,
+          },
+          hostedSearchProbeId,
         ),
-      metadata: buildProviderRequestMetadata(params.providerId, params.sessionId),
-      toolChoice:
-        options?.toolChoice ??
-        (effectiveContext.tools?.length ? "auto" : undefined),
-      reasoning: normalizeStreamReasoning(options?.reasoning) ?? fallbackReasoning,
+        signal: options?.signal,
+        sessionId: options?.sessionId ?? params.sessionId,
+        cacheRetention:
+          options?.cacheRetention ??
+          resolveProviderCacheRetention(params.providerId, params.runtime.promptCachingEnabled),
+        metadata: buildProviderRequestMetadata(params.providerId, params.sessionId),
+        toolChoice: options?.toolChoice ?? (effectiveContext.tools?.length ? "auto" : undefined),
+        reasoning: normalizeStreamReasoning(options?.reasoning) ?? fallbackReasoning,
+      };
+
+      streamOptions = finalizeProviderStreamOptions({
+        providerId: params.providerId,
+        baseUrl: params.runtime.baseUrl,
+        options: streamOptions,
+        context: effectiveContext,
+        model: streamModel,
+        workdir: params.workdir,
+        nativeWebSearch: params.nativeWebSearch,
+        debugLogger: params.debugLogger,
+        extra: {
+          round,
+          sessionId: params.sessionId,
+        },
+      });
+
+      const hostedSearchAggregator = createHostedSearchEventAggregator({
+        providerId: params.providerId,
+        onHostedSearch: (hostedSearch) => {
+          if (hostedSearch.status === "searching") {
+            nativeWebSearchStatusController.schedule();
+          } else {
+            nativeWebSearchStatusController.pause();
+          }
+          upsertHostedSearchBlockForRound(round, hostedSearch);
+          upsertHostedSearchOrderedBlockForRound(round, hostedSearch);
+          params.onHostedSearch?.(hostedSearch, round);
+        },
+      });
+      const hostedSearchProbe = startHostedSearchFetchProbe({
+        providerId: params.providerId,
+        sessionId: params.sessionId,
+        requestId: hostedSearchProbeId,
+        enabled: shouldProbeHostedSearch,
+        onRawEvent: hostedSearchAggregator.accept,
+      });
+      hostedSearchProbeByRound.set(round, {
+        finishProbe: hostedSearchProbe.finish,
+        completeAggregator: hostedSearchAggregator.complete,
+        failAggregator: hostedSearchAggregator.fail,
+        disposeAggregator: hostedSearchAggregator.dispose,
+      });
+
+      params.debugLogger?.logRequest(
+        buildStreamRequestDebugPayload({
+          runtime: params.runtime,
+          context: effectiveContext,
+          options: streamOptions,
+          round,
+        }),
+      );
+
+      return streamSimpleByApi(streamModel, effectiveContext, streamOptions);
     };
 
-    streamOptions = finalizeProviderStreamOptions({
-      providerId: params.providerId,
-      baseUrl: params.runtime.baseUrl,
-      options: streamOptions,
-      context: effectiveContext,
-      model: streamModel,
-      workdir: params.workdir,
-      nativeWebSearch: params.nativeWebSearch,
-      debugLogger: params.debugLogger,
-      extra: {
-        round,
-        sessionId: params.sessionId,
+    agent = new Agent({
+      initialState: {
+        systemPrompt: buildSystemPrompt(currentSystemPrompt, toolsSuffix),
+        model,
+        thinkingLevel,
+        tools: agentTools,
+        messages: params.context.messages.slice(),
       },
-    });
-
-    const hostedSearchAggregator = createHostedSearchEventAggregator({
-      providerId: params.providerId,
-      onHostedSearch: (hostedSearch) => {
-        if (hostedSearch.status === "searching") {
-          nativeWebSearchStatusController.schedule();
-        } else {
-          nativeWebSearchStatusController.pause();
-        }
-        upsertHostedSearchBlockForRound(round, hostedSearch);
-        upsertHostedSearchOrderedBlockForRound(round, hostedSearch);
-        params.onHostedSearch?.(hostedSearch, round);
-      },
-    });
-    const hostedSearchProbe = startHostedSearchFetchProbe({
-      providerId: params.providerId,
       sessionId: params.sessionId,
-      requestId: hostedSearchProbeId,
-      enabled: shouldProbeHostedSearch,
-      onRawEvent: hostedSearchAggregator.accept,
-    });
-    hostedSearchProbeByRound.set(round, {
-      finishProbe: hostedSearchProbe.finish,
-      completeAggregator: hostedSearchAggregator.complete,
-      failAggregator: hostedSearchAggregator.fail,
-      disposeAggregator: hostedSearchAggregator.dispose,
-    });
-
-    params.debugLogger?.logRequest(
-      buildStreamRequestDebugPayload({
-        runtime: params.runtime,
-        context: effectiveContext,
-        options: streamOptions,
-        round,
+      streamFn,
+      toolExecution: "sequential",
+      afterToolCall: async ({ toolCall }) => ({
+        isError: toolResultErrorFlags.get(toolCall.id) ?? false,
       }),
-    );
-
-    return streamSimpleByApi(streamModel, effectiveContext, streamOptions);
-  };
-
-  agent = new Agent({
-    initialState: {
-      systemPrompt: buildSystemPrompt(currentSystemPrompt, toolsSuffix),
-      model,
-      thinkingLevel,
-      tools: agentTools,
-      messages: params.context.messages.slice(),
-    },
-    sessionId: params.sessionId,
-    streamFn,
-    toolExecution: "sequential",
-    afterToolCall: async ({ toolCall }) => ({
-      isError: toolResultErrorFlags.get(toolCall.id) ?? false,
-    }),
-    beforeToolCall: async ({ assistantMessage, toolCall }) => {
-      toolCallsById.set(toolCall.id, toolCall);
-      if (toolCall.name !== "Agent") {
-        return undefined;
-      }
-      const group = findConsecutiveToolGroup(
-        assistantMessage,
-        toolCall.id,
-        toolCall.name,
-      );
-      if (!group || group.length <= 1) return undefined;
-
-      const batchKey = buildParallelToolBatchKey(group);
-      if (!parallelToolBatches.has(batchKey)) {
-        parallelToolBatches.set(batchKey, {
-          toolName: toolCall.name,
-          toolCalls: group,
-          started: false,
-          announced: false,
-          resultPromises: new Map(),
-        });
-      }
-      for (const call of group) {
-        parallelBatchKeyByToolCallId.set(call.id, batchKey);
-      }
-      return undefined;
-    },
-    transformContext: async (_messages, _signal) => {
-      const override = await consumePendingTurnOverride();
-      if (override) {
-        applyTurnContextOverride(override);
-      }
-      return getAgentMessages(agent).slice();
-    },
-  });
-
-  const textReconciler = createStreamingTextReconciler();
-
-  const unsubscribe = agent.subscribe((event) => {
-    switch (event.type) {
-      case "turn_start":
-        currentRound += 1;
-        params.onTurnStart?.(currentRound);
-        params.onToolStatus?.(`第 ${currentRound} 轮：模型生成中...`);
-        break;
-      case "message_update": {
-        const streamEvent = event.assistantMessageEvent;
-        if (streamEvent.type === "text_delta") {
-          nativeWebSearchStatusController.noteVisibleActivity();
-          const delta = textReconciler.appendDelta(
-            `${currentRound}:${streamEvent.contentIndex}`,
-            streamEvent.delta,
-          );
-          if (delta) {
-            appendHostedSearchOrderedTextForRound(currentRound, delta);
-            params.onTextDelta(delta, currentRound);
-          }
-        } else if (streamEvent.type === "text_end") {
-          const delta = textReconciler.reconcileFinalText(
-            `${currentRound}:${streamEvent.contentIndex}`,
-            streamEvent.content,
-          );
-          nativeWebSearchStatusController.pause();
-          if (delta) {
-            appendHostedSearchOrderedTextForRound(currentRound, delta);
-            params.onTextDelta(delta, currentRound);
-          }
-        } else if (streamEvent.type === "thinking_delta") {
-          nativeWebSearchStatusController.noteVisibleActivity();
-          params.onThinkingDelta?.(streamEvent.delta, currentRound);
-        } else if (streamEvent.type === "thinking_end") {
-          nativeWebSearchStatusController.pause();
-        } else if (streamEvent.type === "toolcall_start") {
-          nativeWebSearchStatusController.pause();
-          const block = streamEvent.partial.content[streamEvent.contentIndex];
-          if (block && block.type === "toolCall") {
-            toolCallsById.set(block.id, block);
-            params.onToolCall?.(block, currentRound);
-          }
-        } else if (streamEvent.type === "toolcall_end") {
-          nativeWebSearchStatusController.pause();
-          toolCallsById.set(streamEvent.toolCall.id, streamEvent.toolCall);
-          params.onToolCall?.(streamEvent.toolCall, currentRound);
+      beforeToolCall: async ({ assistantMessage, toolCall }) => {
+        toolCallsById.set(toolCall.id, toolCall);
+        if (toolCall.name !== "Agent") {
+          return undefined;
         }
-        break;
-      }
-      case "message_end":
-        if (event.message.role === "assistant") {
-          const hostedSearchFinishMode =
-            event.message.stopReason === "aborted"
-              ? "dispose"
-              : event.message.stopReason === "error"
-                ? "failed"
-                : "completed";
-          const hostedSearchBlocks = getHostedSearchBlocksForRound(currentRound);
-          const assistantWithHostedSearch = applyHostedSearchBlocksToAssistant(
-            event.message as AssistantMessage,
-            currentRound,
-            hostedSearchBlocks,
-          );
-          const normalizedSeedTurn = recoverAssistantSeedToolCalls(assistantWithHostedSearch);
-          const assistantMessage = normalizedSeedTurn?.assistant ?? assistantWithHostedSearch;
-          if (normalizedSeedTurn || assistantWithHostedSearch !== event.message) {
-            const stateMessages = getAgentMessages(agent);
-            if (stateMessages.length > 0) {
-              agent.state.messages = [...stateMessages.slice(0, -1), assistantMessage];
+        const group = findConsecutiveToolGroup(assistantMessage, toolCall.id, toolCall.name);
+        if (!group || group.length <= 1) return undefined;
+
+        const batchKey = buildParallelToolBatchKey(group);
+        if (!parallelToolBatches.has(batchKey)) {
+          parallelToolBatches.set(batchKey, {
+            toolName: toolCall.name,
+            toolCalls: group,
+            started: false,
+            announced: false,
+            resultPromises: new Map(),
+          });
+        }
+        for (const call of group) {
+          parallelBatchKeyByToolCallId.set(call.id, batchKey);
+        }
+        return undefined;
+      },
+      transformContext: async (_messages, _signal) => {
+        const override = await consumePendingTurnOverride();
+        if (override) {
+          applyTurnContextOverride(override);
+        }
+        return getAgentMessages(agent).slice();
+      },
+    });
+
+    const textReconciler = createStreamingTextReconciler();
+
+    const unsubscribe = agent.subscribe((event) => {
+      switch (event.type) {
+        case "turn_start":
+          currentRound += 1;
+          params.onTurnStart?.(currentRound);
+          params.onToolStatus?.(`第 ${currentRound} 轮：模型生成中...`);
+          break;
+        case "message_update": {
+          const streamEvent = event.assistantMessageEvent;
+          if (streamEvent.type === "text_delta") {
+            nativeWebSearchStatusController.noteVisibleActivity();
+            const delta = textReconciler.appendDelta(
+              `${currentRound}:${streamEvent.contentIndex}`,
+              streamEvent.delta,
+            );
+            if (delta) {
+              appendHostedSearchOrderedTextForRound(currentRound, delta);
+              params.onTextDelta(delta, currentRound);
             }
+          } else if (streamEvent.type === "text_end") {
+            const delta = textReconciler.reconcileFinalText(
+              `${currentRound}:${streamEvent.contentIndex}`,
+              streamEvent.content,
+            );
+            nativeWebSearchStatusController.pause();
+            if (delta) {
+              appendHostedSearchOrderedTextForRound(currentRound, delta);
+              params.onTextDelta(delta, currentRound);
+            }
+          } else if (streamEvent.type === "thinking_delta") {
+            nativeWebSearchStatusController.noteVisibleActivity();
+            params.onThinkingDelta?.(streamEvent.delta, currentRound);
+          } else if (streamEvent.type === "thinking_end") {
+            nativeWebSearchStatusController.pause();
+          } else if (streamEvent.type === "toolcall_start") {
+            nativeWebSearchStatusController.pause();
+            const block = streamEvent.partial.content[streamEvent.contentIndex];
+            if (block && block.type === "toolCall") {
+              toolCallsById.set(block.id, block);
+              params.onToolCall?.(block, currentRound);
+            }
+          } else if (streamEvent.type === "toolcall_end") {
+            nativeWebSearchStatusController.pause();
+            toolCallsById.set(streamEvent.toolCall.id, streamEvent.toolCall);
+            params.onToolCall?.(streamEvent.toolCall, currentRound);
           }
-          if (normalizedSeedTurn && normalizedSeedTurn.toolCalls.length > 0) {
-            pendingRecoveredSeedTurnRef.current = {
+          break;
+        }
+        case "message_end":
+          if (event.message.role === "assistant") {
+            const hostedSearchFinishMode =
+              event.message.stopReason === "aborted"
+                ? "dispose"
+                : event.message.stopReason === "error"
+                  ? "failed"
+                  : "completed";
+            const hostedSearchBlocks = getHostedSearchBlocksForRound(currentRound);
+            const assistantWithHostedSearch = applyHostedSearchBlocksToAssistant(
+              event.message as AssistantMessage,
+              currentRound,
+              hostedSearchBlocks,
+            );
+            const normalizedSeedTurn = recoverAssistantSeedToolCalls(assistantWithHostedSearch);
+            const assistantMessage = normalizedSeedTurn?.assistant ?? assistantWithHostedSearch;
+            if (normalizedSeedTurn || assistantWithHostedSearch !== event.message) {
+              const stateMessages = getAgentMessages(agent);
+              if (stateMessages.length > 0) {
+                agent.state.messages = [...stateMessages.slice(0, -1), assistantMessage];
+              }
+            }
+            if (normalizedSeedTurn && normalizedSeedTurn.toolCalls.length > 0) {
+              pendingRecoveredSeedTurnRef.current = {
+                round: currentRound,
+                assistant: assistantMessage,
+                toolCalls: normalizedSeedTurn.toolCalls,
+              };
+              params.debugLogger?.logResponse({
+                type: "seed_tool_call_recovery",
+                round: currentRound,
+                toolCalls: normalizedSeedTurn.toolCalls,
+              });
+            }
+            queueHostedSearchFinalization(currentRound, hostedSearchFinishMode, {
+              current: assistantMessage,
+            });
+            params.debugLogger?.logResult({
               round: currentRound,
               assistant: assistantMessage,
-              toolCalls: normalizedSeedTurn.toolCalls,
+            });
+            const toolCallCount = getAssistantToolCalls(assistantMessage).length;
+            if (toolCallCount > 0) {
+              nativeWebSearchStatusController.pause();
+              params.onToolStatus?.(`第 ${currentRound} 轮：准备执行 ${toolCallCount} 个工具...`);
+            }
+            params.onAssistantMessage?.(assistantMessage, currentRound);
+          } else if (event.message.role === "toolResult") {
+            const toolCall =
+              toolCallsById.get(event.message.toolCallId) ??
+              toSyntheticToolCall({
+                id: event.message.toolCallId,
+                name: event.message.toolName,
+              });
+            params.onToolResult?.(toolCall, event.message, currentRound);
+          }
+          break;
+        case "turn_end": {
+          const toolResults = event.toolResults.filter(
+            (message): message is ToolResultMessage => message.role === "toolResult",
+          );
+          if (
+            params.onBeforeNextTurn &&
+            event.message.role === "assistant" &&
+            event.message.stopReason === "toolUse" &&
+            toolResults.length > 0
+          ) {
+            const runtimeMessages = getAgentMessages(agent);
+            const runtimeSnapshot: Context = {
+              systemPrompt: currentSystemPrompt,
+              messages: runtimeMessages.slice(),
+              tools: llmTools,
             };
-            params.debugLogger?.logResponse({
-              type: "seed_tool_call_recovery",
+            const emittedSnapshot = getMessagesSinceBaseline(agent, emittedBaselineIndex);
+            const assistant = event.message;
+            pendingTurnOverridePromise = params.onBeforeNextTurn({
               round: currentRound,
-              toolCalls: normalizedSeedTurn.toolCalls,
+              assistant,
+              toolResults,
+              runtimeContext: runtimeSnapshot,
+              emittedMessages: emittedSnapshot,
+              signal: params.signal,
             });
           }
-          queueHostedSearchFinalization(currentRound, hostedSearchFinishMode, {
-            current: assistantMessage,
-          });
-          params.debugLogger?.logResult({
-            round: currentRound,
-            assistant: assistantMessage,
-          });
-          const toolCallCount = getAssistantToolCalls(assistantMessage).length;
-          if (toolCallCount > 0) {
-            nativeWebSearchStatusController.pause();
-            params.onToolStatus?.(`第 ${currentRound} 轮：准备执行 ${toolCallCount} 个工具...`);
-          }
-          params.onAssistantMessage?.(assistantMessage, currentRound);
-        } else if (event.message.role === "toolResult") {
+          break;
+        }
+        case "tool_execution_start": {
+          nativeWebSearchStatusController.pause();
           const toolCall =
-            toolCallsById.get(event.message.toolCallId) ??
+            toolCallsById.get(event.toolCallId) ??
             toSyntheticToolCall({
-              id: event.message.toolCallId,
-              name: event.message.toolName,
+              id: event.toolCallId,
+              name: event.toolName,
+              arguments: event.args ?? {},
             });
-          params.onToolResult?.(toolCall, event.message, currentRound);
+          toolCallsById.set(toolCall.id, toolCall);
+          const parallelBatch = getParallelToolBatch(
+            toolCall.id,
+            parallelBatchKeyByToolCallId,
+            parallelToolBatches,
+          );
+          if (parallelBatch && parallelBatch.toolCalls.length > 1) {
+            params.onToolStatus?.(getParallelToolBatchStatus(parallelBatch));
+          } else {
+            params.onToolStatus?.(`正在执行：${summarizeToolCall(toolCall)}`);
+          }
+          params.onToolExecutionStart?.(toolCall, currentRound);
+          break;
         }
-        break;
-      case "turn_end": {
-        const toolResults = event.toolResults.filter(
-          (message): message is ToolResultMessage => message.role === "toolResult",
-        );
-        if (
-          params.onBeforeNextTurn &&
-          event.message.role === "assistant" &&
-          event.message.stopReason === "toolUse" &&
-          toolResults.length > 0
-        ) {
-          const runtimeMessages = getAgentMessages(agent);
-          const runtimeSnapshot: Context = {
-            systemPrompt: currentSystemPrompt,
-            messages: runtimeMessages.slice(),
-            tools: llmTools,
-          };
-          const emittedSnapshot = getMessagesSinceBaseline(agent, emittedBaselineIndex);
-          const assistant = event.message;
-          pendingTurnOverridePromise = params.onBeforeNextTurn({
-            round: currentRound,
-            assistant,
-            toolResults,
-            runtimeContext: runtimeSnapshot,
-            emittedMessages: emittedSnapshot,
-            signal: params.signal,
-          });
-        }
-        break;
+        case "agent_end":
+          latestAgentEndMessages = event.messages as Message[];
+          {
+            const assistant = findLastAssistantMessage(latestAgentEndMessages);
+            const hostedSearchFinishMode =
+              assistant?.stopReason === "aborted"
+                ? "dispose"
+                : assistant?.stopReason === "error"
+                  ? "failed"
+                  : "completed";
+            queueAllHostedSearchFinalizations(hostedSearchFinishMode);
+          }
+          nativeWebSearchStatusController.finish();
+          params.onToolStatus?.(null);
+          break;
       }
-      case "tool_execution_start": {
-        nativeWebSearchStatusController.pause();
-        const toolCall =
-          toolCallsById.get(event.toolCallId) ??
-          toSyntheticToolCall({
-            id: event.toolCallId,
-            name: event.toolName,
-            arguments: event.args ?? {},
-          });
-        toolCallsById.set(toolCall.id, toolCall);
-        const parallelBatch = getParallelToolBatch(
-          toolCall.id,
-          parallelBatchKeyByToolCallId,
-          parallelToolBatches,
-        );
-        if (parallelBatch && parallelBatch.toolCalls.length > 1) {
-          params.onToolStatus?.(getParallelToolBatchStatus(parallelBatch));
-        } else {
-          params.onToolStatus?.(`正在执行：${summarizeToolCall(toolCall)}`);
-        }
-        params.onToolExecutionStart?.(toolCall, currentRound);
-        break;
-      }
-      case "agent_end":
-        latestAgentEndMessages = event.messages as Message[];
-        {
-          const assistant = findLastAssistantMessage(latestAgentEndMessages);
-          const hostedSearchFinishMode =
-            assistant?.stopReason === "aborted"
-              ? "dispose"
-              : assistant?.stopReason === "error"
-                ? "failed"
-                : "completed";
-          queueAllHostedSearchFinalizations(hostedSearchFinishMode);
-        }
-        nativeWebSearchStatusController.finish();
-        params.onToolStatus?.(null);
-        break;
-    }
-  });
+    });
 
-  let abortListener: (() => void) | undefined;
-  if (params.signal) {
-    const onAbort = () => agent.abort();
-    params.signal.addEventListener("abort", onAbort, { once: true });
-    abortListener = () => params.signal?.removeEventListener("abort", onAbort);
-  }
+    let abortListener: (() => void) | undefined;
+    if (params.signal) {
+      const onAbort = () => agent.abort();
+      params.signal.addEventListener("abort", onAbort, { once: true });
+      abortListener = () => params.signal?.removeEventListener("abort", onAbort);
+    }
 
     try {
       let recoveredSeedTurnCount = 0;

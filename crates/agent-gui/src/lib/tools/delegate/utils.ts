@@ -83,9 +83,7 @@ export async function runWithConcurrency<T, R>(
   }
 
   await Promise.all(
-    new Array(Math.min(items.length, Math.max(1, concurrency)))
-      .fill(0)
-      .map(() => runLoop()),
+    new Array(Math.min(items.length, Math.max(1, concurrency))).fill(0).map(() => runLoop()),
   );
   return results;
 }

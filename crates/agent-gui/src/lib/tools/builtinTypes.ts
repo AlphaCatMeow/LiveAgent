@@ -49,9 +49,14 @@ export type BuiltinToolBundle<TExtra extends object = {}> = TExtra & {
 };
 
 export function createBuiltinMetadataMap(
-  entries: Array<[toolName: string, metadata: Omit<BuiltinToolMetadata, "groupId"> & {
-    groupId: BuiltinToolGroupId;
-  }]>,
+  entries: Array<
+    [
+      toolName: string,
+      metadata: Omit<BuiltinToolMetadata, "groupId"> & {
+        groupId: BuiltinToolGroupId;
+      },
+    ]
+  >,
 ) {
   return new Map<string, BuiltinToolMetadata>(entries);
 }

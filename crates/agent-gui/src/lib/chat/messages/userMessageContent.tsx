@@ -1,9 +1,9 @@
 import { File, Folder } from "../../../components/icons";
 
 import {
-  parsePastedTextDisplayReferences,
-  type PendingUploadedFile,
   type PastedTextDisplayReference,
+  type PendingUploadedFile,
+  parsePastedTextDisplayReferences,
 } from "./uploadedFiles";
 
 export function isMentionToken(token: string) {
@@ -30,16 +30,16 @@ function isSkillMentionName(value: string) {
 
 function isCommonSkillMentionEnvVar(name: string) {
   const upper = name.toUpperCase();
-  return COMMON_SKILL_MENTION_ENV_VARS.has(upper) ||
-    (upper.endsWith(":") && COMMON_SKILL_MENTION_ENV_VARS.has(upper.slice(0, -1)));
+  return (
+    COMMON_SKILL_MENTION_ENV_VARS.has(upper) ||
+    (upper.endsWith(":") && COMMON_SKILL_MENTION_ENV_VARS.has(upper.slice(0, -1)))
+  );
 }
 
 export function isSkillMentionToken(token: string) {
   if (!token.startsWith("$")) return false;
   const name = token.slice(1);
-  return Boolean(name) &&
-    isSkillMentionName(name) &&
-    !isCommonSkillMentionEnvVar(name);
+  return Boolean(name) && isSkillMentionName(name) && !isCommonSkillMentionEnvVar(name);
 }
 
 type UserMessageSegment =
@@ -62,10 +62,7 @@ function pushTextSegment(segments: UserMessageSegment[], value: string) {
   segments.push({ type: "text", value });
 }
 
-function appendSegments(
-  segments: UserMessageSegment[],
-  incoming: UserMessageSegment[],
-) {
+function appendSegments(segments: UserMessageSegment[], incoming: UserMessageSegment[]) {
   for (const segment of incoming) {
     if (segment.type === "text") {
       pushTextSegment(segments, segment.value);
@@ -81,13 +78,8 @@ function unescapeMarkdown(value: string) {
 
 function normalizeMarkdownDestination(value: string) {
   const trimmed = value.trim();
-  const inner =
-    trimmed.startsWith("<") && trimmed.endsWith(">")
-      ? trimmed.slice(1, -1)
-      : trimmed;
-  return unescapeMarkdown(inner)
-    .replace(/%3C/gi, "<")
-    .replace(/%3E/gi, ">");
+  const inner = trimmed.startsWith("<") && trimmed.endsWith(">") ? trimmed.slice(1, -1) : trimmed;
+  return unescapeMarkdown(inner).replace(/%3C/gi, "<").replace(/%3E/gi, ">");
 }
 
 function normalizeReferencePath(value: string) {
@@ -263,13 +255,7 @@ function PastedTextChip({
   );
 }
 
-function MentionChip({
-  path,
-  isDir,
-}: {
-  path: string;
-  isDir: boolean;
-}) {
+function MentionChip({ path, isDir }: { path: string; isDir: boolean }) {
   const fileName = path.split("/").pop() || path;
   return (
     <span
@@ -310,7 +296,9 @@ export function UserMessageContent({
   pastedTextFiles?: PendingUploadedFile[];
 }) {
   const parts = tokenizeUserMessage(text, pastedTextFiles);
-  const hasChip = parts.some((part) => part.type === "mention" || part.type === "skill" || part.type === "pastedText");
+  const hasChip = parts.some(
+    (part) => part.type === "mention" || part.type === "skill" || part.type === "pastedText",
+  );
   if (!hasChip) return <>{text}</>;
 
   return (
@@ -323,13 +311,7 @@ export function UserMessageContent({
           return <SkillMentionChip key={idx} name={part.name} />;
         }
         if (part.type === "pastedText") {
-          return (
-            <PastedTextChip
-              key={idx}
-              reference={part.reference}
-              file={part.file}
-            />
-          );
+          return <PastedTextChip key={idx} reference={part.reference} file={part.file} />;
         }
         return <span key={idx}>{part.value}</span>;
       })}

@@ -12,11 +12,11 @@ import {
 
 import { Button } from "../../components/ui/button";
 import { useLocale } from "../../i18n";
-import { isAgentExecutionMode, updateCronTasks } from "../../lib/settings";
 import { buildModelOptions } from "../../lib/chat/page/chatPageHelpers";
-import { AgentActivationSwitch, ConfirmDeletePopover } from "./shared";
-import { CronTaskModal, type CronTask, type CronTaskType } from "./CronTaskModal";
+import { isAgentExecutionMode, updateCronTasks } from "../../lib/settings";
+import { type CronTask, CronTaskModal, type CronTaskType } from "./CronTaskModal";
 import { CronTaskViewModal } from "./CronTaskViewModal";
+import { AgentActivationSwitch, ConfirmDeletePopover } from "./shared";
 import type { SettingsSectionProps } from "./types";
 
 const TASK_TYPE_ICON: Record<CronTaskType, typeof Terminal> = {
@@ -93,7 +93,12 @@ export function CronSection(props: SettingsSectionProps) {
   }
 
   function handleDelete(id: string) {
-    setSettings((prev) => updateCronTasks(prev, prev.cron.filter((task) => task.id !== id)));
+    setSettings((prev) =>
+      updateCronTasks(
+        prev,
+        prev.cron.filter((task) => task.id !== id),
+      ),
+    );
   }
 
   function handleToggle(id: string) {
@@ -101,9 +106,7 @@ export function CronSection(props: SettingsSectionProps) {
       updateCronTasks(
         prev,
         prev.cron.map((task) =>
-          task.id === id && !isCronTaskExhausted(task)
-            ? { ...task, enabled: !task.enabled }
-            : task,
+          task.id === id && !isCronTaskExhausted(task) ? { ...task, enabled: !task.enabled } : task,
         ),
       ),
     );
@@ -163,9 +166,7 @@ export function CronSection(props: SettingsSectionProps) {
           <p className="mt-3 text-sm font-medium text-muted-foreground">
             {t("settings.cronEmpty")}
           </p>
-          <p className="mt-1 text-xs text-muted-foreground/70">
-            {t("settings.cronEmptyDesc")}
-          </p>
+          <p className="mt-1 text-xs text-muted-foreground/70">{t("settings.cronEmptyDesc")}</p>
         </div>
       ) : (
         <div className="space-y-2">
@@ -190,7 +191,9 @@ export function CronSection(props: SettingsSectionProps) {
               >
                 <div className="flex items-center gap-3 px-4 py-3">
                   {/* Icon */}
-                  <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${tone.bg} ${tone.text}`}>
+                  <div
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${tone.bg} ${tone.text}`}
+                  >
                     <Icon className="h-4 w-4" />
                   </div>
 
@@ -200,7 +203,9 @@ export function CronSection(props: SettingsSectionProps) {
                       <span className="truncate text-sm font-medium text-foreground">
                         {task.name}
                       </span>
-                      <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium leading-none ${tone.bg} ${tone.text}`}>
+                      <span
+                        className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium leading-none ${tone.bg} ${tone.text}`}
+                      >
                         {t(tone.label)}
                       </span>
                     </div>
@@ -250,10 +255,7 @@ export function CronSection(props: SettingsSectionProps) {
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </button>
-                    <ConfirmDeletePopover
-                      name={task.name}
-                      onConfirm={() => handleDelete(task.id)}
-                    >
+                    <ConfirmDeletePopover name={task.name} onConfirm={() => handleDelete(task.id)}>
                       {(open) => (
                         <button
                           type="button"
@@ -297,10 +299,7 @@ export function CronSection(props: SettingsSectionProps) {
 
       {/* View Modal */}
       {modal.open && modal.mode === "view" ? (
-        <CronTaskViewModal
-          task={modal.task}
-          onClose={() => setModal({ open: false })}
-        />
+        <CronTaskViewModal task={modal.task} onClose={() => setModal({ open: false })} />
       ) : null}
     </div>
   );

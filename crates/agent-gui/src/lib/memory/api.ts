@@ -423,9 +423,7 @@ export async function memoryOrganizeRunRead(args: { runId: string }) {
 }
 
 export async function memoryOrganizeRunClearHistory() {
-  return invoke<MemoryOrganizeRunClearHistoryResponse>(
-    "memory_organize_run_clear_history",
-  );
+  return invoke<MemoryOrganizeRunClearHistoryResponse>("memory_organize_run_clear_history");
 }
 
 export async function memoryOrganizeDueClaim(args: {
@@ -439,7 +437,9 @@ export async function memoryOrganizeDueClaim(args: {
   return invoke<MemoryOrganizeDueClaimResponse>("memory_organize_due_claim", { args });
 }
 
-export async function memoryOrganizeDueComplete(args: Parameters<typeof memoryOrganizeRunUpdate>[0]) {
+export async function memoryOrganizeDueComplete(
+  args: Parameters<typeof memoryOrganizeRunUpdate>[0],
+) {
   return invoke<MemoryOrganizeRun | null>("memory_organize_due_complete", { args });
 }
 

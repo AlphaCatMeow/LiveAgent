@@ -6,9 +6,6 @@ import type {
   ToolResultMessage,
   UserMessage,
 } from "@mariozechner/pi-ai";
-
-import { runAssistantWithTools } from "../../lib/chat/runner/agentRunner";
-import { isAbortLikeError } from "../../lib/chat/page/chatPageHelpers";
 import {
   recordSilentMemoryDecision,
   recordSilentMemorySkip,
@@ -21,10 +18,10 @@ import {
   buildRecentRejectionsBlock,
   buildSilentMemoryExtractionPrompt,
   DEFAULT_MEMORY_REVIEWER_MODE,
+  type MemoryReviewerMode,
   SILENT_MEMORY_DONE_TEXT,
   SILENT_MEMORY_NOOP_TEXT,
   SILENT_MEMORY_SYSTEM_PROMPT,
-  type MemoryReviewerMode,
   type SilentMemoryCandidateEntry,
   type SilentMemoryRejectionEntry,
 } from "../../lib/chat/memory/memoryPolicy";
@@ -33,12 +30,14 @@ import {
   type SilentMemoryBlockPlanItem,
   type SilentMemoryParseResult,
 } from "../../lib/chat/memory/memoryProtocol";
+import { isAbortLikeError } from "../../lib/chat/page/chatPageHelpers";
+import { runAssistantWithTools } from "../../lib/chat/runner/agentRunner";
 import type { StreamDebugLogger } from "../../lib/debug/agentDebug";
 import {
+  type MemoryMeta,
   memoryList,
   memoryRecentRejections,
   memoryTodayLocalDate,
-  type MemoryMeta,
 } from "../../lib/memory/api";
 import type {
   CodexRequestFormat,
@@ -81,9 +80,7 @@ function toCandidateEntry(entry: MemoryMeta): SilentMemoryCandidateEntry {
   };
 }
 
-function collectCandidateEntries(
-  entries: readonly MemoryMeta[],
-): SilentMemoryCandidateEntry[] {
+function collectCandidateEntries(entries: readonly MemoryMeta[]): SilentMemoryCandidateEntry[] {
   const seen = new Set<string>();
   const all: SilentMemoryCandidateEntry[] = [];
   for (const entry of entries) {
@@ -104,11 +101,7 @@ export type SilentMemoryExtractionVisibleEvents = {
   onThinkingDelta?: (delta: string, round: number) => void;
   onToolCall?: (toolCall: ToolCall, round: number) => void;
   onToolExecutionStart?: (toolCall: ToolCall, round: number) => void;
-  onToolResult?: (
-    toolCall: ToolCall,
-    toolResult: ToolResultMessage,
-    round: number,
-  ) => void;
+  onToolResult?: (toolCall: ToolCall, toolResult: ToolResultMessage, round: number) => void;
   onAssistantMessage?: (assistant: AssistantMessage, round: number) => void;
   onToolStatus?: (status: string | null) => void;
 };
@@ -141,8 +134,8 @@ export type SilentMemoryExtractionBaseParams = {
   visibleEvents?: SilentMemoryExtractionVisibleEvents;
 };
 
-export type SilentMemoryExtractionParams =
-  SilentMemoryExtractionModelConfig & SilentMemoryExtractionBaseParams;
+export type SilentMemoryExtractionParams = SilentMemoryExtractionModelConfig &
+  SilentMemoryExtractionBaseParams;
 
 export type SilentMemoryExtractionResult = {
   ok: boolean;
@@ -196,8 +189,7 @@ function pruneSilentMemoryConversationState() {
   if (conversationIds.size <= SILENT_MEMORY_CONVERSATION_STATE_LIMIT) return;
 
   const sortedIds = Array.from(conversationIds).sort(
-    (a, b) =>
-      (silentMemoryLastRunAt.get(a) ?? 0) - (silentMemoryLastRunAt.get(b) ?? 0),
+    (a, b) => (silentMemoryLastRunAt.get(a) ?? 0) - (silentMemoryLastRunAt.get(b) ?? 0),
   );
   for (const conversationId of sortedIds.slice(
     0,
@@ -273,9 +265,7 @@ function extractLatestUserText(messages: readonly Message[]): string {
     if (typeof message.content === "string") return message.content;
     if (Array.isArray(message.content)) {
       const text = message.content
-        .map((part) =>
-          part && typeof part === "object" && part.type === "text" ? part.text : "",
-        )
+        .map((part) => (part && typeof part === "object" && part.type === "text" ? part.text : ""))
         .filter((segment): segment is string => typeof segment === "string")
         .join("\n");
       if (text.trim().length > 0) return text;
@@ -310,9 +300,7 @@ async function loadSilentMemoryCandidates(workdir: string) {
   }
 }
 
-async function loadSilentMemoryRejections(
-  workdir: string,
-): Promise<SilentMemoryRejectionEntry[]> {
+async function loadSilentMemoryRejections(workdir: string): Promise<SilentMemoryRejectionEntry[]> {
   try {
     const response = await memoryRecentRejections({
       sinceDays: 7,
@@ -696,10 +684,7 @@ export async function runSilentMemoryExtraction(
     systemPrompt: appendSystemPrompt(baseContext.systemPrompt, SILENT_MEMORY_SYSTEM_PROMPT),
     messages: [...baseContext.messages, hiddenPrompt],
   };
-  const timeoutSignal = createTimeoutSignal(
-    params.signal,
-    SILENT_MEMORY_EXTRACTION_TIMEOUT_MS,
-  );
+  const timeoutSignal = createTimeoutSignal(params.signal, SILENT_MEMORY_EXTRACTION_TIMEOUT_MS);
   const visibleEvents = params.visibleEvents;
   const mapRound = (round: number) => (visibleEvents?.roundOffset ?? 0) + round;
   const forwardedTurnRounds = new Set<number>();
@@ -724,8 +709,7 @@ export async function runSilentMemoryExtraction(
       // stream it to chat; after parsing, emit only block-4's concise status.
       onTextDelta: () => {},
       onThinkingDelta: () => {},
-      onToolCall: (toolCall, round) =>
-        visibleEvents?.onToolCall?.(toolCall, mapRound(round)),
+      onToolCall: (toolCall, round) => visibleEvents?.onToolCall?.(toolCall, mapRound(round)),
       onToolExecutionStart: (toolCall, round) =>
         visibleEvents?.onToolExecutionStart?.(toolCall, mapRound(round)),
       onToolResult: (toolCall, toolResult, round) => {
@@ -764,27 +748,19 @@ export async function runSilentMemoryExtraction(
       finalAssistantIndex >= 0
         ? (result.emittedMessages[finalAssistantIndex] as AssistantMessage)
         : undefined;
-    const finalAssistantText = extractFinalAssistantTextForProtocol(
-      result.emittedMessages,
-    );
+    const finalAssistantText = extractFinalAssistantTextForProtocol(result.emittedMessages);
     if (finalAssistantText) {
       const parseResult = parseSilentMemoryProtocol(finalAssistantText);
       recordSilentMemoryDecision(params.conversationId, parseResult);
       if (parseResult.parseFailed) {
-        console.warn(
-          "Silent memory four-block protocol parse failed:",
-          parseResult.reason,
-        );
+        console.warn("Silent memory four-block protocol parse failed:", parseResult.reason);
       }
       const statusAssistant = createSilentMemoryStatusAssistant({
         template: finalAssistant,
         model: params.model,
         text: statusTextForParseResult(parseResult, finalAssistantText),
       });
-      emittedMessages = replaceFinalAssistantWithStatus(
-        result.emittedMessages,
-        statusAssistant,
-      );
+      emittedMessages = replaceFinalAssistantWithStatus(result.emittedMessages, statusAssistant);
       emitSilentMemoryStatus({
         visibleEvents,
         statusAssistant,
@@ -826,8 +802,7 @@ export async function runSilentMemoryExtraction(
       ok: false,
       emittedMessages: [] as Message[],
       aborted:
-        params.signal?.aborted === true ||
-        (!timeoutSignal.timedOut() && isAbortLikeError(error)),
+        params.signal?.aborted === true || (!timeoutSignal.timedOut() && isAbortLikeError(error)),
     };
   } finally {
     timeoutSignal.cleanup();

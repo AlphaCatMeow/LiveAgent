@@ -1,5 +1,3 @@
-import { invoke } from "@tauri-apps/api/core";
-
 import type {
   ImageContent,
   TextContent,
@@ -7,12 +5,10 @@ import type {
   ToolCall,
   ToolResultMessage,
 } from "@mariozechner/pi-ai";
+import { invoke } from "@tauri-apps/api/core";
 
 import type { McpServerConfig } from "../settings";
-import {
-  createBuiltinMetadataMap,
-  type BuiltinToolBundle,
-} from "./builtinTypes";
+import { type BuiltinToolBundle, createBuiltinMetadataMap } from "./builtinTypes";
 
 type McpToolInfo = {
   serverId: string;
@@ -82,10 +78,12 @@ export async function createMcpTools(params: {
   servers: McpServerConfig[];
   onLoadError?: (message: string) => void;
   loadFailureMode?: "continue" | "throw";
-}): Promise<BuiltinToolBundle<{
-  /** Maps the safe tool name (used by LLM) to the underlying MCP server/tool. */
-  toolNameMap: Map<string, { serverId: string; toolName: string; serverLabel: string }>;
-}>> {
+}): Promise<
+  BuiltinToolBundle<{
+    /** Maps the safe tool name (used by LLM) to the underlying MCP server/tool. */
+    toolNameMap: Map<string, { serverId: string; toolName: string; serverLabel: string }>;
+  }>
+> {
   const servers = params.servers ?? [];
   const enabledServers = servers.filter((s) => s.enabled);
 
@@ -164,7 +162,10 @@ export async function createMcpTools(params: {
     console.warn("[MCP] tools list failed, continuing without MCP tools", err);
   }
 
-  const toolNameMap = new Map<string, { serverId: string; toolName: string; serverLabel: string }>();
+  const toolNameMap = new Map<
+    string,
+    { serverId: string; toolName: string; serverLabel: string }
+  >();
   const tools: Tool[] = [];
   const metadataEntries: Array<
     [

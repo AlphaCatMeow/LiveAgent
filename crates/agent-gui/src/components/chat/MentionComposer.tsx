@@ -1,8 +1,10 @@
-import { fileIconSvg, folderIconSvg } from "../icons";
-import { getFileTypeIcon } from "./fileTypeIcons";
+import { invoke } from "@tauri-apps/api/core";
 import {
+  type ClipboardEvent,
   forwardRef,
+  type KeyboardEvent,
   memo,
+  type RefObject,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -10,13 +12,11 @@ import {
   useMemo,
   useRef,
   useState,
-  type ClipboardEvent,
-  type KeyboardEvent,
-  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
-import { invoke } from "@tauri-apps/api/core";
 import { cn } from "../../lib/shared/utils";
+import { fileIconSvg, folderIconSvg } from "../icons";
+import { getFileTypeIcon } from "./fileTypeIcons";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -178,7 +178,10 @@ function serializeChildrenToSegments(
       const mentionPath = el.getAttribute(MENTION_TAG_ATTR);
       if (mentionPath) {
         const kind = el.getAttribute(MENTION_KIND_ATTR);
-        pushTextSegment(parts, formatMentionReference(mentionPath, kind === "dir" ? "dir" : "file"));
+        pushTextSegment(
+          parts,
+          formatMentionReference(mentionPath, kind === "dir" ? "dir" : "file"),
+        );
       } else if (el.hasAttribute(SKILL_MENTION_NAME_ATTR)) {
         const name = el.getAttribute(SKILL_MENTION_NAME_ATTR)?.trim() ?? "";
         const skillFile = el.getAttribute(SKILL_MENTION_FILE_ATTR)?.trim() ?? "";
@@ -355,9 +358,7 @@ function isActiveImeKeyboardEvent(event: KeyboardEvent<HTMLDivElement>) {
 function isEnterKeyboardEvent(event: KeyboardEvent<HTMLDivElement>) {
   const nativeEvent = event.nativeEvent as globalThis.KeyboardEvent;
   return (
-    event.key === "Enter" ||
-    nativeEvent.code === "Enter" ||
-    nativeEvent.code === "NumpadEnter"
+    event.key === "Enter" || nativeEvent.code === "Enter" || nativeEvent.code === "NumpadEnter"
   );
 }
 
@@ -685,7 +686,8 @@ function chipBeforeCursor(root: HTMLElement): HTMLElement | null {
         el.hasAttribute(MENTION_TAG_ATTR) ||
         el.hasAttribute(SKILL_MENTION_NAME_ATTR) ||
         el.hasAttribute(LARGE_PASTE_TAG_ATTR)
-      ) return el;
+      )
+        return el;
     }
   }
 
@@ -700,7 +702,8 @@ function chipBeforeCursor(root: HTMLElement): HTMLElement | null {
         ce.hasAttribute(MENTION_TAG_ATTR) ||
         ce.hasAttribute(SKILL_MENTION_NAME_ATTR) ||
         ce.hasAttribute(LARGE_PASTE_TAG_ATTR)
-      ) return ce;
+      )
+        return ce;
     }
   }
 
@@ -778,9 +781,7 @@ function Popup({
         {isLoading && (
           <div className="px-3 py-2 text-xs text-muted-foreground">Indexing files...</div>
         )}
-        {error && !isLoading && (
-          <div className="px-3 py-2 text-xs text-destructive">{error}</div>
-        )}
+        {error && !isLoading && <div className="px-3 py-2 text-xs text-destructive">{error}</div>}
         {suggestions.map((suggestion, i) => {
           const isSkill = suggestion.type === "skill";
           const entry = suggestion.type === "file" ? suggestion.entry : null;
@@ -794,7 +795,9 @@ function Popup({
           const subtitle = skill?.description ?? (dirPath ? `${dirPath}/` : "");
           return (
             <div
-              key={entry ? `${entry.kind}:${entry.path}` : `skill:${skill?.skillFile ?? skill?.name}`}
+              key={
+                entry ? `${entry.kind}:${entry.path}` : `skill:${skill?.skillFile ?? skill?.name}`
+              }
               ref={i === highlightIndex ? hlRef : undefined}
               className={cn(
                 "mention-popup-item group mx-1.5 flex cursor-pointer items-center gap-2.5 rounded-xl px-2.5 py-1.5 text-sm transition-all",
@@ -813,11 +816,15 @@ function Popup({
                   isSkill
                     ? "bg-violet-500/10 text-violet-700 dark:bg-violet-400/15 dark:text-violet-300"
                     : isDir
-                    ? "bg-amber-500/10 dark:bg-amber-400/15"
-                    : "bg-foreground/[0.04] dark:bg-white/[0.05]",
+                      ? "bg-amber-500/10 dark:bg-amber-400/15"
+                      : "bg-foreground/[0.04] dark:bg-white/[0.05]",
                 )}
               >
-                {Icon ? <Icon width={14} height={14} /> : <span className="text-[12px] font-semibold">$</span>}
+                {Icon ? (
+                  <Icon width={14} height={14} />
+                ) : (
+                  <span className="text-[12px] font-semibold">$</span>
+                )}
               </span>
               <span className="min-w-0 flex-1 truncate">
                 <span className="font-medium tracking-tight text-foreground/95">{title}</span>
@@ -829,10 +836,12 @@ function Popup({
                 <span className="shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground/60">
                   skill
                 </span>
-              ) : isDir && (
-                <span className="shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground/60">
-                  dir
-                </span>
+              ) : (
+                isDir && (
+                  <span className="shrink-0 text-[10px] uppercase tracking-wider text-muted-foreground/60">
+                    dir
+                  </span>
+                )
               )}
             </div>
           );
@@ -850,656 +859,661 @@ function Popup({
 /*  MentionComposer                                                    */
 /* ------------------------------------------------------------------ */
 
-export const MentionComposer = memo(forwardRef<MentionComposerHandle, MentionComposerProps>(function MentionComposer({
-  onSend,
-  onEmptyChange,
-  onBusyChange,
-  onPasteFiles,
-  disabled = false,
-  placeholder = "",
-  workdir,
-  enabledSkills = [],
-  className,
-}: MentionComposerProps, ref) {
-  const editorRef = useRef<HTMLDivElement>(null);
-  const wrapperRef = useRef<HTMLDivElement>(null);
-  const [isEmpty, setIsEmpty] = useState(true);
-  const lastIsEmptyRef = useRef(true);
-  const isComposingRef = useRef(false);
-  const compositionEnterKeyRef = useRef(false);
-  const lastCompositionEndAtRef = useRef(0);
-  const imeEnterSuppressUntilRef = useRef(0);
-  const busyReleaseTimerRef = useRef<number | null>(null);
-  const isBusyRef = useRef(false);
-  const largePastesRef = useRef(new Map<string, MentionComposerLargePaste>());
-  const largePasteCounterRef = useRef(0);
+export const MentionComposer = memo(
+  forwardRef<MentionComposerHandle, MentionComposerProps>(function MentionComposer(
+    {
+      onSend,
+      onEmptyChange,
+      onBusyChange,
+      onPasteFiles,
+      disabled = false,
+      placeholder = "",
+      workdir,
+      enabledSkills = [],
+      className,
+    }: MentionComposerProps,
+    ref,
+  ) {
+    const editorRef = useRef<HTMLDivElement>(null);
+    const wrapperRef = useRef<HTMLDivElement>(null);
+    const [isEmpty, setIsEmpty] = useState(true);
+    const lastIsEmptyRef = useRef(true);
+    const isComposingRef = useRef(false);
+    const compositionEnterKeyRef = useRef(false);
+    const lastCompositionEndAtRef = useRef(0);
+    const imeEnterSuppressUntilRef = useRef(0);
+    const busyReleaseTimerRef = useRef<number | null>(null);
+    const isBusyRef = useRef(false);
+    const largePastesRef = useRef(new Map<string, MentionComposerLargePaste>());
+    const largePasteCounterRef = useRef(0);
 
-  const setBusy = useCallback(
-    (nextBusy: boolean) => {
-      if (isBusyRef.current === nextBusy) return;
-      isBusyRef.current = nextBusy;
-      onBusyChange?.(nextBusy);
-    },
-    [onBusyChange],
-  );
+    const setBusy = useCallback(
+      (nextBusy: boolean) => {
+        if (isBusyRef.current === nextBusy) return;
+        isBusyRef.current = nextBusy;
+        onBusyChange?.(nextBusy);
+      },
+      [onBusyChange],
+    );
 
-  const scheduleBusyRelease = useCallback(() => {
-    if (busyReleaseTimerRef.current !== null) {
-      window.clearTimeout(busyReleaseTimerRef.current);
-    }
-    busyReleaseTimerRef.current = window.setTimeout(() => {
-      busyReleaseTimerRef.current = null;
-      setBusy(false);
-    }, 140);
-  }, [setBusy]);
-
-  // ---- File list ----
-  const normalizedWorkdir = workdir.trim();
-  const [mentionSessionEntries, setMentionSessionEntries] = useState<MentionFileEntry[]>([]);
-  const [mentionSessionLoading, setMentionSessionLoading] = useState(false);
-  const [mentionSessionError, setMentionSessionError] = useState<string | null>(null);
-  const mentionSessionRequestSeqRef = useRef(0);
-  const mentionActiveRef = useRef(false);
-  const mentionSessionQueryRef = useRef("");
-
-  // ---- Mention state ----
-  const [mentionCtx, setMentionCtx] = useState<MentionContext | null>(null);
-  const [highlightIdx, setHighlightIdx] = useState(0);
-
-  const resetMentionSession = useCallback(() => {
-    mentionSessionRequestSeqRef.current += 1;
-    mentionSessionQueryRef.current = "";
-    setMentionSessionEntries([]);
-    setMentionSessionLoading(false);
-    setMentionSessionError(null);
-  }, []);
-
-  const closeMentionSession = useCallback(() => {
-    mentionActiveRef.current = false;
-    setMentionCtx(null);
-    setHighlightIdx(0);
-    resetMentionSession();
-  }, [resetMentionSession]);
-
-  const startMentionSession = useCallback(
-    (ctx: MentionContext) => {
-      const requestSeq = ++mentionSessionRequestSeqRef.current;
-      mentionSessionQueryRef.current = ctx.query;
-      setMentionSessionEntries([]);
-      setMentionSessionLoading(ctx.trigger === "file" && Boolean(normalizedWorkdir));
-      setMentionSessionError(null);
-
-      if (ctx.trigger === "skill") {
-        return;
-      }
-      if (!normalizedWorkdir) {
-        return;
-      }
-
-      invoke<MentionListResponse>("fs_mention_list", {
-        workdir: normalizedWorkdir,
-        max_results: MENTION_INDEX_MAX_RESULTS,
-        query: ctx.query,
-      })
-        .then((resp) => {
-          if (requestSeq !== mentionSessionRequestSeqRef.current) return;
-          setMentionSessionEntries(resp.entries);
-        })
-        .catch(() => {
-          if (requestSeq !== mentionSessionRequestSeqRef.current) return;
-          setMentionSessionEntries([]);
-          setMentionSessionError("Could not index files");
-        })
-        .finally(() => {
-          if (requestSeq !== mentionSessionRequestSeqRef.current) return;
-          setMentionSessionLoading(false);
-        });
-    },
-    [normalizedWorkdir],
-  );
-
-  const mentionSessionSearchIndex = useMemo<MentionSearchEntry[]>(
-    () =>
-      mentionSessionEntries.map((entry) => ({
-        entry,
-        searchPath: entry.path.toLowerCase(),
-      })),
-    [mentionSessionEntries],
-  );
-
-  useEffect(() => {
-    closeMentionSession();
-  }, [normalizedWorkdir, closeMentionSession]);
-
-  useEffect(() => {
-    return () => {
-      mentionSessionRequestSeqRef.current += 1;
+    const scheduleBusyRelease = useCallback(() => {
       if (busyReleaseTimerRef.current !== null) {
         window.clearTimeout(busyReleaseTimerRef.current);
       }
+      busyReleaseTimerRef.current = window.setTimeout(() => {
+        busyReleaseTimerRef.current = null;
+        setBusy(false);
+      }, 140);
+    }, [setBusy]);
+
+    // ---- File list ----
+    const normalizedWorkdir = workdir.trim();
+    const [mentionSessionEntries, setMentionSessionEntries] = useState<MentionFileEntry[]>([]);
+    const [mentionSessionLoading, setMentionSessionLoading] = useState(false);
+    const [mentionSessionError, setMentionSessionError] = useState<string | null>(null);
+    const mentionSessionRequestSeqRef = useRef(0);
+    const mentionActiveRef = useRef(false);
+    const mentionSessionQueryRef = useRef("");
+
+    // ---- Mention state ----
+    const [mentionCtx, setMentionCtx] = useState<MentionContext | null>(null);
+    const [highlightIdx, setHighlightIdx] = useState(0);
+
+    const resetMentionSession = useCallback(() => {
+      mentionSessionRequestSeqRef.current += 1;
+      mentionSessionQueryRef.current = "";
+      setMentionSessionEntries([]);
+      setMentionSessionLoading(false);
+      setMentionSessionError(null);
+    }, []);
+
+    const closeMentionSession = useCallback(() => {
+      mentionActiveRef.current = false;
+      setMentionCtx(null);
+      setHighlightIdx(0);
+      resetMentionSession();
+    }, [resetMentionSession]);
+
+    const startMentionSession = useCallback(
+      (ctx: MentionContext) => {
+        const requestSeq = ++mentionSessionRequestSeqRef.current;
+        mentionSessionQueryRef.current = ctx.query;
+        setMentionSessionEntries([]);
+        setMentionSessionLoading(ctx.trigger === "file" && Boolean(normalizedWorkdir));
+        setMentionSessionError(null);
+
+        if (ctx.trigger === "skill") {
+          return;
+        }
+        if (!normalizedWorkdir) {
+          return;
+        }
+
+        invoke<MentionListResponse>("fs_mention_list", {
+          workdir: normalizedWorkdir,
+          max_results: MENTION_INDEX_MAX_RESULTS,
+          query: ctx.query,
+        })
+          .then((resp) => {
+            if (requestSeq !== mentionSessionRequestSeqRef.current) return;
+            setMentionSessionEntries(resp.entries);
+          })
+          .catch(() => {
+            if (requestSeq !== mentionSessionRequestSeqRef.current) return;
+            setMentionSessionEntries([]);
+            setMentionSessionError("Could not index files");
+          })
+          .finally(() => {
+            if (requestSeq !== mentionSessionRequestSeqRef.current) return;
+            setMentionSessionLoading(false);
+          });
+      },
+      [normalizedWorkdir],
+    );
+
+    const mentionSessionSearchIndex = useMemo<MentionSearchEntry[]>(
+      () =>
+        mentionSessionEntries.map((entry) => ({
+          entry,
+          searchPath: entry.path.toLowerCase(),
+        })),
+      [mentionSessionEntries],
+    );
+
+    useEffect(() => {
+      closeMentionSession();
+    }, [normalizedWorkdir, closeMentionSession]);
+
+    useEffect(() => {
+      return () => {
+        mentionSessionRequestSeqRef.current += 1;
+        if (busyReleaseTimerRef.current !== null) {
+          window.clearTimeout(busyReleaseTimerRef.current);
+        }
+        setBusy(false);
+      };
+    }, [setBusy]);
+
+    useEffect(() => {
+      if (!disabled) return;
+      closeMentionSession();
       setBusy(false);
-    };
-  }, [setBusy]);
+    }, [disabled, closeMentionSession, setBusy]);
 
-  useEffect(() => {
-    if (!disabled) return;
-    closeMentionSession();
-    setBusy(false);
-  }, [disabled, closeMentionSession, setBusy]);
+    const normalizedMentionQuery = mentionCtx ? normalizeMentionQuery(mentionCtx.query) : "";
+    const suggestions = useMemo<MentionSuggestion[]>(() => {
+      if (mentionCtx === null) {
+        return [];
+      }
 
-  const normalizedMentionQuery = mentionCtx ? normalizeMentionQuery(mentionCtx.query) : "";
-  const suggestions = useMemo<MentionSuggestion[]>(() => {
-    if (mentionCtx === null) {
-      return [];
-    }
+      if (mentionCtx.trigger === "skill") {
+        const next: MentionSuggestion[] = [];
+        for (const skill of enabledSkills) {
+          const haystack = `${skill.name}\n${skill.description}\n${skill.baseDir}`.toLowerCase();
+          if (normalizedMentionQuery && !haystack.includes(normalizedMentionQuery)) {
+            continue;
+          }
+          next.push({ type: "skill", skill });
+          if (next.length >= MAX_SUGGESTIONS) {
+            break;
+          }
+        }
+        return next;
+      }
 
-    if (mentionCtx.trigger === "skill") {
       const next: MentionSuggestion[] = [];
-      for (const skill of enabledSkills) {
-        const haystack = `${skill.name}\n${skill.description}\n${skill.baseDir}`.toLowerCase();
-        if (normalizedMentionQuery && !haystack.includes(normalizedMentionQuery)) {
+      for (const item of mentionSessionSearchIndex) {
+        if (normalizedMentionQuery && !item.searchPath.includes(normalizedMentionQuery)) {
           continue;
         }
-        next.push({ type: "skill", skill });
+        next.push({ type: "file", entry: item.entry });
         if (next.length >= MAX_SUGGESTIONS) {
           break;
         }
       }
       return next;
-    }
+    }, [enabledSkills, mentionCtx, mentionSessionSearchIndex, normalizedMentionQuery]);
 
-    const next: MentionSuggestion[] = [];
-    for (const item of mentionSessionSearchIndex) {
-      if (normalizedMentionQuery && !item.searchPath.includes(normalizedMentionQuery)) {
-        continue;
-      }
-      next.push({ type: "file", entry: item.entry });
-      if (next.length >= MAX_SUGGESTIONS) {
-        break;
-      }
-    }
-    return next;
-  }, [enabledSkills, mentionCtx, mentionSessionSearchIndex, normalizedMentionQuery]);
+    useEffect(() => {
+      setHighlightIdx((current) => {
+        if (suggestions.length === 0) return 0;
+        return Math.min(current, suggestions.length - 1);
+      });
+    }, [suggestions.length]);
 
-  useEffect(() => {
-    setHighlightIdx((current) => {
-      if (suggestions.length === 0) return 0;
-      return Math.min(current, suggestions.length - 1);
-    });
-  }, [suggestions.length]);
+    const popupLoading = mentionSessionLoading;
+    const popupError = suggestions.length === 0 ? mentionSessionError : null;
+    const popupEmptyLabel =
+      mentionCtx?.trigger === "skill" ? "No matching enabled Skills" : "No matching files";
+    const showEmpty =
+      mentionCtx !== null && !popupLoading && !popupError && suggestions.length === 0;
+    const popupVisible =
+      mentionCtx !== null &&
+      (popupLoading || Boolean(popupError) || suggestions.length > 0 || showEmpty);
 
-  const popupLoading = mentionSessionLoading;
-  const popupError = suggestions.length === 0 ? mentionSessionError : null;
-  const popupEmptyLabel =
-    mentionCtx?.trigger === "skill" ? "No matching enabled Skills" : "No matching files";
-  const showEmpty =
-    mentionCtx !== null &&
-    !popupLoading &&
-    !popupError &&
-    suggestions.length === 0;
-  const popupVisible =
-    mentionCtx !== null &&
-    (popupLoading || Boolean(popupError) || suggestions.length > 0 || showEmpty);
+    const applyEmptyState = useCallback(
+      (nextEmpty: boolean) => {
+        if (lastIsEmptyRef.current === nextEmpty) return;
+        lastIsEmptyRef.current = nextEmpty;
+        setIsEmpty(nextEmpty);
+        onEmptyChange?.(nextEmpty);
+      },
+      [onEmptyChange],
+    );
 
-  const applyEmptyState = useCallback(
-    (nextEmpty: boolean) => {
-      if (lastIsEmptyRef.current === nextEmpty) return;
-      lastIsEmptyRef.current = nextEmpty;
-      setIsEmpty(nextEmpty);
-      onEmptyChange?.(nextEmpty);
-    },
-    [onEmptyChange],
-  );
-
-  const refreshEmptyState = useCallback(() => {
-    const el = editorRef.current;
-    if (!el) return;
-    applyEmptyState(editorTextIsEmpty(el));
-  }, [applyEmptyState]);
-
-  const buildDraft = useCallback((): MentionComposerDraft => {
-    const el = editorRef.current;
-    if (!el) {
-      return {
-        segments: [],
-        text: "",
-        textWithoutLargePastes: "",
-        largePastes: [],
-        skillMentions: [],
-        isEmpty: true,
-      };
-    }
-
-    const segments = serializeChildrenToSegments(el, largePastesRef.current);
-    const largePastes: MentionComposerLargePaste[] = [];
-    const skillMentions: MentionComposerSkillMention[] = [];
-    const textParts: string[] = [];
-    const textWithoutLargePastesParts: string[] = [];
-    for (const segment of segments) {
-      if (segment.type === "text") {
-        textParts.push(segment.text);
-        textWithoutLargePastesParts.push(segment.text);
-      } else if (segment.type === "largePaste") {
-        largePastes.push(segment.paste);
-        textParts.push(segment.paste.text);
-      } else {
-        skillMentions.push(segment.skill);
-        const token = formatSkillMentionToken(segment.skill);
-        textParts.push(token);
-        textWithoutLargePastesParts.push(token);
-      }
-    }
-
-    const text = textParts.join("").replace(/\u00A0/g, " ");
-    const textWithoutLargePastes = textWithoutLargePastesParts.join("").replace(/\u00A0/g, " ");
-    return {
-      segments,
-      text,
-      textWithoutLargePastes,
-      largePastes,
-      skillMentions,
-      isEmpty: editorTextIsEmpty(el),
-    };
-  }, []);
-
-  const createLargePaste = useCallback((text: string): MentionComposerLargePaste => {
-    const index = largePasteCounterRef.current + 1;
-    largePasteCounterRef.current = index;
-    return {
-      id: `large-paste-${Date.now()}-${crypto.randomUUID()}`,
-      label: `Pasted text ${index}`,
-      text,
-      charCount: text.length,
-      lineCount: countLargePasteLines(text),
-      preview: normalizeLargePastePreview(text),
-    };
-  }, []);
-
-  const insertLargePaste = useCallback(
-    (text: string) => {
+    const refreshEmptyState = useCallback(() => {
       const el = editorRef.current;
       if (!el) return;
-      const paste = createLargePaste(text);
-      largePastesRef.current.set(paste.id, paste);
-      insertNodeAtCursor(el, createLargePasteChip(paste));
-      closeMentionSession();
-      refreshEmptyState();
-    },
-    [closeMentionSession, createLargePaste, refreshEmptyState],
-  );
+      applyEmptyState(editorTextIsEmpty(el));
+    }, [applyEmptyState]);
 
-  // ---- Mention detection (called after DOM updates) ----
-  const refreshMention = useCallback(() => {
-    const el = editorRef.current;
-    if (!el) return;
-    const applyContext = (ctx: MentionContext | null) => {
-      if (ctx) {
-        if (!mentionActiveRef.current) {
-          mentionActiveRef.current = true;
-          mentionSessionQueryRef.current = ctx.query;
-          setMentionCtx(ctx);
-          setHighlightIdx(0);
-          startMentionSession(ctx);
-          return;
-        }
-        setMentionCtx(ctx);
-        if (ctx.query !== mentionSessionQueryRef.current) {
-          mentionSessionQueryRef.current = ctx.query;
-          setHighlightIdx(0);
-        }
-      } else if (mentionActiveRef.current) {
-        closeMentionSession();
+    const buildDraft = useCallback((): MentionComposerDraft => {
+      const el = editorRef.current;
+      if (!el) {
+        return {
+          segments: [],
+          text: "",
+          textWithoutLargePastes: "",
+          largePastes: [],
+          skillMentions: [],
+          isEmpty: true,
+        };
       }
-    };
 
-    applyContext(detectMention(el, enabledSkills.length > 0));
-    window.requestAnimationFrame(() => {
-      const nextEl = editorRef.current;
-      if (!nextEl || document.activeElement !== nextEl) return;
-      applyContext(detectMention(nextEl, enabledSkills.length > 0));
-    });
-  }, [closeMentionSession, enabledSkills.length, startMentionSession]);
-
-  useImperativeHandle(
-    ref,
-    () => ({
-      getText: () => {
-        const el = editorRef.current;
-        if (!el) return "";
-        return serializeChildren(el, largePastesRef.current).replace(/\u00A0/g, " ");
-      },
-      getDraft: buildDraft,
-      hasContent: () => !buildDraft().isEmpty,
-      setText: (text: string) => {
-        const el = editorRef.current;
-        if (!el) return;
-        el.innerHTML = "";
-        largePastesRef.current.clear();
-        if (isLargePasteText(text)) {
-          insertLargePaste(text);
+      const segments = serializeChildrenToSegments(el, largePastesRef.current);
+      const largePastes: MentionComposerLargePaste[] = [];
+      const skillMentions: MentionComposerSkillMention[] = [];
+      const textParts: string[] = [];
+      const textWithoutLargePastesParts: string[] = [];
+      for (const segment of segments) {
+        if (segment.type === "text") {
+          textParts.push(segment.text);
+          textWithoutLargePastesParts.push(segment.text);
+        } else if (segment.type === "largePaste") {
+          largePastes.push(segment.paste);
+          textParts.push(segment.paste.text);
         } else {
-          el.innerText = text;
-          closeMentionSession();
-          refreshEmptyState();
+          skillMentions.push(segment.skill);
+          const token = formatSkillMentionToken(segment.skill);
+          textParts.push(token);
+          textWithoutLargePastesParts.push(token);
         }
-      },
-      setDraft: (draft: MentionComposerDraft) => {
+      }
+
+      const text = textParts.join("").replace(/\u00A0/g, " ");
+      const textWithoutLargePastes = textWithoutLargePastesParts.join("").replace(/\u00A0/g, " ");
+      return {
+        segments,
+        text,
+        textWithoutLargePastes,
+        largePastes,
+        skillMentions,
+        isEmpty: editorTextIsEmpty(el),
+      };
+    }, []);
+
+    const createLargePaste = useCallback((text: string): MentionComposerLargePaste => {
+      const index = largePasteCounterRef.current + 1;
+      largePasteCounterRef.current = index;
+      return {
+        id: `large-paste-${Date.now()}-${crypto.randomUUID()}`,
+        label: `Pasted text ${index}`,
+        text,
+        charCount: text.length,
+        lineCount: countLargePasteLines(text),
+        preview: normalizeLargePastePreview(text),
+      };
+    }, []);
+
+    const insertLargePaste = useCallback(
+      (text: string) => {
         const el = editorRef.current;
         if (!el) return;
-        el.innerHTML = "";
-        largePastesRef.current.clear();
+        const paste = createLargePaste(text);
+        largePastesRef.current.set(paste.id, paste);
+        insertNodeAtCursor(el, createLargePasteChip(paste));
+        closeMentionSession();
+        refreshEmptyState();
+      },
+      [closeMentionSession, createLargePaste, refreshEmptyState],
+    );
 
-        if (draft.segments.length === 0 && draft.text) {
-          if (isLargePasteText(draft.text)) {
-            insertLargePaste(draft.text);
+    // ---- Mention detection (called after DOM updates) ----
+    const refreshMention = useCallback(() => {
+      const el = editorRef.current;
+      if (!el) return;
+      const applyContext = (ctx: MentionContext | null) => {
+        if (ctx) {
+          if (!mentionActiveRef.current) {
+            mentionActiveRef.current = true;
+            mentionSessionQueryRef.current = ctx.query;
+            setMentionCtx(ctx);
+            setHighlightIdx(0);
+            startMentionSession(ctx);
             return;
           }
-          el.innerText = draft.text;
-        } else {
-          for (const segment of draft.segments) {
-            if (segment.type === "largePaste") {
-              largePastesRef.current.set(segment.paste.id, segment.paste);
-              el.appendChild(createLargePasteChip(segment.paste));
-            } else if (segment.type === "skillMention") {
-              el.appendChild(createSkillMentionChip(segment.skill));
-            } else if (segment.text) {
-              el.appendChild(document.createTextNode(segment.text));
+          setMentionCtx(ctx);
+          if (ctx.query !== mentionSessionQueryRef.current) {
+            mentionSessionQueryRef.current = ctx.query;
+            setHighlightIdx(0);
+          }
+        } else if (mentionActiveRef.current) {
+          closeMentionSession();
+        }
+      };
+
+      applyContext(detectMention(el, enabledSkills.length > 0));
+      window.requestAnimationFrame(() => {
+        const nextEl = editorRef.current;
+        if (!nextEl || document.activeElement !== nextEl) return;
+        applyContext(detectMention(nextEl, enabledSkills.length > 0));
+      });
+    }, [closeMentionSession, enabledSkills.length, startMentionSession]);
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        getText: () => {
+          const el = editorRef.current;
+          if (!el) return "";
+          return serializeChildren(el, largePastesRef.current).replace(/\u00A0/g, " ");
+        },
+        getDraft: buildDraft,
+        hasContent: () => !buildDraft().isEmpty,
+        setText: (text: string) => {
+          const el = editorRef.current;
+          if (!el) return;
+          el.innerHTML = "";
+          largePastesRef.current.clear();
+          if (isLargePasteText(text)) {
+            insertLargePaste(text);
+          } else {
+            el.innerText = text;
+            closeMentionSession();
+            refreshEmptyState();
+          }
+        },
+        setDraft: (draft: MentionComposerDraft) => {
+          const el = editorRef.current;
+          if (!el) return;
+          el.innerHTML = "";
+          largePastesRef.current.clear();
+
+          if (draft.segments.length === 0 && draft.text) {
+            if (isLargePasteText(draft.text)) {
+              insertLargePaste(draft.text);
+              return;
             }
+            el.innerText = draft.text;
+          } else {
+            for (const segment of draft.segments) {
+              if (segment.type === "largePaste") {
+                largePastesRef.current.set(segment.paste.id, segment.paste);
+                el.appendChild(createLargePasteChip(segment.paste));
+              } else if (segment.type === "skillMention") {
+                el.appendChild(createSkillMentionChip(segment.skill));
+              } else if (segment.text) {
+                el.appendChild(document.createTextNode(segment.text));
+              }
+            }
+            largePasteCounterRef.current = Math.max(
+              largePasteCounterRef.current,
+              largePastesRef.current.size,
+            );
           }
-          largePasteCounterRef.current = Math.max(
-            largePasteCounterRef.current,
-            largePastesRef.current.size,
-          );
-        }
 
-        closeMentionSession();
-        refreshEmptyState();
-      },
-      clear: () => {
-        const el = editorRef.current;
-        if (!el) return;
-        el.innerHTML = "";
-        largePastesRef.current.clear();
-        closeMentionSession();
-        refreshEmptyState();
-      },
-      focus: () => editorRef.current?.focus(),
-    }),
-    [buildDraft, closeMentionSession, insertLargePaste, refreshEmptyState],
-  );
-
-  // ---- Select suggestion ----
-  const selectSuggestion = useCallback(
-    (suggestion: MentionSuggestion) => {
-      if (!mentionCtx) return;
-      if (suggestion.type === "skill") {
-        insertSkillMentionChip(mentionCtx, suggestion.skill);
-      } else {
-        insertMentionChip(mentionCtx, suggestion.entry.path, suggestion.entry.kind);
-      }
-      closeMentionSession();
-      refreshEmptyState();
-      editorRef.current?.focus();
-    },
-    [closeMentionSession, mentionCtx, refreshEmptyState],
-  );
-
-  // ---- Event handlers ----
-  const handleInput = useCallback(() => {
-    refreshEmptyState();
-    if (!isComposingRef.current) {
-      refreshMention();
-    }
-  }, [refreshEmptyState, refreshMention]);
-
-  const handleKeyUp = useCallback((e: KeyboardEvent<HTMLDivElement>) => {
-    if (disabled || isComposingRef.current || isImeKeyboardEvent(e)) return;
-    if (
-      e.key === "ArrowDown" ||
-      e.key === "ArrowUp" ||
-      e.key === "Tab" ||
-      e.key === "Enter" ||
-      e.key === "Escape"
-    ) {
-      return;
-    }
-    refreshMention();
-  }, [disabled, refreshMention]);
-
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent<HTMLDivElement>) => {
-      if (disabled) {
-        e.preventDefault();
-        return;
-      }
-      const isEnter = isEnterKeyboardEvent(e);
-      const isActiveCompositionKey = isComposingRef.current || isActiveImeKeyboardEvent(e);
-      const hasLegacyImeSignal = hasLegacyImeKeyboardSignal(e);
-
-      if (isActiveCompositionKey) {
-        if (isEnter && !e.shiftKey) {
-          compositionEnterKeyRef.current = true;
+          closeMentionSession();
           refreshEmptyState();
-          refreshMention();
+        },
+        clear: () => {
+          const el = editorRef.current;
+          if (!el) return;
+          el.innerHTML = "";
+          largePastesRef.current.clear();
+          closeMentionSession();
+          refreshEmptyState();
+        },
+        focus: () => editorRef.current?.focus(),
+      }),
+      [buildDraft, closeMentionSession, insertLargePaste, refreshEmptyState],
+    );
+
+    // ---- Select suggestion ----
+    const selectSuggestion = useCallback(
+      (suggestion: MentionSuggestion) => {
+        if (!mentionCtx) return;
+        if (suggestion.type === "skill") {
+          insertSkillMentionChip(mentionCtx, suggestion.skill);
         } else {
-          compositionEnterKeyRef.current = false;
+          insertMentionChip(mentionCtx, suggestion.entry.path, suggestion.entry.kind);
         }
-        return;
-      }
-
-      if (isEnter && !e.shiftKey && imeEnterSuppressUntilRef.current >= performance.now()) {
-        e.preventDefault();
-        imeEnterSuppressUntilRef.current = 0;
-        compositionEnterKeyRef.current = false;
-        lastCompositionEndAtRef.current = 0;
-        refreshEmptyState();
-        refreshMention();
-        return;
-      }
-
-      const compositionEndedAgoMs = performance.now() - lastCompositionEndAtRef.current;
-      if (
-        isEnter &&
-        !e.shiftKey &&
-        lastCompositionEndAtRef.current > 0 &&
-        compositionEndedAgoMs >= 0 &&
-        compositionEndedAgoMs <= IME_COMPOSITION_END_ENTER_TAIL_MS
-      ) {
-        e.preventDefault();
-        imeEnterSuppressUntilRef.current = 0;
-        compositionEnterKeyRef.current = false;
-        lastCompositionEndAtRef.current = 0;
-        refreshEmptyState();
-        refreshMention();
-        return;
-      }
-
-      // Legacy keyCode 229 is too broad in WebViews. It is still useful for
-      // ignoring non-Enter IME key noise, but should not block normal sending.
-      if (!isEnter && hasLegacyImeSignal) {
-        return;
-      }
-
-      // Popup navigation
-      if (popupVisible && suggestions.length > 0) {
-        if (e.key === "ArrowDown") {
-          e.preventDefault();
-          setHighlightIdx((p) => (p + 1) % suggestions.length);
-          return;
-        }
-        if (e.key === "ArrowUp") {
-          e.preventDefault();
-          setHighlightIdx((p) => (p - 1 + suggestions.length) % suggestions.length);
-          return;
-        }
-        if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
-          e.preventDefault();
-          if (suggestions[highlightIdx]) {
-            selectSuggestion(suggestions[highlightIdx]);
-          }
-          return;
-        }
-      }
-      if (popupVisible && e.key === "Escape") {
-        e.preventDefault();
         closeMentionSession();
-        return;
-      }
+        refreshEmptyState();
+        editorRef.current?.focus();
+      },
+      [closeMentionSession, mentionCtx, refreshEmptyState],
+    );
 
-      // Backspace: delete mention chip if cursor is right after one
-      if (e.key === "Backspace") {
-        const chip = chipBeforeCursor(editorRef.current!);
-        if (chip) {
+    // ---- Event handlers ----
+    const handleInput = useCallback(() => {
+      refreshEmptyState();
+      if (!isComposingRef.current) {
+        refreshMention();
+      }
+    }, [refreshEmptyState, refreshMention]);
+
+    const handleKeyUp = useCallback(
+      (e: KeyboardEvent<HTMLDivElement>) => {
+        if (disabled || isComposingRef.current || isImeKeyboardEvent(e)) return;
+        if (
+          e.key === "ArrowDown" ||
+          e.key === "ArrowUp" ||
+          e.key === "Tab" ||
+          e.key === "Enter" ||
+          e.key === "Escape"
+        ) {
+          return;
+        }
+        refreshMention();
+      },
+      [disabled, refreshMention],
+    );
+
+    const handleKeyDown = useCallback(
+      (e: KeyboardEvent<HTMLDivElement>) => {
+        if (disabled) {
           e.preventDefault();
-          const largePasteId = chip.getAttribute(LARGE_PASTE_TAG_ATTR);
-          if (largePasteId) {
-            largePastesRef.current.delete(largePasteId);
+          return;
+        }
+        const isEnter = isEnterKeyboardEvent(e);
+        const isActiveCompositionKey = isComposingRef.current || isActiveImeKeyboardEvent(e);
+        const hasLegacyImeSignal = hasLegacyImeKeyboardSignal(e);
+
+        if (isActiveCompositionKey) {
+          if (isEnter && !e.shiftKey) {
+            compositionEnterKeyRef.current = true;
+            refreshEmptyState();
+            refreshMention();
+          } else {
+            compositionEnterKeyRef.current = false;
           }
-          chip.remove();
+          return;
+        }
+
+        if (isEnter && !e.shiftKey && imeEnterSuppressUntilRef.current >= performance.now()) {
+          e.preventDefault();
+          imeEnterSuppressUntilRef.current = 0;
+          compositionEnterKeyRef.current = false;
+          lastCompositionEndAtRef.current = 0;
           refreshEmptyState();
           refreshMention();
           return;
         }
-      }
 
-      // Normal Enter → send
-      if (isEnter && !e.shiftKey) {
-        imeEnterSuppressUntilRef.current = 0;
-        compositionEnterKeyRef.current = false;
-        lastCompositionEndAtRef.current = 0;
-        e.preventDefault();
-        onSend();
-        return;
-      }
+        const compositionEndedAgoMs = performance.now() - lastCompositionEndAtRef.current;
+        if (
+          isEnter &&
+          !e.shiftKey &&
+          lastCompositionEndAtRef.current > 0 &&
+          compositionEndedAgoMs >= 0 &&
+          compositionEndedAgoMs <= IME_COMPOSITION_END_ENTER_TAIL_MS
+        ) {
+          e.preventDefault();
+          imeEnterSuppressUntilRef.current = 0;
+          compositionEnterKeyRef.current = false;
+          lastCompositionEndAtRef.current = 0;
+          refreshEmptyState();
+          refreshMention();
+          return;
+        }
 
-      // Shift+Enter → line break (normalise to <br>)
-      if (isEnter && e.shiftKey) {
-        imeEnterSuppressUntilRef.current = 0;
-        compositionEnterKeyRef.current = false;
-        lastCompositionEndAtRef.current = 0;
+        // Legacy keyCode 229 is too broad in WebViews. It is still useful for
+        // ignoring non-Enter IME key noise, but should not block normal sending.
+        if (!isEnter && hasLegacyImeSignal) {
+          return;
+        }
+
+        // Popup navigation
+        if (popupVisible && suggestions.length > 0) {
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setHighlightIdx((p) => (p + 1) % suggestions.length);
+            return;
+          }
+          if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setHighlightIdx((p) => (p - 1 + suggestions.length) % suggestions.length);
+            return;
+          }
+          if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+            e.preventDefault();
+            if (suggestions[highlightIdx]) {
+              selectSuggestion(suggestions[highlightIdx]);
+            }
+            return;
+          }
+        }
+        if (popupVisible && e.key === "Escape") {
+          e.preventDefault();
+          closeMentionSession();
+          return;
+        }
+
+        // Backspace: delete mention chip if cursor is right after one
+        if (e.key === "Backspace") {
+          const chip = chipBeforeCursor(editorRef.current!);
+          if (chip) {
+            e.preventDefault();
+            const largePasteId = chip.getAttribute(LARGE_PASTE_TAG_ATTR);
+            if (largePasteId) {
+              largePastesRef.current.delete(largePasteId);
+            }
+            chip.remove();
+            refreshEmptyState();
+            refreshMention();
+            return;
+          }
+        }
+
+        // Normal Enter → send
+        if (isEnter && !e.shiftKey) {
+          imeEnterSuppressUntilRef.current = 0;
+          compositionEnterKeyRef.current = false;
+          lastCompositionEndAtRef.current = 0;
+          e.preventDefault();
+          onSend();
+          return;
+        }
+
+        // Shift+Enter → line break (normalise to <br>)
+        if (isEnter && e.shiftKey) {
+          imeEnterSuppressUntilRef.current = 0;
+          compositionEnterKeyRef.current = false;
+          lastCompositionEndAtRef.current = 0;
+          e.preventDefault();
+          document.execCommand("insertLineBreak");
+          scheduleComposerSelectionScroll(editorRef.current);
+          refreshEmptyState();
+          refreshMention();
+          return;
+        }
+      },
+      [
+        popupVisible,
+        suggestions,
+        highlightIdx,
+        selectSuggestion,
+        disabled,
+        closeMentionSession,
+        onSend,
+        refreshEmptyState,
+        refreshMention,
+      ],
+    );
+
+    const handlePaste = useCallback(
+      (e: ClipboardEvent<HTMLDivElement>) => {
+        if (disabled) {
+          e.preventDefault();
+          return;
+        }
+        const clipboardFiles = extractClipboardFiles(e.clipboardData);
+        if (clipboardFiles.length > 0) {
+          e.preventDefault();
+          onPasteFiles?.(clipboardFiles);
+          return;
+        }
         e.preventDefault();
-        document.execCommand("insertLineBreak");
-        scheduleComposerSelectionScroll(editorRef.current);
+        const text = e.clipboardData.getData("text/plain");
+        if (isLargePasteText(text)) {
+          insertLargePaste(text);
+          return;
+        }
+        document.execCommand("insertText", false, text);
         refreshEmptyState();
         refreshMention();
-        return;
-      }
-    },
-    [
-      popupVisible,
-      suggestions,
-      highlightIdx,
-      selectSuggestion,
-      disabled,
-      closeMentionSession,
-      onSend,
-      refreshEmptyState,
-      refreshMention,
-    ],
-  );
+      },
+      [disabled, insertLargePaste, onPasteFiles, refreshEmptyState, refreshMention],
+    );
 
-  const handlePaste = useCallback(
-    (e: ClipboardEvent<HTMLDivElement>) => {
-      if (disabled) {
-        e.preventDefault();
-        return;
+    const handleCompositionStart = useCallback(() => {
+      isComposingRef.current = true;
+      compositionEnterKeyRef.current = false;
+      lastCompositionEndAtRef.current = 0;
+      imeEnterSuppressUntilRef.current = 0;
+      if (busyReleaseTimerRef.current !== null) {
+        window.clearTimeout(busyReleaseTimerRef.current);
+        busyReleaseTimerRef.current = null;
       }
-      const clipboardFiles = extractClipboardFiles(e.clipboardData);
-      if (clipboardFiles.length > 0) {
-        e.preventDefault();
-        onPasteFiles?.(clipboardFiles);
-        return;
+      setBusy(true);
+    }, [setBusy]);
+
+    const handleCompositionEnd = useCallback(() => {
+      isComposingRef.current = false;
+      lastCompositionEndAtRef.current = performance.now();
+      if (compositionEnterKeyRef.current) {
+        imeEnterSuppressUntilRef.current = performance.now() + IME_ENTER_SUPPRESS_WINDOW_MS;
+        compositionEnterKeyRef.current = false;
       }
-      e.preventDefault();
-      const text = e.clipboardData.getData("text/plain");
-      if (isLargePasteText(text)) {
-        insertLargePaste(text);
-        return;
-      }
-      document.execCommand("insertText", false, text);
       refreshEmptyState();
       refreshMention();
-    },
-    [disabled, insertLargePaste, onPasteFiles, refreshEmptyState, refreshMention],
-  );
+      scheduleBusyRelease();
+    }, [refreshEmptyState, refreshMention, scheduleBusyRelease]);
 
-  const handleCompositionStart = useCallback(() => {
-    isComposingRef.current = true;
-    compositionEnterKeyRef.current = false;
-    lastCompositionEndAtRef.current = 0;
-    imeEnterSuppressUntilRef.current = 0;
-    if (busyReleaseTimerRef.current !== null) {
-      window.clearTimeout(busyReleaseTimerRef.current);
-      busyReleaseTimerRef.current = null;
-    }
-    setBusy(true);
-  }, [setBusy]);
-
-  const handleCompositionEnd = useCallback(() => {
-    isComposingRef.current = false;
-    lastCompositionEndAtRef.current = performance.now();
-    if (compositionEnterKeyRef.current) {
-      imeEnterSuppressUntilRef.current = performance.now() + IME_ENTER_SUPPRESS_WINDOW_MS;
+    const handleBlur = useCallback(() => {
+      isComposingRef.current = false;
       compositionEnterKeyRef.current = false;
-    }
-    refreshEmptyState();
-    refreshMention();
-    scheduleBusyRelease();
-  }, [refreshEmptyState, refreshMention, scheduleBusyRelease]);
+      lastCompositionEndAtRef.current = 0;
+      imeEnterSuppressUntilRef.current = 0;
+      if (busyReleaseTimerRef.current !== null) {
+        window.clearTimeout(busyReleaseTimerRef.current);
+        busyReleaseTimerRef.current = null;
+      }
+      setBusy(false);
+      closeMentionSession();
+    }, [closeMentionSession, setBusy]);
 
-  const handleBlur = useCallback(() => {
-    isComposingRef.current = false;
-    compositionEnterKeyRef.current = false;
-    lastCompositionEndAtRef.current = 0;
-    imeEnterSuppressUntilRef.current = 0;
-    if (busyReleaseTimerRef.current !== null) {
-      window.clearTimeout(busyReleaseTimerRef.current);
-      busyReleaseTimerRef.current = null;
-    }
-    setBusy(false);
-    closeMentionSession();
-  }, [closeMentionSession, setBusy]);
-
-  return (
-    <div ref={wrapperRef} className="relative w-full min-w-0 max-w-full flex-1">
-      {popupVisible && (
-        <Popup
-          anchorRef={wrapperRef}
-          suggestions={suggestions}
-          highlightIndex={highlightIdx}
-          isLoading={popupLoading}
-          error={popupError}
-          showEmpty={showEmpty}
-          emptyLabel={popupEmptyLabel}
-          onSelect={selectSuggestion}
-        />
-      )}
-      <div
-        ref={editorRef}
-        contentEditable={!disabled}
-        suppressContentEditableWarning
-        role="textbox"
-        aria-multiline
-        aria-placeholder={placeholder}
-        aria-disabled={disabled}
-        onInput={handleInput}
-        onKeyDown={handleKeyDown}
-        onKeyUp={handleKeyUp}
-        onPaste={handlePaste}
-        onCompositionStart={handleCompositionStart}
-        onCompositionEnd={handleCompositionEnd}
-        onBlur={handleBlur}
-        className={cn(
-          "mention-composer min-h-[70px] max-h-[160px] w-full min-w-0 max-w-full overflow-y-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] outline-hidden",
-          "text-sm",
-          isEmpty && "is-empty",
-          disabled && "cursor-not-allowed opacity-60",
-          className,
+    return (
+      <div ref={wrapperRef} className="relative w-full min-w-0 max-w-full flex-1">
+        {popupVisible && (
+          <Popup
+            anchorRef={wrapperRef}
+            suggestions={suggestions}
+            highlightIndex={highlightIdx}
+            isLoading={popupLoading}
+            error={popupError}
+            showEmpty={showEmpty}
+            emptyLabel={popupEmptyLabel}
+            onSelect={selectSuggestion}
+          />
         )}
-        data-placeholder={placeholder}
-      />
-    </div>
-  );
-}));
+        <div
+          ref={editorRef}
+          contentEditable={!disabled}
+          suppressContentEditableWarning
+          role="textbox"
+          aria-multiline
+          aria-placeholder={placeholder}
+          aria-disabled={disabled}
+          onInput={handleInput}
+          onKeyDown={handleKeyDown}
+          onKeyUp={handleKeyUp}
+          onPaste={handlePaste}
+          onCompositionStart={handleCompositionStart}
+          onCompositionEnd={handleCompositionEnd}
+          onBlur={handleBlur}
+          className={cn(
+            "mention-composer min-h-[70px] max-h-[160px] w-full min-w-0 max-w-full overflow-y-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] outline-hidden",
+            "text-sm",
+            isEmpty && "is-empty",
+            disabled && "cursor-not-allowed opacity-60",
+            className,
+          )}
+          data-placeholder={placeholder}
+        />
+      </div>
+    );
+  }),
+);
 
 MentionComposer.displayName = "MentionComposer";

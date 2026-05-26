@@ -1,23 +1,11 @@
 import type { Tool } from "@mariozechner/pi-ai";
-
-import {
-  normalizeConversationState,
-  type ConversationViewState,
-} from "../conversation/conversationState";
-import {
-  defaultSubagentHistoryRecorder,
-  type SubagentHistoryRecorder,
-  type SubagentIdentityRecord,
-  type SubagentRunHistoryInput,
-  type SubagentRunSummary,
-} from "./subagentHistory";
+import { parseSubagentRunState } from "../../tools/delegate/history";
 import {
   createAgentTemplateLookup,
   identitiesByLogicalAgent,
   latestRunsByLogicalAgent,
   normalizeLookupKey,
 } from "../../tools/delegate/identity";
-import { parseSubagentRunState } from "../../tools/delegate/history";
 import { normalizeSubagentRunMode } from "../../tools/delegate/input";
 import { buildSubagentSystemPrompt } from "../../tools/delegate/prompts";
 import type {
@@ -27,6 +15,17 @@ import type {
   DelegateTaskIntent,
   DelegateWorktreeInfo,
 } from "../../tools/delegate/types";
+import {
+  type ConversationViewState,
+  normalizeConversationState,
+} from "../conversation/conversationState";
+import {
+  defaultSubagentHistoryRecorder,
+  type SubagentHistoryRecorder,
+  type SubagentIdentityRecord,
+  type SubagentRunHistoryInput,
+  type SubagentRunSummary,
+} from "./subagentHistory";
 
 const DEFAULT_WARMUP_LIMIT = 16;
 const DEFAULT_WARMUP_CONCURRENCY = 2;
@@ -70,12 +69,8 @@ export type SubagentRuntimeWarmupInput = {
 
 export type SubagentRuntimeManager = {
   warmupConversation: (input: SubagentRuntimeWarmupInput) => void;
-  getHydratedState: (
-    input: SubagentRuntimeStateRequest,
-  ) => ConversationViewState | null;
-  hydrateState: (
-    input: SubagentRuntimeStateRequest,
-  ) => Promise<ConversationViewState | null>;
+  getHydratedState: (input: SubagentRuntimeStateRequest) => ConversationViewState | null;
+  hydrateState: (input: SubagentRuntimeStateRequest) => Promise<ConversationViewState | null>;
   rememberRunState: (input: SubagentRuntimeRememberInput) => void;
   invalidateConversation: (parentConversationId: string) => void;
   disposeConversation: (parentConversationId: string) => void;
@@ -111,9 +106,7 @@ function taskIntentFromIdentity(value: string | undefined): DelegateTaskIntent {
 }
 
 function applyPolicyFromIdentity(value: string | undefined): DelegateApplyPolicy {
-  return value === "none" || value === "explicit" || value === "auto"
-    ? value
-    : "none";
+  return value === "none" || value === "explicit" || value === "auto" ? value : "none";
 }
 
 function buildWarmupTask(params: {
@@ -140,9 +133,11 @@ function buildWarmupTask(params: {
   };
 }
 
-function rebaseStateMeta(params: SubagentRuntimeStateRequest & {
-  state: ConversationViewState;
-}) {
+function rebaseStateMeta(
+  params: SubagentRuntimeStateRequest & {
+    state: ConversationViewState;
+  },
+) {
   return normalizeConversationState({
     meta: {
       ...params.state.meta,
@@ -174,9 +169,7 @@ async function runWithConcurrency<T>(
     }
   }
   await Promise.all(
-    new Array(Math.min(Math.max(1, concurrency), items.length))
-      .fill(0)
-      .map(() => runLoop()),
+    new Array(Math.min(Math.max(1, concurrency), items.length)).fill(0).map(() => runLoop()),
   );
 }
 
@@ -219,12 +212,7 @@ export function createSubagentRuntimeManager(
     const parentConversationId = conversationKey(input.parentConversationId);
     if (!parentConversationId) return null;
     const entry = getEntry(parentConversationId, input.runSummary.logicalAgentId);
-    if (
-      !entry ||
-      entry.status !== "ready" ||
-      entry.runId !== input.runSummary.id ||
-      !entry.state
-    ) {
+    if (!entry || entry.status !== "ready" || entry.runId !== input.runSummary.id || !entry.state) {
       return null;
     }
     entry.updatedAt = Date.now();

@@ -1,23 +1,20 @@
 import type { AssistantMessage, Context, Message } from "@mariozechner/pi-ai";
 
 import { assistantMessageToText } from "../../providers/llm";
-import { normalizeConversationSystemPrompt } from "../context/systemPrompt";
 import {
   sanitizeMessagesForContinuation,
   sanitizeMessagesForModelContext,
 } from "../context/requestContextSanitizer";
+import { normalizeConversationSystemPrompt } from "../context/systemPrompt";
 import { buildUiMessages, type UiRound } from "../messages/uiMessages";
 import {
-  stripUploadedFilesMessageMetadata,
   type PendingUploadedFile,
+  stripUploadedFilesMessageMetadata,
 } from "../messages/uploadedFiles";
 
 const INTERNAL_RESUME_MESSAGE_TEXT =
   "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed.";
-const SILENT_MEMORY_EXTRACTION_FINAL_TEXTS = new Set([
-  "记忆整理完成。",
-  "本轮无需更新记忆。",
-]);
+const SILENT_MEMORY_EXTRACTION_FINAL_TEXTS = new Set(["记忆整理完成。", "本轮无需更新记忆。"]);
 
 export type StoredSummaryMessage = {
   role: "summary";
@@ -106,10 +103,7 @@ export type RenderAssistantGroup = {
   isFromCompactedSegment: boolean;
 };
 
-export type RenderTimelineItem =
-  | RenderSummaryCard
-  | RenderUserMessage
-  | RenderAssistantGroup;
+export type RenderTimelineItem = RenderSummaryCard | RenderUserMessage | RenderAssistantGroup;
 
 export type ConversationViewState = {
   meta: StoredChatContextMeta;
@@ -147,15 +141,11 @@ function getMessageTimestamp(message: Message | undefined) {
   return typeof message.timestamp === "number" ? message.timestamp : Date.now();
 }
 
-function isMemoryManagerToolUseAssistantMessage(
-  message: Message,
-): message is AssistantMessage {
+function isMemoryManagerToolUseAssistantMessage(message: Message): message is AssistantMessage {
   return (
     message.role === "assistant" &&
     message.content.length > 0 &&
-    message.content.every(
-      (block) => block.type === "toolCall" && block.name === "MemoryManager",
-    )
+    message.content.every((block) => block.type === "toolCall" && block.name === "MemoryManager")
   );
 }
 
@@ -519,9 +509,7 @@ function buildUpdatedTimelineForActiveSegment(params: {
     .filter((item) => item.segmentIndex < activeSegmentIndex)
     .map(markTimelineItemCompacted);
   const activeSegment = segments[activeSegmentIndex];
-  const activeItems = activeSegment
-    ? buildTimelineItemsForSegment(activeSegment, false)
-    : [];
+  const activeItems = activeSegment ? buildTimelineItemsForSegment(activeSegment, false) : [];
   return [...preserved, ...activeItems];
 }
 
@@ -534,7 +522,9 @@ function rebuildTimelineFromSegment(params: {
   const { previousItems, segments, activeSegmentIndex, startSegmentIndex } = params;
   const preserved = previousItems
     .filter((item) => item.segmentIndex < startSegmentIndex)
-    .map((item) => (item.segmentIndex < activeSegmentIndex ? markTimelineItemCompacted(item) : item));
+    .map((item) =>
+      item.segmentIndex < activeSegmentIndex ? markTimelineItemCompacted(item) : item,
+    );
   const rebuilt = segments
     .filter((segment) => segment.segmentIndex >= startSegmentIndex)
     .flatMap((segment) =>
@@ -642,7 +632,11 @@ export function appendMessagesToConversation(
 
   for (const message of incomingMessages) {
     if (isCompactionAssistantMessage(message)) {
-      const checkpoint = appendCompactionCheckpointToSegments(segments, activeSegmentIndex, message);
+      const checkpoint = appendCompactionCheckpointToSegments(
+        segments,
+        activeSegmentIndex,
+        message,
+      );
       if (checkpoint.appended) {
         activeSegmentIndex = checkpoint.activeSegmentIndex;
         changedSegmentIndexes.add(activeSegmentIndex);
@@ -720,10 +714,7 @@ export function appendRenderOnlyMessagesToConversation(
       const roundOffset = getLastRoundNumber(lastItem.rounds);
       historyRenderItems[lastIndex] = {
         ...lastItem,
-        rounds: [
-          ...lastItem.rounds,
-          ...shiftUiRounds(sourceRounds, roundOffset),
-        ],
+        rounds: [...lastItem.rounds, ...shiftUiRounds(sourceRounds, roundOffset)],
         timestamp,
       };
       continue;
@@ -752,19 +743,15 @@ export function truncateConversationFromMessage(
   const targetSegment = state.segments[ref.segmentIndex];
   if (!targetSegment) return state;
 
-  const segments = state.segments
-    .slice(0, ref.segmentIndex + 1)
-    .map((segment) => ({
-      ...segment,
-      messages: segment.messages.slice(),
-    }));
+  const segments = state.segments.slice(0, ref.segmentIndex + 1).map((segment) => ({
+    ...segment,
+    messages: segment.messages.slice(),
+  }));
   const target = segments[ref.segmentIndex];
   const cutoff = Math.max(0, Math.min(ref.messageIndex, target.messages.length));
   target.messages = target.messages.slice(0, cutoff);
   target.updatedAt =
-    cutoff > 0
-      ? getMessageTimestamp(target.messages[cutoff - 1])
-      : target.createdAt;
+    cutoff > 0 ? getMessageTimestamp(target.messages[cutoff - 1]) : target.createdAt;
   const normalizedSegments = segments.map((segment, index) =>
     index === ref.segmentIndex ? normalizeSegment(segment, index) : segment,
   );

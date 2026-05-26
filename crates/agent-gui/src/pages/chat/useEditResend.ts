@@ -1,16 +1,15 @@
-import { useCallback, useEffect, useRef, type MutableRefObject } from "react";
-
+import { type MutableRefObject, useCallback, useEffect, useRef } from "react";
+import type { MentionComposerHandle } from "../../components/chat/MentionComposer";
 import {
-  truncateConversationFromMessage,
   type ConversationViewState,
   type HistoryMessageRef,
+  truncateConversationFromMessage,
 } from "../../lib/chat/conversation/conversationState";
+import type { PendingUploadedFile } from "../../lib/chat/messages/uploadedFiles";
 import {
   collectRetainedSubagentParentToolCallIds,
   pruneSubagentRunsForConversation,
 } from "../../lib/chat/subagent/subagentHistory";
-import type { PendingUploadedFile } from "../../lib/chat/messages/uploadedFiles";
-import type { MentionComposerHandle } from "../../components/chat/MentionComposer";
 import type { ConversationRuntimeEntry } from "./chatPageRuntime";
 import type { SendChatAction } from "./gatewayBridgeTypes";
 
@@ -55,16 +54,8 @@ export function useEditResend(params: UseEditResendParams) {
   const pendingEditResendRef = useRef<PendingEditResend | null>(null);
 
   const handleResendFromEdit = useCallback(
-    (
-      messageRef: HistoryMessageRef,
-      text: string,
-      uploadedFiles: PendingUploadedFile[],
-    ) => {
-      if (
-        isSending ||
-        isConversationHydrating ||
-        isConversationHydrationFailed
-      ) {
+    (messageRef: HistoryMessageRef, text: string, uploadedFiles: PendingUploadedFile[]) => {
+      if (isSending || isConversationHydrating || isConversationHydrationFailed) {
         return;
       }
       const normalized = text.trim();

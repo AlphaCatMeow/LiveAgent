@@ -1,13 +1,12 @@
 import { useState } from "react";
-
+import { HubBackdrop, HubHeader } from "../../components/hub/HubChrome";
 import { Cloud, Plug, Plus, Server, Sparkles } from "../../components/icons";
 import { Button } from "../../components/ui/button";
 import { useLocale } from "../../i18n";
+import { type AppSettings, type McpServerConfig, updateMcp } from "../../lib/settings";
+import { cn } from "../../lib/shared/utils";
 import { McpRegistryBrowser } from "./McpRegistryBrowser";
 import { McpServerEditModal, McpServersForm } from "./McpServersForm";
-import { type AppSettings, type McpServerConfig, updateMcp } from "../../lib/settings";
-import { HubBackdrop, HubHeader } from "../../components/hub/HubChrome";
-import { cn } from "../../lib/shared/utils";
 
 type McpHubPageProps = {
   settings: AppSettings;
@@ -19,9 +18,7 @@ type McpHubPageProps = {
 
 type McpHubView = "installed" | "store";
 
-type EditingState =
-  | { mode: "add" }
-  | { mode: "edit"; idx: number; server: McpServerConfig };
+type EditingState = { mode: "add" } | { mode: "edit"; idx: number; server: McpServerConfig };
 
 export function McpHubPage(props: McpHubPageProps) {
   const { settings, setSettings, sidebarOpen, onOpenSidebar } = props;
@@ -47,9 +44,7 @@ export function McpHubPage(props: McpHubPageProps) {
       if (editing?.mode === "edit") {
         const targetIdx = editing.idx;
         return updateMcp(prev, {
-          servers: prev.mcp.servers.map((item, index) =>
-            index === targetIdx ? server : item,
-          ),
+          servers: prev.mcp.servers.map((item, index) => (index === targetIdx ? server : item)),
         });
       }
       return updateMcp(prev, {

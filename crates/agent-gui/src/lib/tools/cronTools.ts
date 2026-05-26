@@ -1,12 +1,8 @@
+import type { Tool, ToolCall, ToolResultMessage } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
 import { invoke } from "@tauri-apps/api/core";
 
-import type { Tool, ToolCall, ToolResultMessage } from "@mariozechner/pi-ai";
-
-import {
-  createBuiltinMetadataMap,
-  type BuiltinToolBundle,
-} from "./builtinTypes";
+import { type BuiltinToolBundle, createBuiltinMetadataMap } from "./builtinTypes";
 
 type SelectedModelInput = {
   customProviderId: string;
@@ -127,17 +123,10 @@ const MANAGE_CRON_TASK_PARAMETERS = Type.Object({
     }),
   ),
   type: Type.Optional(
-    Type.Union(
-      [
-        Type.Literal("bash"),
-        Type.Literal("http"),
-        Type.Literal("prompt"),
-      ],
-      {
-        description:
-          "Cron task implementation type. Required for create. Optional for update when switching the task kind.",
-      },
-    ),
+    Type.Union([Type.Literal("bash"), Type.Literal("http"), Type.Literal("prompt")], {
+      description:
+        "Cron task implementation type. Required for create. Optional for update when switching the task kind.",
+    }),
   ),
   enabled: Type.Optional(
     Type.Boolean({
@@ -146,28 +135,16 @@ const MANAGE_CRON_TASK_PARAMETERS = Type.Object({
     }),
   ),
   remaining_executions: Type.Optional(
-    Type.Union(
-      [
-        Type.Integer({ minimum: 0 }),
-        Type.Null(),
-      ],
-      {
-        description:
-          "Remaining run count for this cron task. Omit or pass null for unlimited runs. Pass 0 only when the task should be exhausted and disabled.",
-      },
-    ),
+    Type.Union([Type.Integer({ minimum: 0 }), Type.Null()], {
+      description:
+        "Remaining run count for this cron task. Omit or pass null for unlimited runs. Pass 0 only when the task should be exhausted and disabled.",
+    }),
   ),
   remainingExecutions: Type.Optional(
-    Type.Union(
-      [
-        Type.Integer({ minimum: 0 }),
-        Type.Null(),
-      ],
-      {
-        description:
-          "Camel-case alias for remaining_executions. Prefer remaining_executions unless the caller already uses camelCase.",
-      },
-    ),
+    Type.Union([Type.Integer({ minimum: 0 }), Type.Null()], {
+      description:
+        "Camel-case alias for remaining_executions. Prefer remaining_executions unless the caller already uses camelCase.",
+    }),
   ),
   script: Type.Optional(
     Type.String({
@@ -185,16 +162,13 @@ const MANAGE_CRON_TASK_PARAMETERS = Type.Object({
         }),
         method: Type.Optional(
           Type.String({
-            description:
-              "HTTP method for the scheduled request. Defaults to POST when omitted.",
+            description: "HTTP method for the scheduled request. Defaults to POST when omitted.",
           }),
         ),
         headers: Type.Optional(
-          Type.Record(
-            Type.String(),
-            Type.String(),
-            { description: "Optional HTTP headers for the scheduled request." },
-          ),
+          Type.Record(Type.String(), Type.String(), {
+            description: "Optional HTTP headers for the scheduled request.",
+          }),
         ),
         body: Type.Optional(
           Type.Any({
@@ -219,13 +193,11 @@ const MANAGE_CRON_TASK_PARAMETERS = Type.Object({
       {
         custom_provider_id: Type.String({
           minLength: 1,
-          description:
-            "Provider id from Settings -> Providers for a prompt cron task.",
+          description: "Provider id from Settings -> Providers for a prompt cron task.",
         }),
         model: Type.String({
           minLength: 1,
-          description:
-            "Model id used by the prompt cron task.",
+          description: "Model id used by the prompt cron task.",
         }),
       },
       {
@@ -246,13 +218,10 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function hasOwnKey(value: Record<string, unknown>, key: string) {
-  return Object.prototype.hasOwnProperty.call(value, key);
+  return Object.hasOwn(value, key);
 }
 
-function pickOwnValue(
-  value: Record<string, unknown>,
-  keys: readonly string[],
-): unknown {
+function pickOwnValue(value: Record<string, unknown>, keys: readonly string[]): unknown {
   for (const key of keys) {
     if (hasOwnKey(value, key)) {
       return value[key];
@@ -261,10 +230,7 @@ function pickOwnValue(
   return undefined;
 }
 
-function hasAnyOwnKey(
-  value: Record<string, unknown>,
-  keys: readonly string[],
-) {
+function hasAnyOwnKey(value: Record<string, unknown>, keys: readonly string[]) {
   return keys.some((key) => hasOwnKey(value, key));
 }
 
@@ -337,9 +303,7 @@ function parseSelectedModelInput(
   if (!obj) {
     throw new Error(`CronTaskManager ${fieldLabel} must be an object.`);
   }
-  const customProviderId = normalizeText(
-    obj.custom_provider_id ?? obj.customProviderId,
-  );
+  const customProviderId = normalizeText(obj.custom_provider_id ?? obj.customProviderId);
   const model = normalizeText(obj.model);
   if (!customProviderId || !model) {
     throw new Error(
@@ -368,10 +332,7 @@ function canHttpMethodHaveBody(method: string): boolean {
   return method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE";
 }
 
-function parseHeaderMap(
-  value: unknown,
-  fieldLabel: string,
-): Record<string, string> | undefined {
+function parseHeaderMap(value: unknown, fieldLabel: string): Record<string, string> | undefined {
   if (value == null) return undefined;
   const obj = asRecord(value);
   if (!obj) {
@@ -380,8 +341,7 @@ function parseHeaderMap(
   const headers: Record<string, string> = {};
   for (const [rawKey, rawValue] of Object.entries(obj)) {
     const key = rawKey.trim();
-    const text =
-      typeof rawValue === "string" ? rawValue.trim() : String(rawValue ?? "").trim();
+    const text = typeof rawValue === "string" ? rawValue.trim() : String(rawValue ?? "").trim();
     if (!key || !text) continue;
     headers[key] = text;
   }
@@ -656,8 +616,7 @@ function formatCronLogTimestamp(value: number) {
 
 function buildCronLogLines(log: CronExecutionLogResponse, index: number) {
   const status = log.success ? "success" : "failed";
-  const exitCode =
-    typeof log.exitCode === "number" ? ` | exit_code=${log.exitCode}` : "";
+  const exitCode = typeof log.exitCode === "number" ? ` | exit_code=${log.exitCode}` : "";
   const output = log.output.trim();
   return [
     `${index + 1}. log_id=${log.id} | started_at=${formatCronLogTimestamp(log.startedAt)} | status=${status} | duration_ms=${log.durationMs}${exitCode}`,
@@ -694,7 +653,7 @@ function buildCronTaskManagerResultText(result: SystemCronTaskManagerResponse) {
     case "list_logs":
       return buildCronLogsResultText(result.logs ?? []);
     case "read":
-    default:
+    default: {
       if (result.task) {
         return ["Cron task details:", ...buildCronTaskDetailLines(result.task)].join("\n");
       }
@@ -711,6 +670,7 @@ function buildCronTaskManagerResultText(result: SystemCronTaskManagerResponse) {
         ),
         "Use action=read with task_id to inspect one task before action=update, action=delete, or action=list_logs.",
       ].join("\n");
+    }
   }
 }
 

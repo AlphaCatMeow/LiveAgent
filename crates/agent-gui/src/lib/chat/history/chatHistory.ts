@@ -1,14 +1,13 @@
-import { invoke } from "@tauri-apps/api/core";
 import type { Message } from "@mariozechner/pi-ai";
-
+import { invoke } from "@tauri-apps/api/core";
+import { normalizeConversationSystemPrompt } from "../context/systemPrompt";
 import {
-  normalizeConversationState,
   type ConversationViewState,
+  normalizeConversationState,
   type StoredChatContextMeta,
   type StoredContextSegment,
   type StoredSummaryMessage,
 } from "../conversation/conversationState";
-import { normalizeConversationSystemPrompt } from "../context/systemPrompt";
 
 export type ChatHistorySummary = {
   id: string;
@@ -138,10 +137,8 @@ function parseStoredChatContextMeta(
     tools: Array.isArray(parsed.tools) ? parsed.tools : undefined,
     activeSegmentIndex:
       typeof parsed.activeSegmentIndex === "number" ? parsed.activeSegmentIndex : 0,
-    totalSegmentCount:
-      typeof parsed.totalSegmentCount === "number" ? parsed.totalSegmentCount : 1,
-    totalMessageCount:
-      typeof parsed.totalMessageCount === "number" ? parsed.totalMessageCount : 0,
+    totalSegmentCount: typeof parsed.totalSegmentCount === "number" ? parsed.totalSegmentCount : 1,
+    totalMessageCount: typeof parsed.totalMessageCount === "number" ? parsed.totalMessageCount : 0,
   };
 }
 
@@ -204,10 +201,7 @@ export async function getChatHistory(id: string, fallbackSystemPrompt?: string) 
   return normalizeWireRecord(record, fallbackSystemPrompt);
 }
 
-export async function getChatHistoryActiveSegment(
-  id: string,
-  fallbackSystemPrompt?: string,
-) {
+export async function getChatHistoryActiveSegment(id: string, fallbackSystemPrompt?: string) {
   const record = await invoke<ChatHistoryActiveSegmentWireRecord>(
     "chat_history_get_active_segment",
     { id },
@@ -233,19 +227,14 @@ export async function getChatHistoryActiveSegment(
   } satisfies ChatHistoryActiveSegmentRecord;
 }
 
-function enqueueConversationWrite<T>(
-  conversationId: string,
-  task: () => Promise<T>,
-): Promise<T> {
+function enqueueConversationWrite<T>(conversationId: string, task: () => Promise<T>): Promise<T> {
   const key = conversationId.trim();
   if (!key) {
     return task();
   }
 
   const previous = conversationWriteQueues.get(key) ?? Promise.resolve();
-  const next = previous
-    .catch(() => undefined)
-    .then(task);
+  const next = previous.catch(() => undefined).then(task);
   const tail = next.then(
     () => undefined,
     () => undefined,
@@ -269,17 +258,8 @@ function buildChatHistoryConversationInput(params: {
   updatedAt: number;
   state: ConversationViewState;
 }): ChatHistoryConversationInput {
-  const {
-    conversationId,
-    providerId,
-    model,
-    sessionId,
-    cwd,
-    title,
-    createdAt,
-    updatedAt,
-    state,
-  } = params;
+  const { conversationId, providerId, model, sessionId, cwd, title, createdAt, updatedAt, state } =
+    params;
 
   return {
     id: conversationId,
@@ -440,11 +420,7 @@ export async function persistConversationState(params: PersistConversationStateP
     nextState.segments.length === previousState.segments.length + 1;
   if (
     appendShape &&
-    segmentPrefixMatches(
-      previousState.segments,
-      nextState.segments,
-      previousState.segments.length,
-    )
+    segmentPrefixMatches(previousState.segments, nextState.segments, previousState.segments.length)
   ) {
     const appendedSegment = nextState.segments[nextState.activeSegmentIndex];
     if (appendedSegment) {

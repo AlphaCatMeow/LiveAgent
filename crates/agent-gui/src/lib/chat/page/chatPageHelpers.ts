@@ -1,9 +1,8 @@
 import type { Context } from "@mariozechner/pi-ai";
-
+import { type ModelOption, toModelValue } from "../../providers/llm";
 import type { AppSettings } from "../../settings";
 import type { ChatHistorySummary } from "../history/chatHistory";
 import { getMessageText } from "../messages/uiMessages";
-import { toModelValue, type ModelOption } from "../../providers/llm";
 
 const FALLBACK_TITLE_MAX_CHARS = 48;
 const TITLE_LOOKAHEAD_TIMEOUT_MS = 1_200;
@@ -92,9 +91,7 @@ export function isAbortLikeError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error ?? "");
   const normalized = message.trim().toLowerCase();
   return (
-    normalized.includes("已取消") ||
-    normalized.includes("abort") ||
-    normalized.includes("aborted")
+    normalized.includes("已取消") || normalized.includes("abort") || normalized.includes("aborted")
   );
 }
 
@@ -115,10 +112,7 @@ export function sortHistoryItems(items: ChatHistorySummary[]) {
   });
 }
 
-export function mergeHistoryItem(
-  items: ChatHistorySummary[],
-  nextItem: ChatHistorySummary,
-) {
+export function mergeHistoryItem(items: ChatHistorySummary[], nextItem: ChatHistorySummary) {
   const existing = items.find((item) => item.id === nextItem.id);
   const merged = existing
     ? {

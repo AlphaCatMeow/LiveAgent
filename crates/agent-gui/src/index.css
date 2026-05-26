@@ -11,11 +11,7 @@
 
 @layer utilities {
   .font-openai-chat {
-    font-family:
-      "OpenAI Sans Semibold",
-      "PingFang SC",
-      "Microsoft YaHei",
-      sans-serif;
+    font-family: "OpenAI Sans Semibold", "PingFang SC", "Microsoft YaHei", sans-serif;
   }
 
   /*
@@ -310,7 +306,9 @@
   /* Code blocks — container, header, body (safe in components layer) */
   .chat-markdown [data-streamdown="code-block"] {
     @apply relative my-4 overflow-hidden rounded-xl border border-border/50 bg-muted/20;
-    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.04);
+    box-shadow:
+      0 1px 3px 0 rgba(0, 0, 0, 0.04),
+      0 1px 2px -1px rgba(0, 0, 0, 0.04);
   }
   .chat-markdown [data-streamdown="code-block-header"] {
     @apply h-auto border-b border-border/60 bg-muted/55 px-3 py-2 text-[11px] uppercase tracking-[0.22em] text-muted-foreground;
@@ -545,7 +543,9 @@
   }
 
   @keyframes typingBounce {
-    0%, 60%, 100% {
+    0%,
+    60%,
+    100% {
       transform: translateY(0);
     }
     30% {
@@ -554,7 +554,8 @@
   }
 
   @keyframes vibingBounce {
-    0%, 100% {
+    0%,
+    100% {
       transform: translateY(0);
     }
     30% {
@@ -596,7 +597,8 @@
   }
 
   @keyframes heroFloat {
-    0%, 100% {
+    0%,
+    100% {
       transform: translateY(0);
     }
     50% {
@@ -606,11 +608,14 @@
 
   /* Glow pulse animation */
   .hero-glow-pulse {
-    animation: heroGlowPulse 5s ease-in-out infinite, heroFadeIn 1.2s ease-out both;
+    animation:
+      heroGlowPulse 5s ease-in-out infinite,
+      heroFadeIn 1.2s ease-out both;
   }
 
   @keyframes heroGlowPulse {
-    0%, 100% {
+    0%,
+    100% {
       opacity: 0.7;
       transform: scale(1);
     }
@@ -670,15 +675,33 @@
     animation: mentionItemIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 
-  .mention-popup-item:nth-child(1) { animation-delay: 0ms; }
-  .mention-popup-item:nth-child(2) { animation-delay: 18ms; }
-  .mention-popup-item:nth-child(3) { animation-delay: 36ms; }
-  .mention-popup-item:nth-child(4) { animation-delay: 54ms; }
-  .mention-popup-item:nth-child(5) { animation-delay: 72ms; }
-  .mention-popup-item:nth-child(6) { animation-delay: 90ms; }
-  .mention-popup-item:nth-child(7) { animation-delay: 108ms; }
-  .mention-popup-item:nth-child(8) { animation-delay: 126ms; }
-  .mention-popup-item:nth-child(n+9) { animation-delay: 140ms; }
+  .mention-popup-item:nth-child(1) {
+    animation-delay: 0ms;
+  }
+  .mention-popup-item:nth-child(2) {
+    animation-delay: 18ms;
+  }
+  .mention-popup-item:nth-child(3) {
+    animation-delay: 36ms;
+  }
+  .mention-popup-item:nth-child(4) {
+    animation-delay: 54ms;
+  }
+  .mention-popup-item:nth-child(5) {
+    animation-delay: 72ms;
+  }
+  .mention-popup-item:nth-child(6) {
+    animation-delay: 90ms;
+  }
+  .mention-popup-item:nth-child(7) {
+    animation-delay: 108ms;
+  }
+  .mention-popup-item:nth-child(8) {
+    animation-delay: 126ms;
+  }
+  .mention-popup-item:nth-child(n + 9) {
+    animation-delay: 140ms;
+  }
 
   /* Composer dropdown (MCP / Skills) animations */
   @keyframes composerDropdownIn {
@@ -738,17 +761,29 @@
   }
 
   .composer-dropdown[data-state="open"] [role="menuitemcheckbox"]:nth-child(1),
-  .composer-dropdown[data-state="open"] [role="menuitem"]:nth-child(1) { animation-delay: 0.02s; }
+  .composer-dropdown[data-state="open"] [role="menuitem"]:nth-child(1) {
+    animation-delay: 0.02s;
+  }
   .composer-dropdown[data-state="open"] [role="menuitemcheckbox"]:nth-child(2),
-  .composer-dropdown[data-state="open"] [role="menuitem"]:nth-child(2) { animation-delay: 0.04s; }
+  .composer-dropdown[data-state="open"] [role="menuitem"]:nth-child(2) {
+    animation-delay: 0.04s;
+  }
   .composer-dropdown[data-state="open"] [role="menuitemcheckbox"]:nth-child(3),
-  .composer-dropdown[data-state="open"] [role="menuitem"]:nth-child(3) { animation-delay: 0.06s; }
+  .composer-dropdown[data-state="open"] [role="menuitem"]:nth-child(3) {
+    animation-delay: 0.06s;
+  }
   .composer-dropdown[data-state="open"] [role="menuitemcheckbox"]:nth-child(4),
-  .composer-dropdown[data-state="open"] [role="menuitem"]:nth-child(4) { animation-delay: 0.08s; }
+  .composer-dropdown[data-state="open"] [role="menuitem"]:nth-child(4) {
+    animation-delay: 0.08s;
+  }
   .composer-dropdown[data-state="open"] [role="menuitemcheckbox"]:nth-child(5),
-  .composer-dropdown[data-state="open"] [role="menuitem"]:nth-child(5) { animation-delay: 0.10s; }
-  .composer-dropdown[data-state="open"] [role="menuitemcheckbox"]:nth-child(n+6),
-  .composer-dropdown[data-state="open"] [role="menuitem"]:nth-child(n+6) { animation-delay: 0.12s; }
+  .composer-dropdown[data-state="open"] [role="menuitem"]:nth-child(5) {
+    animation-delay: 0.1s;
+  }
+  .composer-dropdown[data-state="open"] [role="menuitemcheckbox"]:nth-child(n + 6),
+  .composer-dropdown[data-state="open"] [role="menuitem"]:nth-child(n + 6) {
+    animation-delay: 0.12s;
+  }
 
   /* Composer reasoning select animations */
   @keyframes composerReasoningDropdownIn {
@@ -907,7 +942,8 @@
   }
 
   @keyframes checkpointPulse {
-    0%, 100% {
+    0%,
+    100% {
       opacity: 0.6;
     }
     50% {
@@ -938,30 +974,43 @@
   }
 
   .checkpoint-shimmer {
-    background: linear-gradient(
-      90deg,
-      transparent 0%,
-      hsl(0 0% 50% / 0.06) 50%,
-      transparent 100%
-    );
+    background: linear-gradient(90deg, transparent 0%, hsl(0 0% 50% / 0.06) 50%, transparent 100%);
     background-size: 200% 100%;
     animation: checkpointShimmer 2.5s ease-in-out infinite;
   }
 
   /* Tool card animations & micro-interactions */
   @keyframes toolCardIn {
-    from { opacity: 0; transform: translateY(6px) scale(0.97); }
-    to   { opacity: 1; transform: translateY(0) scale(1); }
+    from {
+      opacity: 0;
+      transform: translateY(6px) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
   }
 
   @keyframes toolExpandIn {
-    from { opacity: 0; transform: translateY(-4px); }
-    to   { opacity: 1; transform: translateY(0); }
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   @keyframes toolArgPillIn {
-    from { opacity: 0; transform: scale(0.92); }
-    to   { opacity: 1; transform: scale(1); }
+    from {
+      opacity: 0;
+      transform: scale(0.92);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
   }
 
   .tool-card-enter {
@@ -985,17 +1034,31 @@
   }
 
   /* Stagger pills */
-  .tool-arg-pill:nth-child(1) { animation-delay: 0ms; }
-  .tool-arg-pill:nth-child(2) { animation-delay: 30ms; }
-  .tool-arg-pill:nth-child(3) { animation-delay: 60ms; }
-  .tool-arg-pill:nth-child(4) { animation-delay: 90ms; }
-  .tool-arg-pill:nth-child(5) { animation-delay: 120ms; }
-  .tool-arg-pill:nth-child(n+6) { animation-delay: 150ms; }
+  .tool-arg-pill:nth-child(1) {
+    animation-delay: 0ms;
+  }
+  .tool-arg-pill:nth-child(2) {
+    animation-delay: 30ms;
+  }
+  .tool-arg-pill:nth-child(3) {
+    animation-delay: 60ms;
+  }
+  .tool-arg-pill:nth-child(4) {
+    animation-delay: 90ms;
+  }
+  .tool-arg-pill:nth-child(5) {
+    animation-delay: 120ms;
+  }
+  .tool-arg-pill:nth-child(n + 6) {
+    animation-delay: 150ms;
+  }
 
   /* Click / open spring animation */
   .tool-card-enter > summary,
   .tool-card-grouped > summary {
-    transition: transform 250ms cubic-bezier(0.34, 1.56, 0.64, 1), background-color 150ms ease;
+    transition:
+      transform 250ms cubic-bezier(0.34, 1.56, 0.64, 1),
+      background-color 150ms ease;
   }
   .tool-card-enter > summary:active,
   .tool-card-grouped > summary:active {
@@ -1007,9 +1070,15 @@
     animation: toolSummaryBounce 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
   }
   @keyframes toolSummaryBounce {
-    0%   { transform: scale(0.975); }
-    50%  { transform: scale(1.008); }
-    100% { transform: scale(1); }
+    0% {
+      transform: scale(0.975);
+    }
+    50% {
+      transform: scale(1.008);
+    }
+    100% {
+      transform: scale(1);
+    }
   }
 
   /* Focus-visible for keyboard nav */
@@ -1080,29 +1149,60 @@
   /* Hub page loading and entrance animations */
 
   @keyframes hubPageIn {
-    from { opacity: 0; transform: translateY(8px); }
-    to   { opacity: 1; transform: translateY(0); }
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 
   @keyframes hubPanelIn {
-    from { opacity: 0; transform: translateY(14px) scale(0.985); }
-    to   { opacity: 1; transform: translateY(0) scale(1); }
+    from {
+      opacity: 0;
+      transform: translateY(14px) scale(0.985);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
   }
 
   @keyframes hubChipIn {
-    from { opacity: 0; transform: translateY(6px) scale(0.94); }
-    to   { opacity: 1; transform: translateY(0) scale(1); }
+    from {
+      opacity: 0;
+      transform: translateY(6px) scale(0.94);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
   }
 
   @keyframes hubLoadingProgress {
-    0%   { transform: translateX(-60%) scaleX(0.35); }
-    50%  { transform: translateX(30%) scaleX(0.85); }
-    100% { transform: translateX(145%) scaleX(0.35); }
+    0% {
+      transform: translateX(-60%) scaleX(0.35);
+    }
+    50% {
+      transform: translateX(30%) scaleX(0.85);
+    }
+    100% {
+      transform: translateX(145%) scaleX(0.35);
+    }
   }
 
   @keyframes hubStatusPulse {
-    0%, 100% { box-shadow: 0 0 0 0 currentColor; opacity: 0.65; }
-    50%      { box-shadow: 0 0 0 4px transparent; opacity: 1; }
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 currentColor;
+      opacity: 0.65;
+    }
+    50% {
+      box-shadow: 0 0 0 4px transparent;
+      opacity: 1;
+    }
   }
 
   .hub-page-enter {
@@ -1129,12 +1229,24 @@
   .hub-chip-enter {
     animation: hubChipIn 320ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
   }
-  .hub-chip-enter:nth-child(1)  { animation-delay: 0ms; }
-  .hub-chip-enter:nth-child(2)  { animation-delay: 40ms; }
-  .hub-chip-enter:nth-child(3)  { animation-delay: 80ms; }
-  .hub-chip-enter:nth-child(4)  { animation-delay: 120ms; }
-  .hub-chip-enter:nth-child(5)  { animation-delay: 160ms; }
-  .hub-chip-enter:nth-child(n+6) { animation-delay: 200ms; }
+  .hub-chip-enter:nth-child(1) {
+    animation-delay: 0ms;
+  }
+  .hub-chip-enter:nth-child(2) {
+    animation-delay: 40ms;
+  }
+  .hub-chip-enter:nth-child(3) {
+    animation-delay: 80ms;
+  }
+  .hub-chip-enter:nth-child(4) {
+    animation-delay: 120ms;
+  }
+  .hub-chip-enter:nth-child(5) {
+    animation-delay: 160ms;
+  }
+  .hub-chip-enter:nth-child(n + 6) {
+    animation-delay: 200ms;
+  }
 
   .hub-loading-progress {
     width: 42%;
@@ -1149,20 +1261,38 @@
   /* macOS frosted-glass loading hero — calm, monochrome, minimal */
 
   @keyframes hubFrostSpinnerFade {
-    0%   { opacity: 1; }
-    100% { opacity: 0.18; }
+    0% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0.18;
+    }
   }
 
   @keyframes hubFrostTrack {
-    0%   { transform: translateX(-105%); }
-    100% { transform: translateX(260%); }
+    0% {
+      transform: translateX(-105%);
+    }
+    100% {
+      transform: translateX(260%);
+    }
   }
 
   @keyframes hubFrostSheen {
-    0%   { transform: translateX(-60%); opacity: 0; }
-    24%  { opacity: 1; }
-    76%  { opacity: 1; }
-    100% { transform: translateX(160%); opacity: 0; }
+    0% {
+      transform: translateX(-60%);
+      opacity: 0;
+    }
+    24% {
+      opacity: 1;
+    }
+    76% {
+      opacity: 1;
+    }
+    100% {
+      transform: translateX(160%);
+      opacity: 0;
+    }
   }
 
   .hub-frost-hero {
@@ -1186,22 +1316,12 @@
     position: absolute;
     inset: 0;
     width: 50%;
-    background: linear-gradient(
-      90deg,
-      transparent,
-      hsl(0 0% 100% / 0.22),
-      transparent
-    );
+    background: linear-gradient(90deg, transparent, hsl(0 0% 100% / 0.22), transparent);
     animation: hubFrostSheen 2.6s ease-in-out infinite;
     pointer-events: none;
   }
   .dark .hub-frost-hero::after {
-    background: linear-gradient(
-      90deg,
-      transparent,
-      hsl(0 0% 100% / 0.06),
-      transparent
-    );
+    background: linear-gradient(90deg, transparent, hsl(0 0% 100% / 0.06), transparent);
   }
 
   .hub-frost-spinner {
@@ -1223,25 +1343,61 @@
     animation: hubFrostSpinnerFade 1s linear infinite;
     opacity: 0;
   }
-  .hub-frost-spinner > i:nth-child(1)  { transform: rotate(0deg);   animation-delay: -0.917s; }
-  .hub-frost-spinner > i:nth-child(2)  { transform: rotate(30deg);  animation-delay: -0.833s; }
-  .hub-frost-spinner > i:nth-child(3)  { transform: rotate(60deg);  animation-delay: -0.750s; }
-  .hub-frost-spinner > i:nth-child(4)  { transform: rotate(90deg);  animation-delay: -0.667s; }
-  .hub-frost-spinner > i:nth-child(5)  { transform: rotate(120deg); animation-delay: -0.583s; }
-  .hub-frost-spinner > i:nth-child(6)  { transform: rotate(150deg); animation-delay: -0.500s; }
-  .hub-frost-spinner > i:nth-child(7)  { transform: rotate(180deg); animation-delay: -0.417s; }
-  .hub-frost-spinner > i:nth-child(8)  { transform: rotate(210deg); animation-delay: -0.333s; }
-  .hub-frost-spinner > i:nth-child(9)  { transform: rotate(240deg); animation-delay: -0.250s; }
-  .hub-frost-spinner > i:nth-child(10) { transform: rotate(270deg); animation-delay: -0.167s; }
-  .hub-frost-spinner > i:nth-child(11) { transform: rotate(300deg); animation-delay: -0.083s; }
-  .hub-frost-spinner > i:nth-child(12) { transform: rotate(330deg); animation-delay:  0.000s; }
+  .hub-frost-spinner > i:nth-child(1) {
+    transform: rotate(0deg);
+    animation-delay: -0.917s;
+  }
+  .hub-frost-spinner > i:nth-child(2) {
+    transform: rotate(30deg);
+    animation-delay: -0.833s;
+  }
+  .hub-frost-spinner > i:nth-child(3) {
+    transform: rotate(60deg);
+    animation-delay: -0.75s;
+  }
+  .hub-frost-spinner > i:nth-child(4) {
+    transform: rotate(90deg);
+    animation-delay: -0.667s;
+  }
+  .hub-frost-spinner > i:nth-child(5) {
+    transform: rotate(120deg);
+    animation-delay: -0.583s;
+  }
+  .hub-frost-spinner > i:nth-child(6) {
+    transform: rotate(150deg);
+    animation-delay: -0.5s;
+  }
+  .hub-frost-spinner > i:nth-child(7) {
+    transform: rotate(180deg);
+    animation-delay: -0.417s;
+  }
+  .hub-frost-spinner > i:nth-child(8) {
+    transform: rotate(210deg);
+    animation-delay: -0.333s;
+  }
+  .hub-frost-spinner > i:nth-child(9) {
+    transform: rotate(240deg);
+    animation-delay: -0.25s;
+  }
+  .hub-frost-spinner > i:nth-child(10) {
+    transform: rotate(270deg);
+    animation-delay: -0.167s;
+  }
+  .hub-frost-spinner > i:nth-child(11) {
+    transform: rotate(300deg);
+    animation-delay: -0.083s;
+  }
+  .hub-frost-spinner > i:nth-child(12) {
+    transform: rotate(330deg);
+    animation-delay: 0s;
+  }
 
   .hub-frost-track {
     position: relative;
     height: 2px;
     width: 100%;
     border-radius: 9999px;
-    background: hsl(var(--muted-foreground) / 0.10);
+    background: hsl(var(--muted-foreground) / 0.1);
     overflow: hidden;
   }
   .hub-frost-track::before {
@@ -1251,12 +1407,7 @@
     left: 0;
     width: 38%;
     border-radius: inherit;
-    background: linear-gradient(
-      90deg,
-      transparent,
-      hsl(var(--foreground) / 0.5),
-      transparent
-    );
+    background: linear-gradient(90deg, transparent, hsl(var(--foreground) / 0.5), transparent);
     animation: hubFrostTrack 1.6s cubic-bezier(0.65, 0, 0.35, 1) infinite;
   }
 
@@ -1285,26 +1436,48 @@
   }
 
   @keyframes hubLoadingTrackShimmer {
-    0%   { background-position: 150% 0; }
-    100% { background-position: -50% 0; }
+    0% {
+      background-position: 150% 0;
+    }
+    100% {
+      background-position: -50% 0;
+    }
   }
 
   /* Skills loading animations */
 
   @keyframes skillsSkeletonShimmer {
-    0%   { background-position: -200% 0; }
-    100% { background-position: 200% 0; }
+    0% {
+      background-position: -200% 0;
+    }
+    100% {
+      background-position: 200% 0;
+    }
   }
 
   @keyframes skillCardIn {
-    from { opacity: 0; transform: translateY(10px) scale(0.97); }
-    to   { opacity: 1; transform: translateY(0) scale(1); }
+    from {
+      opacity: 0;
+      transform: translateY(10px) scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
   }
 
   @keyframes skillCardCheckIn {
-    0%   { transform: scale(0); opacity: 0; }
-    60%  { transform: scale(1.15); }
-    100% { transform: scale(1); opacity: 1; }
+    0% {
+      transform: scale(0);
+      opacity: 0;
+    }
+    60% {
+      transform: scale(1.15);
+    }
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
   }
 
   .skills-skeleton-shimmer {
@@ -1319,59 +1492,114 @@
   }
 
   @keyframes skillsSkeletonPulse {
-    0%, 100% { background-color: hsl(var(--muted-foreground) / 0.10); }
-    50%      { background-color: hsl(var(--muted-foreground) / 0.22); }
+    0%,
+    100% {
+      background-color: hsl(var(--muted-foreground) / 0.1);
+    }
+    50% {
+      background-color: hsl(var(--muted-foreground) / 0.22);
+    }
   }
 
   .skills-skeleton-pulse {
-    background-color: hsl(var(--muted-foreground) / 0.10);
+    background-color: hsl(var(--muted-foreground) / 0.1);
     animation: skillsSkeletonPulse 1.6s ease-in-out infinite;
   }
-  .skills-skeleton-pulse:nth-child(2)  { animation-delay: 80ms; }
-  .skills-skeleton-pulse:nth-child(3)  { animation-delay: 160ms; }
-  .skills-skeleton-pulse:nth-child(4)  { animation-delay: 240ms; }
-  .skills-skeleton-pulse:nth-child(5)  { animation-delay: 320ms; }
-  .skills-skeleton-pulse:nth-child(6)  { animation-delay: 400ms; }
+  .skills-skeleton-pulse:nth-child(2) {
+    animation-delay: 80ms;
+  }
+  .skills-skeleton-pulse:nth-child(3) {
+    animation-delay: 160ms;
+  }
+  .skills-skeleton-pulse:nth-child(4) {
+    animation-delay: 240ms;
+  }
+  .skills-skeleton-pulse:nth-child(5) {
+    animation-delay: 320ms;
+  }
+  .skills-skeleton-pulse:nth-child(6) {
+    animation-delay: 400ms;
+  }
 
   .skill-card-enter {
     animation: skillCardIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
-  .skill-card-enter:nth-child(1)  { animation-delay: 0ms; }
-  .skill-card-enter:nth-child(2)  { animation-delay: 50ms; }
-  .skill-card-enter:nth-child(3)  { animation-delay: 100ms; }
-  .skill-card-enter:nth-child(4)  { animation-delay: 150ms; }
-  .skill-card-enter:nth-child(5)  { animation-delay: 200ms; }
-  .skill-card-enter:nth-child(6)  { animation-delay: 250ms; }
-  .skill-card-enter:nth-child(n+7) { animation-delay: 300ms; }
+  .skill-card-enter:nth-child(1) {
+    animation-delay: 0ms;
+  }
+  .skill-card-enter:nth-child(2) {
+    animation-delay: 50ms;
+  }
+  .skill-card-enter:nth-child(3) {
+    animation-delay: 100ms;
+  }
+  .skill-card-enter:nth-child(4) {
+    animation-delay: 150ms;
+  }
+  .skill-card-enter:nth-child(5) {
+    animation-delay: 200ms;
+  }
+  .skill-card-enter:nth-child(6) {
+    animation-delay: 250ms;
+  }
+  .skill-card-enter:nth-child(n + 7) {
+    animation-delay: 300ms;
+  }
 
   .skill-check-enter {
     animation: skillCardCheckIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
   }
 
-  .skills-scan-dot { animation: bounce 1s infinite; }
-  .skills-scan-dot:nth-child(2) { animation-delay: 150ms; }
-  .skills-scan-dot:nth-child(3) { animation-delay: 300ms; }
+  .skills-scan-dot {
+    animation: bounce 1s infinite;
+  }
+  .skills-scan-dot:nth-child(2) {
+    animation-delay: 150ms;
+  }
+  .skills-scan-dot:nth-child(3) {
+    animation-delay: 300ms;
+  }
 
   /* Skills store preview drawer animations */
 
   @keyframes skillsDrawerBackdropIn {
-    from { opacity: 0; }
-    to   { opacity: 1; }
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
   }
 
   @keyframes skillsDrawerBackdropOut {
-    from { opacity: 1; }
-    to   { opacity: 0; }
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
   }
 
   @keyframes skillsDrawerPanelIn {
-    from { opacity: 0; transform: translateX(32px); }
-    to   { opacity: 1; transform: translateX(0); }
+    from {
+      opacity: 0;
+      transform: translateX(32px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
   }
 
   @keyframes skillsDrawerPanelOut {
-    from { opacity: 1; transform: translateX(0); }
-    to   { opacity: 0; transform: translateX(32px); }
+    from {
+      opacity: 1;
+      transform: translateX(0);
+    }
+    to {
+      opacity: 0;
+      transform: translateX(32px);
+    }
   }
 
   .skills-drawer-backdrop {
@@ -1410,7 +1638,9 @@
     .skills-drawer-panel-closing {
       animation: none !important;
     }
-    .hub-frost-spinner > i { opacity: 0.4; }
+    .hub-frost-spinner > i {
+      opacity: 0.4;
+    }
   }
 
   @keyframes fileDropOverlayIn {
@@ -1434,7 +1664,8 @@
   }
 
   @keyframes fileDropBorderPulse {
-    0%, 100% {
+    0%,
+    100% {
       box-shadow: 0 0 0 0 hsl(var(--foreground) / 0);
     }
     50% {
@@ -1521,7 +1752,9 @@
   border-radius: 0.25rem;
   cursor: pointer;
   color: hsl(var(--muted-foreground));
-  transition: color 0.15s, background-color 0.15s;
+  transition:
+    color 0.15s,
+    background-color 0.15s;
 }
 .chat-markdown [data-streamdown="code-block-copy-button"]:hover,
 .chat-markdown [data-streamdown="code-block-download-button"]:hover {

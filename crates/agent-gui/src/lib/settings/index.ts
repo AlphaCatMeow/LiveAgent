@@ -1,10 +1,8 @@
-import { DEFAULT_LOCALE, normalizeLocale, type Locale } from "../../i18n/config";
+import { DEFAULT_LOCALE, type Locale, normalizeLocale } from "../../i18n/config";
 import { mergeAlwaysEnabledSkillNames } from "../skills/builtin";
+import { CUSTOM_SYSTEM_TOOL_OPTIONS, type SystemToolId } from "../tools/customSystemTools";
 import { normalizeApiKey, normalizeBaseUrl, normalizeModels } from "./normalize";
-import {
-  CUSTOM_SYSTEM_TOOL_OPTIONS,
-  type SystemToolId,
-} from "../tools/customSystemTools";
+
 export type { SystemToolId } from "../tools/customSystemTools";
 
 export type ProviderId = "codex" | "claude_code" | "gemini";
@@ -13,13 +11,7 @@ export type ExecutionMode = "text" | "tools" | "agent-dev";
 
 export type CodexRequestFormat = "openai-completions" | "openai-responses";
 
-export type ReasoningLevel =
-  | "off"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
+export type ReasoningLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export type McpTransport = "stdio" | "http" | "sse";
 
@@ -37,14 +29,7 @@ export type HookLifecycleEventType =
 
 export type ConversationHookType = "command" | "http";
 
-export type HookHttpMethod =
-  | "GET"
-  | "POST"
-  | "PUT"
-  | "PATCH"
-  | "DELETE"
-  | "HEAD"
-  | "OPTIONS";
+export type HookHttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 
 export type HookHttpRequest = {
   id: string;
@@ -495,7 +480,7 @@ function normalizeChatRuntimeReasoningByProvider(
   CHAT_RUNTIME_REASONING_PROVIDER_KEYS.forEach((key) => {
     const levels = getChatRuntimeReasoningLevelsForProviderKey(key);
     normalized[key] = normalizeChatRuntimeReasoningForLevels(
-      Object.prototype.hasOwnProperty.call(obj, key) ? obj[key] : fallbackReasoning,
+      Object.hasOwn(obj, key) ? obj[key] : fallbackReasoning,
       levels,
     );
   });
@@ -520,9 +505,7 @@ export function getChatRuntimeReasoningLevelsForProvider(params: {
   providerId?: ProviderId;
   requestFormat?: CodexRequestFormat;
 }): ReasoningLevel[] {
-  return getChatRuntimeReasoningLevelsForProviderKey(
-    getChatRuntimeReasoningProviderKey(params),
-  );
+  return getChatRuntimeReasoningLevelsForProviderKey(getChatRuntimeReasoningProviderKey(params));
 }
 
 export function normalizeChatRuntimeControlsForProvider(
@@ -607,7 +590,8 @@ function normalizeOptionalText(input: unknown): string {
 function normalizeCronRemainingExecutions(input: unknown): number | undefined {
   if (input == null) return undefined;
   if (typeof input === "string" && input.trim() === "") return undefined;
-  const numeric = typeof input === "number" ? input : typeof input === "string" ? Number(input) : NaN;
+  const numeric =
+    typeof input === "number" ? input : typeof input === "string" ? Number(input) : NaN;
   if (!Number.isFinite(numeric) || !Number.isInteger(numeric) || numeric < 0) {
     return undefined;
   }
@@ -636,9 +620,7 @@ function normalizeCronTaskType(input: unknown): CronTaskType {
 
 function normalizeHookHttpMethod(input: unknown): HookHttpMethod {
   const value = typeof input === "string" ? input.trim().toUpperCase() : "";
-  return HOOK_HTTP_METHODS.includes(value as HookHttpMethod)
-    ? (value as HookHttpMethod)
-    : "POST";
+  return HOOK_HTTP_METHODS.includes(value as HookHttpMethod) ? (value as HookHttpMethod) : "POST";
 }
 
 export function canHookHttpMethodHaveBody(method: HookHttpMethod): boolean {
@@ -648,9 +630,8 @@ export function canHookHttpMethodHaveBody(method: HookHttpMethod): boolean {
 function normalizeHookHttpRequest(input: unknown): HookHttpRequest {
   const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
   const method = normalizeHookHttpMethod(obj.method);
-  const body = canHookHttpMethodHaveBody(method) && Object.prototype.hasOwnProperty.call(obj, "body")
-    ? obj.body
-    : undefined;
+  const body =
+    canHookHttpMethodHaveBody(method) && Object.hasOwn(obj, "body") ? obj.body : undefined;
 
   return {
     id: typeof obj.id === "string" && obj.id.trim() ? obj.id.trim() : crypto.randomUUID(),
@@ -719,8 +700,7 @@ function normalizeRecordStringString(input: unknown): Record<string, string> | u
   const out: Record<string, string> = {};
   for (const [rawKey, rawValue] of Object.entries(input as Record<string, unknown>)) {
     const key = String(rawKey).trim();
-    const value =
-      typeof rawValue === "string" ? rawValue.trim() : String(rawValue ?? "").trim();
+    const value = typeof rawValue === "string" ? rawValue.trim() : String(rawValue ?? "").trim();
     if (!key || !value) continue;
     out[key] = value;
   }
@@ -763,9 +743,7 @@ function normalizeMcpSelection(input: unknown, servers: McpServerConfig[]): stri
 function normalizeTimeoutMs(input: unknown): number {
   const numeric =
     typeof input === "number" ? input : typeof input === "string" ? Number(input) : NaN;
-  const timeoutMs = Number.isFinite(numeric)
-    ? Math.floor(numeric)
-    : DEFAULT_MCP_TIMEOUT_MS;
+  const timeoutMs = Number.isFinite(numeric) ? Math.floor(numeric) : DEFAULT_MCP_TIMEOUT_MS;
   return timeoutMs > 0 ? timeoutMs : DEFAULT_MCP_TIMEOUT_MS;
 }
 
@@ -932,8 +910,7 @@ export function normalizeCustomProvider(input: unknown): CustomProvider {
     ),
     requestFormat: codexRouting?.requestFormat,
     reasoning: normalizeReasoningLevel(obj.reasoning),
-    promptCachingEnabled:
-      type === "claude_code" ? obj.promptCachingEnabled !== false : false,
+    promptCachingEnabled: type === "claude_code" ? obj.promptCachingEnabled !== false : false,
     nativeWebSearchEnabled: obj.nativeWebSearchEnabled !== false,
   };
 }
@@ -1070,9 +1047,10 @@ function normalizeMemoryOrganizerSchedule(input: unknown): MemoryOrganizerSchedu
     frequency: normalizeMemoryOrganizerFrequency(obj.frequency),
     timeLocal: normalizeMemoryOrganizerTime(obj.timeLocal),
     weekday: normalizeMemoryOrganizerWeekday(obj.weekday),
-    timezone: typeof obj.timezone === "string" && obj.timezone.trim()
-      ? obj.timezone.trim()
-      : defaults.timezone,
+    timezone:
+      typeof obj.timezone === "string" && obj.timezone.trim()
+        ? obj.timezone.trim()
+        : defaults.timezone,
   };
 }
 
@@ -1171,9 +1149,9 @@ export function normalizeMemorySettings(
     Boolean(organizerModel) &&
     organizerSchedule.frequency !== "none";
   const organizerNextRunAt = organizerEnabled
-    ? normalizeOptionalTimestamp(obj.organizerNextRunAt) ??
+    ? (normalizeOptionalTimestamp(obj.organizerNextRunAt) ??
       computeNextMemoryOrganizerRunAt(organizerSchedule) ??
-      undefined
+      undefined)
     : undefined;
   return {
     organizerModel,
@@ -1285,10 +1263,7 @@ export function normalizeSettings(input?: Partial<AppSettings> | null): AppSetti
   };
 }
 
-export function updateSystem(
-  prev: AppSettings,
-  patch: Partial<SystemSettings>,
-): AppSettings {
+export function updateSystem(prev: AppSettings, patch: Partial<SystemSettings>): AppSettings {
   return normalizeSettings({
     ...prev,
     system: {
@@ -1308,10 +1283,7 @@ export function updateMcp(prev: AppSettings, patch: Partial<McpSettings>): AppSe
   });
 }
 
-export function updateAgents(
-  prev: AppSettings,
-  agents: AgentPromptTemplate[],
-): AppSettings {
+export function updateAgents(prev: AppSettings, agents: AgentPromptTemplate[]): AppSettings {
   return normalizeSettings({
     ...prev,
     agents,
@@ -1332,10 +1304,7 @@ export function updateCronTasks(prev: AppSettings, cron: CronTask[]): AppSetting
   });
 }
 
-export function updateSkills(
-  prev: AppSettings,
-  patch: Partial<SkillsSettings>,
-): AppSettings {
+export function updateSkills(prev: AppSettings, patch: Partial<SkillsSettings>): AppSettings {
   return normalizeSettings({
     ...prev,
     skills: {

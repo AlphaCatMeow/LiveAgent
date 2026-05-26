@@ -199,72 +199,78 @@ export function createFileToolState() {
     return buckets.get(buildBucketKey(root, path))?.latestFullText;
   }
 
-  function getExactTextRead(path: string, params: {
-    startLine: number;
-    numLines: number;
-    totalLines: number;
-  }, root?: FileToolRoot) {
-    return buckets
-      .get(buildBucketKey(root, path))
-      ?.byRangeKey.get(
-        buildTextRangeKey({
-          root: normalizeRoot(root),
-          path,
-          kind: "text",
-          mtimeMs: 0,
-          contentHash: "",
-          startLine: params.startLine,
-          numLines: params.numLines,
-          totalLines: params.totalLines,
-          isPartialView: params.startLine > 1 || params.numLines < params.totalLines,
-        }),
-      );
+  function getExactTextRead(
+    path: string,
+    params: {
+      startLine: number;
+      numLines: number;
+      totalLines: number;
+    },
+    root?: FileToolRoot,
+  ) {
+    return buckets.get(buildBucketKey(root, path))?.byRangeKey.get(
+      buildTextRangeKey({
+        root: normalizeRoot(root),
+        path,
+        kind: "text",
+        mtimeMs: 0,
+        contentHash: "",
+        startLine: params.startLine,
+        numLines: params.numLines,
+        totalLines: params.totalLines,
+        isPartialView: params.startLine > 1 || params.numLines < params.totalLines,
+      }),
+    );
   }
 
   function getExactImageRead(path: string, root?: FileToolRoot) {
     return buckets.get(buildBucketKey(root, path))?.byRangeKey.get(buildImageRangeKey());
   }
 
-  function getExactPdfRead(path: string, params: {
-    pageStart: number;
-    numPages: number;
-    totalPages: number;
-  }, root?: FileToolRoot) {
-    return buckets
-      .get(buildBucketKey(root, path))
-      ?.byRangeKey.get(
-        buildPdfRangeKey({
-          root: normalizeRoot(root),
-          path,
-          kind: "pdf",
-          mtimeMs: 0,
-          contentHash: "",
-          pageStart: params.pageStart,
-          numPages: params.numPages,
-          totalPages: params.totalPages,
-        }),
-      );
+  function getExactPdfRead(
+    path: string,
+    params: {
+      pageStart: number;
+      numPages: number;
+      totalPages: number;
+    },
+    root?: FileToolRoot,
+  ) {
+    return buckets.get(buildBucketKey(root, path))?.byRangeKey.get(
+      buildPdfRangeKey({
+        root: normalizeRoot(root),
+        path,
+        kind: "pdf",
+        mtimeMs: 0,
+        contentHash: "",
+        pageStart: params.pageStart,
+        numPages: params.numPages,
+        totalPages: params.totalPages,
+      }),
+    );
   }
 
-  function getExactNotebookRead(path: string, params: {
-    cellStart: number;
-    numCells: number;
-    totalCells: number;
-  }, root?: FileToolRoot) {
-    return buckets
-      .get(buildBucketKey(root, path))
-      ?.byRangeKey.get(
-        buildNotebookRangeKey({
-          root: normalizeRoot(root),
-          path,
-          kind: "notebook",
-          mtimeMs: 0,
-          contentHash: "",
-          cellStart: params.cellStart,
-          numCells: params.numCells,
-          totalCells: params.totalCells,
-        }),
-      );
+  function getExactNotebookRead(
+    path: string,
+    params: {
+      cellStart: number;
+      numCells: number;
+      totalCells: number;
+    },
+    root?: FileToolRoot,
+  ) {
+    return buckets.get(buildBucketKey(root, path))?.byRangeKey.get(
+      buildNotebookRangeKey({
+        root: normalizeRoot(root),
+        path,
+        kind: "notebook",
+        mtimeMs: 0,
+        contentHash: "",
+        cellStart: params.cellStart,
+        numCells: params.numCells,
+        totalCells: params.totalCells,
+      }),
+    );
   }
 
   function clear(path: string, root?: FileToolRoot) {

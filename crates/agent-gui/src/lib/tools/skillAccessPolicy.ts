@@ -17,7 +17,11 @@ type SkillLike = {
 };
 
 function normalizeRelPath(path: string) {
-  return path.trim().replace(/\\/g, "/").replace(/^\.\/+/, "").replace(/\/+$/g, "");
+  return path
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/^\.\/+/, "")
+    .replace(/\/+$/g, "");
 }
 
 function normalizeName(name: string) {
@@ -41,9 +45,7 @@ function normalizePolicyBaseDirs(policy?: SkillAccessPolicy) {
 function normalizePolicyNames(policy?: SkillAccessPolicy) {
   if (!Array.isArray(policy?.allowedSkillNames)) return null;
   return new Set(
-    policy.allowedSkillNames
-      .map((name) => normalizeName(String(name)))
-      .filter(Boolean),
+    policy.allowedSkillNames.map((name) => normalizeName(String(name))).filter(Boolean),
   );
 }
 
@@ -115,14 +117,15 @@ export function buildSkillAccessDeniedMessage(params: {
   const allowed = Array.from(params.allowedSkillNames ?? [])
     .map((name) => String(name).trim())
     .filter(Boolean);
-  const allowedText = allowed.length > 0
-    ? `Allowed Skills in this conversation: ${allowed.join(", ")}.`
-    : "No Skills are enabled for file access in this conversation.";
+  const allowedText =
+    allowed.length > 0
+      ? `Allowed Skills in this conversation: ${allowed.join(", ")}.`
+      : "No Skills are enabled for file access in this conversation.";
   return [
     `${params.operation} is blocked: ${target} is not enabled for this conversation.`,
     allowedText,
     "Enable the Skill in the chat Skills selector before reading, searching, or running files from it.",
-    'Do not bypass this with Bash, absolute paths, find /, or ~/.liveagent/skills.',
+    "Do not bypass this with Bash, absolute paths, find /, or ~/.liveagent/skills.",
   ].join(" ");
 }
 
@@ -132,11 +135,13 @@ export function assertSkillPathAllowedByPolicy(
   operation: string,
 ) {
   if (isSkillPathAllowedByPolicy(policy, path)) return;
-  throw new Error(buildSkillAccessDeniedMessage({
-    operation,
-    path,
-    allowedSkillNames: policy?.allowedSkillNames,
-  }));
+  throw new Error(
+    buildSkillAccessDeniedMessage({
+      operation,
+      path,
+      allowedSkillNames: policy?.allowedSkillNames,
+    }),
+  );
 }
 
 export function assertSkillNameAllowedByPolicy(
@@ -145,11 +150,13 @@ export function assertSkillNameAllowedByPolicy(
   operation: string,
 ) {
   if (isSkillNameAllowedByPolicy(policy, name)) return;
-  throw new Error(buildSkillAccessDeniedMessage({
-    operation,
-    name,
-    allowedSkillNames: policy?.allowedSkillNames,
-  }));
+  throw new Error(
+    buildSkillAccessDeniedMessage({
+      operation,
+      name,
+      allowedSkillNames: policy?.allowedSkillNames,
+    }),
+  );
 }
 
 export function filterSkillsByAccessPolicy<T extends SkillLike>(
@@ -171,10 +178,12 @@ export function filterSkillsByAccessPolicy<T extends SkillLike>(
 
 export function assertSkillInventoryAllowed(policy: SkillAccessPolicy | undefined) {
   if (!isSkillAccessPolicyRestrictive(policy) || policy?.allowSkillInventory === true) return;
-  throw new Error(buildSkillAccessDeniedMessage({
-    operation: "SkillsManager(action=list)",
-    allowedSkillNames: policy?.allowedSkillNames,
-  }));
+  throw new Error(
+    buildSkillAccessDeniedMessage({
+      operation: "SkillsManager(action=list)",
+      allowedSkillNames: policy?.allowedSkillNames,
+    }),
+  );
 }
 
 export function assertSkillManagementAllowed(

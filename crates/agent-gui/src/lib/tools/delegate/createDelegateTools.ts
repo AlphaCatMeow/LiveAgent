@@ -1,12 +1,4 @@
 import type { Tool, ToolCall, ToolResultMessage } from "@mariozechner/pi-ai";
-
-import { runAssistantWithTools } from "../../chat/runner/agentRunner";
-import {
-  appendMessagesToConversation,
-  buildRequestContext,
-  createConversationStateFromContext,
-  type ConversationViewState,
-} from "../../chat/conversation/conversationState";
 import {
   createCompactionThrottleState,
   noteCompactionApplied,
@@ -14,6 +6,13 @@ import {
   runMidTurnCompaction,
   runPreCompactConversation,
 } from "../../chat/compaction/contextCompaction";
+import {
+  appendMessagesToConversation,
+  buildRequestContext,
+  type ConversationViewState,
+  createConversationStateFromContext,
+} from "../../chat/conversation/conversationState";
+import { runAssistantWithTools } from "../../chat/runner/agentRunner";
 import {
   defaultSubagentHistoryRecorder,
   listSubagentMessages,
@@ -26,13 +25,16 @@ import {
 } from "../../chat/subagent/subagentHistory";
 import { renderSubagentMessageBusSnapshot } from "../../chat/subagent/subagentMessageBus";
 import type { SubagentRuntimeManager } from "../../chat/subagent/subagentRuntimeManager";
-import { createSubagentScheduler, type SubagentScheduler } from "../../chat/subagent/subagentScheduler";
+import {
+  createSubagentScheduler,
+  type SubagentScheduler,
+} from "../../chat/subagent/subagentScheduler";
 import type { ProviderId } from "../../settings";
 import {
-  createBuiltinMetadataMap,
   type BuiltinToolBundle,
   type BuiltinToolExecutionContext,
   type BuiltinToolMetadata,
+  createBuiltinMetadataMap,
   type DelegateAgentItemResultDetails,
   type DelegateAgentResultDetails,
 } from "../builtinTypes";
@@ -44,6 +46,12 @@ import {
   TEXT_DELTA_EVENT_CHUNK_CHARS,
   THINKING_DELTA_EVENT_CHUNK_CHARS,
 } from "./constants";
+import {
+  buildSubagentRunId,
+  normalizeHistoryError,
+  parseSubagentRunState,
+  rememberSubagentRun,
+} from "./history";
 import {
   createAgentTemplateLookup,
   createSubagentIdentity,
@@ -60,12 +68,12 @@ import {
   normalizeSubagentRunMode,
   resolveResumedAgentExecutionMode,
 } from "./input";
+import { createSubagentMessageTools } from "./messageTools";
 import {
   buildSubagentContext,
   buildSubagentContinuationMessage,
   buildSubagentMessageBusUpdateMessage,
 } from "./prompts";
-import { createSubagentMessageTools } from "./messageTools";
 import {
   buildDelegateAgentCardResult,
   buildDelegateAgentCardToolCall,
@@ -95,12 +103,6 @@ import {
   sanitizeLabelPart,
   truncateText,
 } from "./utils";
-import {
-  buildSubagentRunId,
-  normalizeHistoryError,
-  parseSubagentRunState,
-  rememberSubagentRun,
-} from "./history";
 import {
   buildWorktreeLabel,
   decideWorktreeApply,
@@ -147,15 +149,13 @@ export function createDelegateTools(params: {
   const readOnlyToolNames = new Set(readOnlyTools.map((tool) => tool.name));
   const createWorktree = params.createWorktree ?? defaultCreateWorktree;
   const getWorktreeStatus = params.getWorktreeStatus ?? defaultGetWorktreeStatus;
-  const applyWorktreeChanges =
-    params.applyWorktreeChanges ?? defaultApplyWorktreeChanges;
+  const applyWorktreeChanges = params.applyWorktreeChanges ?? defaultApplyWorktreeChanges;
   const cleanupWorktree = params.cleanupWorktree ?? defaultCleanupWorktree;
   const enqueueApplyWorktreeChanges = createSequentialQueue();
   const subagentHistory = params.subagentHistory ?? defaultSubagentHistoryRecorder;
   const messageBusEnabled = Boolean(params.parentConversationId?.trim());
   const subagentRuntimeManager = params.subagentRuntimeManager;
-  const fallbackSubagentScheduler =
-    params.subagentScheduler ?? createSubagentScheduler();
+  const fallbackSubagentScheduler = params.subagentScheduler ?? createSubagentScheduler();
   const loadMessageBusRecords = async (
     recipientAgentId?: string,
   ): Promise<SubagentMessageRecord[]> => {
@@ -175,10 +175,7 @@ export function createDelegateTools(params: {
       return [];
     }
   };
-  const renderMessageBusSnapshot = async (agent: {
-    id: string;
-    name?: string;
-  }) => {
+  const renderMessageBusSnapshot = async (agent: { id: string; name?: string }) => {
     const messages = await loadMessageBusRecords(agent.id);
     return renderSubagentMessageBusSnapshot({
       messages,
@@ -186,14 +183,8 @@ export function createDelegateTools(params: {
       currentAgentName: agent.name,
     });
   };
-  const enqueueByLogicalAgent = new Map<
-    string,
-    ReturnType<typeof createSequentialQueue>
-  >();
-  const enqueueLogicalAgentRun = <T>(
-    logicalAgentId: string,
-    run: () => Promise<T>,
-  ) => {
+  const enqueueByLogicalAgent = new Map<string, ReturnType<typeof createSequentialQueue>>();
+  const enqueueLogicalAgentRun = <T>(logicalAgentId: string, run: () => Promise<T>) => {
     const conversationKey =
       params.parentConversationId?.trim() || params.sessionId?.trim() || "conversation";
     const key = `${conversationKey}\0${logicalAgentId}`;
@@ -223,10 +214,7 @@ export function createDelegateTools(params: {
       "Include the new user request and any parent-conversation context each subagent needs in that agent's prompt. The full parent conversation is not automatically copied into subagents.",
       "Create a delegated agent once with stable id, name, role, and identity. For later calls to the same agent, pass the same id and only the new prompt for the current task; LiveAgent will reuse the stored identity and ignore attempts to rename or redefine that agent.",
       "Existing delegated agents that may be resumed by id:",
-      formatKnownSubagentRoster(
-        existingIdentitiesByLogicalAgent,
-        existingRunsByLogicalAgent,
-      ),
+      formatKnownSubagentRoster(existingIdentitiesByLogicalAgent, existingRunsByLogicalAgent),
       "Configured AGENTS templates that may be referenced by agent_id:",
       formatConfiguredAgents(templates),
     ].join("\n"),
@@ -267,10 +255,7 @@ export function createDelegateTools(params: {
     const agents: DelegateAgentInput[] = [];
     const canonicalizationNotes: string[] = [];
     for (const rawTask of rawAgents) {
-      const matchedIdentity = findKnownIdentityForTask(
-        rawTask,
-        existingIdentitiesByLogicalAgent,
-      );
+      const matchedIdentity = findKnownIdentityForTask(rawTask, existingIdentitiesByLogicalAgent);
       if (matchedIdentity && matchedIdentity.logicalAgentId !== rawTask.id) {
         canonicalizationNotes.push(
           `- requested id=${rawTask.id} name=${rawTask.name ?? "(none)"} -> id=${matchedIdentity.logicalAgentId} name=${matchedIdentity.displayName}`,
@@ -368,13 +353,10 @@ export function createDelegateTools(params: {
       agents.length,
       clampInteger(args.concurrency, DEFAULT_CONCURRENCY, 1, MAX_CONCURRENCY),
     );
-    const subagentScheduler =
-      context?.subagentScheduler ?? fallbackSubagentScheduler;
+    const subagentScheduler = context?.subagentScheduler ?? fallbackSubagentScheduler;
     const startedAt = Date.now();
     const runStableSubagent = <T>(logicalAgentId: string, run: () => Promise<T>) =>
-      enqueueLogicalAgentRun(logicalAgentId, () =>
-        subagentScheduler.runSubagent(run, signal),
-      );
+      enqueueLogicalAgentRun(logicalAgentId, () => subagentScheduler.runSubagent(run, signal));
 
     const taskResults = await runWithConcurrency(
       agents,
@@ -450,15 +432,12 @@ export function createDelegateTools(params: {
             index,
           });
           const subagentSessionId = params.sessionId
-            ? existingRunSummary?.sessionId ??
+            ? (existingRunSummary?.sessionId ??
               (rawTask.resume
                 ? `${params.sessionId}:subagent:${sanitizeLabelPart(task.id, `agent-${index + 1}`)}`
-                : `${params.sessionId}:subagent:${sanitizeLabelPart(task.id, `agent-${index + 1}`)}:fresh:${sanitizeLabelPart(runId, "run")}`)
+                : `${params.sessionId}:subagent:${sanitizeLabelPart(task.id, `agent-${index + 1}`)}:fresh:${sanitizeLabelPart(runId, "run")}`))
             : undefined;
-          const rememberResult = (
-            result: DelegateAgentItemResultDetails,
-            endedAt?: number,
-          ) => {
+          const rememberResult = (result: DelegateAgentItemResultDetails, endedAt?: number) => {
             rememberSubagentRun(existingRunsByLogicalAgent, {
               runId,
               task,
@@ -530,10 +509,7 @@ export function createDelegateTools(params: {
             };
           };
           {
-            const childRuntime = withSubagentMessageTools(
-              readOnlyTools,
-              params.executeToolCall,
-            );
+            const childRuntime = withSubagentMessageTools(readOnlyTools, params.executeToolCall);
             childTools = childRuntime.tools;
             childExecuteToolCall = childRuntime.executeToolCall;
             childToolNames = new Set(childTools.map((tool) => tool.name));
@@ -859,9 +835,7 @@ export function createDelegateTools(params: {
                 payload: {
                   source: resumeSource,
                   error: normalizeErrorMessage(
-                    compactionErr instanceof Error
-                      ? compactionErr.message
-                      : String(compactionErr),
+                    compactionErr instanceof Error ? compactionErr.message : String(compactionErr),
                     "Subagent pre-compaction failed",
                   ),
                 },
@@ -1075,10 +1049,7 @@ export function createDelegateTools(params: {
                   roundIndex: round,
                   toolCallId: childToolCall.id,
                   toolName: childToolCall.name,
-                  isError:
-                    toolResult.role === "toolResult"
-                      ? Boolean(toolResult.isError)
-                      : false,
+                  isError: toolResult.role === "toolResult" ? Boolean(toolResult.isError) : false,
                   payload: { toolCall: childToolCall, toolResult },
                 });
               },
@@ -1095,10 +1066,7 @@ export function createDelegateTools(params: {
                 flushTextDeltaBuffer();
                 flushThinkingDeltaBuffer();
                 noteCompactionRound(compactionThrottleState);
-                const tempState = appendMessagesToConversation(
-                  subagentState,
-                  emittedMessages,
-                );
+                const tempState = appendMessagesToConversation(subagentState, emittedMessages);
                 const requestContext = buildRequestContext(tempState);
                 const busSnapshot = await renderMessageBusSnapshot({
                   id: task.id,
@@ -1196,10 +1164,7 @@ export function createDelegateTools(params: {
               signal,
             });
 
-            subagentState = appendMessagesToConversation(
-              subagentState,
-              result.emittedMessages,
-            );
+            subagentState = appendMessagesToConversation(subagentState, result.emittedMessages);
 
             if (worktree) {
               try {
@@ -1273,7 +1238,7 @@ export function createDelegateTools(params: {
               applyPatchBytes = 0;
               applySkippedReason = worktreeStatusError
                 ? "status_unavailable"
-                : applyDecision?.skippedReason ?? "no_changes";
+                : (applyDecision?.skippedReason ?? "no_changes");
               recordEvent({
                 eventType: "worktree_apply_skipped",
                 payload: {
@@ -1318,8 +1283,7 @@ export function createDelegateTools(params: {
                     });
                   } else {
                     worktreeCleanupStatus = "skipped";
-                    worktreeCleanupReason =
-                      cleanupResult.skippedReason ?? worktreeCleanupReason;
+                    worktreeCleanupReason = cleanupResult.skippedReason ?? worktreeCleanupReason;
                     recordEvent({
                       eventType: "worktree_cleanup_skipped",
                       payload: cleanupResult,
@@ -1359,51 +1323,54 @@ export function createDelegateTools(params: {
             });
             await flushHistory();
             const completedAt = Date.now();
-            const completedAgent = rememberResult({
-              id: task.id,
-              runId,
-              name: displayName,
-              role: identity.role,
-              prompt: task.prompt,
-              agentId: task.agentId,
-              agentName: template?.name,
-              mode: task.mode,
-              taskIntent: task.taskIntent,
-              applyPolicy: task.applyPolicy,
-              allowedOutputPaths: task.allowedOutputPaths,
-              status: "completed",
-              summary: summary || "(subagent returned an empty report)",
-              durationMs: Date.now() - taskStartedAt,
-              rounds,
-              toolCalls,
-              worktreeRoot: worktree?.worktree_root,
-              workdir: worktree?.workdir,
-              branchName: worktree?.branch_name,
-              changed: worktreeStatus?.changed,
-              statusText: worktreeStatus?.status,
-              diffStat: worktreeStatus?.diff_stat,
-              diff: worktreeStatus?.diff,
-              diffTruncated: worktreeStatus?.diff_truncated,
-              untrackedFiles: worktreeStatus?.untracked_files,
-              worktreeStatusError,
-              applyStatus,
-              applyMethod,
-              applyChanged,
-              applyPatchBytes,
-              applySkippedReason,
-              applyFallbackReason,
-              applyCopiedFiles,
-              applyDeletedFiles,
-              applyConflictFiles,
-              applyError,
-              appliedToWorkdir,
-              worktreeCleanupStatus,
-              worktreeCleanupReason,
-              worktreeCleanupError,
-              worktreeBranchDeleted,
-              candidateArtifacts,
-              changedPaths,
-            }, completedAt);
+            const completedAgent = rememberResult(
+              {
+                id: task.id,
+                runId,
+                name: displayName,
+                role: identity.role,
+                prompt: task.prompt,
+                agentId: task.agentId,
+                agentName: template?.name,
+                mode: task.mode,
+                taskIntent: task.taskIntent,
+                applyPolicy: task.applyPolicy,
+                allowedOutputPaths: task.allowedOutputPaths,
+                status: "completed",
+                summary: summary || "(subagent returned an empty report)",
+                durationMs: Date.now() - taskStartedAt,
+                rounds,
+                toolCalls,
+                worktreeRoot: worktree?.worktree_root,
+                workdir: worktree?.workdir,
+                branchName: worktree?.branch_name,
+                changed: worktreeStatus?.changed,
+                statusText: worktreeStatus?.status,
+                diffStat: worktreeStatus?.diff_stat,
+                diff: worktreeStatus?.diff,
+                diffTruncated: worktreeStatus?.diff_truncated,
+                untrackedFiles: worktreeStatus?.untracked_files,
+                worktreeStatusError,
+                applyStatus,
+                applyMethod,
+                applyChanged,
+                applyPatchBytes,
+                applySkippedReason,
+                applyFallbackReason,
+                applyCopiedFiles,
+                applyDeletedFiles,
+                applyConflictFiles,
+                applyError,
+                appliedToWorkdir,
+                worktreeCleanupStatus,
+                worktreeCleanupReason,
+                worktreeCleanupError,
+                worktreeBranchDeleted,
+                candidateArtifacts,
+                changedPaths,
+              },
+              completedAt,
+            );
             return finishAgent(completedAgent);
           } catch (err) {
             if (worktree) {
@@ -1445,43 +1412,46 @@ export function createDelegateTools(params: {
             });
             await flushHistory();
             const failedAt = Date.now();
-            const failedAgent = rememberResult({
-              id: task.id,
-              runId,
-              name: displayName,
-              role: identity.role,
-              prompt: task.prompt,
-              agentId: task.agentId,
-              agentName: template?.name,
-              mode: task.mode,
-              taskIntent: task.taskIntent,
-              applyPolicy: task.applyPolicy,
-              allowedOutputPaths: task.allowedOutputPaths,
-              status: "failed",
-              summary: "",
-              durationMs: Date.now() - taskStartedAt,
-              rounds,
-              toolCalls,
-              error: message,
-              worktreeRoot: worktree?.worktree_root,
-              workdir: worktree?.workdir,
-              branchName: worktree?.branch_name,
-              changed: worktreeStatus?.changed,
-              statusText: worktreeStatus?.status,
-              diffStat: worktreeStatus?.diff_stat,
-              diff: worktreeStatus?.diff,
-              diffTruncated: worktreeStatus?.diff_truncated,
-              untrackedFiles: worktreeStatus?.untracked_files,
-              worktreeStatusError,
-              applyStatus: worktree ? "skipped" : undefined,
-              applyChanged: worktree ? false : undefined,
-              applyPatchBytes: worktree ? 0 : undefined,
-              applySkippedReason: worktree ? "agent_failed" : undefined,
-              worktreeCleanupStatus: worktree ? "retained" : undefined,
-              worktreeCleanupReason: worktree ? "agent_failed" : undefined,
-              candidateArtifacts,
-              changedPaths,
-            }, failedAt);
+            const failedAgent = rememberResult(
+              {
+                id: task.id,
+                runId,
+                name: displayName,
+                role: identity.role,
+                prompt: task.prompt,
+                agentId: task.agentId,
+                agentName: template?.name,
+                mode: task.mode,
+                taskIntent: task.taskIntent,
+                applyPolicy: task.applyPolicy,
+                allowedOutputPaths: task.allowedOutputPaths,
+                status: "failed",
+                summary: "",
+                durationMs: Date.now() - taskStartedAt,
+                rounds,
+                toolCalls,
+                error: message,
+                worktreeRoot: worktree?.worktree_root,
+                workdir: worktree?.workdir,
+                branchName: worktree?.branch_name,
+                changed: worktreeStatus?.changed,
+                statusText: worktreeStatus?.status,
+                diffStat: worktreeStatus?.diff_stat,
+                diff: worktreeStatus?.diff,
+                diffTruncated: worktreeStatus?.diff_truncated,
+                untrackedFiles: worktreeStatus?.untracked_files,
+                worktreeStatusError,
+                applyStatus: worktree ? "skipped" : undefined,
+                applyChanged: worktree ? false : undefined,
+                applyPatchBytes: worktree ? 0 : undefined,
+                applySkippedReason: worktree ? "agent_failed" : undefined,
+                worktreeCleanupStatus: worktree ? "retained" : undefined,
+                worktreeCleanupReason: worktree ? "agent_failed" : undefined,
+                candidateArtifacts,
+                changedPaths,
+              },
+              failedAt,
+            );
             return finishAgent(failedAgent);
           }
         });

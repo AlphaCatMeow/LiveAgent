@@ -230,10 +230,7 @@ type SubagentRunSegmentWireRecord = {
   updatedAt: number;
 };
 
-type SubagentRunUpsertWireInput = Omit<
-  SubagentRunHistoryInput,
-  "state" | "updatedAt"
-> & {
+type SubagentRunUpsertWireInput = Omit<SubagentRunHistoryInput, "state" | "updatedAt"> & {
   contextMetaJson: string;
   activeSegmentIndex: number;
   totalSegmentCount: number;
@@ -494,9 +491,7 @@ export async function pruneSubagentRunsForConversation(input: SubagentRunPruneIn
   return invoke<SubagentRunPruneResult>("subagent_run_prune", {
     input: {
       parentConversationId,
-      keepParentToolCallIds: input.keepParentToolCallIds
-        .map((id) => id.trim())
-        .filter(Boolean),
+      keepParentToolCallIds: input.keepParentToolCallIds.map((id) => id.trim()).filter(Boolean),
     },
   });
 }

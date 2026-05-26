@@ -1,10 +1,5 @@
 import type { Tool, ToolCall, ToolResultMessage } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
-
-import {
-  SUBAGENT_BROADCAST_RECIPIENT,
-  SUBAGENT_PARENT_AGENT_ID,
-} from "../../chat/subagent/subagentMessageBus";
 import {
   appendSubagentMessage,
   type SubagentHistoryRecorder,
@@ -12,18 +7,14 @@ import {
   type SubagentMessageRecord,
 } from "../../chat/subagent/subagentHistory";
 import {
-  createBuiltinMetadataMap,
-  type BuiltinToolBundle,
-} from "../builtinTypes";
+  SUBAGENT_BROADCAST_RECIPIENT,
+  SUBAGENT_PARENT_AGENT_ID,
+} from "../../chat/subagent/subagentMessageBus";
+import { type BuiltinToolBundle, createBuiltinMetadataMap } from "../builtinTypes";
 
 export const SEND_MESSAGE_TOOL_NAME = "SendMessage";
 
-const CHANNELS = new Set<SubagentMessageChannel>([
-  "direct",
-  "shared",
-  "decision",
-  "question",
-]);
+const CHANNELS = new Set<SubagentMessageChannel>(["direct", "shared", "decision", "question"]);
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -125,8 +116,7 @@ export function createSubagentMessageTools(params: {
               Type.Literal("question"),
             ],
             {
-              description:
-                "Optional bus channel. Defaults to direct, or shared when to=*.",
+              description: "Optional bus channel. Defaults to direct, or shared when to=*.",
             },
           ),
         ),
@@ -195,8 +185,7 @@ export function createSubagentMessageTools(params: {
     const args = asRecord(toolCall.arguments);
     const rawChannel = asString(args.channel).toLowerCase();
     const recipientAgentId =
-      normalizeRecipient(args.to) ||
-      (rawChannel === "shared" ? SUBAGENT_BROADCAST_RECIPIENT : "");
+      normalizeRecipient(args.to) || (rawChannel === "shared" ? SUBAGENT_BROADCAST_RECIPIENT : "");
     const bodyMarkdown = asString(args.message);
     if (!recipientAgentId || !bodyMarkdown) {
       return {

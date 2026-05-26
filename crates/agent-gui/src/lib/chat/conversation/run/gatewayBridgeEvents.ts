@@ -110,9 +110,7 @@ export function createGatewayBridgeEventController(
         type: "error",
         message,
         conversation_id:
-          conversationIdOverride ??
-          params.resolveErrorConversationId?.() ??
-          params.conversationId,
+          conversationIdOverride ?? params.resolveErrorConversationId?.() ?? params.conversationId,
       });
     },
     close() {

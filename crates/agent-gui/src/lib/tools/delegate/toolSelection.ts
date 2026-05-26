@@ -13,8 +13,7 @@ export function selectReadOnlyTools(params: {
     if (tool.name === SEND_MESSAGE_TOOL_NAME) return true;
     const metadata = params.metadataByName.get(tool.name);
     return (
-      metadata?.isReadOnly === true ||
-      (metadata?.groupId === "mcp" && metadata.kind === "mcp")
+      metadata?.isReadOnly === true || (metadata?.groupId === "mcp" && metadata.kind === "mcp")
     );
   });
 }

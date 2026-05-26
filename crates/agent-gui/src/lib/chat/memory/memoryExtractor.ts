@@ -1,7 +1,6 @@
 import type { Message } from "@mariozechner/pi-ai";
-
-import { assistantMessageToText } from "../../providers/llm";
 import { memoryApplyBatch, memoryTodayLocalDate } from "../../memory/api";
+import { assistantMessageToText } from "../../providers/llm";
 import type { ConversationViewState } from "../conversation/conversationState";
 
 const EXTRACTOR_THROTTLE_MS = 5 * 60_000;
@@ -94,7 +93,7 @@ function extractIdentity(text: string): ExtractedDecision[] {
   const out: ExtractedDecision[] = [];
   const nameMatch =
     text.match(/(?:我叫|我的名字是|请叫我)\s*([A-Za-z0-9_\-\u4e00-\u9fa5]{1,40})/) ??
-    text.match(/my name is\s+([A-Za-z0-9_\-]{1,40})/i);
+    text.match(/my name is\s+([A-Za-z0-9_-]{1,40})/i);
   const profileMatch =
     text.match(/我叫\s*[^，,。.\n]+[，,]\s*(?:是|我是)?(?:一个|一名)?([^。.\n]{2,80})/) ??
     text.match(/我是(?:一个|一名)?([^。.\n]{2,80})/);
@@ -138,18 +137,24 @@ function extractExplicitRemember(text: string): ExtractedDecision[] {
     const fact = match[1].trim();
     if (/^(?:了|什么|哪些|啥|吗|么)/.test(fact)) return [];
     if (/[?？]$/.test(fact)) return [];
-    const looksLikePreference = /以后|默认|偏好|喜欢|不要|必须|回答|使用|prefer|always|never/i.test(fact);
+    const looksLikePreference = /以后|默认|偏好|喜欢|不要|必须|回答|使用|prefer|always|never/i.test(
+      fact,
+    );
     const slug = slugify(fact, `user-note-${index + 1}`);
-    return [{
-      op: "upsert",
-      slug: looksLikePreference ? `feedback-${slug}`.slice(0, 64) : `reference-${slug}`.slice(0, 64),
-      scope: looksLikePreference ? "global" : "project",
-      memoryType: looksLikePreference ? "feedback" : "reference",
-      description: fact.slice(0, 120),
-      body: looksLikePreference
-        ? `${fact}\n\n**Why:** 用户明确要求记住这条偏好或约束。\n**How to apply:** 未来相关任务中优先参考，但以当前用户消息为准。`
-        : fact,
-    } satisfies ExtractedDecision];
+    return [
+      {
+        op: "upsert",
+        slug: looksLikePreference
+          ? `feedback-${slug}`.slice(0, 64)
+          : `reference-${slug}`.slice(0, 64),
+        scope: looksLikePreference ? "global" : "project",
+        memoryType: looksLikePreference ? "feedback" : "reference",
+        description: fact.slice(0, 120),
+        body: looksLikePreference
+          ? `${fact}\n\n**Why:** 用户明确要求记住这条偏好或约束。\n**How to apply:** 未来相关任务中优先参考，但以当前用户消息为准。`
+          : fact,
+      } satisfies ExtractedDecision,
+    ];
   });
 }
 
@@ -196,7 +201,9 @@ function latestCompletedTurn(messages: Message[]): LatestTurn | null {
 }
 
 function isMemoryIntrospection(text: string) {
-  return /(?:今天|当前|现在)?.{0,12}(?:记忆|memory).{0,12}(?:哪些|什么|啥|优先级|权重|读取|展示|查看|回顾)/i.test(text);
+  return /(?:今天|当前|现在)?.{0,12}(?:记忆|memory).{0,12}(?:哪些|什么|啥|优先级|权重|读取|展示|查看|回顾)/i.test(
+    text,
+  );
 }
 
 function shouldWriteDaily(userText: string, assistantText: string) {
@@ -214,7 +221,8 @@ function buildDailyAppend(params: {
 }) {
   const project = params.workdir?.split(/[\\/]/).filter(Boolean).pop() || "workspace";
   const time = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const userSummary = params.userText.split(/\n+/).find(Boolean)?.slice(0, 160) || "用户推进了一轮任务";
+  const userSummary =
+    params.userText.split(/\n+/).find(Boolean)?.slice(0, 160) || "用户推进了一轮任务";
   const assistantSummary =
     params.assistantText.split(/\n+/).find(Boolean)?.slice(0, 160) || "助手完成了本轮处理";
   return {
@@ -273,11 +281,7 @@ export async function runMemoryExtractor(params: {
   const messageCount = countRuntimeMessages(params.state);
   const previous = extractorStateByConversation.get(params.conversationId);
   const now = Date.now();
-  if (
-    previous &&
-    previous.lastMessageCount === messageCount &&
-    previous.pending !== true
-  ) {
+  if (previous && previous.lastMessageCount === messageCount && previous.pending !== true) {
     return;
   }
   if (previous && now - previous.lastRunAt < EXTRACTOR_THROTTLE_MS) {

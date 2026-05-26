@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Context } from "@mariozechner/pi-ai";
 import { listen } from "@tauri-apps/api/event";
-
-import { getDefaultSettings, normalizeSettings, type AppSettings } from "./lib/settings";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CronPromptRunner } from "./components/cron/CronPromptRunner";
+import { MemoryOrganizerRunner } from "./components/memory/MemoryOrganizerRunner";
+import { WindowsTitleBar } from "./components/WindowsTitleBar";
+import { LocaleContext, t as translate } from "./i18n";
+import { type AppSettings, getDefaultSettings, normalizeSettings } from "./lib/settings";
 import {
   loadPersistedSettingsWithDefaults,
   persistSettings,
@@ -14,10 +17,6 @@ import {
   buildGatewaySettingsSyncPayload,
   type GatewaySettingsSyncPayload,
 } from "./lib/settings/sync";
-import { LocaleContext, t as translate } from "./i18n";
-import { CronPromptRunner } from "./components/cron/CronPromptRunner";
-import { MemoryOrganizerRunner } from "./components/memory/MemoryOrganizerRunner";
-import { WindowsTitleBar } from "./components/WindowsTitleBar";
 import { ChatPage } from "./pages/ChatPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import type { SectionId } from "./pages/settings/types";
@@ -140,48 +139,49 @@ export default function App() {
     };
   }, []);
 
-  const queueSettingsSave = useCallback((
-    prev: AppSettings,
-    next: AppSettings,
-    fallback: string,
-    publishSync: boolean,
-  ) => {
-    const saveSequence = ++saveSequenceRef.current;
-    setSettingsSaveState({ status: "saving" });
+  const queueSettingsSave = useCallback(
+    (prev: AppSettings, next: AppSettings, fallback: string, publishSync: boolean) => {
+      const saveSequence = ++saveSequenceRef.current;
+      setSettingsSaveState({ status: "saving" });
 
-    saveChainRef.current = saveChainRef.current
-      .catch(() => undefined)
-      .then(() => persistSettings(prev, next))
-      .then(async () => {
-        if (publishSync) {
-          await publishGatewaySettingsSync(next);
-        }
-      })
-      .then(() => {
-        if (saveSequenceRef.current === saveSequence) {
-          setSettingsSaveState({ status: "saved" });
-        }
-      })
-      .catch((error) => {
-        if (saveSequenceRef.current === saveSequence) {
-          setSettingsSaveState({
-            status: "error",
-            message: asErrorMessage(error, fallback),
-          });
-        }
+      saveChainRef.current = saveChainRef.current
+        .catch(() => undefined)
+        .then(() => persistSettings(prev, next))
+        .then(async () => {
+          if (publishSync) {
+            await publishGatewaySettingsSync(next);
+          }
+        })
+        .then(() => {
+          if (saveSequenceRef.current === saveSequence) {
+            setSettingsSaveState({ status: "saved" });
+          }
+        })
+        .catch((error) => {
+          if (saveSequenceRef.current === saveSequence) {
+            setSettingsSaveState({
+              status: "error",
+              message: asErrorMessage(error, fallback),
+            });
+          }
+        });
+    },
+    [],
+  );
+
+  const setSettings = useCallback(
+    (updater: (prev: AppSettings) => AppSettings) => {
+      setSettingsState((prev) => {
+        const next = applyRuntimeSystemDefaults(
+          normalizeSettings(updater(prev)),
+          defaultWorkdirRef.current,
+        );
+        queueSettingsSave(prev, next, "保存设置失败。", hasSettingsSyncChanged(prev, next));
+        return next;
       });
-  }, []);
-
-  const setSettings = useCallback((updater: (prev: AppSettings) => AppSettings) => {
-    setSettingsState((prev) => {
-      const next = applyRuntimeSystemDefaults(
-        normalizeSettings(updater(prev)),
-        defaultWorkdirRef.current,
-      );
-      queueSettingsSave(prev, next, "保存设置失败。", hasSettingsSyncChanged(prev, next));
-      return next;
-    });
-  }, [queueSettingsSave]);
+    },
+    [queueSettingsSave],
+  );
 
   const reloadPersistedSettings = useCallback(async () => {
     await saveChainRef.current.catch(() => undefined);
@@ -198,18 +198,21 @@ export default function App() {
     }));
   }, [setSettings]);
 
-  const openSettings = useCallback((section: SectionId = "system") => {
-    setSettingsSection(section);
-    setSettingsOpen(true);
-    setOverlay("entering");
-    requestAnimationFrame(() => requestAnimationFrame(() => setOverlay("open")));
-    void reloadPersistedSettings().catch((error) => {
-      setSettingsSaveState({
-        status: "error",
-        message: asErrorMessage(error, "重新加载设置失败，当前显示的是旧配置。"),
+  const openSettings = useCallback(
+    (section: SectionId = "system") => {
+      setSettingsSection(section);
+      setSettingsOpen(true);
+      setOverlay("entering");
+      requestAnimationFrame(() => requestAnimationFrame(() => setOverlay("open")));
+      void reloadPersistedSettings().catch((error) => {
+        setSettingsSaveState({
+          status: "error",
+          message: asErrorMessage(error, "重新加载设置失败，当前显示的是旧配置。"),
+        });
       });
-    });
-  }, [reloadPersistedSettings]);
+    },
+    [reloadPersistedSettings],
+  );
 
   const closeSettings = useCallback(() => {
     setOverlay("leaving");
@@ -223,10 +226,13 @@ export default function App() {
   }, [overlay]);
 
   // 构建 locale context value，避免每次渲染重新创建
-  const localeContextValue = useMemo(() => ({
-    locale: settings.locale,
-    t: (key: string) => translate(key, settings.locale),
-  }), [settings.locale]);
+  const localeContextValue = useMemo(
+    () => ({
+      locale: settings.locale,
+      t: (key: string) => translate(key, settings.locale),
+    }),
+    [settings.locale],
+  );
 
   useEffect(() => {
     if (!settingsReady) {

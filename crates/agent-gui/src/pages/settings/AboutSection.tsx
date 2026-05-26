@@ -134,9 +134,7 @@ export function AboutSection(props: SettingsSectionProps) {
   const installed = checkState.status === "installed";
   const restarting = checkState.status === "restarting";
   const canInstall =
-    checkState.status === "ready" &&
-    checkState.result.configured &&
-    checkState.result.available;
+    checkState.status === "ready" && checkState.result.configured && checkState.result.available;
   const statusTitle =
     checkState.status === "error"
       ? t("settings.aboutUpdateError")
@@ -261,9 +259,7 @@ export function AboutSection(props: SettingsSectionProps) {
                       <div className="mt-0.5 font-medium tabular-nums">v{nextVersion}</div>
                     </div>
                     <div className="rounded-lg bg-muted/45 px-3 py-2">
-                      <div className="text-muted-foreground">
-                        {t("settings.aboutReleaseDate")}
-                      </div>
+                      <div className="text-muted-foreground">{t("settings.aboutReleaseDate")}</div>
                       <div className="mt-0.5 truncate font-medium">{releaseDate || "N/A"}</div>
                     </div>
                   </div>

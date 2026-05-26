@@ -22,7 +22,7 @@ function escapeInlineCode(value: string) {
 }
 
 function escapeInlineMarkdown(value: string) {
-  return value.replace(/[`*_{}\[\]()#+\-.!|>]/g, "\\$&");
+  return value.replace(/[`*_{}[\]()#+\-.!|>]/g, "\\$&");
 }
 
 function truncateMarkdown(value: string, maxChars: number) {
@@ -106,9 +106,7 @@ export function renderSubagentMessageBusSnapshot(params: {
     return selected;
   };
 
-  const directInbox = consume(
-    messages.filter((message) => isForAgent(message, currentAgentId)),
-  );
+  const directInbox = consume(messages.filter((message) => isForAgent(message, currentAgentId)));
   const sharedDecisions = consume(
     messages.filter((message) => message.channel === "decision" && isSharedMessage(message)),
   );
@@ -130,7 +128,12 @@ export function renderSubagentMessageBusSnapshot(params: {
 
   const appendSection = (title: string, items: SubagentMessageRecord[]) => {
     if (items.length === 0) return;
-    sections.push("", `### ${title}`, "", ...items.map((message) => renderMessage(message, maxBodyChars)).flatMap((text) => [text, ""]));
+    sections.push(
+      "",
+      `### ${title}`,
+      "",
+      ...items.map((message) => renderMessage(message, maxBodyChars)).flatMap((text) => [text, ""]),
+    );
   };
 
   appendSection(

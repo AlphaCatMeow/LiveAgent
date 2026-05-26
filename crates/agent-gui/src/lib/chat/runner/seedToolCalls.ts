@@ -1,7 +1,6 @@
 import type { AssistantMessage, ToolCall } from "@mariozechner/pi-ai";
 
-const SEED_TOOL_CALL_DISPLAY_PATTERN =
-  /<seed:tool_call>[\s\S]*?(?:<\/seed:tool_call>|$)/gi;
+const SEED_TOOL_CALL_DISPLAY_PATTERN = /<seed:tool_call>[\s\S]*?(?:<\/seed:tool_call>|$)/gi;
 const FUNCTION_PATTERN = /<function\b([^>]*)>([\s\S]*?)(?:<\/function>|$)/i;
 const PARAMETER_PATTERN =
   /<parameter\b([^>]*)>([\s\S]*?)(?:<\/parameter>|(?=<parameter\b|<\/function>|$))/gi;
@@ -38,7 +37,7 @@ function decodeXmlEntities(value: string) {
   return value
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, "\"")
+    .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
     .replace(/&amp;/g, "&");
 }
@@ -89,7 +88,7 @@ function coerceSeedParameterValue(value: string, attributes: Map<string, string>
   if (/^null$/i.test(decoded)) {
     return null;
   }
-  if (/^[\[{][\s\S]*[\]}]$/.test(decoded)) {
+  if (/^[[{][\s\S]*[\]}]$/.test(decoded)) {
     try {
       return JSON.parse(decoded);
     } catch {
@@ -169,8 +168,9 @@ function parseDsmlToolCallMarkup(markup: string): ToolCall[] {
 }
 
 function hasRecoverableToolCallMarkup(text: string) {
-  return text.includes("<seed:tool_call>") ||
-    (text.includes("DSML") && text.includes("tool_calls"));
+  return (
+    text.includes("<seed:tool_call>") || (text.includes("DSML") && text.includes("tool_calls"))
+  );
 }
 
 function recoverToolCallsFromBlockText(text: string) {
@@ -204,9 +204,7 @@ export function stripSeedToolCallMarkup(text: string) {
     return text;
   }
   return cleanRecoveredText(
-    text
-      .replace(SEED_TOOL_CALL_DISPLAY_PATTERN, "")
-      .replace(DSML_TOOL_CALL_DISPLAY_PATTERN, ""),
+    text.replace(SEED_TOOL_CALL_DISPLAY_PATTERN, "").replace(DSML_TOOL_CALL_DISPLAY_PATTERN, ""),
   );
 }
 
@@ -220,8 +218,7 @@ export function recoverAssistantSeedToolCalls(
   const nextContent: AssistantMessage["content"] = [];
   const seenComparableToolCalls = new Set(
     existingStructuredToolCalls.map(
-      (toolCall) =>
-        `${toolCall.name}:${stableStringifyComparable(toolCall.arguments ?? {})}`,
+      (toolCall) => `${toolCall.name}:${stableStringifyComparable(toolCall.arguments ?? {})}`,
     ),
   );
   let changed = false;

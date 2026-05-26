@@ -1,12 +1,12 @@
+import { Select as SelectPrimitive } from "@base-ui/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import * as SelectPrimitive from "@radix-ui/react-select";
 import {
   AlertTriangle,
+  BookOpen,
   Brain,
   BrushCleaning,
   Check,
-  BookOpen,
   ChevronDown,
   Folder,
   Globe2,
@@ -18,28 +18,26 @@ import {
   Trash2,
   X,
 } from "../../components/icons";
-
+import { pokeMemoryOrganizerRunner } from "../../components/memory/MemoryOrganizerRunner";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { useLocale } from "../../i18n";
 import { buildModelOptions } from "../../lib/chat/page/chatPageHelpers";
 import {
-  computeNextMemoryOrganizerRunAt,
-  updateMemorySettings,
-  type AppSettings,
-  type MemoryOrganizerFrequency,
-  type MemoryOrganizerMode,
-  type MemoryOrganizerScope,
-} from "../../lib/settings";
-import { parseModelValue, toModelValue } from "../../lib/providers/llm";
-import {
   formatMemoryError,
+  type MemoryListResponse,
+  type MemoryMeta,
+  type MemoryOrganizeRun,
+  type MemoryOrganizeRunStatus,
+  type MemoryPathsInfo,
+  type MemoryReadResponse,
+  type MemoryType,
   memoryAccept,
   memoryApplyBatch,
   memoryDelete,
   memoryList,
-  memoryOrganizeRunCreate,
   memoryOrganizeRunClearHistory,
+  memoryOrganizeRunCreate,
   memoryOrganizeRunList,
   memoryOrganizeRunRead,
   memoryOrganizeRunUpdate,
@@ -48,16 +46,8 @@ import {
   memoryUpdate,
   memoryWipeAll,
   memoryWrite,
-  type MemoryListResponse,
-  type MemoryMeta,
-  type MemoryOrganizeRun,
-  type MemoryOrganizeRunStatus,
-  type MemoryPathsInfo,
-  type MemoryReadResponse,
-  type MemoryType,
 } from "../../lib/memory/api";
 import {
-  ORGANIZER_PROTOCOL_VERSION,
   appliedBatchCount,
   buildManualApplyState,
   buildReviewItemsForBatch,
@@ -66,6 +56,9 @@ import {
   failedDecisionKeysFromReviewItems,
   inferOrganizerDecisionGroupIds,
   isDefaultSelectedOrganizerDecision,
+  ORGANIZER_PROTOCOL_VERSION,
+  type OrganizerReviewItem,
+  type OrganizerSafeDecision,
   organizerDecisionKey,
   protocolManualApplyState,
   protocolObject,
@@ -74,10 +67,16 @@ import {
   protocolStringArray,
   reviewItemsFromProtocol,
   successfulDecisionKeys,
-  type OrganizerReviewItem,
-  type OrganizerSafeDecision,
 } from "../../lib/memory/organizerProtocol";
-import { pokeMemoryOrganizerRunner } from "../../components/memory/MemoryOrganizerRunner";
+import { parseModelValue, toModelValue } from "../../lib/providers/llm";
+import {
+  type AppSettings,
+  computeNextMemoryOrganizerRunAt,
+  type MemoryOrganizerFrequency,
+  type MemoryOrganizerMode,
+  type MemoryOrganizerScope,
+  updateMemorySettings,
+} from "../../lib/settings";
 import { AgentActivationSwitch } from "./shared";
 
 type MemoryTab = "global" | "project" | "journal";
@@ -142,76 +141,82 @@ function DrawerSelect(props: {
     "group/drawer-select inline-flex h-9 w-full items-center justify-between gap-2 rounded-lg border border-foreground/[0.08] bg-white/55 px-3 text-[13px] leading-none text-foreground/90",
     "outline-none transition-[background-color,border-color,box-shadow] duration-150",
     "hover:border-foreground/[0.14] hover:bg-white/75",
-    "data-[state=open]:border-foreground/[0.2] data-[state=open]:bg-white/85 data-[state=open]:shadow-[0_1px_0_rgba(255,255,255,0.65)_inset,0_2px_8px_-4px_rgba(15,23,42,0.08)]",
+    "data-[open]:border-foreground/[0.2] data-[open]:bg-white/85 data-[open]:shadow-[0_1px_0_rgba(255,255,255,0.65)_inset,0_2px_8px_-4px_rgba(15,23,42,0.08)]",
     "data-[placeholder]:text-muted-foreground",
     "focus-visible:outline-none focus-visible:ring-0",
     "disabled:cursor-not-allowed disabled:opacity-50",
-    "dark:bg-white/[0.04] dark:hover:bg-white/[0.06] dark:data-[state=open]:bg-white/[0.08]",
+    "dark:bg-white/[0.04] dark:hover:bg-white/[0.06] dark:data-[open]:bg-white/[0.08]",
     className,
   ]
     .filter(Boolean)
     .join(" ");
 
   return (
-    <SelectPrimitive.Root value={value} onValueChange={onValueChange} disabled={disabled}>
+    <SelectPrimitive.Root
+      value={value}
+      onValueChange={(v) => {
+        if (v != null) onValueChange(v as string);
+      }}
+      disabled={disabled}
+    >
       <SelectPrimitive.Trigger aria-label={ariaLabel} className={triggerClass}>
         <span className="min-w-0 flex-1 truncate text-left">
-          <SelectPrimitive.Value placeholder={placeholder}>
-            {selected ? selected.label : placeholder}
-          </SelectPrimitive.Value>
+          <SelectPrimitive.Value>{selected ? selected.label : placeholder}</SelectPrimitive.Value>
         </span>
-        <SelectPrimitive.Icon asChild>
-          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-200 ease-out group-data-[state=open]/drawer-select:rotate-180" />
+        <SelectPrimitive.Icon>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-200 ease-out group-data-[open]/drawer-select:rotate-180" />
         </SelectPrimitive.Icon>
       </SelectPrimitive.Trigger>
       <SelectPrimitive.Portal>
-        <SelectPrimitive.Content
-          position="popper"
+        <SelectPrimitive.Positioner
           side="bottom"
           align="start"
           sideOffset={6}
           collisionPadding={12}
-          className={[
-            "drawer-select-content z-[80] overflow-hidden rounded-xl border border-foreground/[0.08] bg-background/95 p-1 text-[13px] text-foreground/90",
-            "shadow-[0_24px_48px_-24px_rgba(15,23,42,0.32),0_2px_6px_-3px_rgba(15,23,42,0.18)] backdrop-blur-2xl",
-            "min-w-[var(--radix-select-trigger-width)]",
-            "data-[state=open]:animate-in data-[state=closed]:animate-out",
-            "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-            "data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
-            "data-[side=bottom]:slide-in-from-top-1 data-[side=top]:slide-in-from-bottom-1",
-            "origin-[var(--radix-select-content-transform-origin)]",
-            "dark:bg-background/90",
-          ].join(" ")}
+          alignItemWithTrigger={false}
         >
-          <SelectPrimitive.Viewport className="max-h-[min(320px,var(--radix-select-content-available-height))] overflow-y-auto p-0.5">
-            {options.map((option) => (
-              <SelectPrimitive.Item
-                key={option.value}
-                value={option.value}
-                className={[
-                  "relative flex w-full cursor-pointer select-none items-start gap-2 rounded-md py-1.5 pl-2.5 pr-8 leading-tight outline-none transition-colors",
-                  "hover:bg-foreground/[0.05] focus:bg-foreground/[0.06] focus:text-foreground",
-                  "data-[state=checked]:bg-primary/[0.08] data-[state=checked]:text-foreground",
-                  "data-[disabled]:pointer-events-none data-[disabled]:opacity-40",
-                ].join(" ")}
-              >
-                <span className="min-w-0 flex-1">
-                  <SelectPrimitive.ItemText>
-                    <span className="block truncate">{option.label}</span>
-                  </SelectPrimitive.ItemText>
-                  {option.description ? (
-                    <span className="mt-0.5 block truncate text-[11px] text-muted-foreground/80">
-                      {option.description}
-                    </span>
-                  ) : null}
-                </span>
-                <SelectPrimitive.ItemIndicator className="absolute right-2 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center text-primary">
-                  <Check className="h-3.5 w-3.5" />
-                </SelectPrimitive.ItemIndicator>
-              </SelectPrimitive.Item>
-            ))}
-          </SelectPrimitive.Viewport>
-        </SelectPrimitive.Content>
+          <SelectPrimitive.Popup
+            className={[
+              "drawer-select-content z-[80] overflow-hidden rounded-xl border border-foreground/[0.08] bg-background/95 p-1 text-[13px] text-foreground/90",
+              "shadow-[0_24px_48px_-24px_rgba(15,23,42,0.32),0_2px_6px_-3px_rgba(15,23,42,0.18)] backdrop-blur-2xl",
+              "min-w-[var(--anchor-width)]",
+              "data-[open]:animate-in data-[closed]:animate-out",
+              "data-[closed]:fade-out-0 data-[open]:fade-in-0",
+              "data-[closed]:zoom-out-95 data-[open]:zoom-in-95",
+              "data-[side=bottom]:slide-in-from-top-1 data-[side=top]:slide-in-from-bottom-1",
+              "dark:bg-background/90",
+            ].join(" ")}
+          >
+            <SelectPrimitive.List className="max-h-[min(320px,var(--available-height))] overflow-y-auto p-0.5">
+              {options.map((option) => (
+                <SelectPrimitive.Item
+                  key={option.value}
+                  value={option.value}
+                  className={[
+                    "relative flex w-full cursor-pointer select-none items-start gap-2 rounded-md py-1.5 pl-2.5 pr-8 leading-tight outline-none transition-colors",
+                    "hover:bg-foreground/[0.05] data-[highlighted]:bg-foreground/[0.06] data-[highlighted]:text-foreground",
+                    "data-[selected]:bg-primary/[0.08] data-[selected]:text-foreground",
+                    "data-[disabled]:pointer-events-none data-[disabled]:opacity-40",
+                  ].join(" ")}
+                >
+                  <span className="min-w-0 flex-1">
+                    <SelectPrimitive.ItemText>
+                      <span className="block truncate">{option.label}</span>
+                    </SelectPrimitive.ItemText>
+                    {option.description ? (
+                      <span className="mt-0.5 block truncate text-[11px] text-muted-foreground/80">
+                        {option.description}
+                      </span>
+                    ) : null}
+                  </span>
+                  <SelectPrimitive.ItemIndicator className="absolute right-2 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center text-primary">
+                    <Check className="h-3.5 w-3.5" />
+                  </SelectPrimitive.ItemIndicator>
+                </SelectPrimitive.Item>
+              ))}
+            </SelectPrimitive.List>
+          </SelectPrimitive.Popup>
+        </SelectPrimitive.Positioner>
       </SelectPrimitive.Portal>
     </SelectPrimitive.Root>
   );
@@ -241,15 +246,11 @@ function dailyTitle(entry: { slug: string; dateLocal?: string | null }) {
 }
 
 function entryTitle(entry: MemoryMeta) {
-  return entry.memoryType === "daily"
-    ? dailyTitle(entry)
-    : entry.description || entry.slug;
+  return entry.memoryType === "daily" ? dailyTitle(entry) : entry.description || entry.slug;
 }
 
 function selectedTitle(entry: MemoryReadResponse) {
-  return entry.memoryType === "daily"
-    ? dailyTitle(entry)
-    : entry.description || entry.slug;
+  return entry.memoryType === "daily" ? dailyTitle(entry) : entry.description || entry.slug;
 }
 
 function entryKey(entry: MemoryMeta) {
@@ -282,9 +283,7 @@ function memoryTypeLabel(
 }
 
 function memoryScopeLabel(scope: MemoryMeta["scope"], t: (key: string) => string) {
-  return scope === "project"
-    ? t("settings.memoryScopeProject")
-    : t("settings.memoryScopeGlobal");
+  return scope === "project" ? t("settings.memoryScopeProject") : t("settings.memoryScopeGlobal");
 }
 
 function organizerStatusLabel(status: MemoryOrganizeRunStatus, t: (key: string) => string) {
@@ -337,10 +336,7 @@ function isOrganizerRunActive(run: Pick<MemoryOrganizeRun, "status"> | null | un
   return run?.status === "pending" || run?.status === "running";
 }
 
-function organizerRiskLabel(
-  risk: OrganizerSafeDecision["riskLevel"],
-  t: (key: string) => string,
-) {
+function organizerRiskLabel(risk: OrganizerSafeDecision["riskLevel"], t: (key: string) => string) {
   if (risk === "high") return t("settings.memoryOrganizerRiskHigh");
   if (risk === "medium") return t("settings.memoryOrganizerRiskMedium");
   return t("settings.memoryOrganizerRiskLow");
@@ -685,7 +681,8 @@ function MemoryOrganizerHistoryModal(props: {
       const failedKeySet = new Set(failedDecisionKeys);
       const safeDecisionsForProtocol = parsedSafeDecisions.map((decision, index) => {
         const key = organizerDecisionKey(decision, index);
-        const grouped = selectedWithGroupedKeys.find((item) => item.key === key)?.decision ?? decision;
+        const grouped =
+          selectedWithGroupedKeys.find((item) => item.key === key)?.decision ?? decision;
         if (failedKeySet.has(key)) return { ...grouped, applyStatus: "failed" as const };
         if (appliedKeySet.has(key)) return { ...grouped, applyStatus: "applied" as const };
         return grouped;
@@ -751,381 +748,396 @@ function MemoryOrganizerHistoryModal(props: {
       >
         <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
         <div className="relative z-10 flex h-[min(760px,calc(100vh-2rem))] w-full max-w-6xl flex-col overflow-hidden rounded-xl border bg-background shadow-2xl">
-        <div className="flex items-center justify-between gap-3 border-b border-border/50 px-5 py-4">
-          <div className="min-w-0">
-            <div id="memory-organizer-history-title" className="text-sm font-semibold">
-              {t("settings.memoryOrganizerHistory")}
+          <div className="flex items-center justify-between gap-3 border-b border-border/50 px-5 py-4">
+            <div className="min-w-0">
+              <div id="memory-organizer-history-title" className="text-sm font-semibold">
+                {t("settings.memoryOrganizerHistory")}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {t("settings.memoryOrganizerHistoryDescription")}
+              </div>
             </div>
-            <div className="mt-1 text-xs text-muted-foreground">
-              {t("settings.memoryOrganizerHistoryDescription")}
-            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+              title={t("settings.memorySettingsClose")}
+              aria-label={t("settings.memorySettingsClose")}
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
-            title={t("settings.memorySettingsClose")}
-            aria-label={t("settings.memorySettingsClose")}
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
 
-        <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)]">
-          <aside className="flex min-h-0 flex-col border-r border-border/50">
-            <div className="space-y-2 border-b border-border/40 p-3">
-              <div className="flex items-center gap-2">
-                <div className="min-w-0 flex-1">
-                  <DrawerSelect
-                    value={statusFilter}
-                    onValueChange={(next) =>
-                      setStatusFilter(next as "all" | MemoryOrganizeRunStatus)
-                    }
-                    ariaLabel={t("settings.memoryOrganizerHistoryAll")}
-                    options={[
-                      { value: "all", label: t("settings.memoryOrganizerHistoryAll") },
-                      { value: "succeeded", label: t("settings.memoryOrganizerStatusSucceeded") },
-                      { value: "failed", label: t("settings.memoryOrganizerStatusFailed") },
-                      { value: "skipped", label: t("settings.memoryOrganizerStatusSkipped") },
-                      { value: "running", label: t("settings.memoryOrganizerStatusRunning") },
-                    ]}
-                  />
+          <div className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)]">
+            <aside className="flex min-h-0 flex-col border-r border-border/50">
+              <div className="space-y-2 border-b border-border/40 p-3">
+                <div className="flex items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    <DrawerSelect
+                      value={statusFilter}
+                      onValueChange={(next) =>
+                        setStatusFilter(next as "all" | MemoryOrganizeRunStatus)
+                      }
+                      ariaLabel={t("settings.memoryOrganizerHistoryAll")}
+                      options={[
+                        { value: "all", label: t("settings.memoryOrganizerHistoryAll") },
+                        { value: "succeeded", label: t("settings.memoryOrganizerStatusSucceeded") },
+                        { value: "failed", label: t("settings.memoryOrganizerStatusFailed") },
+                        { value: "skipped", label: t("settings.memoryOrganizerStatusSkipped") },
+                        { value: "running", label: t("settings.memoryOrganizerStatusRunning") },
+                      ]}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="shrink-0 text-muted-foreground hover:text-destructive"
+                    title={t("settings.memoryOrganizerClearHistory")}
+                    aria-label={t("settings.memoryOrganizerClearHistory")}
+                    onClick={() => setClearConfirmOpen(true)}
+                    disabled={loading || clearingHistory || runs.length === 0}
+                  >
+                    <BrushCleaning className="h-3.5 w-3.5" />
+                  </Button>
                 </div>
                 <Button
                   type="button"
                   variant="outline"
-                  size="icon"
-                  className="shrink-0 text-muted-foreground hover:text-destructive"
-                  title={t("settings.memoryOrganizerClearHistory")}
-                  aria-label={t("settings.memoryOrganizerClearHistory")}
-                  onClick={() => setClearConfirmOpen(true)}
-                  disabled={loading || clearingHistory || runs.length === 0}
+                  size="sm"
+                  className="w-full"
+                  onClick={() => reload()}
+                  disabled={loading}
                 >
-                  <BrushCleaning className="h-3.5 w-3.5" />
+                  <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+                  {t("settings.memoryRefresh")}
                 </Button>
               </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="w-full"
-                onClick={() => reload()}
-                disabled={loading}
-              >
-                <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-                {t("settings.memoryRefresh")}
-              </Button>
-            </div>
-            <div className="min-h-0 flex-1 overflow-auto p-2">
-              {runs.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-border/60 px-3 py-8 text-center text-xs text-muted-foreground">
-                  {t("settings.memoryOrganizerHistoryEmpty")}
+              <div className="min-h-0 flex-1 overflow-auto p-2">
+                {runs.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border/60 px-3 py-8 text-center text-xs text-muted-foreground">
+                    {t("settings.memoryOrganizerHistoryEmpty")}
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    {runs.map((run) => {
+                      const active = selectedRun?.runId === run.runId;
+                      return (
+                        <button
+                          key={run.runId}
+                          type="button"
+                          onClick={() => reload(run.runId)}
+                          className={`w-full rounded-lg border px-3 py-2.5 text-left transition-colors ${
+                            active
+                              ? "border-primary/50 bg-primary/5"
+                              : "border-border/50 bg-background/70 hover:bg-muted/35"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span
+                              className={`rounded border px-1.5 py-0.5 text-[10px] ${organizerStatusClass(run.status)}`}
+                            >
+                              {organizerStatusLabel(run.status, t)}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground">
+                              {organizerTriggerLabel(run.trigger, t)}
+                            </span>
+                          </div>
+                          <div className="mt-1 truncate text-xs font-medium">
+                            {run.finalSummary ||
+                              run.error ||
+                              t("settings.memoryOrganizerHistoryPending")}
+                          </div>
+                          <div className="mt-1 truncate text-[11px] text-muted-foreground">
+                            {formatTime(run.startedAt || run.createdAt)} · {modelNameFromRun(run)}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </aside>
+
+            <section className="min-h-0 overflow-auto p-5">
+              {error ? (
+                <div className="mb-4 whitespace-pre-wrap rounded-lg border border-destructive/20 bg-destructive/[0.05] px-3 py-2 text-xs text-destructive">
+                  {error}
+                </div>
+              ) : null}
+              {historyFeedback ? (
+                <div className="mb-4 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.05] px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300">
+                  {historyFeedback}
+                </div>
+              ) : null}
+              {selectedRun ? (
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={`rounded border px-2 py-1 text-xs ${organizerStatusClass(selectedRun.status)}`}
+                        >
+                          {organizerStatusLabel(selectedRun.status, t)}
+                        </span>
+                        <span className="rounded border border-border/60 px-2 py-1 text-xs text-muted-foreground">
+                          {organizerTriggerLabel(selectedRun.trigger, t)}
+                        </span>
+                        <span className="rounded border border-border/60 px-2 py-1 text-xs text-muted-foreground">
+                          {selectedRun.scope} / {selectedRun.mode}
+                        </span>
+                      </div>
+                      <div className="font-mono text-[11px] text-muted-foreground">
+                        {selectedRun.runId}
+                      </div>
+                    </div>
+                    <div className="grid shrink-0 grid-cols-[auto_minmax(9rem,auto)] gap-x-2 gap-y-1 rounded-md border border-border/50 bg-background/70 px-3 py-2 text-xs text-muted-foreground">
+                      <span className="whitespace-nowrap">
+                        {t("settings.memoryOrganizerStarted")}
+                      </span>
+                      <span className="whitespace-nowrap text-right font-mono text-foreground/80">
+                        {formatTime(selectedRun.startedAt || selectedRun.createdAt)}
+                      </span>
+                      <span className="whitespace-nowrap">
+                        {t("settings.memoryOrganizerFinished")}
+                      </span>
+                      <span className="whitespace-nowrap text-right font-mono text-foreground/80">
+                        {selectedRun.finishedAt ? formatTime(selectedRun.finishedAt) : "-"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-border/60 bg-muted/15 p-4">
+                    <div className="mb-2 text-xs font-semibold text-muted-foreground">
+                      {t("settings.memoryOrganizerFinalSummary")}
+                    </div>
+                    <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                      {displayedFinalSummary(selectedRun, manualApplyDisplay) ||
+                        t("settings.memoryOrganizerHistoryPending")}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-2 sm:grid-cols-4">
+                    {[
+                      ["settings.memoryOrganizerInputCount", selectedRun.inputCount],
+                      ["settings.memoryOrganizerClusterCount", selectedRun.clusterCount],
+                      ["settings.memoryOrganizerSafeApplied", selectedRun.safeApplied],
+                      ["settings.memoryOrganizerReviewSkipped", selectedRun.reviewSkipped],
+                      ["settings.memoryOrganizerCreatedCount", selectedRun.createdCount],
+                      ["settings.memoryOrganizerUpdatedCount", selectedRun.updatedCount],
+                      ["settings.memoryOrganizerDeletedCount", selectedRun.deletedCount],
+                      ["settings.memoryOrganizerParseFailures", selectedRun.parseFailures],
+                    ].map(([key, value]) => (
+                      <div
+                        key={key}
+                        className="rounded-lg border border-border/50 bg-background/70 p-3"
+                      >
+                        <div className="text-[11px] text-muted-foreground">{t(String(key))}</div>
+                        <div className="mt-1 text-lg font-semibold">{value}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {safeDecisions.length > 0 ? (
+                    <div className="rounded-lg border border-border/60 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <div className="text-xs font-semibold text-muted-foreground">
+                            {t("settings.memoryOrganizerManualPreview")}
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {manualApplyDisplay.status === "applied"
+                              ? t("settings.memoryOrganizerApplied")
+                              : manualApplyDisplay.status === "partial"
+                                ? t("settings.memoryOrganizerPartiallyApplied")
+                                : manualApplyDisplay.status === "failed"
+                                  ? t("settings.memoryOrganizerApplyFailed")
+                                  : t("settings.memoryOrganizerManualPreviewDescription")}
+                          </div>
+                        </div>
+                        {canApplyManualPreview ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            onClick={applyManualPreview}
+                            disabled={applyingPreview}
+                          >
+                            <Check className="h-3.5 w-3.5" />
+                            {t("settings.memoryOrganizerApplySelected")}
+                          </Button>
+                        ) : null}
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        {safeDecisions.map((decision, index) => {
+                          const key = organizerDecisionKey(decision, index);
+                          const checked =
+                            manualApplyDisplay.status && manualApplyDisplay.status !== "pending"
+                              ? manualApplyDisplay.appliedDecisionKeys.size === 0
+                                ? decision.applyStatus !== "failed"
+                                : manualApplyDisplay.appliedDecisionKeys.has(key)
+                              : selectedDecisionKeys.has(key);
+                          return (
+                            <label
+                              key={key}
+                              className="flex gap-3 rounded-md border border-border/50 bg-background/70 p-3 text-xs"
+                            >
+                              <input
+                                type="checkbox"
+                                className="mt-0.5 h-4 w-4 shrink-0"
+                                checked={checked}
+                                disabled={!canApplyManualPreview || applyingPreview}
+                                onChange={() => togglePreviewDecision(key)}
+                              />
+                              <span className="min-w-0 flex-1">
+                                <span className="flex flex-wrap items-center gap-2">
+                                  <span className="rounded border border-border/60 px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
+                                    {decision.op === "delete"
+                                      ? t("settings.memoryOrganizerDecisionDelete")
+                                      : t("settings.memoryOrganizerDecisionUpsert")}
+                                  </span>
+                                  <span className="font-mono text-[11px]">{decision.slug}</span>
+                                  {decision.scope ? (
+                                    <span className="text-[11px] text-muted-foreground">
+                                      {decision.scope}
+                                      {decision.workdirHash ? `:${decision.workdirHash}` : ""}
+                                    </span>
+                                  ) : null}
+                                  <span
+                                    className={`rounded border px-1.5 py-0.5 text-[10px] ${organizerRiskClass(decision.riskLevel)}`}
+                                  >
+                                    {organizerRiskLabel(decision.riskLevel, t)}
+                                  </span>
+                                  {decision.confidence != null ? (
+                                    <span className="rounded border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                                      {t("settings.memoryOrganizerConfidence")}{" "}
+                                      {decision.confidence.toFixed(2)}
+                                    </span>
+                                  ) : null}
+                                  {decision.requiresUserAck ? (
+                                    <span className="rounded border border-amber-500/30 bg-amber-500/[0.06] px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-300">
+                                      {t("settings.memoryOrganizerRequiresAck")}
+                                    </span>
+                                  ) : null}
+                                  {decision.applyStatus ? (
+                                    <span
+                                      className={`rounded border px-1.5 py-0.5 text-[10px] ${organizerApplyStatusClass(decision.applyStatus)}`}
+                                    >
+                                      {organizerApplyStatusLabel(decision.applyStatus, t)}
+                                    </span>
+                                  ) : null}
+                                </span>
+                                <span className="mt-1 block break-words text-muted-foreground">
+                                  {decision.reason || decision.description || "-"}
+                                </span>
+                                {decision.applyError?.message ? (
+                                  <span className="mt-1 block break-words text-destructive">
+                                    {decision.applyError.message}
+                                  </span>
+                                ) : null}
+                                {decision.sourceSlugs?.length ? (
+                                  <span className="mt-1 block break-words font-mono text-[10px] text-muted-foreground">
+                                    {t("settings.memoryOrganizerSources")}{" "}
+                                    {decision.sourceSlugs.join(", ")}
+                                  </span>
+                                ) : null}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {rejectionBuckets.length > 0 ? (
+                    <div className="rounded-lg border border-border/60 p-4">
+                      <div className="mb-3 text-xs font-semibold text-muted-foreground">
+                        {t("settings.memoryOrganizerRejectionBuckets")}
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {rejectionBuckets.map(([key, count]) => (
+                          <div
+                            key={key}
+                            className="rounded-md border border-border/50 bg-background/70 px-3 py-2"
+                          >
+                            <div className="text-[11px] text-muted-foreground">{t(key)}</div>
+                            <div className="mt-1 text-sm font-semibold">{count}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {reviewItems.length > 0 ? (
+                    <div className="rounded-lg border border-amber-500/20 bg-amber-500/[0.04] p-4">
+                      <div className="mb-2 text-xs font-semibold text-amber-700 dark:text-amber-300">
+                        {t("settings.memoryOrganizerReviewNotes")}
+                      </div>
+                      <ul className="space-y-2 text-xs text-muted-foreground">
+                        {reviewItems.map((item, index) => (
+                          <li
+                            key={`${index}:${item.phase}:${item.slug || ""}:${item.message}`}
+                            className="rounded-md border border-border/50 bg-background/70 px-3 py-2"
+                          >
+                            <div className="mb-1 flex flex-wrap items-center gap-2">
+                              <span
+                                className={`rounded border px-1.5 py-0.5 text-[10px] ${organizerReviewItemClass(item)}`}
+                              >
+                                {organizerReviewItemLabel(item, t)}
+                              </span>
+                              {item.code ? (
+                                <span className="font-mono text-[10px] text-muted-foreground">
+                                  {item.code}
+                                </span>
+                              ) : null}
+                              {item.slug ? (
+                                <span className="font-mono text-[10px] text-muted-foreground">
+                                  {item.slug}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="break-words">{item.message}</div>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {clusterSummaries.length > 0 ? (
+                    <div className="rounded-lg border border-border/60 p-4">
+                      <div className="mb-2 text-xs font-semibold text-muted-foreground">
+                        {t("settings.memoryOrganizerClusterSummaries")}
+                      </div>
+                      <div className="space-y-2">
+                        {clusterSummaries.map((summary, index) => (
+                          <div
+                            key={`${index}:${summary}`}
+                            className="rounded bg-muted/30 px-3 py-2 text-xs"
+                          >
+                            {summary}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {rawBlocks.length > 0 ? (
+                    <details className="rounded-lg border border-border/60 p-4">
+                      <summary className="cursor-pointer text-xs font-semibold text-muted-foreground">
+                        {t("settings.memoryOrganizerTrimmedProtocol")}
+                      </summary>
+                      <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/30 p-3 text-[11px]">
+                        {JSON.stringify(rawBlocks, null, 2)}
+                      </pre>
+                    </details>
+                  ) : null}
                 </div>
               ) : (
-                <div className="space-y-1.5">
-                  {runs.map((run) => {
-                    const active = selectedRun?.runId === run.runId;
-                    return (
-                      <button
-                        key={run.runId}
-                        type="button"
-                        onClick={() => reload(run.runId)}
-                        className={`w-full rounded-lg border px-3 py-2.5 text-left transition-colors ${
-                          active
-                            ? "border-primary/50 bg-primary/5"
-                            : "border-border/50 bg-background/70 hover:bg-muted/35"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span
-                            className={`rounded border px-1.5 py-0.5 text-[10px] ${organizerStatusClass(run.status)}`}
-                          >
-                            {organizerStatusLabel(run.status, t)}
-                          </span>
-                          <span className="text-[10px] text-muted-foreground">
-                            {organizerTriggerLabel(run.trigger, t)}
-                          </span>
-                        </div>
-                        <div className="mt-1 truncate text-xs font-medium">
-                          {run.finalSummary || run.error || t("settings.memoryOrganizerHistoryPending")}
-                        </div>
-                        <div className="mt-1 truncate text-[11px] text-muted-foreground">
-                          {formatTime(run.startedAt || run.createdAt)} · {modelNameFromRun(run)}
-                        </div>
-                      </button>
-                    );
-                  })}
+                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                  {t("settings.memoryOrganizerHistoryEmpty")}
                 </div>
               )}
-            </div>
-          </aside>
-
-          <section className="min-h-0 overflow-auto p-5">
-            {error ? (
-              <div className="mb-4 whitespace-pre-wrap rounded-lg border border-destructive/20 bg-destructive/[0.05] px-3 py-2 text-xs text-destructive">
-                {error}
-              </div>
-            ) : null}
-            {historyFeedback ? (
-              <div className="mb-4 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.05] px-3 py-2 text-xs text-emerald-700 dark:text-emerald-300">
-                {historyFeedback}
-              </div>
-            ) : null}
-            {selectedRun ? (
-              <div className="space-y-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0 space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span
-                        className={`rounded border px-2 py-1 text-xs ${organizerStatusClass(selectedRun.status)}`}
-                      >
-                        {organizerStatusLabel(selectedRun.status, t)}
-                      </span>
-                      <span className="rounded border border-border/60 px-2 py-1 text-xs text-muted-foreground">
-                        {organizerTriggerLabel(selectedRun.trigger, t)}
-                      </span>
-                      <span className="rounded border border-border/60 px-2 py-1 text-xs text-muted-foreground">
-                        {selectedRun.scope} / {selectedRun.mode}
-                      </span>
-                    </div>
-                    <div className="font-mono text-[11px] text-muted-foreground">
-                      {selectedRun.runId}
-                    </div>
-                  </div>
-                  <div className="grid shrink-0 grid-cols-[auto_minmax(9rem,auto)] gap-x-2 gap-y-1 rounded-md border border-border/50 bg-background/70 px-3 py-2 text-xs text-muted-foreground">
-                    <span className="whitespace-nowrap">{t("settings.memoryOrganizerStarted")}</span>
-                    <span className="whitespace-nowrap text-right font-mono text-foreground/80">
-                      {formatTime(selectedRun.startedAt || selectedRun.createdAt)}
-                    </span>
-                    <span className="whitespace-nowrap">{t("settings.memoryOrganizerFinished")}</span>
-                    <span className="whitespace-nowrap text-right font-mono text-foreground/80">
-                      {selectedRun.finishedAt ? formatTime(selectedRun.finishedAt) : "-"}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="rounded-lg border border-border/60 bg-muted/15 p-4">
-                  <div className="mb-2 text-xs font-semibold text-muted-foreground">
-                    {t("settings.memoryOrganizerFinalSummary")}
-                  </div>
-                  <div className="whitespace-pre-wrap text-sm leading-relaxed">
-                    {displayedFinalSummary(selectedRun, manualApplyDisplay) ||
-                      t("settings.memoryOrganizerHistoryPending")}
-                  </div>
-                </div>
-
-                <div className="grid gap-2 sm:grid-cols-4">
-                  {[
-                    ["settings.memoryOrganizerInputCount", selectedRun.inputCount],
-                    ["settings.memoryOrganizerClusterCount", selectedRun.clusterCount],
-                    ["settings.memoryOrganizerSafeApplied", selectedRun.safeApplied],
-                    ["settings.memoryOrganizerReviewSkipped", selectedRun.reviewSkipped],
-                    ["settings.memoryOrganizerCreatedCount", selectedRun.createdCount],
-                    ["settings.memoryOrganizerUpdatedCount", selectedRun.updatedCount],
-                    ["settings.memoryOrganizerDeletedCount", selectedRun.deletedCount],
-                    ["settings.memoryOrganizerParseFailures", selectedRun.parseFailures],
-                  ].map(([key, value]) => (
-                    <div key={key} className="rounded-lg border border-border/50 bg-background/70 p-3">
-                      <div className="text-[11px] text-muted-foreground">{t(String(key))}</div>
-                      <div className="mt-1 text-lg font-semibold">{value}</div>
-                    </div>
-                  ))}
-                </div>
-
-                {safeDecisions.length > 0 ? (
-                  <div className="rounded-lg border border-border/60 p-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <div className="text-xs font-semibold text-muted-foreground">
-                          {t("settings.memoryOrganizerManualPreview")}
-                        </div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {manualApplyDisplay.status === "applied"
-                            ? t("settings.memoryOrganizerApplied")
-                            : manualApplyDisplay.status === "partial"
-                              ? t("settings.memoryOrganizerPartiallyApplied")
-                              : manualApplyDisplay.status === "failed"
-                                ? t("settings.memoryOrganizerApplyFailed")
-                                : t("settings.memoryOrganizerManualPreviewDescription")}
-                        </div>
-                      </div>
-                      {canApplyManualPreview ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          onClick={applyManualPreview}
-                          disabled={applyingPreview}
-                        >
-                          <Check className="h-3.5 w-3.5" />
-                          {t("settings.memoryOrganizerApplySelected")}
-                        </Button>
-                      ) : null}
-                    </div>
-                    <div className="mt-3 space-y-2">
-                      {safeDecisions.map((decision, index) => {
-                        const key = organizerDecisionKey(decision, index);
-                        const checked =
-                          manualApplyDisplay.status && manualApplyDisplay.status !== "pending"
-                            ? manualApplyDisplay.appliedDecisionKeys.size === 0
-                              ? decision.applyStatus !== "failed"
-                              : manualApplyDisplay.appliedDecisionKeys.has(key)
-                            : selectedDecisionKeys.has(key);
-                        return (
-                          <label
-                            key={key}
-                            className="flex gap-3 rounded-md border border-border/50 bg-background/70 p-3 text-xs"
-                          >
-                            <input
-                              type="checkbox"
-                              className="mt-0.5 h-4 w-4 shrink-0"
-                              checked={checked}
-                              disabled={!canApplyManualPreview || applyingPreview}
-                              onChange={() => togglePreviewDecision(key)}
-                            />
-                            <span className="min-w-0 flex-1">
-                              <span className="flex flex-wrap items-center gap-2">
-                                <span className="rounded border border-border/60 px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
-                                  {decision.op === "delete"
-                                    ? t("settings.memoryOrganizerDecisionDelete")
-                                    : t("settings.memoryOrganizerDecisionUpsert")}
-                                </span>
-                                <span className="font-mono text-[11px]">{decision.slug}</span>
-                                {decision.scope ? (
-                                  <span className="text-[11px] text-muted-foreground">
-                                    {decision.scope}
-                                    {decision.workdirHash ? `:${decision.workdirHash}` : ""}
-                                  </span>
-                                ) : null}
-                                <span
-                                  className={`rounded border px-1.5 py-0.5 text-[10px] ${organizerRiskClass(decision.riskLevel)}`}
-                                >
-                                  {organizerRiskLabel(decision.riskLevel, t)}
-                                </span>
-                                {decision.confidence != null ? (
-                                  <span className="rounded border border-border/60 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                                    {t("settings.memoryOrganizerConfidence")}{" "}
-                                    {decision.confidence.toFixed(2)}
-                                  </span>
-                                ) : null}
-                                {decision.requiresUserAck ? (
-                                  <span className="rounded border border-amber-500/30 bg-amber-500/[0.06] px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-300">
-                                    {t("settings.memoryOrganizerRequiresAck")}
-                                  </span>
-                                ) : null}
-                                {decision.applyStatus ? (
-                                  <span
-                                    className={`rounded border px-1.5 py-0.5 text-[10px] ${organizerApplyStatusClass(decision.applyStatus)}`}
-                                  >
-                                    {organizerApplyStatusLabel(decision.applyStatus, t)}
-                                  </span>
-                                ) : null}
-                              </span>
-                              <span className="mt-1 block break-words text-muted-foreground">
-                                {decision.reason || decision.description || "-"}
-                              </span>
-                              {decision.applyError?.message ? (
-                                <span className="mt-1 block break-words text-destructive">
-                                  {decision.applyError.message}
-                                </span>
-                              ) : null}
-                              {decision.sourceSlugs?.length ? (
-                                <span className="mt-1 block break-words font-mono text-[10px] text-muted-foreground">
-                                  {t("settings.memoryOrganizerSources")}{" "}
-                                  {decision.sourceSlugs.join(", ")}
-                                </span>
-                              ) : null}
-                            </span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : null}
-
-                {rejectionBuckets.length > 0 ? (
-                  <div className="rounded-lg border border-border/60 p-4">
-                    <div className="mb-3 text-xs font-semibold text-muted-foreground">
-                      {t("settings.memoryOrganizerRejectionBuckets")}
-                    </div>
-                    <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                      {rejectionBuckets.map(([key, count]) => (
-                        <div key={key} className="rounded-md border border-border/50 bg-background/70 px-3 py-2">
-                          <div className="text-[11px] text-muted-foreground">{t(key)}</div>
-                          <div className="mt-1 text-sm font-semibold">{count}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {reviewItems.length > 0 ? (
-                  <div className="rounded-lg border border-amber-500/20 bg-amber-500/[0.04] p-4">
-                    <div className="mb-2 text-xs font-semibold text-amber-700 dark:text-amber-300">
-                      {t("settings.memoryOrganizerReviewNotes")}
-                    </div>
-                    <ul className="space-y-2 text-xs text-muted-foreground">
-                      {reviewItems.map((item, index) => (
-                        <li
-                          key={`${index}:${item.phase}:${item.slug || ""}:${item.message}`}
-                          className="rounded-md border border-border/50 bg-background/70 px-3 py-2"
-                        >
-                          <div className="mb-1 flex flex-wrap items-center gap-2">
-                            <span
-                              className={`rounded border px-1.5 py-0.5 text-[10px] ${organizerReviewItemClass(item)}`}
-                            >
-                              {organizerReviewItemLabel(item, t)}
-                            </span>
-                            {item.code ? (
-                              <span className="font-mono text-[10px] text-muted-foreground">
-                                {item.code}
-                              </span>
-                            ) : null}
-                            {item.slug ? (
-                              <span className="font-mono text-[10px] text-muted-foreground">
-                                {item.slug}
-                              </span>
-                            ) : null}
-                          </div>
-                          <div className="break-words">{item.message}</div>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-
-                {clusterSummaries.length > 0 ? (
-                  <div className="rounded-lg border border-border/60 p-4">
-                    <div className="mb-2 text-xs font-semibold text-muted-foreground">
-                      {t("settings.memoryOrganizerClusterSummaries")}
-                    </div>
-                    <div className="space-y-2">
-                      {clusterSummaries.map((summary, index) => (
-                        <div key={`${index}:${summary}`} className="rounded bg-muted/30 px-3 py-2 text-xs">
-                          {summary}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {rawBlocks.length > 0 ? (
-                  <details className="rounded-lg border border-border/60 p-4">
-                    <summary className="cursor-pointer text-xs font-semibold text-muted-foreground">
-                      {t("settings.memoryOrganizerTrimmedProtocol")}
-                    </summary>
-                    <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/30 p-3 text-[11px]">
-                      {JSON.stringify(rawBlocks, null, 2)}
-                    </pre>
-                  </details>
-                ) : null}
-              </div>
-            ) : (
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                {t("settings.memoryOrganizerHistoryEmpty")}
-              </div>
-            )}
-          </section>
-        </div>
+            </section>
+          </div>
         </div>
       </div>
       {clearConfirmOpen ? (
@@ -1277,17 +1289,11 @@ function MemorySettingsDrawer(props: {
     [modelOptions, t],
   );
 
-  function renderModelSelect(
-    value: string,
-    onChange: (value: string) => void,
-    ariaLabel: string,
-  ) {
+  function renderModelSelect(value: string, onChange: (value: string) => void, ariaLabel: string) {
     return (
       <DrawerSelect
         value={value.length > 0 ? value : DRAWER_SELECT_NONE_VALUE}
-        onValueChange={(next) =>
-          onChange(next === DRAWER_SELECT_NONE_VALUE ? "" : next)
-        }
+        onValueChange={(next) => onChange(next === DRAWER_SELECT_NONE_VALUE ? "" : next)}
         options={memoryModelDrawerOptions}
         ariaLabel={ariaLabel}
         placeholder={t("settings.memoryModelNone")}
@@ -1335,9 +1341,7 @@ function MemorySettingsDrawer(props: {
     });
   }
 
-  function updateOrganizerSchedule(
-    patch: Partial<AppSettings["memory"]["organizerSchedule"]>,
-  ) {
+  function updateOrganizerSchedule(patch: Partial<AppSettings["memory"]["organizerSchedule"]>) {
     setSettings((prev) => {
       const organizerSchedule = {
         ...prev.memory.organizerSchedule,
@@ -1389,11 +1393,7 @@ function MemorySettingsDrawer(props: {
       }
       const runnerPoked = pokeMemoryOrganizerRunner();
       setOrganizerFeedback(
-        t(
-          runnerPoked
-            ? "settings.memoryOrganizerQueued"
-            : "settings.memoryOrganizerQueuedRemote",
-        ),
+        t(runnerPoked ? "settings.memoryOrganizerQueued" : "settings.memoryOrganizerQueuedRemote"),
       );
       setHistoryOpen(true);
     } catch (err) {
@@ -1542,9 +1542,7 @@ function MemorySettingsDrawer(props: {
                       <DrawerSelect
                         value={String(settings.memory.organizerSchedule.weekday ?? 1)}
                         disabled={organizerTimingDisabled}
-                        onValueChange={(next) =>
-                          updateOrganizerSchedule({ weekday: Number(next) })
-                        }
+                        onValueChange={(next) => updateOrganizerSchedule({ weekday: Number(next) })}
                         ariaLabel={t("settings.memoryOrganizerWeekday")}
                         options={MEMORY_ORGANIZER_WEEKDAYS.map((key, index) => ({
                           value: String(index),
@@ -1562,9 +1560,7 @@ function MemorySettingsDrawer(props: {
                         value={settings.memory.organizerScope}
                         onValueChange={(next) => {
                           const organizerScope = next as MemoryOrganizerScope;
-                          setSettings((prev) =>
-                            updateMemorySettings(prev, { organizerScope }),
-                          );
+                          setSettings((prev) => updateMemorySettings(prev, { organizerScope }));
                         }}
                         ariaLabel={t("settings.memoryOrganizerScope")}
                         options={MEMORY_ORGANIZER_SCOPES.map((item) => ({
@@ -1581,9 +1577,7 @@ function MemorySettingsDrawer(props: {
                         value={settings.memory.organizerMode}
                         onValueChange={(next) => {
                           const organizerMode = next as MemoryOrganizerMode;
-                          setSettings((prev) =>
-                            updateMemorySettings(prev, { organizerMode }),
-                          );
+                          setSettings((prev) => updateMemorySettings(prev, { organizerMode }));
                         }}
                         ariaLabel={t("settings.memoryOrganizerMode")}
                         options={MEMORY_ORGANIZER_MODES.map((item) => ({
@@ -1632,7 +1626,9 @@ function MemorySettingsDrawer(props: {
                   disabled={!settings.memory.organizerModel || organizerSubmitting}
                   onClick={handleRunNow}
                 >
-                  <RefreshCw className={`h-3.5 w-3.5 ${organizerSubmitting ? "animate-spin" : ""}`} />
+                  <RefreshCw
+                    className={`h-3.5 w-3.5 ${organizerSubmitting ? "animate-spin" : ""}`}
+                  />
                   {t("settings.memoryOrganizerRunNow")}
                 </Button>
               </div>
@@ -1758,10 +1754,7 @@ export function MemoryPanel(props: {
     appendBody: "",
   });
 
-  const modelOptions = useMemo(
-    () => buildMemoryModelOptions(props.settings),
-    [props.settings],
-  );
+  const modelOptions = useMemo(() => buildMemoryModelOptions(props.settings), [props.settings]);
 
   const globalEntries = useMemo(() => {
     return entries
@@ -1834,7 +1827,8 @@ export function MemoryPanel(props: {
       setEntries(list.entries);
       setQuota(list.quota);
       setPathsInfo(info);
-      const keepKey = keepEntry === undefined ? (selectedEntry ? entryKey(selectedEntry) : null) : keepEntry;
+      const keepKey =
+        keepEntry === undefined ? (selectedEntry ? entryKey(selectedEntry) : null) : keepEntry;
       if (keepKey) {
         const found =
           list.entries.find((entry) => entryKey(entry) === keepKey) ??
@@ -2080,343 +2074,369 @@ export function MemoryPanel(props: {
     <>
       <div className="settings-memory-panel flex min-h-0 flex-1 flex-col gap-4">
         <div className="settings-memory-summary-card shrink-0 rounded-xl border border-border/60 bg-card p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0 space-y-1">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <Brain className="h-4 w-4 text-muted-foreground" />
-              {t("settings.memoryTitle")}
-            </div>
-            <div className="break-all text-xs text-muted-foreground">
-              {pathsInfo?.root ?? "~/.liveagent/memory"}
-            </div>
-          </div>
-          <div className="settings-memory-summary-actions flex flex-wrap items-center gap-2">
-            {quotaItems.map((item) => {
-              const level = quotaLevel(item);
-              const label =
-                item.scope === "global"
-                  ? t("settings.memoryQuotaGlobal")
-                  : t("settings.memoryQuotaProject");
-              return (
-                <div
-                  key={`${item.scope}:${item.workdirHash}`}
-                  className={`rounded-md border px-2.5 py-1.5 text-xs ${quotaPillClass(level)}`}
-                >
-                  {label} {item.used} / {item.limit}
-                </div>
-              );
-            })}
-            <div className={`rounded-md border px-2.5 py-1.5 text-xs ${quotaStatusClass(quotaStatus)}`}>
-              {t(quotaStatusLabelKey(quotaStatus))}
-            </div>
-            <Button variant="outline" size="sm" onClick={() => reload()} disabled={loading}>
-              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-              {t("settings.memoryRefresh")}
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              className="h-8 w-8"
-              title={t("settings.memoryOpenSettings")}
-              aria-label={t("settings.memoryOpenSettings")}
-              onClick={() => setSettingsDrawerOpen(true)}
-            >
-              <Settings2 className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        </div>
-
-        {unreviewedCount > 0 ? (
-          <div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-            {unreviewedCount} {t("settings.memoryAwaitingReview")}
-          </div>
-        ) : null}
-        {pathsInfo?.isInCloud ? (
-          <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            {t("settings.memoryCloudWarningPrefix")}{" "}
-            {pathsInfo.cloudProvider ?? t("settings.memoryCloudSyncFolder")}
-          </div>
-        ) : null}
-        {quotaStatus === "full" || quotaStatus === "danger" ? (
-          <div className="mt-3 flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/[0.06] px-3 py-2 text-xs text-red-700 dark:text-red-300">
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            {t(
-              quotaStatus === "full"
-                ? "settings.memoryQuotaFullMessage"
-                : "settings.memoryQuotaNearLimitMessage",
-            )}
-          </div>
-        ) : quotaStatus === "warning" ? (
-          <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            {t("settings.memoryQuotaWarningMessage")}
-          </div>
-        ) : null}
-        {error ? (
-          <div className="mt-3 whitespace-pre-wrap rounded-lg border border-destructive/20 bg-destructive/[0.05] px-3 py-2 text-xs text-destructive">
-            {error}
-          </div>
-        ) : null}
-      </div>
-
-        <div className="settings-memory-layout grid min-h-0 flex-1 gap-4 lg:grid-cols-[380px_minmax(0,1fr)]">
-        <section className="settings-memory-list-section flex min-h-0 flex-col rounded-xl border border-border/60 bg-card">
-          <div className="shrink-0 space-y-3 border-b border-border/40 p-3">
-            <div className="grid grid-cols-3 gap-1 rounded-lg bg-muted/50 p-1">
-              <button
-                type="button"
-                onClick={() => setTab("global")}
-                className={`flex min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium ${tab === "global" ? "bg-background shadow-xs" : "text-muted-foreground"}`}
-              >
-                <Globe2 className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">{t("settings.memoryCategoryGlobal")}</span>
-                <span className="shrink-0 text-[10px] text-muted-foreground">{globalEntryCount}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setTab("project")}
-                className={`flex min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium ${tab === "project" ? "bg-background shadow-xs" : "text-muted-foreground"}`}
-              >
-                <Folder className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">{t("settings.memoryCategoryProject")}</span>
-                <span className="shrink-0 text-[10px] text-muted-foreground">{projectEntryCount}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setTab("journal")}
-                className={`flex min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium ${tab === "journal" ? "bg-background shadow-xs" : "text-muted-foreground"}`}
-              >
-                <BookOpen className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">{t("settings.memoryCategoryJournal")}</span>
-                <span className="shrink-0 text-[10px] text-muted-foreground">{dailyEntryCount}</span>
-              </button>
-            </div>
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-                <Input
-                  value={filter}
-                  onChange={(event) => setFilter(event.target.value)}
-                  className="pl-8 text-xs"
-                  placeholder={t("settings.memorySearchPlaceholder")}
-                />
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 space-y-1">
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <Brain className="h-4 w-4 text-muted-foreground" />
+                {t("settings.memoryTitle")}
               </div>
-              <Button
-                size="icon"
-                variant="outline"
-                title={t("settings.memoryNew")}
-                onClick={() => setShowCreate((value) => !value)}
+              <div className="break-all text-xs text-muted-foreground">
+                {pathsInfo?.root ?? "~/.liveagent/memory"}
+              </div>
+            </div>
+            <div className="settings-memory-summary-actions flex flex-wrap items-center gap-2">
+              {quotaItems.map((item) => {
+                const level = quotaLevel(item);
+                const label =
+                  item.scope === "global"
+                    ? t("settings.memoryQuotaGlobal")
+                    : t("settings.memoryQuotaProject");
+                return (
+                  <div
+                    key={`${item.scope}:${item.workdirHash}`}
+                    className={`rounded-md border px-2.5 py-1.5 text-xs ${quotaPillClass(level)}`}
+                  >
+                    {label} {item.used} / {item.limit}
+                  </div>
+                );
+              })}
+              <div
+                className={`rounded-md border px-2.5 py-1.5 text-xs ${quotaStatusClass(quotaStatus)}`}
               >
-                <Plus className="h-4 w-4" />
+                {t(quotaStatusLabelKey(quotaStatus))}
+              </div>
+              <Button variant="outline" size="sm" onClick={() => reload()} disabled={loading}>
+                <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+                {t("settings.memoryRefresh")}
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                title={t("settings.memoryOpenSettings")}
+                aria-label={t("settings.memoryOpenSettings")}
+                onClick={() => setSettingsDrawerOpen(true)}
+              >
+                <Settings2 className="h-3.5 w-3.5" />
               </Button>
             </div>
           </div>
 
-          <div className="settings-memory-entry-list min-h-0 flex-1 overflow-auto p-2">
-            {tab === "global" ? (
-              renderFlatEntries(globalEntries, "settings.memoryNoGlobalEntries")
-            ) : tab === "journal" ? (
-              renderFlatEntries(dailyEntries, "settings.memoryNoJournalEntries")
-            ) : projectGroups.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-border/60 px-4 py-8 text-center text-xs text-muted-foreground">
-                {t("settings.memoryNoProjectEntries")}
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {projectGroups.map((group) => (
-                  <details key={group.key} className="group rounded-lg border border-border/50 bg-muted/15" open>
-                    <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-left text-xs [&::-webkit-details-marker]:hidden">
-                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-0 -rotate-90" />
-                      <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0 flex-1 truncate font-medium" title={group.label}>
-                        {group.label}
-                      </span>
-                      <span className="shrink-0 rounded bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                        {group.entries.length}
-                      </span>
-                    </summary>
-                    <div className="space-y-1.5 border-t border-border/40 px-2 py-2">
-                      {group.entries.map((entry) => renderEntryButton(entry, true))}
-                    </div>
-                  </details>
-                ))}
-              </div>
-            )}
-          </div>
-        </section>
+          {unreviewedCount > 0 ? (
+            <div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+              {unreviewedCount} {t("settings.memoryAwaitingReview")}
+            </div>
+          ) : null}
+          {pathsInfo?.isInCloud ? (
+            <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              {t("settings.memoryCloudWarningPrefix")}{" "}
+              {pathsInfo.cloudProvider ?? t("settings.memoryCloudSyncFolder")}
+            </div>
+          ) : null}
+          {quotaStatus === "full" || quotaStatus === "danger" ? (
+            <div className="mt-3 flex items-start gap-2 rounded-lg border border-red-500/20 bg-red-500/[0.06] px-3 py-2 text-xs text-red-700 dark:text-red-300">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              {t(
+                quotaStatus === "full"
+                  ? "settings.memoryQuotaFullMessage"
+                  : "settings.memoryQuotaNearLimitMessage",
+              )}
+            </div>
+          ) : quotaStatus === "warning" ? (
+            <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              {t("settings.memoryQuotaWarningMessage")}
+            </div>
+          ) : null}
+          {error ? (
+            <div className="mt-3 whitespace-pre-wrap rounded-lg border border-destructive/20 bg-destructive/[0.05] px-3 py-2 text-xs text-destructive">
+              {error}
+            </div>
+          ) : null}
+        </div>
 
-        <section className="settings-memory-detail-section flex min-h-0 flex-col rounded-xl border border-border/60 bg-card">
-          {showCreate ? (
-            <div className="shrink-0 border-b border-border/40 p-4">
-              <div className="mb-3 text-sm font-semibold">{t("settings.memoryNew")}</div>
-              <div className="grid gap-3 md:grid-cols-2">
-                <Input
-                  value={draft.slug}
-                  onChange={(event) => setDraft((prev) => ({ ...prev, slug: event.target.value }))}
-                  placeholder={t("settings.memorySlugPlaceholder")}
-                />
-                <select
-                  value={draft.memoryType}
-                  onChange={(event) =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      memoryType: event.target.value as MemoryType,
-                    }))
-                  }
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+        <div className="settings-memory-layout grid min-h-0 flex-1 gap-4 lg:grid-cols-[380px_minmax(0,1fr)]">
+          <section className="settings-memory-list-section flex min-h-0 flex-col rounded-xl border border-border/60 bg-card">
+            <div className="shrink-0 space-y-3 border-b border-border/40 p-3">
+              <div className="grid grid-cols-3 gap-1 rounded-lg bg-muted/50 p-1">
+                <button
+                  type="button"
+                  onClick={() => setTab("global")}
+                  className={`flex min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium ${tab === "global" ? "bg-background shadow-xs" : "text-muted-foreground"}`}
                 >
-                  {MEMORY_TYPES.map((type) => (
-                    <option key={type} value={type}>
-                      {memoryTypeLabel(type, t)}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={draft.scope}
-                  onChange={(event) =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      scope: event.target.value as "global" | "project",
-                    }))
-                  }
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                  <Globe2 className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{t("settings.memoryCategoryGlobal")}</span>
+                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                    {globalEntryCount}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTab("project")}
+                  className={`flex min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium ${tab === "project" ? "bg-background shadow-xs" : "text-muted-foreground"}`}
                 >
-                  <option value="global">{t("settings.memoryScopeGlobal")}</option>
-                  <option value="project">{t("settings.memoryScopeProject")}</option>
-                </select>
-                <Input
-                  value={draft.description}
-                  onChange={(event) =>
-                    setDraft((prev) => ({ ...prev, description: event.target.value }))
-                  }
-                  placeholder={t("settings.memoryDescriptionPlaceholder")}
-                />
+                  <Folder className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{t("settings.memoryCategoryProject")}</span>
+                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                    {projectEntryCount}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTab("journal")}
+                  className={`flex min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium ${tab === "journal" ? "bg-background shadow-xs" : "text-muted-foreground"}`}
+                >
+                  <BookOpen className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{t("settings.memoryCategoryJournal")}</span>
+                  <span className="shrink-0 text-[10px] text-muted-foreground">
+                    {dailyEntryCount}
+                  </span>
+                </button>
               </div>
-              <textarea
-                value={draft.body}
-                onChange={(event) => setDraft((prev) => ({ ...prev, body: event.target.value }))}
-                className="mt-3 min-h-28 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm"
-                placeholder={t("settings.memoryBodyPlaceholder")}
-              />
-              <div className="mt-3 flex justify-end gap-2">
-                <Button variant="outline" size="sm" onClick={() => setShowCreate(false)}>
-                  {t("settings.memoryCancel")}
-                </Button>
-                <Button size="sm" onClick={createEntry} disabled={saving}>
-                  {t("settings.memorySave")}
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    value={filter}
+                    onChange={(event) => setFilter(event.target.value)}
+                    className="pl-8 text-xs"
+                    placeholder={t("settings.memorySearchPlaceholder")}
+                  />
+                </div>
+                <Button
+                  size="icon"
+                  variant="outline"
+                  title={t("settings.memoryNew")}
+                  onClick={() => setShowCreate((value) => !value)}
+                >
+                  <Plus className="h-4 w-4" />
                 </Button>
               </div>
             </div>
-          ) : null}
 
-          {selected ? (
-            <>
-              <div className="shrink-0 border-b border-border/40 p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <div className="truncate text-sm font-semibold">{selectedTitle(selected)}</div>
-                      <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                        {memoryScopeLabel(selected.scope, t)}
-                      </span>
-                      <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                        {memoryTypeLabel(selected.memoryType, t)}
-                      </span>
-                      {selected.meta.unreviewed ? (
-                        <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-300">
-                          {t("settings.memoryUnreviewed")}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {t("settings.memoryUpdated")} {formatTime(selected.meta.updatedAt)}
-                    </div>
-                    <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground/70">
-                      id: {selected.slug}
-                    </div>
-                    {selectedEntry?.scope === "project" ? (
-                      <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground/70">
-                        {selectedEntry.workdirPath || selectedEntry.workdirHash}
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {selected.meta.unreviewed && selected.memoryType !== "daily" ? (
-                      <Button variant="outline" size="sm" onClick={acceptSelected} disabled={saving}>
-                        <Check className="h-3.5 w-3.5" />
-                        {t("settings.memoryAccept")}
-                      </Button>
-                    ) : null}
-                    <Button variant="outline" size="sm" onClick={deleteSelected} disabled={saving}>
-                      <Trash2 className="h-3.5 w-3.5" />
-                      {t("settings.memoryDelete")}
-                    </Button>
-                  </div>
+            <div className="settings-memory-entry-list min-h-0 flex-1 overflow-auto p-2">
+              {tab === "global" ? (
+                renderFlatEntries(globalEntries, "settings.memoryNoGlobalEntries")
+              ) : tab === "journal" ? (
+                renderFlatEntries(dailyEntries, "settings.memoryNoJournalEntries")
+              ) : projectGroups.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-border/60 px-4 py-8 text-center text-xs text-muted-foreground">
+                  {t("settings.memoryNoProjectEntries")}
                 </div>
-              </div>
-
-              <div className="settings-memory-detail-body min-h-0 flex-1 overflow-auto p-4">
-                {selected.memoryType === "daily" ? (
-                  <div className="space-y-3">
-                    <textarea
-                      value={editDraft.appendBody}
-                      onChange={(event) =>
-                        setEditDraft((prev) => ({ ...prev, appendBody: event.target.value }))
-                      }
-                      className="min-h-24 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm"
-                      placeholder={t("settings.memoryAppendBlockPlaceholder")}
-                    />
-                    <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
-                      <pre className="whitespace-pre-wrap break-words text-xs leading-relaxed text-foreground">
-                        {selected.body || t("settings.memoryEmptyBody")}
-                      </pre>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <Input
-                      value={editDraft.description}
-                      onChange={(event) =>
-                        setEditDraft((prev) => ({ ...prev, description: event.target.value }))
-                      }
-                      placeholder={t("settings.memoryDescriptionPlaceholder")}
-                    />
-                    <textarea
-                      value={editDraft.body}
-                      onChange={(event) =>
-                        setEditDraft((prev) => ({ ...prev, body: event.target.value }))
-                      }
-                      className="min-h-[360px] w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-xs leading-relaxed"
-                    />
-                  </div>
-                )}
-              </div>
-
-              <div className="shrink-0 border-t border-border/40 p-4">
-                <div className="flex justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setWipeConfirmOpen(true)}
-                      disabled={saving}
+              ) : (
+                <div className="space-y-2">
+                  {projectGroups.map((group) => (
+                    <details
+                      key={group.key}
+                      className="group rounded-lg border border-border/50 bg-muted/15"
+                      open
                     >
-                      {t("settings.memoryWipeAll")}
-                    </Button>
-                  </div>
-                  <Button size="sm" onClick={saveSelected} disabled={saving}>
+                      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-left text-xs [&::-webkit-details-marker]:hidden">
+                        <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-0 -rotate-90" />
+                        <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1 truncate font-medium" title={group.label}>
+                          {group.label}
+                        </span>
+                        <span className="shrink-0 rounded bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          {group.entries.length}
+                        </span>
+                      </summary>
+                      <div className="space-y-1.5 border-t border-border/40 px-2 py-2">
+                        {group.entries.map((entry) => renderEntryButton(entry, true))}
+                      </div>
+                    </details>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section className="settings-memory-detail-section flex min-h-0 flex-col rounded-xl border border-border/60 bg-card">
+            {showCreate ? (
+              <div className="shrink-0 border-b border-border/40 p-4">
+                <div className="mb-3 text-sm font-semibold">{t("settings.memoryNew")}</div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  <Input
+                    value={draft.slug}
+                    onChange={(event) =>
+                      setDraft((prev) => ({ ...prev, slug: event.target.value }))
+                    }
+                    placeholder={t("settings.memorySlugPlaceholder")}
+                  />
+                  <select
+                    value={draft.memoryType}
+                    onChange={(event) =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        memoryType: event.target.value as MemoryType,
+                      }))
+                    }
+                    className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                  >
+                    {MEMORY_TYPES.map((type) => (
+                      <option key={type} value={type}>
+                        {memoryTypeLabel(type, t)}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={draft.scope}
+                    onChange={(event) =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        scope: event.target.value as "global" | "project",
+                      }))
+                    }
+                    className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                  >
+                    <option value="global">{t("settings.memoryScopeGlobal")}</option>
+                    <option value="project">{t("settings.memoryScopeProject")}</option>
+                  </select>
+                  <Input
+                    value={draft.description}
+                    onChange={(event) =>
+                      setDraft((prev) => ({ ...prev, description: event.target.value }))
+                    }
+                    placeholder={t("settings.memoryDescriptionPlaceholder")}
+                  />
+                </div>
+                <textarea
+                  value={draft.body}
+                  onChange={(event) => setDraft((prev) => ({ ...prev, body: event.target.value }))}
+                  className="mt-3 min-h-28 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  placeholder={t("settings.memoryBodyPlaceholder")}
+                />
+                <div className="mt-3 flex justify-end gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setShowCreate(false)}>
+                    {t("settings.memoryCancel")}
+                  </Button>
+                  <Button size="sm" onClick={createEntry} disabled={saving}>
                     {t("settings.memorySave")}
                   </Button>
                 </div>
               </div>
-            </>
-          ) : (
-            <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-sm text-muted-foreground">
-              {t("settings.memorySelectEntry")}
-            </div>
-          )}
-        </section>
+            ) : null}
+
+            {selected ? (
+              <>
+                <div className="shrink-0 border-b border-border/40 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="truncate text-sm font-semibold">
+                          {selectedTitle(selected)}
+                        </div>
+                        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          {memoryScopeLabel(selected.scope, t)}
+                        </span>
+                        <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          {memoryTypeLabel(selected.memoryType, t)}
+                        </span>
+                        {selected.meta.unreviewed ? (
+                          <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-300">
+                            {t("settings.memoryUnreviewed")}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {t("settings.memoryUpdated")} {formatTime(selected.meta.updatedAt)}
+                      </div>
+                      <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground/70">
+                        id: {selected.slug}
+                      </div>
+                      {selectedEntry?.scope === "project" ? (
+                        <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground/70">
+                          {selectedEntry.workdirPath || selectedEntry.workdirHash}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {selected.meta.unreviewed && selected.memoryType !== "daily" ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={acceptSelected}
+                          disabled={saving}
+                        >
+                          <Check className="h-3.5 w-3.5" />
+                          {t("settings.memoryAccept")}
+                        </Button>
+                      ) : null}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={deleteSelected}
+                        disabled={saving}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        {t("settings.memoryDelete")}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="settings-memory-detail-body min-h-0 flex-1 overflow-auto p-4">
+                  {selected.memoryType === "daily" ? (
+                    <div className="space-y-3">
+                      <textarea
+                        value={editDraft.appendBody}
+                        onChange={(event) =>
+                          setEditDraft((prev) => ({ ...prev, appendBody: event.target.value }))
+                        }
+                        className="min-h-24 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm"
+                        placeholder={t("settings.memoryAppendBlockPlaceholder")}
+                      />
+                      <div className="rounded-lg border border-border/50 bg-muted/20 p-3">
+                        <pre className="whitespace-pre-wrap break-words text-xs leading-relaxed text-foreground">
+                          {selected.body || t("settings.memoryEmptyBody")}
+                        </pre>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <Input
+                        value={editDraft.description}
+                        onChange={(event) =>
+                          setEditDraft((prev) => ({ ...prev, description: event.target.value }))
+                        }
+                        placeholder={t("settings.memoryDescriptionPlaceholder")}
+                      />
+                      <textarea
+                        value={editDraft.body}
+                        onChange={(event) =>
+                          setEditDraft((prev) => ({ ...prev, body: event.target.value }))
+                        }
+                        className="min-h-[360px] w-full resize-y rounded-md border border-input bg-background px-3 py-2 font-mono text-xs leading-relaxed"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="shrink-0 border-t border-border/40 p-4">
+                  <div className="flex justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setWipeConfirmOpen(true)}
+                        disabled={saving}
+                      >
+                        {t("settings.memoryWipeAll")}
+                      </Button>
+                    </div>
+                    <Button size="sm" onClick={saveSelected} disabled={saving}>
+                      {t("settings.memorySave")}
+                    </Button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-sm text-muted-foreground">
+                {t("settings.memorySelectEntry")}
+              </div>
+            )}
+          </section>
         </div>
       </div>
 

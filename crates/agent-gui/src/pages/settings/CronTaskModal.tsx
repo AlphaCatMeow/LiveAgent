@@ -1,6 +1,6 @@
+import { invoke } from "@tauri-apps/api/core";
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { invoke } from "@tauri-apps/api/core";
 import {
   AlertTriangle,
   Check,
@@ -18,7 +18,6 @@ import {
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
-import { parseModelValue, toModelValue } from "../../lib/providers/llm";
 import {
   Select,
   SelectContent,
@@ -28,20 +27,21 @@ import {
 } from "../../components/ui/select";
 import { Textarea } from "../../components/ui/textarea";
 import { useLocale } from "../../i18n";
+import { parseModelValue, toModelValue } from "../../lib/providers/llm";
 import {
-  canHookHttpMethodHaveBody,
-  HOOK_HTTP_METHODS,
   type CronTask,
   type CronTaskType,
+  canHookHttpMethodHaveBody,
   type ExecutionMode,
+  HOOK_HTTP_METHODS,
   type HookHttpMethod,
   isAgentExecutionMode,
 } from "../../lib/settings";
 import {
   createEmptyTaskRequestDraft,
   parseHttpRequests,
-  taskRequestToDraft,
   type TaskHttpRequestDraft,
+  taskRequestToDraft,
 } from "./taskConfigUtils";
 
 export type { CronTask, CronTaskType } from "../../lib/settings";
@@ -94,36 +94,32 @@ export function CronTaskModal({
   const [prompt, setPrompt] = useState(initialData?.prompt ?? "");
   const [selectedModelValue, setSelectedModelValue] = useState(() =>
     initialData?.selectedModel
-      ? toModelValue(
-          initialData.selectedModel.customProviderId,
-          initialData.selectedModel.model,
-        )
+      ? toModelValue(initialData.selectedModel.customProviderId, initialData.selectedModel.model)
       : "",
   );
   const [formError, setFormError] = useState<string | null>(null);
   const [expandedRequest, setExpandedRequest] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  const promptModelOptions = selectedModelValue &&
+  const promptModelOptions =
+    selectedModelValue &&
     !modelOptions.some((option) => option.value === selectedModelValue) &&
     initialData?.selectedModel
-    ? [
-        ...modelOptions,
-        {
-          value: selectedModelValue,
-          label: initialData.selectedModel.model,
-          providerName: initialData.selectedModel.customProviderId,
-        },
-      ]
-    : modelOptions;
+      ? [
+          ...modelOptions,
+          {
+            value: selectedModelValue,
+            label: initialData.selectedModel.model,
+            providerName: initialData.selectedModel.customProviderId,
+          },
+        ]
+      : modelOptions;
 
   const selectedPromptModel =
     promptModelOptions.find((option) => option.value === selectedModelValue) ?? null;
 
   function updateRequest(id: string, patch: Partial<CronHttpRequestDraft>) {
-    setRequests((prev) =>
-      prev.map((req) => (req.id === id ? { ...req, ...patch } : req)),
-    );
+    setRequests((prev) => prev.map((req) => (req.id === id ? { ...req, ...patch } : req)));
   }
 
   async function handleSave() {
@@ -149,8 +145,7 @@ export function CronTaskModal({
 
       const trimmedPrompt = prompt.trim();
       const trimmedScript = scriptText.trim();
-      const parsedSelectedModel =
-        type === "prompt" ? parseModelValue(selectedModelValue) : null;
+      const parsedSelectedModel = type === "prompt" ? parseModelValue(selectedModelValue) : null;
       if (type === "bash" && !trimmedScript) {
         throw new Error(t("settings.cronCommandRequired"));
       }
@@ -189,7 +184,7 @@ export function CronTaskModal({
               })
             : undefined,
         prompt: type === "prompt" ? trimmedPrompt : undefined,
-        selectedModel: type === "prompt" ? parsedSelectedModel ?? undefined : undefined,
+        selectedModel: type === "prompt" ? (parsedSelectedModel ?? undefined) : undefined,
       };
 
       await onSave(data);
@@ -202,9 +197,7 @@ export function CronTaskModal({
 
   const scriptLineCount = scriptText.split(/\r?\n/).filter((l) => l.trim()).length;
 
-  const modalTitle = mode === "add"
-    ? t("settings.cronModalAdd")
-    : t("settings.cronModalEdit");
+  const modalTitle = mode === "add" ? t("settings.cronModalAdd") : t("settings.cronModalEdit");
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -319,20 +312,29 @@ export function CronTaskModal({
               {/* Bash */}
               <button
                 type="button"
-                onClick={() => { setFormError(null); setType("bash"); }}
+                onClick={() => {
+                  setFormError(null);
+                  setType("bash");
+                }}
                 className={`group relative flex items-start gap-3 rounded-xl border-2 p-4 text-left transition-all ${
                   type === "bash"
                     ? "border-blue-500/50 bg-blue-500/5 shadow-sm shadow-blue-500/10"
                     : "border-border/60 bg-background hover:border-border hover:bg-muted/20"
                 }`}
               >
-                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
-                  type === "bash" ? "bg-blue-500/15 text-blue-500" : "bg-muted/60 text-muted-foreground"
-                }`}>
+                <div
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
+                    type === "bash"
+                      ? "bg-blue-500/15 text-blue-500"
+                      : "bg-muted/60 text-muted-foreground"
+                  }`}
+                >
                   <Terminal className="h-5 w-5" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className={`text-sm font-semibold ${type === "bash" ? "text-blue-600 dark:text-blue-400" : "text-foreground"}`}>
+                  <div
+                    className={`text-sm font-semibold ${type === "bash" ? "text-blue-600 dark:text-blue-400" : "text-foreground"}`}
+                  >
                     {t("settings.cronTypeBash")}
                   </div>
                   <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
@@ -349,20 +351,29 @@ export function CronTaskModal({
               {/* HTTP */}
               <button
                 type="button"
-                onClick={() => { setFormError(null); setType("http"); }}
+                onClick={() => {
+                  setFormError(null);
+                  setType("http");
+                }}
                 className={`group relative flex items-start gap-3 rounded-xl border-2 p-4 text-left transition-all ${
                   type === "http"
                     ? "border-emerald-500/50 bg-emerald-500/5 shadow-sm shadow-emerald-500/10"
                     : "border-border/60 bg-background hover:border-border hover:bg-muted/20"
                 }`}
               >
-                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
-                  type === "http" ? "bg-emerald-500/15 text-emerald-500" : "bg-muted/60 text-muted-foreground"
-                }`}>
+                <div
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
+                    type === "http"
+                      ? "bg-emerald-500/15 text-emerald-500"
+                      : "bg-muted/60 text-muted-foreground"
+                  }`}
+                >
                   <Globe className="h-5 w-5" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className={`text-sm font-semibold ${type === "http" ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>
+                  <div
+                    className={`text-sm font-semibold ${type === "http" ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}
+                  >
                     {t("settings.cronTypeHttp")}
                   </div>
                   <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
@@ -379,20 +390,29 @@ export function CronTaskModal({
               {/* Prompt */}
               <button
                 type="button"
-                onClick={() => { setFormError(null); setType("prompt"); }}
+                onClick={() => {
+                  setFormError(null);
+                  setType("prompt");
+                }}
                 className={`group relative flex items-start gap-3 rounded-xl border-2 p-4 text-left transition-all ${
                   type === "prompt"
                     ? "border-violet-500/50 bg-violet-500/5 shadow-sm shadow-violet-500/10"
                     : "border-border/60 bg-background hover:border-border hover:bg-muted/20"
                 }`}
               >
-                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
-                  type === "prompt" ? "bg-violet-500/15 text-violet-500" : "bg-muted/60 text-muted-foreground"
-                }`}>
+                <div
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
+                    type === "prompt"
+                      ? "bg-violet-500/15 text-violet-500"
+                      : "bg-muted/60 text-muted-foreground"
+                  }`}
+                >
                   <MessageSquare className="h-5 w-5" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className={`text-sm font-semibold ${type === "prompt" ? "text-violet-600 dark:text-violet-400" : "text-foreground"}`}>
+                  <div
+                    className={`text-sm font-semibold ${type === "prompt" ? "text-violet-600 dark:text-violet-400" : "text-foreground"}`}
+                  >
                     {t("settings.cronTypePrompt")}
                   </div>
                   <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
@@ -529,7 +549,9 @@ export function CronTaskModal({
                               isExpanded ? "text-primary" : "text-muted-foreground"
                             }`}
                           >
-                            <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isExpanded ? "" : "-rotate-90"}`} />
+                            <ChevronDown
+                              className={`h-3.5 w-3.5 transition-transform ${isExpanded ? "" : "-rotate-90"}`}
+                            />
                           </button>
                           <button
                             type="button"
@@ -677,7 +699,8 @@ export function CronTaskModal({
               </div>
             ) : name.trim() &&
               cron.trim() &&
-              (type !== "prompt" || (prompt.trim() && Boolean(parseModelValue(selectedModelValue)))) ? (
+              (type !== "prompt" ||
+                (prompt.trim() && Boolean(parseModelValue(selectedModelValue)))) ? (
               <div className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
                 <Check className="h-3.5 w-3.5" />
                 <span>{t("settings.agentsReady")}</span>

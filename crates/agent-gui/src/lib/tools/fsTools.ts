@@ -1,6 +1,3 @@
-import { Type, type TSchema } from "@sinclair/typebox";
-import { invoke } from "@tauri-apps/api/core";
-
 import type {
   ImageContent,
   TextContent,
@@ -8,12 +5,12 @@ import type {
   ToolCall,
   ToolResultMessage,
 } from "@mariozechner/pi-ai";
-
-import type { FileToolState } from "./fileToolState";
+import { type TSchema, Type } from "@sinclair/typebox";
+import { invoke } from "@tauri-apps/api/core";
 import {
-  createBuiltinMetadataMap,
   type BuiltinToolBundle,
   type BuiltinToolResultDetails,
+  createBuiltinMetadataMap,
   type DeleteResultDetails,
   type DisplayImageItemDetails,
   type DisplayImageResultDetails,
@@ -29,6 +26,7 @@ import {
   type ReadTextResultDetails,
   type WriteResultDetails,
 } from "./builtinTypes";
+import type { FileToolState } from "./fileToolState";
 import {
   buildScopedPathError,
   formatScopedTarget,
@@ -39,8 +37,8 @@ import {
   relativePathFromAbsolute,
 } from "./pathUtils";
 import {
-  assertSkillPathAllowedByPolicy,
   assertSkillMutationAllowed,
+  assertSkillPathAllowedByPolicy,
   buildSkillAccessDeniedMessage,
   isSkillAccessPolicyRestrictive,
   type SkillAccessPolicy,
@@ -309,24 +307,30 @@ export function createFsTools(params: {
     assertSkillMutationAllowed(skillAccessPolicy, operation, path);
   }
 
-  function assertOptionalSkillsPathAccess(root: FileToolRoot, path: string | undefined, operation: string) {
+  function assertOptionalSkillsPathAccess(
+    root: FileToolRoot,
+    path: string | undefined,
+    operation: string,
+  ) {
     if (root !== "skills") return;
     if (path) {
       assertSkillPathAllowedByPolicy(skillAccessPolicy, path, operation);
       return;
     }
     if (isSkillAccessPolicyRestrictive(skillAccessPolicy)) {
-      throw new Error(buildSkillAccessDeniedMessage({
-        operation,
-        allowedSkillNames: skillAccessPolicy?.allowedSkillNames,
-      }));
+      throw new Error(
+        buildSkillAccessDeniedMessage({
+          operation,
+          allowedSkillNames: skillAccessPolicy?.allowedSkillNames,
+        }),
+      );
     }
   }
 
   const toolRead: Tool = {
     name: "Read",
     description:
-      'Read a text, image, PDF, notebook, Word, Excel/spreadsheet, or archive file from the workspace or an enabled Skill. For text files, use start_line (1-based) and limit for pagination. For PDFs, use page_start and page_limit. For notebooks (.ipynb), use cell_start and cell_limit. Word/Excel/archive files return a best-effort text preview or entry listing. Returns version metadata and may return an `unchanged` stub when content has not changed since the previous read. Use Image instead when the user asks to show, view, render, or display an image in the chat UI. Do not use Markdown image syntax or HTML img tags to display files.',
+      "Read a text, image, PDF, notebook, Word, Excel/spreadsheet, or archive file from the workspace or an enabled Skill. For text files, use start_line (1-based) and limit for pagination. For PDFs, use page_start and page_limit. For notebooks (.ipynb), use cell_start and cell_limit. Word/Excel/archive files return a best-effort text preview or entry listing. Returns version metadata and may return an `unchanged` stub when content has not changed since the previous read. Use Image instead when the user asks to show, view, render, or display an image in the chat UI. Do not use Markdown image syntax or HTML img tags to display files.",
     parameters: withFileRootParameters({
       path: Type.String({
         description:
@@ -386,7 +390,7 @@ export function createFsTools(params: {
         Type.Array(
           Type.String({
             description:
-              'Local image path. Same rules as `path`: RELATIVE to the selected `root` when the image is inside the workspace or a Skill; an external ABSOLUTE path only when it lives outside both roots.',
+              "Local image path. Same rules as `path`: RELATIVE to the selected `root` when the image is inside the workspace or a Skill; an external ABSOLUTE path only when it lives outside both roots.",
           }),
           {
             minItems: 1,
@@ -397,7 +401,8 @@ export function createFsTools(params: {
       ),
       url: Type.Optional(
         Type.String({
-          description: "Single http/https image URL. Use this directly for remote images that only need to be displayed.",
+          description:
+            "Single http/https image URL. Use this directly for remote images that only need to be displayed.",
         }),
       ),
       urls: Type.Optional(
@@ -408,13 +413,15 @@ export function createFsTools(params: {
           {
             minItems: 1,
             maxItems: MAX_DISPLAY_IMAGE_PATHS,
-            description: "Multiple remote image URLs to display in order without pre-downloading them.",
+            description:
+              "Multiple remote image URLs to display in order without pre-downloading them.",
           },
         ),
       ),
       base64: Type.Optional(
         Type.String({
-          description: "Single image as a data URL or raw base64. For raw base64, provide mimeType when possible.",
+          description:
+            "Single image as a data URL or raw base64. For raw base64, provide mimeType when possible.",
         }),
       ),
       base64s: Type.Optional(
@@ -425,31 +432,34 @@ export function createFsTools(params: {
           {
             minItems: 1,
             maxItems: MAX_DISPLAY_IMAGE_PATHS,
-            description: "Multiple base64 images to display in order. Prefer data URLs so the MIME type is explicit.",
+            description:
+              "Multiple base64 images to display in order. Prefer data URLs so the MIME type is explicit.",
           },
         ),
       ),
       mimeType: Type.Optional(
         Type.String({
-          description: "MIME type for raw base64 input, for example image/png, image/jpeg, or image/svg+xml.",
+          description:
+            "MIME type for raw base64 input, for example image/png, image/jpeg, or image/svg+xml.",
         }),
       ),
       source: Type.Optional(
         Type.String({
           description:
-            'Single generic image source. Accepted forms: workspace- or Skills-relative path (matching `root`), external absolute path OUTSIDE both roots, http/https URL, data URL, raw base64, or raw SVG XML. Prefer this for mixed or unknown source types. Same relative-path rule as `path`: never pass an absolute path that points into the workspace or a Skill — strip the root prefix instead.',
+            "Single generic image source. Accepted forms: workspace- or Skills-relative path (matching `root`), external absolute path OUTSIDE both roots, http/https URL, data URL, raw base64, or raw SVG XML. Prefer this for mixed or unknown source types. Same relative-path rule as `path`: never pass an absolute path that points into the workspace or a Skill — strip the root prefix instead.",
         }),
       ),
       sources: Type.Optional(
         Type.Array(
           Type.String({
             description:
-              'Generic image source. Same accepted forms and same relative-path rule as `source` — never an absolute path that points into the workspace or a Skill.',
+              "Generic image source. Same accepted forms and same relative-path rule as `source` — never an absolute path that points into the workspace or a Skill.",
           }),
           {
             minItems: 1,
             maxItems: MAX_DISPLAY_IMAGE_PATHS,
-            description: "Multiple mixed image sources to display in order. Use this for mixed path + URL + base64 galleries.",
+            description:
+              "Multiple mixed image sources to display in order. Use this for mixed path + URL + base64 galleries.",
           },
         ),
       ),
@@ -459,7 +469,7 @@ export function createFsTools(params: {
   const toolWrite: Tool = {
     name: "Write",
     description:
-      'Create a new text file or fully rewrite an existing text file. There is no append mode — to add content, Read the file first, then either Write the full new content or use Edit to insert. Existing files must have been Read first (under the same root) so the tool can validate version metadata and reject stale rewrites.',
+      "Create a new text file or fully rewrite an existing text file. There is no append mode — to add content, Read the file first, then either Write the full new content or use Edit to insert. Existing files must have been Read first (under the same root) so the tool can validate version metadata and reject stale rewrites.",
     parameters: withFileRootParameters({
       path: Type.String({
         description:
@@ -477,7 +487,7 @@ export function createFsTools(params: {
   const toolEdit: Tool = {
     name: "Edit",
     description:
-      'Perform an exact-string replacement in a file you have already Read under the same root. Validates version metadata before writing and rejects stale edits — if the file changed after the last Read, Read it again before retrying. If `old_string` matches multiple places, either narrow it until unique or set `replace_all=true` explicitly.',
+      "Perform an exact-string replacement in a file you have already Read under the same root. Validates version metadata before writing and rejects stale edits — if the file changed after the last Read, Read it again before retrying. If `old_string` matches multiple places, either narrow it until unique or set `replace_all=true` explicitly.",
     parameters: withFileRootParameters({
       path: Type.String({
         description:
@@ -494,7 +504,8 @@ export function createFsTools(params: {
       ),
       replace_all: Type.Optional(
         Type.Boolean({
-          description: "Replace every exact match when true; otherwise only a single unambiguous match is allowed",
+          description:
+            "Replace every exact match when true; otherwise only a single unambiguous match is allowed",
         }),
       ),
     }),
@@ -503,7 +514,7 @@ export function createFsTools(params: {
   const toolDelete: Tool = {
     name: "Delete",
     description:
-      'Delete a file or directory under the selected root. Directories are removed recursively. Use this instead of Bash rm, rmdir, unlink, or find -delete for workspace or Skill files. Use this instead of Bash `rm` / `rmdir` / `unlink` / `find -delete` for any workspace or Skill file.',
+      "Delete a file or directory under the selected root. Directories are removed recursively. Use this instead of Bash rm, rmdir, unlink, or find -delete for workspace or Skill files. Use this instead of Bash `rm` / `rmdir` / `unlink` / `find -delete` for any workspace or Skill file.",
     parameters: withFileRootParameters({
       path: Type.String({
         description:
@@ -515,7 +526,7 @@ export function createFsTools(params: {
   const toolList: Tool = {
     name: "List",
     description:
-      'List files and directories under the selected root using ignore-aware traversal. Supports depth-limited traversal and paginated results. Prefer this over `Bash ls` / `find` for workspace or Skill content.',
+      "List files and directories under the selected root using ignore-aware traversal. Supports depth-limited traversal and paginated results. Prefer this over `Bash ls` / `find` for workspace or Skill content.",
     parameters: withFileRootParameters({
       path: Type.Optional(
         Type.String({
@@ -541,10 +552,11 @@ export function createFsTools(params: {
   const toolGlob: Tool = {
     name: "Glob",
     description:
-      'Find files by glob pattern using ignore-aware traversal. Results are paginated and sorted by path. Prefer this over `Bash find` for workspace or Skill content.',
+      "Find files by glob pattern using ignore-aware traversal. Results are paginated and sorted by path. Prefer this over `Bash find` for workspace or Skill content.",
     parameters: withFileRootParameters({
       pattern: Type.String({
-        description: 'Glob pattern relative to the search root, for example "**/*.tsx" or "src/**/Chat*.ts". Use `/` as the separator (Windows `\\` is auto-normalized).',
+        description:
+          'Glob pattern relative to the search root, for example "**/*.tsx" or "src/**/Chat*.ts". Use `/` as the separator (Windows `\\` is auto-normalized).',
       }),
       path: Type.Optional(
         Type.String({
@@ -572,7 +584,7 @@ export function createFsTools(params: {
   const toolGrep: Tool = {
     name: "Grep",
     description:
-      'Search file contents using a regular expression with ignore-aware traversal. Supports output_mode=content|files|count, pagination, optional surrounding context, and multiline matching. Prefer this over `Bash grep` / `rg` for any workspace or Skill content.',
+      "Search file contents using a regular expression with ignore-aware traversal. Supports output_mode=content|files|count, pagination, optional surrounding context, and multiline matching. Prefer this over `Bash grep` / `rg` for any workspace or Skill content.",
     parameters: withFileRootParameters({
       pattern: Type.String({ description: "Regular expression to search for in file contents." }),
       path: Type.Optional(
@@ -590,16 +602,13 @@ export function createFsTools(params: {
         Type.Boolean({ description: "Case-insensitive when true (default: true)" }),
       ),
       output_mode: Type.Optional(
-        Type.Union([
-          Type.Literal("content"),
-          Type.Literal("files"),
-          Type.Literal("count"),
-        ]),
+        Type.Union([Type.Literal("content"), Type.Literal("files"), Type.Literal("count")]),
       ),
       head_limit: Type.Optional(
         Type.Number({
           minimum: 1,
-          description: "Maximum number of rows to return for the selected output mode (default: 200)",
+          description:
+            "Maximum number of rows to return for the selected output mode (default: 200)",
         }),
       ),
       offset: Type.Optional(
@@ -642,18 +651,13 @@ export function createFsTools(params: {
       workdir,
       skillsRootDir: cachedSkillsRootDir,
     });
-    assertSkillsPathAccess(root, path, "Read(root=\"skills\")");
-    const start_line =
-      typeof args?.start_line === "number" ? args.start_line : undefined;
+    assertSkillsPathAccess(root, path, 'Read(root="skills")');
+    const start_line = typeof args?.start_line === "number" ? args.start_line : undefined;
     const limit = typeof args?.limit === "number" ? args.limit : undefined;
-    const page_start =
-      typeof args?.page_start === "number" ? args.page_start : undefined;
-    const page_limit =
-      typeof args?.page_limit === "number" ? args.page_limit : undefined;
-    const cell_start =
-      typeof args?.cell_start === "number" ? args.cell_start : undefined;
-    const cell_limit =
-      typeof args?.cell_limit === "number" ? args.cell_limit : undefined;
+    const page_start = typeof args?.page_start === "number" ? args.page_start : undefined;
+    const page_limit = typeof args?.page_limit === "number" ? args.page_limit : undefined;
+    const cell_start = typeof args?.cell_start === "number" ? args.cell_start : undefined;
+    const cell_limit = typeof args?.cell_limit === "number" ? args.cell_limit : undefined;
 
     const res = await invokeScopedFileCommand<ReadCommandResponse>({
       toolName: "Read",
@@ -742,11 +746,15 @@ export function createFsTools(params: {
         contentHash: res.contentHash,
         reusedExisting: false,
       };
-      const previous = fileState.getExactPdfRead(path, {
-        pageStart,
-        numPages,
-        totalPages,
-      }, root);
+      const previous = fileState.getExactPdfRead(
+        path,
+        {
+          pageStart,
+          numPages,
+          totalPages,
+        },
+        root,
+      );
       const reusedExisting =
         previous?.kind === "pdf" &&
         previous.mtimeMs === baseDetails.mtimeMs &&
@@ -802,11 +810,15 @@ export function createFsTools(params: {
         contentHash: res.contentHash,
         reusedExisting: false,
       };
-      const previous = fileState.getExactNotebookRead(path, {
-        cellStart,
-        numCells,
-        totalCells,
-      }, root);
+      const previous = fileState.getExactNotebookRead(
+        path,
+        {
+          cellStart,
+          numCells,
+          totalCells,
+        },
+        root,
+      );
       const reusedExisting =
         previous?.kind === "notebook" &&
         previous.mtimeMs === baseDetails.mtimeMs &&
@@ -907,11 +919,15 @@ export function createFsTools(params: {
       contentHash: res.contentHash,
       reusedExisting: false,
     };
-    const previous = fileState.getExactTextRead(path, {
-      startLine,
-      numLines,
-      totalLines,
-    }, root);
+    const previous = fileState.getExactTextRead(
+      path,
+      {
+        startLine,
+        numLines,
+        totalLines,
+      },
+      root,
+    );
     const reusedExisting =
       previous?.kind === "text" &&
       previous.mtimeMs === baseDetails.mtimeMs &&
@@ -972,11 +988,14 @@ export function createFsTools(params: {
       readLimit = latest.totalLines;
     }
 
-    await execRead({
-      root: params.root,
-      path: params.path,
-      limit: readLimit,
-    }, params.signal);
+    await execRead(
+      {
+        root: params.root,
+        path: params.path,
+        limit: readLimit,
+      },
+      params.signal,
+    );
 
     const snapshot = fileState.getLatestFullText(params.path, params.root);
     if (snapshot) {
@@ -1004,11 +1023,12 @@ export function createFsTools(params: {
   }
 
   function getOptionalMimeType(args: any) {
-    const value = typeof args?.mimeType === "string"
-      ? args.mimeType
-      : typeof args?.mime_type === "string"
-        ? args.mime_type
-        : "";
+    const value =
+      typeof args?.mimeType === "string"
+        ? args.mimeType
+        : typeof args?.mime_type === "string"
+          ? args.mime_type
+          : "";
     return value.trim() || undefined;
   }
 
@@ -1024,20 +1044,15 @@ export function createFsTools(params: {
   ) {
     rawItems.forEach((item, index) => {
       const itemLabel = rawItems.length > 1 ? `${label}[${index}]` : label;
-      const normalized = sourceType === "path"
-        ? normalizeImageLocalPathSource(
-            item,
-            itemLabel,
-            root,
-            scopedWorkdir,
-            rootExplicit,
-          )
-        : {
-            source: normalizeRequiredImageSource(item, itemLabel),
-            root: undefined,
-            workdir: undefined,
-            scopedPath: undefined,
-          };
+      const normalized =
+        sourceType === "path"
+          ? normalizeImageLocalPathSource(item, itemLabel, root, scopedWorkdir, rootExplicit)
+          : {
+              source: normalizeRequiredImageSource(item, itemLabel),
+              root: undefined,
+              workdir: undefined,
+              scopedPath: undefined,
+            };
       sources.push({
         source: normalized.source,
         sourceType,
@@ -1053,9 +1068,7 @@ export function createFsTools(params: {
     if (/^data:image\//i.test(source)) return "base64";
     if (/^https?:\/\//i.test(source)) return "url";
     const compact = source.replace(/\s/g, "");
-    if (
-      /^(iVBORw0KGgo|\/9j\/|R0lGOD|UklGR|Qk|AAABAA|PHN2Z|PD94bWwg)/.test(compact)
-    ) {
+    if (/^(iVBORw0KGgo|\/9j\/|R0lGOD|UklGR|Qk|AAABAA|PHN2Z|PD94bWwg)/.test(compact)) {
       return "base64";
     }
     return "auto";
@@ -1087,10 +1100,7 @@ export function createFsTools(params: {
     for (const home of homes) {
       const expanded = `${home}${suffix}`;
       if (relativePathFromAbsolute(expanded, workdir) !== null) return expanded;
-      if (
-        cachedSkillsRootDir &&
-        relativePathFromAbsolute(expanded, cachedSkillsRootDir) !== null
-      ) {
+      if (cachedSkillsRootDir && relativePathFromAbsolute(expanded, cachedSkillsRootDir) !== null) {
         return expanded;
       }
     }
@@ -1154,10 +1164,7 @@ export function createFsTools(params: {
         required: true,
       });
     }
-    if (
-      cachedSkillsRootDir &&
-      relativePathFromAbsolute(localPath, cachedSkillsRootDir) !== null
-    ) {
+    if (cachedSkillsRootDir && relativePathFromAbsolute(localPath, cachedSkillsRootDir) !== null) {
       return buildScopedPathError({
         label,
         rawPath: localPath,
@@ -1189,7 +1196,7 @@ export function createFsTools(params: {
         workdir,
         skillsRootDir: cachedSkillsRootDir,
       });
-      assertSkillsPathAccess(root ?? "workspace", scopedPath, "Image(root=\"skills\")");
+      assertSkillsPathAccess(root ?? "workspace", scopedPath, 'Image(root="skills")');
       return {
         source: scopedPath,
         root,
@@ -1243,8 +1250,7 @@ export function createFsTools(params: {
         rawItems.length > 1 ? `${label}[${index}]` : label,
       );
       const sourceType = inferGenericImageSourceType(source);
-      const shouldNormalizeAsLocalPath =
-        sourceType === "auto" && !isInlineSvgSource(source);
+      const shouldNormalizeAsLocalPath = sourceType === "auto" && !isInlineSvgSource(source);
       const normalized = shouldNormalizeAsLocalPath
         ? normalizeImageLocalPathSource(
             source,
@@ -1395,12 +1401,14 @@ export function createFsTools(params: {
           ].join(" "),
         );
       }
-      throw new Error(buildScopedToolRuntimeError({
-        toolName: "Image",
-        root: input.root,
-        path: input.scopedPath ?? (input.sourceType === "path" ? input.source : undefined),
-        error,
-      }));
+      throw new Error(
+        buildScopedToolRuntimeError({
+          toolName: "Image",
+          root: input.root,
+          path: input.scopedPath ?? (input.sourceType === "path" ? input.source : undefined),
+          error,
+        }),
+      );
     }
 
     if (res.kind !== "image") {
@@ -1432,7 +1440,10 @@ export function createFsTools(params: {
     };
   }
 
-  async function execImage(args: any, signal?: AbortSignal): Promise<ToolOk<DisplayImageResultDetails>> {
+  async function execImage(
+    args: any,
+    signal?: AbortSignal,
+  ): Promise<ToolOk<DisplayImageResultDetails>> {
     if (signal?.aborted) throw new Error("Cancelled");
 
     const root = normalizeRoot(args, "Image");
@@ -1469,27 +1480,31 @@ export function createFsTools(params: {
       image.root && image.root !== "workspace"
         ? `root=${image.root} path=${image.path}`
         : image.path;
-    const textSummary = imageDetails.length === 1
-      ? [
-          `Display image: ${formatImagePath(firstImage)}`,
-          `sourceType=${firstImage.sourceType ?? "unknown"}`,
-          `renderMode=${firstImage.renderMode ?? "inline"}`,
-          firstImage.mimeType ? `mime=${firstImage.mimeType}` : null,
-          typeof firstImage.sizeBytes === "number" ? `sizeBytes=${firstImage.sizeBytes}` : null,
-        ].filter(Boolean).join("\n")
-      : [
-          `Display images: ${imageDetails.length}`,
-          ...imageDetails.map(
-            (image, index) =>
+    const textSummary =
+      imageDetails.length === 1
+        ? [
+            `Display image: ${formatImagePath(firstImage)}`,
+            `sourceType=${firstImage.sourceType ?? "unknown"}`,
+            `renderMode=${firstImage.renderMode ?? "inline"}`,
+            firstImage.mimeType ? `mime=${firstImage.mimeType}` : null,
+            typeof firstImage.sizeBytes === "number" ? `sizeBytes=${firstImage.sizeBytes}` : null,
+          ]
+            .filter(Boolean)
+            .join("\n")
+        : [
+            `Display images: ${imageDetails.length}`,
+            ...imageDetails.map((image, index) =>
               [
                 `${index + 1}. ${formatImagePath(image)}`,
                 `sourceType=${image.sourceType ?? "unknown"}`,
                 `renderMode=${image.renderMode ?? "inline"}`,
                 image.mimeType ? `mime=${image.mimeType}` : null,
                 typeof image.sizeBytes === "number" ? `sizeBytes=${image.sizeBytes}` : null,
-              ].filter(Boolean).join("\n"),
-          ),
-        ].join("\n");
+              ]
+                .filter(Boolean)
+                .join("\n"),
+            ),
+          ].join("\n");
 
     return {
       content: [
@@ -1497,7 +1512,7 @@ export function createFsTools(params: {
           type: "text",
           text: textSummary,
         },
-        ...entries.flatMap((entry) => entry.content ? [entry.content] : []),
+        ...entries.flatMap((entry) => (entry.content ? [entry.content] : [])),
       ],
       details,
     };
@@ -1515,7 +1530,7 @@ export function createFsTools(params: {
       workdir,
       skillsRootDir: cachedSkillsRootDir,
     });
-    assertSkillsPathMutationAccess(root, path, "Write(root=\"skills\")");
+    assertSkillsPathMutationAccess(root, path, 'Write(root="skills")');
     const content = typeof args?.content === "string" ? args.content : "";
     const mode = typeof args?.mode === "string" ? args.mode : "rewrite";
     if (mode !== "rewrite") {
@@ -1524,7 +1539,9 @@ export function createFsTools(params: {
 
     const latest = fileState.getLatest(path, root);
     if (latest?.kind === "text" && latest.isPartialView) {
-      throw new Error(`Write requires a full-file Read first for existing files: ${formatScopedTarget(root, path)}. Retry with Read using the same root and path before rewriting. Do not use Bash for workspace or Skills file operations.`);
+      throw new Error(
+        `Write requires a full-file Read first for existing files: ${formatScopedTarget(root, path)}. Retry with Read using the same root and path before rewriting. Do not use Bash for workspace or Skills file operations.`,
+      );
     }
     const fullSnapshot = fileState.getLatestFullText(path, root);
 
@@ -1590,13 +1607,11 @@ export function createFsTools(params: {
       workdir,
       skillsRootDir: cachedSkillsRootDir,
     });
-    assertSkillsPathMutationAccess(root, path, "Edit(root=\"skills\")");
+    assertSkillsPathMutationAccess(root, path, 'Edit(root="skills")');
     const old_string = typeof args?.old_string === "string" ? args.old_string : "";
     const new_string = typeof args?.new_string === "string" ? args.new_string : "";
     const expected_replacements =
-      typeof args?.expected_replacements === "number"
-        ? args.expected_replacements
-        : undefined;
+      typeof args?.expected_replacements === "number" ? args.expected_replacements : undefined;
     const replace_all = args?.replace_all === true;
 
     if (!old_string) {
@@ -1674,7 +1689,7 @@ export function createFsTools(params: {
       workdir,
       skillsRootDir: cachedSkillsRootDir,
     });
-    assertSkillsPathMutationAccess(root, path, "Delete(root=\"skills\")");
+    assertSkillsPathMutationAccess(root, path, 'Delete(root="skills")');
     const res = await invokeScopedFileCommand<DeleteCommandResponse>({
       toolName: "Delete",
       root,
@@ -1719,11 +1734,10 @@ export function createFsTools(params: {
             skillsRootDir: cachedSkillsRootDir,
           })
         : undefined;
-    assertOptionalSkillsPathAccess(root, path, "List(root=\"skills\")");
+    assertOptionalSkillsPathAccess(root, path, 'List(root="skills")');
     const depth = typeof args?.depth === "number" ? args.depth : undefined;
     const offset = typeof args?.offset === "number" ? args.offset : undefined;
-    const max_results =
-      typeof args?.max_results === "number" ? args.max_results : undefined;
+    const max_results = typeof args?.max_results === "number" ? args.max_results : undefined;
 
     const res = await invokeScopedFileCommand<ListCommandResponse>({
       toolName: "List",
@@ -1751,8 +1765,8 @@ export function createFsTools(params: {
       entries: res.entries,
     };
 
-    const lines = res.entries.map((entry) =>
-      `${entry.kind === "dir" ? "[DIR]" : "[FILE]"} ${entry.path}`,
+    const lines = res.entries.map(
+      (entry) => `${entry.kind === "dir" ? "[DIR]" : "[FILE]"} ${entry.path}`,
     );
     const suffix = res.hasMore ? "\n...more entries omitted...\n" : "";
 
@@ -1791,14 +1805,13 @@ export function createFsTools(params: {
         : undefined;
     if (root === "skills") {
       if (path) {
-        assertSkillPathAllowedByPolicy(skillAccessPolicy, path, "Glob(root=\"skills\")");
+        assertSkillPathAllowedByPolicy(skillAccessPolicy, path, 'Glob(root="skills")');
       } else {
-        assertSkillPathAllowedByPolicy(skillAccessPolicy, pattern, "Glob(root=\"skills\")");
+        assertSkillPathAllowedByPolicy(skillAccessPolicy, pattern, 'Glob(root="skills")');
       }
     }
     const offset = typeof args?.offset === "number" ? args.offset : undefined;
-    const max_results =
-      typeof args?.max_results === "number" ? args.max_results : undefined;
+    const max_results = typeof args?.max_results === "number" ? args.max_results : undefined;
     const sort_by = typeof args?.sort_by === "string" ? args.sort_by : undefined;
     if (sort_by && sort_by !== "path") {
       throw new Error("Glob.sort_by only supports path");
@@ -1866,16 +1879,13 @@ export function createFsTools(params: {
             skillsRootDir: cachedSkillsRootDir,
           })
         : undefined;
-    assertOptionalSkillsPathAccess(root, path, "Grep(root=\"skills\")");
+    assertOptionalSkillsPathAccess(root, path, 'Grep(root="skills")');
     const file_pattern =
       typeof args?.file_pattern === "string" ? args.file_pattern.trim() : undefined;
     const ignore_case = typeof args?.ignore_case === "boolean" ? args.ignore_case : true;
     const output_mode =
-      args?.output_mode === "files" || args?.output_mode === "count"
-        ? args.output_mode
-        : "content";
-    const head_limit =
-      typeof args?.head_limit === "number" ? args.head_limit : undefined;
+      args?.output_mode === "files" || args?.output_mode === "count" ? args.output_mode : "content";
+    const head_limit = typeof args?.head_limit === "number" ? args.head_limit : undefined;
     const offset = typeof args?.offset === "number" ? args.offset : undefined;
     const context = typeof args?.context === "number" ? args.context : undefined;
     const multiline = args?.multiline === true;
@@ -1913,7 +1923,7 @@ export function createFsTools(params: {
       correctedFilePath = path;
       path = split.parentPath;
       effectiveFilePattern = split.fileName;
-      assertOptionalSkillsPathAccess(root, path, "Grep(root=\"skills\")");
+      assertOptionalSkillsPathAccess(root, path, 'Grep(root="skills")');
       res = await invokeScopedFileCommand<GrepCommandResponse>({
         toolName: "Grep",
         root,
@@ -1953,8 +1963,7 @@ export function createFsTools(params: {
       files: res.files.map((file) => ({
         path: file.path,
         count: file.count,
-        firstLine:
-          typeof file.firstLine === "number" ? file.firstLine : undefined,
+        firstLine: typeof file.firstLine === "number" ? file.firstLine : undefined,
       })),
     };
 
@@ -1963,8 +1972,9 @@ export function createFsTools(params: {
         ? `matches=${res.matchCount}\nfiles=${res.fileCount}`
         : res.outputMode === "files"
           ? res.files
-              .map((file) =>
-                `${file.path} (${file.count}${typeof file.firstLine === "number" ? `, firstLine=${file.firstLine}` : ""})`,
+              .map(
+                (file) =>
+                  `${file.path} (${file.count}${typeof file.firstLine === "number" ? `, firstLine=${file.firstLine}` : ""})`,
               )
               .join("\n")
           : res.matches.map((match) => `${match.path}:${match.line}: ${match.text}`).join("\n");

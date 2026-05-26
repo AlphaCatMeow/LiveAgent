@@ -50,7 +50,7 @@ function globAllowedOutputPathToRegExp(pattern: string) {
 
 function decodeGitQuotedPath(value: string) {
   const text = value.trim();
-  if (!(text.startsWith("\"") && text.endsWith("\""))) return text;
+  if (!(text.startsWith('"') && text.endsWith('"'))) return text;
   const body = text.slice(1, -1);
   const decoder = new TextDecoder();
   let output = "";
@@ -80,7 +80,7 @@ function decodeGitQuotedPath(value: string) {
     const escaped = body[index + 1] ?? "";
     const replacements: Record<string, string> = {
       "\\": "\\",
-      "\"": "\"",
+      '"': '"',
       n: "\n",
       r: "\r",
       t: "\t",
@@ -101,7 +101,7 @@ function parseWorktreeStatusPath(line: string) {
     return normalizeRelativePath(decodeGitQuotedPath(trimmed.slice(3)));
   }
   const body = line.length > 3 ? line.slice(3).trim() : trimmed.slice(2).trim();
-  const renamedPath = body.includes(" -> ") ? body.split(" -> ").pop() ?? body : body;
+  const renamedPath = body.includes(" -> ") ? (body.split(" -> ").pop() ?? body) : body;
   return normalizeRelativePath(decodeGitQuotedPath(renamedPath));
 }
 
@@ -175,7 +175,9 @@ export function decideWorktreeApply(params: {
       return {
         shouldApply: false,
         skippedReason:
-          candidateArtifacts.length > 0 ? "artifact_explicit_apply_required" : "explicit_apply_required",
+          candidateArtifacts.length > 0
+            ? "artifact_explicit_apply_required"
+            : "explicit_apply_required",
         changedPaths,
         candidateArtifacts: candidateArtifacts.length > 0 ? candidateArtifacts : changedPaths,
       };

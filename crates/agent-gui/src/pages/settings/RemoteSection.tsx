@@ -2,9 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useState } from "react";
 import {
+  Check,
   Cloud,
   Copy,
-  Check,
   Eye,
   EyeOff,
   Globe,
@@ -40,7 +40,11 @@ function CopyButton({ value }: { value: string }) {
       onClick={handleCopy}
       className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
     >
-      {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+      {copied ? (
+        <Check className="h-3.5 w-3.5 text-emerald-500" />
+      ) : (
+        <Copy className="h-3.5 w-3.5" />
+      )}
     </button>
   );
 }
@@ -243,9 +247,7 @@ export function RemoteSection(props: SettingsSectionProps) {
           <AgentActivationSwitch
             checked={settings.remote.enabled}
             title={
-              settings.remote.enabled
-                ? t("settings.remoteDisable")
-                : t("settings.remoteEnable")
+              settings.remote.enabled ? t("settings.remoteDisable") : t("settings.remoteEnable")
             }
             onToggle={() =>
               updateRemoteSettings(setSettings, {
@@ -440,7 +442,6 @@ export function RemoteSection(props: SettingsSectionProps) {
           <div className="mt-1 text-sm font-medium">{formatTimestamp(status.lastHeartbeat)}</div>
         </div>
       </div>
-
     </div>
   );
 }

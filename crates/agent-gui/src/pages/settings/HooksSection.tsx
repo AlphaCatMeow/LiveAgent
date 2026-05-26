@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { type ReactNode, useState } from "react";
 import {
   Bot,
   CheckCircle2,
@@ -19,21 +19,14 @@ import {
 import { Button } from "../../components/ui/button";
 import { useLocale } from "../../i18n";
 import {
-  HOOK_LIFECYCLE_EVENTS,
   type ConversationHook,
+  HOOK_LIFECYCLE_EVENTS,
   type HookLifecycleEventType,
   updateHooks,
 } from "../../lib/settings";
 import { HookModal } from "./HookModal";
-import {
-  AgentActivationSwitch,
-  ConfirmDeletePopover,
-} from "./shared";
-import {
-  getHookEventDescription,
-  getHookEventLabel,
-  getHookTypeTone,
-} from "./hookUtils";
+import { getHookEventDescription, getHookEventLabel, getHookTypeTone } from "./hookUtils";
+import { AgentActivationSwitch, ConfirmDeletePopover } from "./shared";
 import type { SettingsSectionProps } from "./types";
 
 type LifecyclePhase = {
@@ -56,9 +49,7 @@ type PhaseGroup = {
 export function HooksSection(props: SettingsSectionProps) {
   const { settings, setSettings } = props;
   const { t } = useLocale();
-  const [activeEvent, setActiveEvent] = useState<HookLifecycleEventType>(
-    HOOK_LIFECYCLE_EVENTS[0],
-  );
+  const [activeEvent, setActiveEvent] = useState<HookLifecycleEventType>(HOOK_LIFECYCLE_EVENTS[0]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingHook, setEditingHook] = useState<ConversationHook | null>(null);
   const [collapsedPhases, setCollapsedPhases] = useState<Set<string>>(new Set());
@@ -169,10 +160,7 @@ export function HooksSection(props: SettingsSectionProps) {
     closeModal();
   }
 
-  function updateHookState(
-    hookId: string,
-    updater: (hook: ConversationHook) => ConversationHook,
-  ) {
+  function updateHookState(hookId: string, updater: (hook: ConversationHook) => ConversationHook) {
     setSettings((prev) =>
       updateHooks(
         prev,
@@ -183,7 +171,10 @@ export function HooksSection(props: SettingsSectionProps) {
 
   function deleteHook(hookId: string) {
     setSettings((prev) =>
-      updateHooks(prev, prev.hooks.filter((hook) => hook.id !== hookId)),
+      updateHooks(
+        prev,
+        prev.hooks.filter((hook) => hook.id !== hookId),
+      ),
     );
   }
 
@@ -360,7 +351,6 @@ export function HooksSection(props: SettingsSectionProps) {
                                     ) : null}
                                   </div>
                                 </div>
-
                               </button>
                             </li>
                           );
@@ -391,9 +381,7 @@ export function HooksSection(props: SettingsSectionProps) {
                 })()}
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="text-base font-semibold">
-                      {getHookEventLabel(t, activeEvent)}
-                    </h3>
+                    <h3 className="text-base font-semibold">{getHookEventLabel(t, activeEvent)}</h3>
                   </div>
                   <p className="mt-0.5 text-sm text-muted-foreground">
                     {getHookEventDescription(t, activeEvent)}
@@ -428,7 +416,7 @@ export function HooksSection(props: SettingsSectionProps) {
                   const stepCount =
                     hook.type === "command"
                       ? (hook.script ?? "").split(/\r?\n/).filter((line) => line.trim()).length
-                      : hook.requests?.length ?? 0;
+                      : (hook.requests?.length ?? 0);
                   return (
                     <div
                       key={hook.id}

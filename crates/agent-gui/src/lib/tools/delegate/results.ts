@@ -1,7 +1,11 @@
 import type { ToolCall, ToolResultMessage } from "@mariozechner/pi-ai";
 
 import type { SubagentIdentityRecord } from "../../chat/subagent/subagentHistory";
-import type { DelegateAgentCardResultDetails, DelegateAgentItemResultDetails, DelegateAgentResultDetails } from "../builtinTypes";
+import type {
+  DelegateAgentCardResultDetails,
+  DelegateAgentItemResultDetails,
+  DelegateAgentResultDetails,
+} from "../builtinTypes";
 import { DELEGATE_TOOL_NAME } from "./constants";
 import type { DelegateAgentInput } from "./types";
 
@@ -19,7 +23,11 @@ export function buildDelegateResultText(details: DelegateAgentResultDetails) {
       `mode=${task.mode}`,
       task.taskIntent ? `intent=${task.taskIntent}` : "",
       task.applyPolicy ? `apply_policy=${task.applyPolicy}` : "",
-      task.agentName ? `template=${task.agentName}` : task.agentId ? `template=${task.agentId}` : "template=generic",
+      task.agentName
+        ? `template=${task.agentName}`
+        : task.agentId
+          ? `template=${task.agentId}`
+          : "template=generic",
       `duration_ms=${task.durationMs} rounds=${task.rounds} tool_calls=${task.toolCalls}`,
       task.worktreeRoot ? `worktree=${task.worktreeRoot}` : "",
       task.branchName ? `branch=${task.branchName}` : "",

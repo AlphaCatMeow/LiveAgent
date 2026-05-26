@@ -100,11 +100,7 @@ function parseBoolean(value: string): boolean {
   return lowered === "true" || lowered === "yes" || lowered === "1";
 }
 
-function applyKeyValue(
-  out: MemoryEvidenceFrontmatter,
-  key: string,
-  rawValue: string,
-): void {
+function applyKeyValue(out: MemoryEvidenceFrontmatter, key: string, rawValue: string): void {
   const value = rawValue.trim();
   switch (key) {
     case "confidence":

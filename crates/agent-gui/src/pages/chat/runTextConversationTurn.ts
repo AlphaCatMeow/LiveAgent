@@ -1,34 +1,35 @@
 import type { AssistantMessage, Context } from "@mariozechner/pi-ai";
-
-import { streamAssistantMessage, assistantMessageToText } from "../../lib/providers/llm";
+import {
+  type CompactionThrottleState,
+  noteCompactionRound,
+  type ProviderRuntimeConfig,
+  shouldProtectionCompactConversation,
+} from "../../lib/chat/compaction/contextCompaction";
 import {
   appendMessagesToConversation,
   type ConversationViewState,
 } from "../../lib/chat/conversation/conversationState";
-import {
-  noteCompactionRound,
-  shouldProtectionCompactConversation,
-  type CompactionThrottleState,
-  type ProviderRuntimeConfig,
-} from "../../lib/chat/compaction/contextCompaction";
-import type { StreamDebugLogger } from "../../lib/debug/agentDebug";
-import type { ProviderId } from "../../lib/settings";
-import type { GatewayBridgeEventController } from "../../lib/chat/conversation/run";
-import type { ConversationHookLifecycle } from "../../lib/chat/conversation/run";
 import type { LiveTranscriptStore } from "../../lib/chat/conversation/liveTranscriptStore";
+import type {
+  ConversationHookLifecycle,
+  GatewayBridgeEventController,
+} from "../../lib/chat/conversation/run";
+import type { HostedSearchBlock } from "../../lib/chat/messages/hostedSearch";
+import {
+  appendTextDeltaToRound,
+  collapseThinking,
+  type LiveRound,
+  updateLiveRound,
+  upsertHostedSearchToRound,
+} from "../../lib/chat/messages/uiMessages";
 import { isAbortLikeError } from "../../lib/chat/page/chatPageHelpers";
 import {
   createDeferredProviderNativeWebSearchStatus,
   resolveProviderNativeWebSearchStatus,
 } from "../../lib/chat/search/providerNativeSearchStatus";
-import {
-  appendTextDeltaToRound,
-  collapseThinking,
-  updateLiveRound,
-  upsertHostedSearchToRound,
-  type LiveRound,
-} from "../../lib/chat/messages/uiMessages";
-import type { HostedSearchBlock } from "../../lib/chat/messages/hostedSearch";
+import type { StreamDebugLogger } from "../../lib/debug/agentDebug";
+import { assistantMessageToText, streamAssistantMessage } from "../../lib/providers/llm";
+import type { ProviderId } from "../../lib/settings";
 import { buildPartialAssistantMessage, type ConversationRuntimeEntry } from "./chatPageRuntime";
 import { buildProtectionCompactionStatus } from "./compactionStatusText";
 import {
@@ -236,11 +237,7 @@ export async function runTextConversationTurn(params: RunTextConversationTurnPar
     );
   }
 
-  function updateHostedSearch(
-    hostedSearch: HostedSearchBlock,
-    round: number,
-    existingText = "",
-  ) {
+  function updateHostedSearch(hostedSearch: HostedSearchBlock, round: number, existingText = "") {
     const shouldSeedExistingText = !textModeUsesLiveRounds && existingText.length > 0;
     ensureTextLiveRound(round);
     gatewayBridgeEvents.queueEvent({
@@ -280,8 +277,7 @@ export async function runTextConversationTurn(params: RunTextConversationTurnPar
   });
   hookLifecycle.startAgent();
 
-  textResponseLoop:
-  while (!finalAssistant) {
+  textResponseLoop: while (!finalAssistant) {
     contextWithSkills =
       pendingTextContext ??
       buildPreparedContext(getNextConversationState(), undefined, {
@@ -308,8 +304,7 @@ export async function runTextConversationTurn(params: RunTextConversationTurnPar
     while (!finalAssistant) {
       const nativeWebSearchStatusController = createDeferredProviderNativeWebSearchStatus({
         status: nativeWebSearchStatus,
-        onStatus: (status) =>
-          updateGatewayBridgeToolStatus(status, isConversationVisible()),
+        onStatus: (status) => updateGatewayBridgeToolStatus(status, isConversationVisible()),
       });
       try {
         finalAssistant = await streamAssistantMessage({
@@ -469,8 +464,7 @@ export async function runTextConversationTurn(params: RunTextConversationTurnPar
   const finalState = appendMessagesToConversation(getNextConversationState(), [finalAssistant]);
   noteCompactionRound(conversationThrottleState);
   const shouldRunMemoryExtraction =
-    finalAssistant.stopReason !== "error" &&
-    finalAssistant.stopReason !== "aborted";
+    finalAssistant.stopReason !== "error" && finalAssistant.stopReason !== "aborted";
   commitAssistantRoundMeta(finalAssistant, textRound);
   resetLiveTranscript(transcriptStore);
   updateConversationRuntimeEntry(conversationId, (prev) => ({
@@ -505,9 +499,7 @@ export async function runTextConversationTurn(params: RunTextConversationTurnPar
     void runSilentMemoryExtractionWithFallback({
       primary: memoryExtractionModel ?? currentMemoryExtractionModel,
       fallback: memoryExtractionModel ? currentMemoryExtractionModel : undefined,
-      onPrimaryFailure: memoryExtractionModel
-        ? onMemoryExtractionModelFailure
-        : undefined,
+      onPrimaryFailure: memoryExtractionModel ? onMemoryExtractionModelFailure : undefined,
       sessionId,
       conversationId,
       workdir: conversationCwd,

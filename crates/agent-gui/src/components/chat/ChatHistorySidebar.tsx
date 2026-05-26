@@ -1,14 +1,9 @@
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import iconSimpleUrl from "../../../src-tauri/icons/icon-simple.png";
 import { useLocale } from "../../i18n";
+import type { ChatHistorySummary } from "../../lib/chat/history/chatHistory";
+import { cn } from "../../lib/shared/utils";
 import {
   Edit3,
   Link2,
@@ -23,9 +18,6 @@ import {
   SquarePen,
   Trash2,
 } from "../icons";
-
-import type { ChatHistorySummary } from "../../lib/chat/history/chatHistory";
-import { cn } from "../../lib/shared/utils";
 import { Button } from "../ui/button";
 import {
   DropdownMenu,
@@ -167,9 +159,7 @@ const HistoryRow = memo(function HistoryRow(props: {
         <p className="truncate text-sm leading-5 text-foreground/80">
           删除「<span className="font-medium text-foreground">{item.title}</span>」？
         </p>
-        <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">
-          此操作无法撤销
-        </p>
+        <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">此操作无法撤销</p>
         <div className="mt-2 grid grid-cols-2 gap-1.5">
           <Button
             type="button"
@@ -239,9 +229,7 @@ const HistoryRow = memo(function HistoryRow(props: {
             )}
             title={item.title}
           >
-            <span className="block truncate text-sm font-medium leading-5">
-              {item.title}
-            </span>
+            <span className="block truncate text-sm font-medium leading-5">{item.title}</span>
           </button>
 
           <div className="flex items-center gap-1.5">
@@ -277,26 +265,30 @@ const HistoryRow = memo(function HistoryRow(props: {
             ) : null}
 
             <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  title="更多操作"
-                  aria-label="更多操作"
-                  onPointerDown={(e) => e.stopPropagation()}
-                  onClick={(e) => e.stopPropagation()}
-                  className={cn(
-                    "h-8 w-8 shrink-0 rounded-xl text-muted-foreground opacity-0 pointer-events-none transition-[opacity,colors]",
-                    "hover:bg-muted/70 hover:text-foreground",
-                    "group-hover/item:opacity-100 group-hover/item:pointer-events-auto",
-                    "group-focus-within/item:opacity-100 group-focus-within/item:pointer-events-auto",
-                    menuOpen && "bg-muted/70 text-foreground",
-                    menuOpen && "opacity-100 pointer-events-auto",
-                  )}
-                >
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    title="更多操作"
+                    aria-label="更多操作"
+                    onPointerDown={(e: React.PointerEvent<HTMLButtonElement>) =>
+                      e.stopPropagation()
+                    }
+                    onClick={(e: React.MouseEvent<HTMLButtonElement>) => e.stopPropagation()}
+                    className={cn(
+                      "h-8 w-8 shrink-0 rounded-xl text-muted-foreground opacity-0 pointer-events-none transition-[opacity,colors]",
+                      "hover:bg-muted/70 hover:text-foreground",
+                      "group-hover/item:opacity-100 group-hover/item:pointer-events-auto",
+                      "group-focus-within/item:opacity-100 group-focus-within/item:pointer-events-auto",
+                      menuOpen && "bg-muted/70 text-foreground",
+                      menuOpen && "opacity-100 pointer-events-auto",
+                    )}
+                  />
+                }
+              >
+                <MoreHorizontal className="h-4 w-4" />
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 side="right"
@@ -357,7 +349,9 @@ function SidebarStateCard(props: {
           : "border-border/60 bg-background/70 text-muted-foreground",
       )}
     >
-      <div className={cn("font-medium", tone === "error" ? "text-destructive" : "text-foreground/85")}>
+      <div
+        className={cn("font-medium", tone === "error" ? "text-destructive" : "text-foreground/85")}
+      >
         {title}
       </div>
       {description ? <div className="mt-1 text-xs leading-5">{description}</div> : null}
@@ -414,10 +408,7 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
     [items, sharedConversationCountProp],
   );
   const historyScrollRef = useRef<HTMLDivElement | null>(null);
-  const getHistoryItemKey = useCallback(
-    (index: number) => items[index]?.id ?? index,
-    [items],
-  );
+  const getHistoryItemKey = useCallback((index: number) => items[index]?.id ?? index, [items]);
   const historyVirtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => historyScrollRef.current,
@@ -427,9 +418,7 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
   });
   const virtualHistoryRows = historyVirtualizer.getVirtualItems();
   const lastVirtualHistoryIndex =
-    virtualHistoryRows.length > 0
-      ? virtualHistoryRows[virtualHistoryRows.length - 1].index
-      : -1;
+    virtualHistoryRows.length > 0 ? virtualHistoryRows[virtualHistoryRows.length - 1].index : -1;
 
   useEffect(() => {
     if (
@@ -636,10 +625,7 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
               </p>
             </div>
           ) : (
-            <div
-              className="relative"
-              style={{ height: historyVirtualizer.getTotalSize() }}
-            >
+            <div className="relative" style={{ height: historyVirtualizer.getTotalSize() }}>
               {virtualHistoryRows.map((virtualRow) => {
                 const item = items[virtualRow.index];
                 if (!item) return null;

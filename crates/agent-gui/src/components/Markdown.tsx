@@ -1,22 +1,21 @@
-import { memo, useLayoutEffect, useRef, type ComponentProps } from "react";
 import { cjk } from "@streamdown/cjk";
 import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Copy, ExternalLink, X } from "./icons";
+import { type ComponentProps, memo, useLayoutEffect, useRef } from "react";
+import remarkBreaks from "remark-breaks";
 import {
-  Streamdown,
-  defaultRemarkPlugins,
   type Components,
+  defaultRemarkPlugins,
   type ExtraProps,
   type LinkSafetyModalProps,
+  Streamdown,
   type StreamdownTranslations,
 } from "streamdown";
-import remarkBreaks from "remark-breaks";
-
-import { Button } from "./ui/button";
 import { cn } from "../lib/shared/utils";
+import { Copy, ExternalLink, X } from "./icons";
+import { Button } from "./ui/button";
 
 type MarkdownProps = {
   content: string;
@@ -165,12 +164,7 @@ const streamdownTranslations = {
   viewFullscreen: "全屏查看",
 } satisfies Partial<StreamdownTranslations>;
 
-function ExternalLinkModal({
-  isOpen,
-  onClose,
-  onConfirm,
-  url,
-}: LinkSafetyModalProps) {
+function ExternalLinkModal({ isOpen, onClose, onConfirm, url }: LinkSafetyModalProps) {
   if (!isOpen) {
     return null;
   }

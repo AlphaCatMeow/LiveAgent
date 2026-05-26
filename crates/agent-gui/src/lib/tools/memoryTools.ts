@@ -1,8 +1,22 @@
-import { Type } from "@sinclair/typebox";
 import type { Tool, ToolCall, ToolResultMessage } from "@mariozechner/pi-ai";
-
+import { Type } from "@sinclair/typebox";
+import {
+  MEMORY_MANAGER_ACTION_DESCRIPTION_RO,
+  MEMORY_MANAGER_ACTION_DESCRIPTION_RW,
+  MEMORY_MANAGER_FIELD_DESCRIPTIONS,
+  MEMORY_MANAGER_TOOL_DESCRIPTION,
+} from "../chat/memory/memoryPolicy";
 import {
   formatMemoryError,
+  type MemoryHistoryTimeMode,
+  type MemoryListResponse,
+  type MemoryMeta,
+  type MemoryMutationResponse,
+  type MemoryReadResponse,
+  type MemoryScope,
+  type MemorySearchResponse,
+  type MemorySearchType,
+  type MemoryType,
   memoryAccept,
   memoryDelete,
   memoryList,
@@ -10,26 +24,8 @@ import {
   memorySearch,
   memoryUpdate,
   memoryWrite,
-  type MemoryMeta,
-  type MemoryListResponse,
-  type MemoryMutationResponse,
-  type MemoryHistoryTimeMode,
-  type MemoryReadResponse,
-  type MemorySearchResponse,
-  type MemoryScope,
-  type MemorySearchType,
-  type MemoryType,
 } from "../memory/api";
-import {
-  createBuiltinMetadataMap,
-  type BuiltinToolBundle,
-} from "./builtinTypes";
-import {
-  MEMORY_MANAGER_ACTION_DESCRIPTION_RO,
-  MEMORY_MANAGER_ACTION_DESCRIPTION_RW,
-  MEMORY_MANAGER_FIELD_DESCRIPTIONS,
-  MEMORY_MANAGER_TOOL_DESCRIPTION,
-} from "../chat/memory/memoryPolicy";
+import { type BuiltinToolBundle, createBuiltinMetadataMap } from "./builtinTypes";
 
 type MemoryToolMode = "rw" | "ro";
 
@@ -50,9 +46,7 @@ function createMemoryManagerParameters(mode: MemoryToolMode) {
   return Type.Object({
     action: Type.Union(actionLiterals, {
       description:
-        mode === "ro"
-          ? MEMORY_MANAGER_ACTION_DESCRIPTION_RO
-          : MEMORY_MANAGER_ACTION_DESCRIPTION_RW,
+        mode === "ro" ? MEMORY_MANAGER_ACTION_DESCRIPTION_RO : MEMORY_MANAGER_ACTION_DESCRIPTION_RW,
     }),
     slug: Type.Optional(
       Type.String({
@@ -186,12 +180,15 @@ function createMemoryManagerParameters(mode: MemoryToolMode) {
       }),
     ),
     aliases: Type.Optional(
-      Type.Union([
-        Type.String({ maxLength: 200 }),
-        Type.Array(Type.String({ maxLength: 24 }), { maxItems: 8 }),
-      ], {
-        description: MEMORY_MANAGER_FIELD_DESCRIPTIONS.aliases,
-      }),
+      Type.Union(
+        [
+          Type.String({ maxLength: 200 }),
+          Type.Array(Type.String({ maxLength: 24 }), { maxItems: 8 }),
+        ],
+        {
+          description: MEMORY_MANAGER_FIELD_DESCRIPTIONS.aliases,
+        },
+      ),
     ),
     supersedes: Type.Optional(
       Type.String({
@@ -256,7 +253,9 @@ function requireQuery(args: Record<string, unknown>) {
 function requireWriteType(value: unknown): MemoryType {
   const type = optionalMemoryType(value);
   if (!type || type === "daily") {
-    throw new Error("MemoryManager write/update type must be user, feedback, project, or reference.");
+    throw new Error(
+      "MemoryManager write/update type must be user, feedback, project, or reference.",
+    );
   }
   return type;
 }
@@ -290,11 +289,7 @@ function optionalStringList(value: unknown) {
 }
 
 function frontmatterString(value: string) {
-  return value
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/\r?\n/g, " ")
-    .slice(0, 240);
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r?\n/g, " ").slice(0, 240);
 }
 
 function frontmatterArray(values: string[]) {
@@ -381,7 +376,10 @@ function buildListResultText(result: MemoryListResponse) {
   const scopeQuotaText =
     result.quota.scopeQuotas && result.quota.scopeQuotas.length > 0
       ? ` scopes=${result.quota.scopeQuotas
-          .map((quota) => `${quota.scope}${quota.workdirHash ? `:${quota.workdirHash}` : ""}=${quota.used}/${quota.limit}`)
+          .map(
+            (quota) =>
+              `${quota.scope}${quota.workdirHash ? `:${quota.workdirHash}` : ""}=${quota.used}/${quota.limit}`,
+          )
           .join(",")}`
       : "";
   if (result.entries.length === 0) {
@@ -391,12 +389,10 @@ function buildListResultText(result: MemoryListResponse) {
     entry.dateLocal || entry.slug.replace(/^daily-/, "") || entry.slug;
   return [
     `Found ${result.entries.length} memory entries. quota=${result.quota.used}/${result.quota.limit}${scopeQuotaText}${result.truncated ? " truncated=true" : ""}`,
-    ...result.entries.map(
-      (entry, index) => {
-        const label = entry.memoryType === "daily" ? dailyTitle(entry) : entry.description;
-        return `${index + 1}. [${entry.slug}] scope=${entry.scope} type=${entry.memoryType}${entry.unreviewed ? " unreviewed=true" : ""} confidence=${entry.confidence ?? "unknown"} — ${label}`;
-      },
-    ),
+    ...result.entries.map((entry, index) => {
+      const label = entry.memoryType === "daily" ? dailyTitle(entry) : entry.description;
+      return `${index + 1}. [${entry.slug}] scope=${entry.scope} type=${entry.memoryType}${entry.unreviewed ? " unreviewed=true" : ""} confidence=${entry.confidence ?? "unknown"} — ${label}`;
+    }),
   ].join("\n");
 }
 
@@ -422,13 +418,8 @@ function buildSearchResultText(result: MemorySearchResponse) {
     `Found ${result.matches.length} memory match(es) and ${historyMatches.length} chat-history match(es). usedFallback=${result.usedFallback}`,
     ...result.matches.map((match, index) => {
       const raw =
-        typeof match.rawScore === "number"
-          ? ` rawScore=${match.rawScore.toFixed(3)}`
-          : "";
-      const age =
-        typeof match.ageDays === "number"
-        ? ` ageDays=${match.ageDays.toFixed(1)}`
-        : "";
+        typeof match.rawScore === "number" ? ` rawScore=${match.rawScore.toFixed(3)}` : "";
+      const age = typeof match.ageDays === "number" ? ` ageDays=${match.ageDays.toFixed(1)}` : "";
       return `${index + 1}. [${match.slug}] scope=${match.scope} type=${match.memoryType} score=${match.score.toFixed(3)}${raw}${age}${match.unreviewed ? " unreviewed=true" : ""} confidence=${match.confidence ?? "unknown"}\n${match.snippet}`;
     }),
     ...(historyMatches.length > 0
@@ -437,9 +428,7 @@ function buildSearchResultText(result: MemorySearchResponse) {
           ...historyMatches.map((match, index) => {
             const role = match.role ? ` role=${match.role}` : "";
             const message =
-              typeof match.messageIndex === "number"
-                ? ` message=${match.messageIndex}`
-                : "";
+              typeof match.messageIndex === "number" ? ` message=${match.messageIndex}` : "";
             const cwd = match.cwd ? ` cwd=${match.cwd}` : "";
             return `${index + 1}. [history:${match.source}] conversation=${match.conversationId} title=${match.title} segment=${match.segmentIndex}${message}${role} score=${match.score.toFixed(3)} updatedAt=${match.updatedAt}${cwd}\n${match.snippet}`;
           }),
@@ -691,7 +680,9 @@ export function createMemoryTools(params: {
           timestamp: now,
         };
       }
-      throw new Error("MemoryManager action must be list, read, search, write, update, delete, or accept.");
+      throw new Error(
+        "MemoryManager action must be list, read, search, write, update, delete, or accept.",
+      );
     } catch (error) {
       return {
         role: "toolResult",

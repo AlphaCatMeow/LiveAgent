@@ -1,10 +1,9 @@
 import type { Context, Message, TextContent, ToolResultMessage } from "@mariozechner/pi-ai";
-
+import type { DisplayImageItemDetails, DisplayImageResultDetails } from "../../tools/builtinTypes";
 import {
   hostedSearchBlockToContextText,
   normalizeHostedSearchBlock,
 } from "../messages/hostedSearch";
-import type { DisplayImageItemDetails, DisplayImageResultDetails } from "../../tools/builtinTypes";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object";
@@ -12,15 +11,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function normalizeDisplayImageItem(value: unknown): DisplayImageItemDetails | null {
   if (!isRecord(value)) return null;
-  const { root, path, sourceType, renderMode, sourceUrl, mimeType, sizeBytes, mtimeMs, contentHash } = value;
+  const {
+    root,
+    path,
+    sourceType,
+    renderMode,
+    sourceUrl,
+    mimeType,
+    sizeBytes,
+    mtimeMs,
+    contentHash,
+  } = value;
   if (typeof path !== "string") {
     return null;
   }
   return {
     ...(typeof root === "string" ? { root: root as DisplayImageItemDetails["root"] } : {}),
     path,
-    ...(typeof sourceType === "string" ? { sourceType: sourceType as DisplayImageItemDetails["sourceType"] } : {}),
-    ...(typeof renderMode === "string" ? { renderMode: renderMode as DisplayImageItemDetails["renderMode"] } : {}),
+    ...(typeof sourceType === "string"
+      ? { sourceType: sourceType as DisplayImageItemDetails["sourceType"] }
+      : {}),
+    ...(typeof renderMode === "string"
+      ? { renderMode: renderMode as DisplayImageItemDetails["renderMode"] }
+      : {}),
     ...(typeof sourceUrl === "string" ? { sourceUrl } : {}),
     ...(typeof mimeType === "string" ? { mimeType } : {}),
     ...(typeof sizeBytes === "number" ? { sizeBytes } : {}),
@@ -39,7 +52,9 @@ function getDisplayImageItems(details: unknown): DisplayImageItemDetails[] {
   });
 }
 
-function isDisplayImageToolResult(message: Message): message is ToolResultMessage<DisplayImageResultDetails> {
+function isDisplayImageToolResult(
+  message: Message,
+): message is ToolResultMessage<DisplayImageResultDetails> {
   return (
     message.role === "toolResult" &&
     !message.isError &&
@@ -66,22 +81,18 @@ function buildDisplayImageContextText(message: ToolResultMessage<DisplayImageRes
 
   const noun = images.length === 1 ? "image" : "images";
   const formatPath = (image: DisplayImageItemDetails) =>
-    image.root && image.root !== "workspace"
-      ? `root=${image.root} path=${image.path}`
-      : image.path;
+    image.root && image.root !== "workspace" ? `root=${image.root} path=${image.path}` : image.path;
   return [
     `Displayed ${images.length} ${noun} in the chat UI successfully.`,
-    ...images.map(
-      (image, index) => {
-        const facts = [
-          image.sourceType ? `sourceType=${image.sourceType}` : null,
-          image.renderMode ? `renderMode=${image.renderMode}` : null,
-          image.mimeType ? `mime=${image.mimeType}` : null,
-          typeof image.sizeBytes === "number" ? `sizeBytes=${image.sizeBytes}` : null,
-        ].filter(Boolean);
-        return `${index + 1}. ${formatPath(image)}${facts.length > 0 ? ` (${facts.join(", ")})` : ""}`;
-      },
-    ),
+    ...images.map((image, index) => {
+      const facts = [
+        image.sourceType ? `sourceType=${image.sourceType}` : null,
+        image.renderMode ? `renderMode=${image.renderMode}` : null,
+        image.mimeType ? `mime=${image.mimeType}` : null,
+        typeof image.sizeBytes === "number" ? `sizeBytes=${image.sizeBytes}` : null,
+      ].filter(Boolean);
+      return `${index + 1}. ${formatPath(image)}${facts.length > 0 ? ` (${facts.join(", ")})` : ""}`;
+    }),
     "Inline image bytes are omitted from model context because Image is a display-only UI tool.",
   ].join("\n");
 }

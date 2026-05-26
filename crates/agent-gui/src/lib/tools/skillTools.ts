@@ -1,11 +1,11 @@
+import type { Tool, ToolCall, ToolResultMessage } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
 
-import type { Tool, ToolCall, ToolResultMessage } from "@mariozechner/pi-ai";
-
 import { manageSkill, notifySkillsDiscoveryUpdated } from "../skills";
+import { isAlwaysEnabledSkillName } from "../skills/builtin";
 import {
-  createBuiltinMetadataMap,
   type BuiltinToolBundle,
+  createBuiltinMetadataMap,
   type SkillsManagerActionResultDetails,
   type SkillsManagerResultDetails,
 } from "./builtinTypes";
@@ -20,7 +20,6 @@ import {
   normalizeSkillBaseDir,
   type SkillAccessPolicy,
 } from "./skillAccessPolicy";
-import { isAlwaysEnabledSkillName } from "../skills/builtin";
 
 function asErrorMessage(err: unknown) {
   return err instanceof Error ? err.message : String(err);
@@ -73,8 +72,12 @@ const SKILL_MANAGER_PARAMETERS = Type.Object({
         "Relative Skill file path for action=read, for example my-skill/SKILL.md, my-skill/skill.json, or my-skill/README.md.",
     }),
   ),
-  offset: Type.Optional(Type.Number({ minimum: 0, description: "Starting line for read (0-based)." })),
-  length: Type.Optional(Type.Number({ minimum: 0, description: "Number of lines to read (default: 200)." })),
+  offset: Type.Optional(
+    Type.Number({ minimum: 0, description: "Starting line for read (0-based)." }),
+  ),
+  length: Type.Optional(
+    Type.Number({ minimum: 0, description: "Number of lines to read (default: 200)." }),
+  ),
   source: Type.Optional(
     Type.String({
       description:
@@ -96,7 +99,8 @@ const SKILL_MANAGER_PARAMETERS = Type.Object({
         Type.Literal("newest"),
       ],
       {
-        description: "Browse sort for action=clawhub_search when query is omitted. Defaults to downloads.",
+        description:
+          "Browse sort for action=clawhub_search when query is omitted. Defaults to downloads.",
       },
     ),
   ),
@@ -114,7 +118,8 @@ const SKILL_MANAGER_PARAMETERS = Type.Object({
   ),
   slug: Type.Optional(
     Type.String({
-      description: "ClawHub skill slug for action=clawhub_install, as returned by action=clawhub_search.",
+      description:
+        "ClawHub skill slug for action=clawhub_install, as returned by action=clawhub_search.",
     }),
   ),
   version: Type.Optional(
@@ -135,7 +140,8 @@ const SKILL_MANAGER_PARAMETERS = Type.Object({
   ),
   body: Type.Optional(
     Type.String({
-      description: "Markdown body for action=create. Frontmatter is generated from name and description.",
+      description:
+        "Markdown body for action=create. Frontmatter is generated from name and description.",
     }),
   ),
   files: Type.Optional(
@@ -245,7 +251,9 @@ function appendUnique(out: string[], value: string) {
 function collectManagedSkillAccess(result: Awaited<ReturnType<typeof manageSkill>>) {
   const names: string[] = [];
   const baseDirs: string[] = [];
-  const collect = (item: { name?: string | null; skillFile?: string | null } | null | undefined) => {
+  const collect = (
+    item: { name?: string | null; skillFile?: string | null } | null | undefined,
+  ) => {
     if (!item) return;
     if (typeof item.name === "string") {
       appendUnique(names, item.name);
@@ -312,9 +320,12 @@ function buildSkillManagerErrorText(args: Record<string, unknown>, error: unknow
   return lines.join(" ");
 }
 
-function normalizeSkillManagerPayload(args: Record<string, unknown>, options: {
-  workdir?: string;
-} = {}) {
+function normalizeSkillManagerPayload(
+  args: Record<string, unknown>,
+  options: {
+    workdir?: string;
+  } = {},
+) {
   const action = normalizeAction(args);
   const payload: Record<string, unknown> = { action };
 
@@ -367,7 +378,8 @@ function normalizeSkillManagerPayload(args: Record<string, unknown>, options: {
       if (value) payload[key] = value;
     }
     if (!payload.name) throw new Error("SkillsManager.name is required for action=create");
-    if (!payload.description) throw new Error("SkillsManager.description is required for action=create");
+    if (!payload.description)
+      throw new Error("SkillsManager.description is required for action=create");
     if (Array.isArray(args.files)) payload.files = args.files;
     return payload;
   }
@@ -381,7 +393,9 @@ function normalizeSkillManagerPayload(args: Record<string, unknown>, options: {
 
   if (action === "list") return payload;
 
-  throw new Error(`SkillsManager.action must be one of: read, list, install, create, validate, package, delete, clawhub_search, clawhub_install. Received: ${JSON.stringify(action)}`);
+  throw new Error(
+    `SkillsManager.action must be one of: read, list, install, create, validate, package, delete, clawhub_search, clawhub_install. Received: ${JSON.stringify(action)}`,
+  );
 }
 
 function filterManageSkillResult(
@@ -402,7 +416,11 @@ function enforceSkillManagerAccessPolicy(
 ) {
   const action = typeof payload.action === "string" ? payload.action : "";
   if (action === "read") {
-    assertSkillPathAllowedByPolicy(policy, String(payload.path ?? ""), "SkillsManager(action=\"read\")");
+    assertSkillPathAllowedByPolicy(
+      policy,
+      String(payload.path ?? ""),
+      'SkillsManager(action="read")',
+    );
     return;
   }
   if (action === "list") {
@@ -471,12 +489,16 @@ function formatManageSkillResultText(
         `stars=${item.stars}`,
         `installs=${item.installsCurrent}`,
       ].join(" ");
-      lines.push(`- ${item.slug} | ${item.displayName} | version=${item.latestVersion ?? "latest"} | ${stats}`);
+      lines.push(
+        `- ${item.slug} | ${item.displayName} | version=${item.latestVersion ?? "latest"} | ${stats}`,
+      );
       if (item.summary) lines.push(`  summary=${item.summary}`);
       if (item.ownerHandle) lines.push(`  owner=${item.ownerHandle}`);
       if (item.downloadUrl) lines.push(`  downloadUrl=${item.downloadUrl}`);
       const versionArg = item.latestVersion ? `, version="${item.latestVersion}"` : "";
-      lines.push(`  install=SkillsManager(action="clawhub_install", slug="${item.slug}"${versionArg}, conflict="backup")`);
+      lines.push(
+        `  install=SkillsManager(action="clawhub_install", slug="${item.slug}"${versionArg}, conflict="backup")`,
+      );
     }
   } else if (result.action === "install" || result.action === "clawhub_install") {
     const installed = result.installed ?? [];
@@ -517,7 +539,9 @@ function formatManageSkillResultText(
   return lines.join("\n");
 }
 
-function buildActionDetails(result: Awaited<ReturnType<typeof manageSkill>>): SkillsManagerActionResultDetails {
+function buildActionDetails(
+  result: Awaited<ReturnType<typeof manageSkill>>,
+): SkillsManagerActionResultDetails {
   const validationErrors = result.validation?.errors ?? [];
   const installedBackup = result.installed?.find(
     (item) => typeof item.backup === "string" && item.backup.length > 0,
@@ -540,25 +564,33 @@ function buildActionDetails(result: Awaited<ReturnType<typeof manageSkill>>): Sk
     deletedName: result.deleted?.name,
     validationOk: result.validation?.ok,
     packageArchive: result.package?.archive,
-    target: result.created?.target ?? result.installed?.[0]?.target ?? result.validation?.target ?? result.package?.target ?? result.deleted?.target,
+    target:
+      result.created?.target ??
+      result.installed?.[0]?.target ??
+      result.validation?.target ??
+      result.package?.target ??
+      result.deleted?.target,
     backup,
     clawhubResultCount: result.clawhubResults?.length,
     clawhubNextCursor: result.clawhubNextCursor ?? undefined,
     clawhubSlug: result.clawhubSlug ?? result.clawhubResults?.[0]?.slug,
-    clawhubDownloadUrl: result.clawhubDownloadUrl ?? result.clawhubResults?.[0]?.downloadUrl ?? undefined,
+    clawhubDownloadUrl:
+      result.clawhubDownloadUrl ?? result.clawhubResults?.[0]?.downloadUrl ?? undefined,
     errors: validationErrors.length > 0 ? validationErrors : undefined,
   };
 }
 
-export function createSkillTools(params: {
-  workdir?: string;
-  skillAccessPolicy?: SkillAccessPolicy;
-  onManagedSkillsChanged?: (change: {
-    action: "install" | "create";
-    names: string[];
-    baseDirs: string[];
-  }) => void | Promise<void>;
-} = {}): BuiltinToolBundle {
+export function createSkillTools(
+  params: {
+    workdir?: string;
+    skillAccessPolicy?: SkillAccessPolicy;
+    onManagedSkillsChanged?: (change: {
+      action: "install" | "create";
+      names: string[];
+      baseDirs: string[];
+    }) => void | Promise<void>;
+  } = {},
+): BuiltinToolBundle {
   const skillAccessPolicy = params.skillAccessPolicy;
   const toolSkillsManager: Tool = {
     name: "SkillsManager",
@@ -604,7 +636,11 @@ export function createSkillTools(params: {
       enforceSkillManagerAccessPolicy(payload, skillAccessPolicy);
       const result = await manageSkill(payload);
       const visibleResult = filterManageSkillResult(result, skillAccessPolicy);
-      if (result.action === "install" || result.action === "create" || result.action === "clawhub_install") {
+      if (
+        result.action === "install" ||
+        result.action === "create" ||
+        result.action === "clawhub_install"
+      ) {
         const access = collectManagedSkillAccess(result);
         grantSkillsToAccessPolicy(skillAccessPolicy, access);
         if (access.names.length > 0 || access.baseDirs.length > 0) {
@@ -625,14 +661,17 @@ export function createSkillTools(params: {
       }
 
       if (visibleResult.action === "read") {
-        const path = typeof visibleResult.path === "string" ? visibleResult.path : String(payload.path ?? "");
+        const path =
+          typeof visibleResult.path === "string" ? visibleResult.path : String(payload.path ?? "");
         const content = typeof visibleResult.content === "string" ? visibleResult.content : "";
-        const startLine = typeof visibleResult.startLine === "number"
-          ? visibleResult.startLine
-          : (typeof payload.offset === "number" ? payload.offset : 0) + 1;
-        const numLines = typeof visibleResult.numLines === "number"
-          ? visibleResult.numLines
-          : countSkillTextLines(content);
+        const startLine =
+          typeof visibleResult.startLine === "number"
+            ? visibleResult.startLine
+            : (typeof payload.offset === "number" ? payload.offset : 0) + 1;
+        const numLines =
+          typeof visibleResult.numLines === "number"
+            ? visibleResult.numLines
+            : countSkillTextLines(content);
         const details: SkillsManagerResultDetails = {
           kind: "read_skill",
           path,
@@ -663,7 +702,9 @@ export function createSkillTools(params: {
         role: "toolResult",
         toolCallId: toolCall.id,
         toolName: toolCall.name,
-        content: [{ type: "text", text: formatManageSkillResultText(visibleResult, skillAccessPolicy) }],
+        content: [
+          { type: "text", text: formatManageSkillResultText(visibleResult, skillAccessPolicy) },
+        ],
         details,
         isError: false,
         timestamp: now,

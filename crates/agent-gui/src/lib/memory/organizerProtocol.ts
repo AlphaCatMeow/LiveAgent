@@ -187,14 +187,23 @@ export function isDefaultSelectedOrganizerDecision(decision: OrganizerSafeDecisi
   return !decision.requiresUserAck && (decision.riskLevel ?? "low") === "low";
 }
 
-export function appliedBatchCount(batch: Pick<MemoryBatchResponse, "created" | "updated" | "deleted">) {
+export function appliedBatchCount(
+  batch: Pick<MemoryBatchResponse, "created" | "updated" | "deleted">,
+) {
   return batch.created.length + batch.updated.length + batch.deleted.length;
 }
 
-export function inferOrganizerDecisionGroupIds<T extends OrganizerSafeDecision>(decisions: T[]): T[] {
+export function inferOrganizerDecisionGroupIds<T extends OrganizerSafeDecision>(
+  decisions: T[],
+): T[] {
   const grouped = decisions.map((decision) => ({ ...decision }));
   for (const target of grouped) {
-    if (target.op !== "upsert" || target.groupId || !target.sourceSlugs || target.sourceSlugs.length < 2) {
+    if (
+      target.op !== "upsert" ||
+      target.groupId ||
+      !target.sourceSlugs ||
+      target.sourceSlugs.length < 2
+    ) {
       continue;
     }
     const sourceSet = new Set(target.sourceSlugs.filter((slug) => slug && slug !== target.slug));
@@ -220,11 +229,7 @@ export function buildManualApplyState(input: {
   failedDecisionKeys: string[];
 }) {
   const status: Exclude<OrganizerManualApplyStatus, ""> =
-    input.warningCount === 0
-      ? "applied"
-      : input.appliedCount > 0
-        ? "partial"
-        : "failed";
+    input.warningCount === 0 ? "applied" : input.appliedCount > 0 ? "partial" : "failed";
   return {
     status,
     appliedAt: Date.now(),
@@ -249,13 +254,16 @@ export function buildReviewItemsForBatch(
           ? detail.decisionIndex
           : undefined;
       const fallback =
-        detailDecisionIndex !== undefined ? selectedWithKeys[detailDecisionIndex] : selectedWithKeys[index];
+        detailDecisionIndex !== undefined
+          ? selectedWithKeys[detailDecisionIndex]
+          : selectedWithKeys[index];
       return {
         ...item,
         slug: item.slug ?? fallback?.decision.slug,
         op: item.op ?? fallback?.decision.op,
         groupId: item.groupId ?? fallback?.decision.groupId,
-        decisionKey: item.decisionKey ?? decisionKeyForSlug(selectedWithKeys, item.slug) ?? fallback?.key,
+        decisionKey:
+          item.decisionKey ?? decisionKeyForSlug(selectedWithKeys, item.slug) ?? fallback?.key,
       };
     });
   }
@@ -277,7 +285,9 @@ export function reviewItemsFromProtocol(protocol: OrganizerProtocolObject): Orga
     ? protocol.reviewItems.map((item) => normalizeReviewItem(item)).filter((item) => item.message)
     : [];
   if (structured.length > 0) return structured;
-  return protocolStringArray(protocol.reviewNotes).map((note) => parseWarningString(note, "planning"));
+  return protocolStringArray(protocol.reviewNotes).map((note) =>
+    parseWarningString(note, "planning"),
+  );
 }
 
 export function deriveManualApplyDisplay(input: {
@@ -344,7 +354,9 @@ export function decisionsWithApplyStatus(
   return decisions.map((decision, index) => {
     const key = organizerDecisionKey(decision, index);
     const failed =
-      manualApplyState.failedDecisionKeys.has(key) || failedByKey.get(key) || failedBySlug.get(decision.slug);
+      manualApplyState.failedDecisionKeys.has(key) ||
+      failedByKey.get(key) ||
+      failedBySlug.get(decision.slug);
     if (failed) {
       return {
         ...decision,
@@ -370,7 +382,10 @@ function organizerGroupId(decision: OrganizerSafeDecision) {
   return `merge:${scope}:${workdir}:${decision.slug}:${sources}`;
 }
 
-function parseWarningString(input: string, fallbackPhase: OrganizerReviewItem["phase"] = "apply"): OrganizerReviewItem {
+function parseWarningString(
+  input: string,
+  fallbackPhase: OrganizerReviewItem["phase"] = "apply",
+): OrganizerReviewItem {
   const trimmed = input.trim();
   if (trimmed.startsWith("{")) {
     try {
@@ -390,15 +405,26 @@ function parseWarningString(input: string, fallbackPhase: OrganizerReviewItem["p
   };
 }
 
-function normalizeReviewItem(value: unknown, fallbackPhase: OrganizerReviewItem["phase"] = "planning"): OrganizerReviewItem {
-  const obj = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-  const code = stringValue(obj.code) || stringValue(obj.error);
-  const message = stringValue(obj.message) || stringValue(obj.reason) || stringValue(obj.error) || JSON.stringify(value);
-  const suggested = obj.suggested_next_call && typeof obj.suggested_next_call === "object"
-    ? (obj.suggested_next_call as Record<string, unknown>)
-    : obj.suggestedNextCall && typeof obj.suggestedNextCall === "object"
-      ? (obj.suggestedNextCall as Record<string, unknown>)
+function normalizeReviewItem(
+  value: unknown,
+  fallbackPhase: OrganizerReviewItem["phase"] = "planning",
+): OrganizerReviewItem {
+  const obj =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
       : {};
+  const code = stringValue(obj.code) || stringValue(obj.error);
+  const message =
+    stringValue(obj.message) ||
+    stringValue(obj.reason) ||
+    stringValue(obj.error) ||
+    JSON.stringify(value);
+  const suggested =
+    obj.suggested_next_call && typeof obj.suggested_next_call === "object"
+      ? (obj.suggested_next_call as Record<string, unknown>)
+      : obj.suggestedNextCall && typeof obj.suggestedNextCall === "object"
+        ? (obj.suggestedNextCall as Record<string, unknown>)
+        : {};
   const phase =
     obj.phase === "planning" || obj.phase === "apply" || obj.phase === "system"
       ? obj.phase
@@ -406,7 +432,10 @@ function normalizeReviewItem(value: unknown, fallbackPhase: OrganizerReviewItem[
         ? "apply"
         : fallbackPhase;
   const kind =
-    obj.kind === "review" || obj.kind === "skipped" || obj.kind === "warning" || obj.kind === "error"
+    obj.kind === "review" ||
+    obj.kind === "skipped" ||
+    obj.kind === "warning" ||
+    obj.kind === "error"
       ? obj.kind
       : code
         ? "error"
@@ -426,10 +455,7 @@ function normalizeReviewItem(value: unknown, fallbackPhase: OrganizerReviewItem[
     code: code || undefined,
     message,
     slug:
-      stringValue(obj.slug) ||
-      stringValue(suggested.slug) ||
-      slugFromText(message) ||
-      undefined,
+      stringValue(obj.slug) || stringValue(suggested.slug) || slugFromText(message) || undefined,
     op:
       obj.op === "delete" || obj.action === "delete"
         ? "delete"

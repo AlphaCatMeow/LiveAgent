@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-
+import { GlassPanel, HubBackdrop, HubHeader } from "../../components/hub/HubChrome";
 import {
   AlertTriangle,
   BookOpen,
@@ -17,10 +17,11 @@ import {
   Trash2,
   X,
 } from "../../components/icons";
-import { GlassPanel, HubBackdrop, HubHeader } from "../../components/hub/HubChrome";
 import { Button } from "../../components/ui/button";
 import { ConfirmDeletePopover } from "../../components/ui/confirm-action-popover";
 import { useLocale } from "../../i18n";
+import { type AppSettings, updateSkills } from "../../lib/settings";
+import { cn } from "../../lib/shared/utils";
 import {
   discoverSkills,
   getSkillInstallJobStatus,
@@ -29,21 +30,19 @@ import {
   manageSkill,
   mergeAlwaysEnabledSkillNames,
   notifySkillsDiscoveryUpdated,
-  startSkillInstallJob,
   type SkillInstallJobSnapshot,
   type SkillSummary,
+  startSkillInstallJob,
 } from "../../lib/skills";
 import {
   buildClawHubDownloadUrl,
-  getClawHubSkillDetail,
-  listClawHubSkills,
-  searchClawHubSkills,
   type ClawHubSkillCard,
   type ClawHubSkillDetail,
   type ClawHubSort,
+  getClawHubSkillDetail,
+  listClawHubSkills,
+  searchClawHubSkills,
 } from "../../lib/skills/clawHub";
-import { updateSkills, type AppSettings } from "../../lib/settings";
-import { cn } from "../../lib/shared/utils";
 
 type SkillsHubView = "installed" | "store";
 
@@ -146,40 +145,43 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
     buildSkillDiscoverySignature(initialRootDir ?? "", initialSkills ?? []),
   );
 
-  const refresh = useCallback(async (options?: { silent?: boolean }) => {
-    if (lockedByChatMode) {
-      setSkills([]);
-      setRootDir("");
-      setLoadError(null);
-      setLoading(false);
-      discoverySignatureRef.current = buildSkillDiscoverySignature("", []);
-      return;
-    }
-    const silent = options?.silent === true;
-    if (!silent) {
-      setLoading(true);
-    }
-    setLoadError(null);
-    try {
-      const discovery = await discoverSkills({ force: true });
-      const signature = buildSkillDiscoverySignature(discovery.rootDir, discovery.skills);
-      const changed = discoverySignatureRef.current !== signature;
-      discoverySignatureRef.current = signature;
-      setSkills(discovery.skills);
-      setRootDir(discovery.rootDir);
-      if (changed) {
-        notifySkillsDiscoveryUpdated();
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setSkills([]);
-      setLoadError(msg || "Failed to load skills");
-    } finally {
-      if (!silent) {
+  const refresh = useCallback(
+    async (options?: { silent?: boolean }) => {
+      if (lockedByChatMode) {
+        setSkills([]);
+        setRootDir("");
+        setLoadError(null);
         setLoading(false);
+        discoverySignatureRef.current = buildSkillDiscoverySignature("", []);
+        return;
       }
-    }
-  }, [lockedByChatMode]);
+      const silent = options?.silent === true;
+      if (!silent) {
+        setLoading(true);
+      }
+      setLoadError(null);
+      try {
+        const discovery = await discoverSkills({ force: true });
+        const signature = buildSkillDiscoverySignature(discovery.rootDir, discovery.skills);
+        const changed = discoverySignatureRef.current !== signature;
+        discoverySignatureRef.current = signature;
+        setSkills(discovery.skills);
+        setRootDir(discovery.rootDir);
+        if (changed) {
+          notifySkillsDiscoveryUpdated();
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setSkills([]);
+        setLoadError(msg || "Failed to load skills");
+      } finally {
+        if (!silent) {
+          setLoading(false);
+        }
+      }
+    },
+    [lockedByChatMode],
+  );
 
   useEffect(() => {
     if (initialSkills && initialSkills.length > 0) {
@@ -211,8 +213,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
     if (!text) return skills;
     return skills.filter(
       (skill) =>
-        skill.name.toLowerCase().includes(text) ||
-        skill.description.toLowerCase().includes(text),
+        skill.name.toLowerCase().includes(text) || skill.description.toLowerCase().includes(text),
     );
   }, [filter, skills]);
 
@@ -312,28 +313,31 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
     };
   }, [lockedByChatMode, refresh, view]);
 
-  const enableInstalledSkillsFromJob = useCallback((job: SkillInstallJobSnapshot) => {
-    const installedNames = (job.installed ?? [])
-      .map((item) => item.name?.trim())
-      .filter((name): name is string => Boolean(name) && !isAlwaysEnabledSkillName(name));
-    if (installedNames.length === 0) return;
+  const enableInstalledSkillsFromJob = useCallback(
+    (job: SkillInstallJobSnapshot) => {
+      const installedNames = (job.installed ?? [])
+        .map((item) => item.name?.trim())
+        .filter((name): name is string => Boolean(name) && !isAlwaysEnabledSkillName(name));
+      if (installedNames.length === 0) return;
 
-    setSettings((prev) => {
-      const next = new Set(prev.skills.selected);
-      let changed = prev.skills.enabled !== true;
-      for (const name of installedNames) {
-        if (!next.has(name)) {
-          next.add(name);
-          changed = true;
+      setSettings((prev) => {
+        const next = new Set(prev.skills.selected);
+        let changed = prev.skills.enabled !== true;
+        for (const name of installedNames) {
+          if (!next.has(name)) {
+            next.add(name);
+            changed = true;
+          }
         }
-      }
-      if (!changed) return prev;
-      return updateSkills(prev, {
-        enabled: true,
-        selected: Array.from(next),
+        if (!changed) return prev;
+        return updateSkills(prev, {
+          enabled: true,
+          selected: Array.from(next),
+        });
       });
-    });
-  }, [setSettings]);
+    },
+    [setSettings],
+  );
 
   useEffect(() => {
     const activeJobs = Object.values(installJobs).filter(
@@ -426,8 +430,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
   async function deleteSkill(skill: SkillSummary) {
     if (lockedByChatMode || isAlwaysEnabledSkillName(skill.name) || deletingSkillName) return;
     const skillName = skill.name;
-    const sourceSlug =
-      skill.source?.registry === "clawhub" ? skill.source.slug?.trim() || "" : "";
+    const sourceSlug = skill.source?.registry === "clawhub" ? skill.source.slug?.trim() || "" : "";
     setLoadError(null);
     setDeletingSkillName(skillName);
     try {
@@ -667,263 +670,266 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                   </GlassPanel>
                 </div>
               ) : (
-              <>
-                {view === "installed" ? (
-                  <div className="h-full min-h-0 overflow-y-auto px-0.5 pb-4 pr-1 pt-1.5">
-                    <div className="flex flex-col gap-5">
-                    {loadError ? (
-                      <GlassPanel tone="error" className="hub-panel-enter">
-                        <div className="flex items-center gap-2">
-                          <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
-                          <span className="text-xs text-destructive">{loadError}</span>
-                        </div>
-                      </GlassPanel>
-                    ) : null}
-
-                {!skillsEnabled ? (
-                  <GlassPanel tone="muted" className="hub-panel-enter">
-                    <div className="flex items-center gap-2">
-                      <BookOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      <span className="text-xs text-muted-foreground">
-                        {t("settings.skillsDisabledHint")}
-                      </span>
-                    </div>
-                  </GlassPanel>
-                ) : null}
-
-                {skills.length > 4 ? (
-                  <div className="hub-panel-enter relative max-w-md">
-                    <Search className="absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                    <input
-                      type="text"
-                      value={filter}
-                      onChange={(e) => setFilter(e.currentTarget.value)}
-                      placeholder={t("settings.skillsSearch")}
-                      className="h-10 w-full rounded-xl border border-border/40 bg-background/60 pl-10 pr-3 text-[13px] outline-hidden backdrop-blur-xl transition-all placeholder:text-muted-foreground/60 focus:border-border/60 focus:bg-background/85 focus:ring-2 focus:ring-foreground/10"
-                    />
-                  </div>
-                ) : null}
-
-                {!loading && skills.length === 0 && !loadError ? (
-                  <GlassPanel className="hub-panel-enter">
-                    <div className="flex flex-col items-center gap-3 py-8 text-center">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted/60">
-                        <BookOpen className="h-5 w-5 text-muted-foreground" />
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-sm font-medium text-muted-foreground">
-                          {t("settings.skillsNotFound")}
-                        </p>
-                        <p className="text-xs text-muted-foreground/70">
-                          {t("settings.skillsNotFoundHint")}
-                        </p>
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="mt-1 gap-1.5 rounded-full"
-                        onClick={() => void refresh()}
-                      >
-                        <RefreshCw className="h-3.5 w-3.5" />
-                        {t("settings.skillsRescan")}
-                      </Button>
-                    </div>
-                  </GlassPanel>
-                ) : null}
-
-                {loading && skills.length === 0 ? (
-                  <>
-                    <div className="hub-frost-hero hub-panel-enter px-4 py-3.5">
-                      <div className="flex items-center gap-3.5">
-                        <FrostSpinner />
-                        <div className="min-w-0 flex-1">
-                          <div className="text-[13px] font-medium tracking-tight text-foreground">
-                            {t("settings.skillsScanning")}
-                          </div>
-                          <div className="mt-0.5 truncate text-[11px] text-muted-foreground/80">
-                            正在读取固定 Skills 目录并同步会话可用能力
-                          </div>
-                        </div>
-                      </div>
-                      <div className="hub-frost-track mt-3.5" />
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                      {[1, 2, 3, 4, 5, 6].map((item) => (
-                        <div key={item} className="hub-frost-skeleton skill-card-enter p-3.5">
-                          <div className="flex items-center gap-3">
-                            <div className="skills-skeleton-shimmer h-9 w-9 shrink-0 rounded-lg" />
-                            <div className="flex-1 space-y-2">
-                              <div className="skills-skeleton-shimmer h-3.5 w-28 rounded" />
-                              <div className="skills-skeleton-shimmer h-3 w-full max-w-[12rem] rounded" />
+                <>
+                  {view === "installed" ? (
+                    <div className="h-full min-h-0 overflow-y-auto px-0.5 pb-4 pr-1 pt-1.5">
+                      <div className="flex flex-col gap-5">
+                        {loadError ? (
+                          <GlassPanel tone="error" className="hub-panel-enter">
+                            <div className="flex items-center gap-2">
+                              <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
+                              <span className="text-xs text-destructive">{loadError}</span>
                             </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                ) : null}
+                          </GlassPanel>
+                        ) : null}
 
-                {filtered.length > 0 ? (
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                    {filtered.map((skill) => {
-                      const alwaysEnabled = isAlwaysEnabledSkillName(skill.name);
-                      const checked = alwaysEnabled || selected.has(skill.name);
-                      const deleting = deletingSkillName === skill.name;
-                      const deleteDisabled = deletingSkillName !== null;
-                      const card = (
-                        <>
-                          <div className="flex items-start justify-between gap-2">
-                            <div
-                              className={cn(
-                                "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition-all",
-                                checked
-                                  ? "border-border/55 bg-background/80 text-foreground/85 shadow-[0_1px_0_rgba(255,255,255,0.55)_inset]"
-                                  : "border-border/30 bg-muted/50 text-muted-foreground group-hover:border-border/50 group-hover:bg-background/70 group-hover:text-foreground/85",
-                              )}
-                            >
-                              <Sparkles className="h-[18px] w-[18px]" />
+                        {!skillsEnabled ? (
+                          <GlassPanel tone="muted" className="hub-panel-enter">
+                            <div className="flex items-center gap-2">
+                              <BookOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
+                              <span className="text-xs text-muted-foreground">
+                                {t("settings.skillsDisabledHint")}
+                              </span>
                             </div>
+                          </GlassPanel>
+                        ) : null}
 
-                            {alwaysEnabled ? (
-                              <div
-                                className="inline-flex shrink-0 items-center gap-1 rounded-full bg-foreground/[0.06] px-2 py-0.5 text-[10px] font-medium text-foreground/75 ring-1 ring-border/45"
-                                title={t("settings.skillsAlwaysOn")}
-                              >
-                                <Lock className="h-2.5 w-2.5" />
-                                <span>{t("settings.skillsAlwaysOn")}</span>
+                        {skills.length > 4 ? (
+                          <div className="hub-panel-enter relative max-w-md">
+                            <Search className="absolute left-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                            <input
+                              type="text"
+                              value={filter}
+                              onChange={(e) => setFilter(e.currentTarget.value)}
+                              placeholder={t("settings.skillsSearch")}
+                              className="h-10 w-full rounded-xl border border-border/40 bg-background/60 pl-10 pr-3 text-[13px] outline-hidden backdrop-blur-xl transition-all placeholder:text-muted-foreground/60 focus:border-border/60 focus:bg-background/85 focus:ring-2 focus:ring-foreground/10"
+                            />
+                          </div>
+                        ) : null}
+
+                        {!loading && skills.length === 0 && !loadError ? (
+                          <GlassPanel className="hub-panel-enter">
+                            <div className="flex flex-col items-center gap-3 py-8 text-center">
+                              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted/60">
+                                <BookOpen className="h-5 w-5 text-muted-foreground" />
                               </div>
-                            ) : (
-                              <div
-                                className="flex shrink-0 items-center gap-1.5"
-                                onClick={(event) => event.stopPropagation()}
-                                onKeyDown={(event) => event.stopPropagation()}
+                              <div className="space-y-1">
+                                <p className="text-sm font-medium text-muted-foreground">
+                                  {t("settings.skillsNotFound")}
+                                </p>
+                                <p className="text-xs text-muted-foreground/70">
+                                  {t("settings.skillsNotFoundHint")}
+                                </p>
+                              </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="mt-1 gap-1.5 rounded-full"
+                                onClick={() => void refresh()}
                               >
-                                <ConfirmDeletePopover
-                                  name={skill.name}
-                                  onConfirm={() => void deleteSkill(skill)}
-                                >
-                                  {(open) => (
-                                    <button
-                                      type="button"
-                                      disabled={deleteDisabled}
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        open();
-                                      }}
-                                      className={cn(
-                                        "flex h-6 w-6 items-center justify-center rounded-md border border-border/35 bg-background/65 text-muted-foreground transition-all",
-                                        "hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive",
-                                        "disabled:cursor-not-allowed disabled:opacity-60",
-                                      )}
-                                      title="删除 Skill"
-                                    >
-                                      {deleting ? (
-                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                      ) : (
-                                        <Trash2 className="h-3.5 w-3.5" />
-                                      )}
-                                    </button>
-                                  )}
-                                </ConfirmDeletePopover>
-                                <div
-                                  className={cn(
-                                    "flex h-5 w-5 items-center justify-center rounded-md border transition-all",
-                                    checked
-                                      ? "border-foreground/80 bg-foreground/85 text-background shadow-[0_2px_6px_-2px_rgba(15,23,42,0.35)]"
-                                      : "border-border bg-background group-hover:border-foreground/40",
-                                  )}
-                                >
-                                  {checked ? <Check className="h-3 w-3" /> : null}
+                                <RefreshCw className="h-3.5 w-3.5" />
+                                {t("settings.skillsRescan")}
+                              </Button>
+                            </div>
+                          </GlassPanel>
+                        ) : null}
+
+                        {loading && skills.length === 0 ? (
+                          <>
+                            <div className="hub-frost-hero hub-panel-enter px-4 py-3.5">
+                              <div className="flex items-center gap-3.5">
+                                <FrostSpinner />
+                                <div className="min-w-0 flex-1">
+                                  <div className="text-[13px] font-medium tracking-tight text-foreground">
+                                    {t("settings.skillsScanning")}
+                                  </div>
+                                  <div className="mt-0.5 truncate text-[11px] text-muted-foreground/80">
+                                    正在读取固定 Skills 目录并同步会话可用能力
+                                  </div>
                                 </div>
                               </div>
-                            )}
-                          </div>
-
-                          <div className="mt-2.5 min-w-0 flex-1">
-                            <div className="truncate text-[13px] font-semibold leading-tight text-foreground">
-                              {skill.name}
+                              <div className="hub-frost-track mt-3.5" />
                             </div>
-                            {skill.description ? (
-                              <p className="mt-1 line-clamp-2 text-[11.5px] leading-[1.4] text-muted-foreground">
-                                {skill.description}
-                              </p>
-                            ) : null}
+
+                            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                              {[1, 2, 3, 4, 5, 6].map((item) => (
+                                <div
+                                  key={item}
+                                  className="hub-frost-skeleton skill-card-enter p-3.5"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className="skills-skeleton-shimmer h-9 w-9 shrink-0 rounded-lg" />
+                                    <div className="flex-1 space-y-2">
+                                      <div className="skills-skeleton-shimmer h-3.5 w-28 rounded" />
+                                      <div className="skills-skeleton-shimmer h-3 w-full max-w-[12rem] rounded" />
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </>
+                        ) : null}
+
+                        {filtered.length > 0 ? (
+                          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                            {filtered.map((skill) => {
+                              const alwaysEnabled = isAlwaysEnabledSkillName(skill.name);
+                              const checked = alwaysEnabled || selected.has(skill.name);
+                              const deleting = deletingSkillName === skill.name;
+                              const deleteDisabled = deletingSkillName !== null;
+                              const card = (
+                                <>
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div
+                                      className={cn(
+                                        "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition-all",
+                                        checked
+                                          ? "border-border/55 bg-background/80 text-foreground/85 shadow-[0_1px_0_rgba(255,255,255,0.55)_inset]"
+                                          : "border-border/30 bg-muted/50 text-muted-foreground group-hover:border-border/50 group-hover:bg-background/70 group-hover:text-foreground/85",
+                                      )}
+                                    >
+                                      <Sparkles className="h-[18px] w-[18px]" />
+                                    </div>
+
+                                    {alwaysEnabled ? (
+                                      <div
+                                        className="inline-flex shrink-0 items-center gap-1 rounded-full bg-foreground/[0.06] px-2 py-0.5 text-[10px] font-medium text-foreground/75 ring-1 ring-border/45"
+                                        title={t("settings.skillsAlwaysOn")}
+                                      >
+                                        <Lock className="h-2.5 w-2.5" />
+                                        <span>{t("settings.skillsAlwaysOn")}</span>
+                                      </div>
+                                    ) : (
+                                      <div
+                                        className="flex shrink-0 items-center gap-1.5"
+                                        onClick={(event) => event.stopPropagation()}
+                                        onKeyDown={(event) => event.stopPropagation()}
+                                      >
+                                        <ConfirmDeletePopover
+                                          name={skill.name}
+                                          onConfirm={() => void deleteSkill(skill)}
+                                        >
+                                          {(open) => (
+                                            <button
+                                              type="button"
+                                              disabled={deleteDisabled}
+                                              onClick={(event) => {
+                                                event.stopPropagation();
+                                                open();
+                                              }}
+                                              className={cn(
+                                                "flex h-6 w-6 items-center justify-center rounded-md border border-border/35 bg-background/65 text-muted-foreground transition-all",
+                                                "hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive",
+                                                "disabled:cursor-not-allowed disabled:opacity-60",
+                                              )}
+                                              title="删除 Skill"
+                                            >
+                                              {deleting ? (
+                                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                              ) : (
+                                                <Trash2 className="h-3.5 w-3.5" />
+                                              )}
+                                            </button>
+                                          )}
+                                        </ConfirmDeletePopover>
+                                        <div
+                                          className={cn(
+                                            "flex h-5 w-5 items-center justify-center rounded-md border transition-all",
+                                            checked
+                                              ? "border-foreground/80 bg-foreground/85 text-background shadow-[0_2px_6px_-2px_rgba(15,23,42,0.35)]"
+                                              : "border-border bg-background group-hover:border-foreground/40",
+                                          )}
+                                        >
+                                          {checked ? <Check className="h-3 w-3" /> : null}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  <div className="mt-2.5 min-w-0 flex-1">
+                                    <div className="truncate text-[13px] font-semibold leading-tight text-foreground">
+                                      {skill.name}
+                                    </div>
+                                    {skill.description ? (
+                                      <p className="mt-1 line-clamp-2 text-[11.5px] leading-[1.4] text-muted-foreground">
+                                        {skill.description}
+                                      </p>
+                                    ) : null}
+                                  </div>
+
+                                  <div className="mt-2.5 flex items-center gap-1 border-t border-border/30 pt-2 text-[10.5px] text-muted-foreground/70">
+                                    <FileText className="h-3 w-3 shrink-0" />
+                                    <span className="truncate">{skill.skillFile}</span>
+                                  </div>
+                                </>
+                              );
+
+                              const key = `${skill.name}-${rootDir}`;
+                              if (alwaysEnabled) {
+                                return (
+                                  <div
+                                    key={key}
+                                    className="skill-card-enter group flex h-full flex-col rounded-2xl border border-border/50 bg-background/75 p-3.5 backdrop-blur-xl shadow-[0_1px_0_rgba(255,255,255,0.55)_inset,0_4px_18px_-12px_rgba(15,23,42,0.16)]"
+                                  >
+                                    {card}
+                                  </div>
+                                );
+                              }
+
+                              return (
+                                <div
+                                  key={key}
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={() => toggleSkill(skill.name, !checked)}
+                                  onKeyDown={(event) => {
+                                    if (event.key !== "Enter" && event.key !== " ") return;
+                                    event.preventDefault();
+                                    toggleSkill(skill.name, !checked);
+                                  }}
+                                  className={cn(
+                                    "hub-skill-card skill-card-enter group flex h-full w-full flex-col rounded-2xl border p-3.5 text-left transition-all",
+                                    "cursor-pointer backdrop-blur-xl focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/15",
+                                    checked
+                                      ? "border-border/55 bg-background/80 shadow-[0_1px_0_rgba(255,255,255,0.6)_inset,0_4px_18px_-12px_rgba(15,23,42,0.18)]"
+                                      : "border-border/35 bg-background/55 hover:-translate-y-0.5 hover:border-border/55 hover:bg-background/70 hover:shadow-[0_4px_16px_-10px_rgba(15,23,42,0.18)]",
+                                  )}
+                                >
+                                  {card}
+                                </div>
+                              );
+                            })}
                           </div>
+                        ) : null}
 
-                          <div className="mt-2.5 flex items-center gap-1 border-t border-border/30 pt-2 text-[10.5px] text-muted-foreground/70">
-                            <FileText className="h-3 w-3 shrink-0" />
-                            <span className="truncate">{skill.skillFile}</span>
-                          </div>
-                        </>
-                      );
-
-                      const key = `${skill.name}-${rootDir}`;
-                      if (alwaysEnabled) {
-                        return (
-                          <div
-                            key={key}
-                            className="skill-card-enter group flex h-full flex-col rounded-2xl border border-border/50 bg-background/75 p-3.5 backdrop-blur-xl shadow-[0_1px_0_rgba(255,255,255,0.55)_inset,0_4px_18px_-12px_rgba(15,23,42,0.16)]"
-                          >
-                            {card}
-                          </div>
-                        );
-                      }
-
-                      return (
-                        <div
-                          key={key}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => toggleSkill(skill.name, !checked)}
-                          onKeyDown={(event) => {
-                            if (event.key !== "Enter" && event.key !== " ") return;
-                            event.preventDefault();
-                            toggleSkill(skill.name, !checked);
-                          }}
-                          className={cn(
-                            "hub-skill-card skill-card-enter group flex h-full w-full flex-col rounded-2xl border p-3.5 text-left transition-all",
-                            "cursor-pointer backdrop-blur-xl focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/15",
-                            checked
-                              ? "border-border/55 bg-background/80 shadow-[0_1px_0_rgba(255,255,255,0.6)_inset,0_4px_18px_-12px_rgba(15,23,42,0.18)]"
-                              : "border-border/35 bg-background/55 hover:-translate-y-0.5 hover:border-border/55 hover:bg-background/70 hover:shadow-[0_4px_16px_-10px_rgba(15,23,42,0.18)]",
-                          )}
-                        >
-                          {card}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : null}
-
-                {filter.trim() && filtered.length === 0 && skills.length > 0 ? (
-                  <GlassPanel tone="muted" className="hub-panel-enter">
-                    <p className="py-2 text-center text-sm text-muted-foreground">
-                      {t("settings.skillsNoMatch").replace("{filter}", filter)}
-                    </p>
-                  </GlassPanel>
-                ) : null}
+                        {filter.trim() && filtered.length === 0 && skills.length > 0 ? (
+                          <GlassPanel tone="muted" className="hub-panel-enter">
+                            <p className="py-2 text-center text-sm text-muted-foreground">
+                              {t("settings.skillsNoMatch").replace("{filter}", filter)}
+                            </p>
+                          </GlassPanel>
+                        ) : null}
+                      </div>
                     </div>
-                  </div>
-                ) : (
-                  <SkillsStoreView
-                    items={storeItems}
-                    query={storeQuery}
-                    sort={storeSort}
-                    loading={storeLoading}
-                    loadingMore={storeLoadingMore}
-                    error={storeError}
-                    cursor={storeCursor}
-                    installedSlugs={installedStoreSlugs}
-                    installingBySlug={installingBySlug}
-                    installJobs={installJobs}
-                    onQueryChange={setStoreQuery}
-                    onSortChange={setStoreSort}
-                    onLoadMore={() => void loadMoreStore()}
-                    onInstall={(skill) => void installStoreSkill(skill)}
-                  />
-                )}
-              </>
+                  ) : (
+                    <SkillsStoreView
+                      items={storeItems}
+                      query={storeQuery}
+                      sort={storeSort}
+                      loading={storeLoading}
+                      loadingMore={storeLoadingMore}
+                      error={storeError}
+                      cursor={storeCursor}
+                      installedSlugs={installedStoreSlugs}
+                      installingBySlug={installingBySlug}
+                      installJobs={installJobs}
+                      onQueryChange={setStoreQuery}
+                      onSortChange={setStoreSort}
+                      onLoadMore={() => void loadMoreStore()}
+                      onInstall={(skill) => void installStoreSkill(skill)}
+                    />
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -1471,8 +1477,14 @@ function SkillsStorePreviewDrawer(props: {
                   </div>
                   <div className="divide-y divide-border/30">
                     <StorePreviewField label="Slug" value={data.slug} />
-                    <StorePreviewField label={t("settings.skillsStorePreviewOwner")} value={owner} />
-                    <StorePreviewField label={t("settings.skillsStorePreviewVersion")} value={version} />
+                    <StorePreviewField
+                      label={t("settings.skillsStorePreviewOwner")}
+                      value={owner}
+                    />
+                    <StorePreviewField
+                      label={t("settings.skillsStorePreviewVersion")}
+                      value={version}
+                    />
                     <StorePreviewField
                       label={t("settings.skillsStorePreviewUpdated")}
                       value={data.updatedAt ? formatFullStoreDate(data.updatedAt) : null}
@@ -1530,12 +1542,10 @@ function SkillsStorePreviewDrawer(props: {
               variant="outline"
               size="sm"
               className="h-9 flex-1 gap-1.5 rounded-xl border-border/50 bg-background/70"
-              asChild
+              render={<a href={link} target="_blank" rel="noreferrer" />}
             >
-              <a href={link} target="_blank" rel="noreferrer">
-                <ExternalLink className="h-3.5 w-3.5" />
-                {t("settings.skillsStoreOpenInClawHub")}
-              </a>
+              <ExternalLink className="h-3.5 w-3.5" />
+              {t("settings.skillsStoreOpenInClawHub")}
             </Button>
           ) : null}
           <Button

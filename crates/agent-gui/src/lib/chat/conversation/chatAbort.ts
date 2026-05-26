@@ -1,9 +1,4 @@
-import type {
-  AssistantMessage,
-  Message,
-  Model,
-  Usage,
-} from "@mariozechner/pi-ai";
+import type { AssistantMessage, Message, Model, Usage } from "@mariozechner/pi-ai";
 
 import type { ExecutionMode } from "../../settings";
 import {
@@ -104,11 +99,7 @@ function buildAssistantMessage(params: {
 export function isAbortedAssistantMessage(
   message: Message | AssistantMessage | null | undefined,
 ): message is AssistantMessage {
-  return Boolean(
-    message &&
-      message.role === "assistant" &&
-      message.stopReason === "aborted",
-  );
+  return Boolean(message && message.role === "assistant" && message.stopReason === "aborted");
 }
 
 export function buildAbortedMessagesFromSnapshot(params: {
@@ -170,9 +161,7 @@ function extractAssistantText(message: AssistantMessage) {
   return text.trim();
 }
 
-function toPersistableAbortedAssistant(
-  message: AssistantMessage,
-): AssistantMessage | null {
+function toPersistableAbortedAssistant(message: AssistantMessage): AssistantMessage | null {
   const text = extractAssistantText(message);
   const hostedSearchBlocks = (message.content as unknown[]).filter(
     (block): block is AssistantMessage["content"][number] =>
@@ -185,10 +174,7 @@ function toPersistableAbortedAssistant(
   }
   return {
     ...message,
-    content: [
-      ...(text ? [{ type: "text" as const, text }] : []),
-      ...hostedSearchBlocks,
-    ],
+    content: [...(text ? [{ type: "text" as const, text }] : []), ...hostedSearchBlocks],
     errorMessage: undefined,
   };
 }

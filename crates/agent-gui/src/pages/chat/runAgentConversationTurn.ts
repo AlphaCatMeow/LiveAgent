@@ -5,43 +5,35 @@ import type {
   ToolCall,
   ToolResultMessage,
 } from "@mariozechner/pi-ai";
-
-import { assistantMessageToText } from "../../lib/providers/llm";
-import { runAssistantWithTools } from "../../lib/chat/runner/agentRunner";
+import {
+  type CompactionThrottleState,
+  noteCompactionRound,
+  type ProviderRuntimeConfig,
+  shouldProtectionCompactConversation,
+} from "../../lib/chat/compaction/contextCompaction";
+import { isAbortedAssistantMessage } from "../../lib/chat/conversation/chatAbort";
 import {
   appendMessagesToConversation,
   appendRenderOnlyMessagesToConversation,
   type ConversationViewState,
 } from "../../lib/chat/conversation/conversationState";
-import {
-  noteCompactionRound,
-  shouldProtectionCompactConversation,
-  type CompactionThrottleState,
-  type ProviderRuntimeConfig,
-} from "../../lib/chat/compaction/contextCompaction";
-import { isAbortedAssistantMessage } from "../../lib/chat/conversation/chatAbort";
-import type { StreamDebugLogger } from "../../lib/debug/agentDebug";
-import type { ProviderId, SystemToolId, AppSettings } from "../../lib/settings";
+import type { LiveTranscriptStore } from "../../lib/chat/conversation/liveTranscriptStore";
 import type {
   ConversationHookLifecycle,
   GatewayBridgeEventController,
 } from "../../lib/chat/conversation/run";
-import type { LiveTranscriptStore } from "../../lib/chat/conversation/liveTranscriptStore";
+import type { HostedSearchBlock } from "../../lib/chat/messages/hostedSearch";
 import {
   appendTextDeltaToRound,
   appendThinkingDeltaToRound,
   attachToolResultToRound,
   collapseThinking,
+  type LiveRound,
+  updateLiveRound,
   upsertHostedSearchToRound,
   upsertToolCallToRound,
-  updateLiveRound,
-  type LiveRound,
 } from "../../lib/chat/messages/uiMessages";
-import type { HostedSearchBlock } from "../../lib/chat/messages/hostedSearch";
-import {
-  buildExistingSubagentsReminder,
-} from "../../lib/chat/subagent/subagentReminders";
-import { createSubagentScheduler } from "../../lib/chat/subagent/subagentScheduler";
+import { runAssistantWithTools } from "../../lib/chat/runner/agentRunner";
 import {
   listSubagentIdentities,
   listSubagentMessages,
@@ -53,7 +45,12 @@ import {
   renderSubagentMessageBusSnapshot,
   SUBAGENT_PARENT_AGENT_ID,
 } from "../../lib/chat/subagent/subagentMessageBus";
+import { buildExistingSubagentsReminder } from "../../lib/chat/subagent/subagentReminders";
 import type { SubagentRuntimeManager } from "../../lib/chat/subagent/subagentRuntimeManager";
+import { createSubagentScheduler } from "../../lib/chat/subagent/subagentScheduler";
+import type { StreamDebugLogger } from "../../lib/debug/agentDebug";
+import { assistantMessageToText } from "../../lib/providers/llm";
+import type { AppSettings, ProviderId, SystemToolId } from "../../lib/settings";
 import { buildBuiltinToolRegistry } from "../../lib/tools/builtinRegistry";
 import type { BuiltinToolExecutionContext } from "../../lib/tools/builtinTypes";
 import { createFileToolState } from "../../lib/tools/fileToolState";
@@ -66,7 +63,7 @@ import {
 import { buildProtectionCompactionStatus } from "./compactionStatusText";
 import {
   recordSilentMemoryTurnBoundary,
-  runSilentMemoryExtraction,
+  type runSilentMemoryExtraction,
   type SilentMemoryExtractionModelConfig,
 } from "./silentMemoryExtraction";
 import { runSilentMemoryExtractionWithFallback } from "./silentMemoryExtractionFallback";
@@ -132,17 +129,11 @@ function finishAgentPerfSpan(
 }
 
 function shouldShowToolEvent(toolCall: ToolCall) {
-  return (
-    toolCall.name !== "Agent" ||
-    toolCall.arguments?.delegate_agent_card === true
-  );
+  return toolCall.name !== "Agent" || toolCall.arguments?.delegate_agent_card === true;
 }
 
 function isDelegateAgentCardToolCall(toolCall: ToolCall) {
-  return (
-    toolCall.name === "Agent" &&
-    toolCall.arguments?.delegate_agent_card === true
-  );
+  return toolCall.name === "Agent" && toolCall.arguments?.delegate_agent_card === true;
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -199,8 +190,7 @@ function extractConversationSubagentRuns(params: {
           providerId: params.providerId,
           model: params.model,
           sessionId:
-            optionalString(agent.sessionId) ??
-            `${params.sessionId}:subagent:${logicalAgentId}`,
+            optionalString(agent.sessionId) ?? `${params.sessionId}:subagent:${logicalAgentId}`,
           workdir: optionalString(agent.workdir),
           worktreeRoot: optionalString(agent.worktreeRoot),
           branchName: optionalString(agent.branchName),
@@ -331,11 +321,7 @@ type RunAgentConversationTurnParams = {
     store: LiveTranscriptStore,
     shouldAutoScroll?: boolean,
   ) => void;
-  updateToolStatus: (
-    status: string | null,
-    store: LiveTranscriptStore,
-    visible: boolean,
-  ) => void;
+  updateToolStatus: (status: string | null, store: LiveTranscriptStore, visible: boolean) => void;
   updateGatewayBridgeToolStatus: (
     status: string | null,
     visible: boolean,
@@ -406,9 +392,7 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
   } = params;
 
   if (!effectiveWorkdir) {
-    throw new Error(
-      "Tool mode requires a working directory configured in Settings -> System.",
-    );
+    throw new Error("Tool mode requires a working directory configured in Settings -> System.");
   }
 
   // Clear the per-conversation slug tracker before a fresh user turn so the
@@ -423,25 +407,23 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
     model,
   });
   const loadStoredRunsStartedAt = perfNowMs();
-  const [
-    storedSubagentRuns,
-    storedSubagentIdentities,
-    storedSubagentMessages,
-  ] = await Promise.all([
+  const [storedSubagentRuns, storedSubagentIdentities, storedSubagentMessages] = await Promise.all([
     loadStoredSubagentRuns(conversationId),
     loadStoredSubagentIdentities(conversationId),
     loadStoredSubagentMessages(conversationId),
   ]);
-  finishAgentPerfSpan(conversationDebugLogger, "subagent_runs.load_stored", loadStoredRunsStartedAt, {
-    conversationId,
-    count: storedSubagentRuns.length,
-    identityCount: storedSubagentIdentities.length,
-    messageCount: storedSubagentMessages.length,
-  });
-  const conversationSubagentRuns = [
-    ...transcriptSubagentRuns,
-    ...storedSubagentRuns,
-  ];
+  finishAgentPerfSpan(
+    conversationDebugLogger,
+    "subagent_runs.load_stored",
+    loadStoredRunsStartedAt,
+    {
+      conversationId,
+      count: storedSubagentRuns.length,
+      identityCount: storedSubagentIdentities.length,
+      messageCount: storedSubagentMessages.length,
+    },
+  );
+  const conversationSubagentRuns = [...transcriptSubagentRuns, ...storedSubagentRuns];
   const subagentReminder = buildExistingSubagentsReminder(
     storedSubagentIdentities,
     conversationSubagentRuns,
@@ -530,9 +512,14 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
     tools: combinedTools,
     includeUploadedFilesMetadata: true,
   });
-  finishAgentPerfSpan(conversationDebugLogger, "conversation.pre_compaction", preCompactionStartedAt, {
-    toolCount: combinedTools.length,
-  });
+  finishAgentPerfSpan(
+    conversationDebugLogger,
+    "conversation.pre_compaction",
+    preCompactionStartedAt,
+    {
+      toolCount: combinedTools.length,
+    },
+  );
 
   const combinedExecutor: (
     toolCall: ToolCall,
@@ -607,7 +594,7 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
                 runningToolCallIds: [],
                 thinkingOpen: false,
               },
-        ];
+            ];
         return updateLiveRound(withRound, round, (target) =>
           upsertHostedSearchToRound(collapseThinking(target), hostedSearch),
         );
@@ -681,11 +668,7 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
           );
 
           protectionCheckChars += delta.length;
-          if (
-            midStreamCompactionRequested ||
-            sawToolCallInRound ||
-            protectionCheckChars < 160
-          ) {
+          if (midStreamCompactionRequested || sawToolCallInRound || protectionCheckChars < 160) {
             return;
           }
 
@@ -786,10 +769,7 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
           batchLiveRoundsUpdate(
             (prev) =>
               updateLiveRound(prev, round, (target) => {
-                const withToolCall = upsertToolCallToRound(
-                  collapseThinking(target),
-                  toolCall,
-                );
+                const withToolCall = upsertToolCallToRound(collapseThinking(target), toolCall);
                 const runningIds = withToolCall.runningToolCallIds || [];
                 const nextRunning = runningIds.includes(toolCall.id)
                   ? runningIds
@@ -824,11 +804,7 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
             (prev) =>
               updateLiveRound(prev, round, (target) => {
                 const tr: ToolResultMessage = toolResult as ToolResultMessage;
-                const nextTarget = attachToolResultToRound(
-                  collapseThinking(target),
-                  toolCall,
-                  tr,
-                );
+                const nextTarget = attachToolResultToRound(collapseThinking(target), toolCall, tr);
 
                 return {
                   ...nextTarget,
@@ -912,10 +888,15 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
         signal: getRequestController().signal,
         debugLogger: conversationDebugLogger,
       });
-      finishAgentPerfSpan(conversationDebugLogger, "assistant.run_with_tools", assistantRunStartedAt, {
-        emittedMessageCount: result.emittedMessages.length,
-        messageCount: result.messages.length,
-      });
+      finishAgentPerfSpan(
+        conversationDebugLogger,
+        "assistant.run_with_tools",
+        assistantRunStartedAt,
+        {
+          emittedMessageCount: result.emittedMessages.length,
+          messageCount: result.messages.length,
+        },
+      );
     } catch (error) {
       if (!midStreamCompactionRequested) {
         throw error;
@@ -964,7 +945,6 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
       }
 
       pendingAgentContext = compactedContext;
-      continue;
     }
   }
 
@@ -992,8 +972,7 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
   }
   noteCompactionRound(conversationThrottleState);
   const shouldRunMemoryExtraction =
-    assistantStopReason !== "error" &&
-    assistantStopReason !== "aborted";
+    assistantStopReason !== "error" && assistantStopReason !== "aborted";
   const memoryRoundOffset = Math.max(
     activeAgentRound || pendingTerminalAssistantMetaRef.current?.round || 1,
     1,
@@ -1011,9 +990,7 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
     return runSilentMemoryExtractionWithFallback({
       primary: memoryExtractionModel ?? currentMemoryExtractionModel,
       fallback: memoryExtractionModel ? currentMemoryExtractionModel : undefined,
-      onPrimaryFailure: memoryExtractionModel
-        ? onMemoryExtractionModelFailure
-        : undefined,
+      onPrimaryFailure: memoryExtractionModel ? onMemoryExtractionModelFailure : undefined,
       sessionId,
       conversationId,
       workdir: conversationCwd ?? effectiveWorkdir,
@@ -1103,10 +1080,7 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
         batchLiveRoundsUpdate(
           (prev) =>
             updateLiveRound(prev, round, (target) => {
-              const withToolCall = upsertToolCallToRound(
-                collapseThinking(target),
-                toolCall,
-              );
+              const withToolCall = upsertToolCallToRound(collapseThinking(target), toolCall);
               const runningIds = withToolCall.runningToolCallIds || [];
               return {
                 ...withToolCall,

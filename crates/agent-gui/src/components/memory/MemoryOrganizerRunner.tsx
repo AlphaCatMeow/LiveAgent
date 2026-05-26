@@ -1,30 +1,29 @@
-import { useEffect, useRef } from "react";
-import { Type } from "@sinclair/typebox";
 import type { Context, Tool, ToolCall, ToolResultMessage } from "@mariozechner/pi-ai";
-
-import { createStreamDebugLogger } from "../../lib/debug/agentDebug";
+import { Type } from "@sinclair/typebox";
+import { useEffect, useRef } from "react";
 import { runAssistantWithTools } from "../../lib/chat/runner/agentRunner";
-import { assistantMessageToText } from "../../lib/providers/llm";
+import { createStreamDebugLogger } from "../../lib/debug/agentDebug";
 import {
-  DEFAULT_CHAT_RUNTIME_CONTROLS,
-  computeNextMemoryOrganizerRunAt,
-  findProviderModelConfig,
-  isAgentDevMode,
-  type AppSettings,
-  type MemoryOrganizerMode,
-} from "../../lib/settings";
-import {
+  type MemoryBatchResponse,
+  type MemoryMeta,
+  type MemoryOrganizeRun,
+  type MemoryType,
   memoryApplyBatch,
   memoryList,
   memoryOrganizeDueClaim,
   memoryOrganizeDueComplete,
   memoryOrganizeRunUpdate,
   memoryRead,
-  type MemoryBatchResponse,
-  type MemoryMeta,
-  type MemoryOrganizeRun,
-  type MemoryType,
 } from "../../lib/memory/api";
+import { assistantMessageToText } from "../../lib/providers/llm";
+import {
+  type AppSettings,
+  computeNextMemoryOrganizerRunAt,
+  DEFAULT_CHAT_RUNTIME_CONTROLS,
+  findProviderModelConfig,
+  isAgentDevMode,
+  type MemoryOrganizerMode,
+} from "../../lib/settings";
 import { createMemoryTools } from "../../lib/tools/memoryTools";
 
 type MemoryOrganizerRunnerProps = {
@@ -205,9 +204,7 @@ function stringValue(value: unknown) {
 }
 
 function stringArrayValue(value: unknown) {
-  return Array.isArray(value)
-    ? value.map((item) => stringValue(item)).filter(Boolean)
-    : [];
+  return Array.isArray(value) ? value.map((item) => stringValue(item)).filter(Boolean) : [];
 }
 
 function recordValue(value: unknown): Record<string, unknown> {
@@ -265,10 +262,7 @@ function riskRank(value: OrganizerRiskLevel) {
   return 1;
 }
 
-function maxRisk(
-  current: OrganizerRiskLevel,
-  next: OrganizerRiskLevel,
-): OrganizerRiskLevel {
+function maxRisk(current: OrganizerRiskLevel, next: OrganizerRiskLevel): OrganizerRiskLevel {
   return riskRank(next) > riskRank(current) ? next : current;
 }
 
@@ -277,16 +271,19 @@ function isReviewed(entry: OrganizerEntry | undefined) {
 }
 
 const ORGANIZER_PLAN_DECISION_SCHEMA = Type.Object({
-  action: Type.Union([
-    Type.Literal("keep"),
-    Type.Literal("merge_into"),
-    Type.Literal("delete"),
-    Type.Literal("mark_review"),
-    Type.Literal("rewrite_hint"),
-  ], {
-    description:
-      "Decision action. Use merge_into to merge source_slugs into target_slug. Use rewrite_hint instead of emitting a replacement body.",
-  }),
+  action: Type.Union(
+    [
+      Type.Literal("keep"),
+      Type.Literal("merge_into"),
+      Type.Literal("delete"),
+      Type.Literal("mark_review"),
+      Type.Literal("rewrite_hint"),
+    ],
+    {
+      description:
+        "Decision action. Use merge_into to merge source_slugs into target_slug. Use rewrite_hint instead of emitting a replacement body.",
+    },
+  ),
   slug: Type.Optional(
     Type.String({
       minLength: 3,
@@ -368,8 +365,7 @@ const ORGANIZER_PLAN_TOOL: Tool = {
 
 const ORGANIZER_TOPIC_TOOL: Tool = {
   name: ORGANIZER_TOPIC_TOOL_NAME,
-  description:
-    "Submit semantic topic clusters for memory organization. Do not propose edits.",
+  description: "Submit semantic topic clusters for memory organization. Do not propose edits.",
   parameters: Type.Object({
     topic_clusters: Type.Array(
       Type.Object({
@@ -489,9 +485,7 @@ function buildStructuralClusters(entries: OrganizerEntry[]): OrganizerCluster[] 
   }
   const clusters: OrganizerCluster[] = [];
   for (const [key, group] of groups) {
-    const sorted = group.sort((a, b) =>
-      a.slug.localeCompare(b.slug) || b.updatedAt - a.updatedAt,
-    );
+    const sorted = group.sort((a, b) => a.slug.localeCompare(b.slug) || b.updatedAt - a.updatedAt);
     for (let index = 0; index < sorted.length; index += ORGANIZER_CLUSTER_SIZE) {
       clusters.push({
         id: `${key}:${Math.floor(index / ORGANIZER_CLUSTER_SIZE) + 1}`,
@@ -540,15 +534,23 @@ function buildTopicClustersFromArgs(args: Record<string, unknown>, entries: Orga
   const clusters: OrganizerCluster[] = [];
   for (const item of topicClusters) {
     if (!item || typeof item !== "object" || Array.isArray(item)) continue;
-    const topic = stringValue((item as { topic?: unknown }).topic) || `topic-${clusters.length + 1}`;
+    const topic =
+      stringValue((item as { topic?: unknown }).topic) || `topic-${clusters.length + 1}`;
     const slugs = uniqueStrings(stringArrayValue((item as { slugs?: unknown }).slugs))
       .filter((slug) => bySlug.has(slug) && !used.has(slug))
       .slice(0, ORGANIZER_TOPIC_CLUSTER_SIZE);
     if (slugs.length < 2) continue;
     for (const slug of slugs) used.add(slug);
     clusters.push({
-      id: `topic:${topic.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 48) || clusters.length + 1}`,
-      entries: slugs.map((slug) => bySlug.get(slug)).filter((entry): entry is OrganizerEntry => Boolean(entry)),
+      id: `topic:${
+        topic
+          .replace(/[^a-z0-9_-]+/gi, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 48) || clusters.length + 1
+      }`,
+      entries: slugs
+        .map((slug) => bySlug.get(slug))
+        .filter((entry): entry is OrganizerEntry => Boolean(entry)),
     });
   }
   const leftovers = entries.filter((entry) => !used.has(entry.slug));
@@ -592,7 +594,12 @@ function buildGlobalInventory(entries: OrganizerEntry[], clusters: OrganizerClus
   }
   const inventory = entries
     .slice()
-    .sort((a, b) => a.scope.localeCompare(b.scope) || a.memoryType.localeCompare(b.memoryType) || a.slug.localeCompare(b.slug))
+    .sort(
+      (a, b) =>
+        a.scope.localeCompare(b.scope) ||
+        a.memoryType.localeCompare(b.memoryType) ||
+        a.slug.localeCompare(b.slug),
+    )
     .map((entry) => ({
       slug: entry.slug,
       cluster_id: clusterBySlug.get(entry.slug) || "",
@@ -682,7 +689,9 @@ function toolResultMessage(
   };
 }
 
-function normalizeOrganizerPlanArgs(args: Record<string, unknown>): Omit<OrganizerClusterPlan, "raw"> {
+function normalizeOrganizerPlanArgs(
+  args: Record<string, unknown>,
+): Omit<OrganizerClusterPlan, "raw"> {
   const decisions = Array.isArray(args.decisions) ? args.decisions : [];
   const normalized: OrganizerPlanDecision[] = [];
   for (const item of decisions) {
@@ -729,10 +738,7 @@ async function runOrganizerModelPrompt(params: {
   systemPrompt: string;
   workdir: string;
   tools: Context["tools"];
-  executeToolCall: (
-    toolCall: ToolCall,
-    signal?: AbortSignal,
-  ) => Promise<ToolResultMessage>;
+  executeToolCall: (toolCall: ToolCall, signal?: AbortSignal) => Promise<ToolResultMessage>;
   signal?: AbortSignal;
 }) {
   const { provider, model } = resolveOrganizerProvider(params.run, params.settings);
@@ -805,12 +811,7 @@ async function runTopicClusterPrompt(params: {
   return {
     args: submittedArgs,
     raw: clip(
-      [
-        rawText,
-        "",
-        `[${ORGANIZER_TOPIC_TOOL_NAME}]`,
-        JSON.stringify(submittedArgs, null, 2),
-      ]
+      [rawText, "", `[${ORGANIZER_TOPIC_TOOL_NAME}]`, JSON.stringify(submittedArgs, null, 2)]
         .filter((part) => part.trim().length > 0)
         .join("\n"),
       ORGANIZER_RAW_PROTOCOL_CHARS,
@@ -862,12 +863,7 @@ async function runOrganizerPlanPrompt(params: {
     summary: plan.summary,
     compression: plan.compression,
     raw: clip(
-      [
-        rawText,
-        "",
-        `[${ORGANIZER_TOOL_NAME}]`,
-        JSON.stringify(captured.args ?? plan, null, 2),
-      ]
+      [rawText, "", `[${ORGANIZER_TOOL_NAME}]`, JSON.stringify(captured.args ?? plan, null, 2)]
         .filter((part) => part.trim().length > 0)
         .join("\n"),
       ORGANIZER_RAW_PROTOCOL_CHARS,
@@ -887,10 +883,7 @@ function emptyRejectionBuckets(): OrganizerRejectionBuckets {
   };
 }
 
-function incrementBucket(
-  buckets: OrganizerRejectionBuckets,
-  key: keyof OrganizerRejectionBuckets,
-) {
+function incrementBucket(buckets: OrganizerRejectionBuckets, key: keyof OrganizerRejectionBuckets) {
   buckets[key] += 1;
 }
 
@@ -1004,10 +997,7 @@ function shouldQueueOrganizerDecision(params: {
   );
 }
 
-function addRejectionBucketForReasons(
-  buckets: OrganizerRejectionBuckets,
-  reasons: string[],
-) {
+function addRejectionBucketForReasons(buckets: OrganizerRejectionBuckets, reasons: string[]) {
   if (reasons.includes("review_required_by_llm")) {
     incrementBucket(buckets, "reviewRequiredByLlm");
   }
@@ -1139,48 +1129,48 @@ function buildSafeDecisions(results: ParsedClusterResult[], run: MemoryOrganizeR
           addRejectionBucketForReasons(rejectionBuckets, risk.reasons);
           continue;
         }
-          const description = item.descriptionHint || targetEntry.description;
-          const body = synthesizeBodyFromSources(
-            targetEntry,
-            [targetEntry, ...sourceEntries],
-            reason,
-            evidencePreserved,
+        const description = item.descriptionHint || targetEntry.description;
+        const body = synthesizeBodyFromSources(
+          targetEntry,
+          [targetEntry, ...sourceEntries],
+          reason,
+          evidencePreserved,
+        );
+        const groupId = organizerMergeGroupId(cluster.id, targetEntry.slug, [
+          targetEntry.slug,
+          ...sourceSlugs,
+        ]);
+        if (utf8ByteLength(body) > ORGANIZER_MEMORY_BODY_LIMIT_BYTES) {
+          reviewSkipped += 1;
+          incrementBucket(rejectionBuckets, "missingPayload");
+          reviewNotes.push(
+            `${cluster.id}: merge_into ${targetEntry.slug} - merged body exceeds ${ORGANIZER_MEMORY_BODY_LIMIT_BYTES} bytes; skipped automatic apply and requires a shorter manual rewrite.`,
           );
-          const groupId = organizerMergeGroupId(cluster.id, targetEntry.slug, [
-            targetEntry.slug,
-            ...sourceSlugs,
-          ]);
-          if (utf8ByteLength(body) > ORGANIZER_MEMORY_BODY_LIMIT_BYTES) {
-            reviewSkipped += 1;
-            incrementBucket(rejectionBuckets, "missingPayload");
-            reviewNotes.push(
-              `${cluster.id}: merge_into ${targetEntry.slug} - merged body exceeds ${ORGANIZER_MEMORY_BODY_LIMIT_BYTES} bytes; skipped automatic apply and requires a shorter manual rewrite.`,
-            );
-            continue;
-          }
-          decisions.push({
-            op: "upsert",
-            slug: targetEntry.slug,
-            scope: targetEntry.scope,
-            workdirHash: targetEntry.scope === "project" ? targetEntry.workdirHash : undefined,
+          continue;
+        }
+        decisions.push({
+          op: "upsert",
+          slug: targetEntry.slug,
+          scope: targetEntry.scope,
+          workdirHash: targetEntry.scope === "project" ? targetEntry.workdirHash : undefined,
           memoryType: targetEntry.memoryType as MemoryType,
           description,
           body,
           reason: reason || "memory organizer update",
           confidence,
           riskLevel: risk.risk,
-            requiresUserAck:
-              risk.risk !== "low" ||
-              sourceEntries.some(isReviewed) ||
-              isReviewed(targetEntry) ||
-              risk.reasons.includes("cross_type") ||
-              risk.reasons.includes("cross_scope"),
-            sourceSlugs: [targetEntry.slug, ...sourceSlugs],
-            evidencePreserved,
-            blockedReasons: risk.reasons,
-            groupId,
-          });
-          for (const sourceEntry of sourceEntries) {
+          requiresUserAck:
+            risk.risk !== "low" ||
+            sourceEntries.some(isReviewed) ||
+            isReviewed(targetEntry) ||
+            risk.reasons.includes("cross_type") ||
+            risk.reasons.includes("cross_scope"),
+          sourceSlugs: [targetEntry.slug, ...sourceSlugs],
+          evidencePreserved,
+          blockedReasons: risk.reasons,
+          groupId,
+        });
+        for (const sourceEntry of sourceEntries) {
           if (sourceEntry.memoryType === "daily") {
             reviewSkipped += 1;
             incrementBucket(rejectionBuckets, "unsupported");
@@ -1207,9 +1197,9 @@ function buildSafeDecisions(results: ParsedClusterResult[], run: MemoryOrganizeR
             addRejectionBucketForReasons(rejectionBuckets, deleteRisk.reasons);
             continue;
           }
-            decisions.push({
-              op: "delete",
-              slug: sourceEntry.slug,
+          decisions.push({
+            op: "delete",
+            slug: sourceEntry.slug,
             scope: sourceEntry.scope,
             workdirHash: sourceEntry.scope === "project" ? sourceEntry.workdirHash : undefined,
             reason: `merged into ${targetEntry.slug}`,
@@ -1220,11 +1210,11 @@ function buildSafeDecisions(results: ParsedClusterResult[], run: MemoryOrganizeR
               isReviewed(sourceEntry) ||
               deleteRisk.reasons.includes("cross_type") ||
               deleteRisk.reasons.includes("cross_scope"),
-              sourceSlugs: [sourceEntry.slug, targetEntry.slug],
-              evidencePreserved,
-              blockedReasons: deleteRisk.reasons,
-              groupId,
-            });
+            sourceSlugs: [sourceEntry.slug, targetEntry.slug],
+            evidencePreserved,
+            blockedReasons: deleteRisk.reasons,
+            groupId,
+          });
           mergedCount += 1;
         }
       }
@@ -1557,8 +1547,7 @@ export function MemoryOrganizerRunner({ settings, setSettings }: MemoryOrganizer
     }
 
     const onPoke = (event: Event) => {
-      const force =
-        !(event instanceof CustomEvent) || event.detail?.force !== false;
+      const force = !(event instanceof CustomEvent) || event.detail?.force !== false;
       void tick(force);
     };
     window.addEventListener(MEMORY_ORGANIZER_EVENT, onPoke);

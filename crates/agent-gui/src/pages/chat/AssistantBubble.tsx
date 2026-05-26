@@ -1,16 +1,19 @@
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { generateDiffFile } from "@git-diff-view/file";
+import { DiffModeEnum, DiffView } from "@git-diff-view/react";
 import type { ImageContent, ToolResultMessage, Usage } from "@mariozechner/pi-ai";
+import { memo, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import iconSimpleUrl from "../../../src-tauri/icons/icon-simple.png";
+import type { IconComponent } from "../../components/icons";
 import {
   Bot,
   Brain,
   ChevronRight,
   Eye,
+  FilePenLine,
+  FileText,
+  FolderTree,
   ImageIcon,
   ImageOff,
-  FileText,
-  FilePenLine,
-  FolderTree,
   Loader2,
   Plug,
   Search,
@@ -19,30 +22,27 @@ import {
   Trash2,
   Wrench,
 } from "../../components/icons";
-import type { IconComponent } from "../../components/icons";
-import { DiffView, DiffModeEnum } from "@git-diff-view/react";
-import { generateDiffFile } from "@git-diff-view/file";
 import "@git-diff-view/react/styles/diff-view.css";
 
-import { LiveMarkdown, Markdown } from "../../components/Markdown";
 import { ImagePreview, type ImagePreviewSlide } from "../../components/chat/ImagePreview";
+import { LiveMarkdown, Markdown } from "../../components/Markdown";
 import { useLocale } from "../../i18n";
-import { cn } from "../../lib/shared/utils";
+import type { HostedSearchBlock } from "../../lib/chat/messages/hostedSearch";
 import {
   previewText,
   safeStringify,
-  toolCallArgsForDisplay,
-  toolResultMessageToText,
   summarizeToolCall,
   type ToolTraceItem,
+  toolCallArgsForDisplay,
+  toolResultMessageToText,
   type UiRound,
 } from "../../lib/chat/messages/uiMessages";
-import type { HostedSearchBlock } from "../../lib/chat/messages/hostedSearch";
 import { normalizeLiveToolStatus, VIBING_STATUS } from "../../lib/chat/page/chatPageHelpers";
 import { prepareImageProxyUrl } from "../../lib/providers/proxy";
+import { cn } from "../../lib/shared/utils";
 import type {
-  DeleteResultDetails,
   DelegateAgentCardResultDetails,
+  DeleteResultDetails,
   DisplayImageItemDetails,
   DisplayImageResultDetails,
   EditResultDetails,
@@ -54,8 +54,8 @@ import type {
   ReadImageResultDetails,
   ReadNotebookResultDetails,
   ReadPdfResultDetails,
-  SkillsManagerResultDetails,
   ReadTextResultDetails,
+  SkillsManagerResultDetails,
   SubagentMessageResultDetails,
   WriteResultDetails,
 } from "../../lib/tools/builtinTypes";
@@ -319,10 +319,7 @@ function getLatestHostedSearchTitle(
   return t("chat.search.noQuery");
 }
 
-function getHostedSearchCountLabel(
-  count: number,
-  t: (key: string) => string,
-) {
+function getHostedSearchCountLabel(count: number, t: (key: string) => string) {
   return count <= 1 ? t("chat.search.oneSearch") : `${count} ${t("chat.search.searches")}`;
 }
 
@@ -362,7 +359,8 @@ function HostedSearchGroupView({ items }: { items: HostedSearchBlock[] }) {
         <div
           className="relative mt-0.5 flex h-[24px] w-[24px] shrink-0 items-center justify-center rounded-[7px] sm:mt-0"
           style={{
-            background: "linear-gradient(135deg, hsl(var(--tool-search-accent) / 0.13), hsl(var(--tool-search-accent) / 0.06))",
+            background:
+              "linear-gradient(135deg, hsl(var(--tool-search-accent) / 0.13), hsl(var(--tool-search-accent) / 0.06))",
           }}
         >
           {isSearching ? (
@@ -444,9 +442,7 @@ function HostedSearchGroupView({ items }: { items: HostedSearchBlock[] }) {
                       className="block min-w-0 max-w-full rounded-[6px] border border-transparent px-2 py-1 text-[12px] transition-colors hover:border-border/45 hover:bg-background/60"
                       title={source.url}
                     >
-                      <span className="block truncate font-medium text-foreground/85">
-                        {label}
-                      </span>
+                      <span className="block truncate font-medium text-foreground/85">{label}</span>
                       <span className="block truncate text-muted-foreground">
                         {getSourceHost(source.url)}
                       </span>
@@ -465,21 +461,36 @@ function HostedSearchGroupView({ items }: { items: HostedSearchBlock[] }) {
 function getToolMeta(name: string): { Icon: IconComponent; accent: string; category: string } {
   switch (name) {
     case "Bash":
-    case "ManagedProcess": return { Icon: Terminal, accent: "var(--tool-bash-accent)", category: "terminal" };
-    case "Read":   return { Icon: Eye,         accent: "var(--tool-file-accent)",   category: "file" };
-    case "Image":  return { Icon: ImageIcon,   accent: "var(--tool-file-accent)",   category: "file" };
-    case "SkillsManager": return { Icon: Eye,  accent: "var(--tool-file-accent)",   category: "file" };
-    case "MemoryManager": return { Icon: Brain, accent: "var(--tool-list-accent)",   category: "system" };
-    case "McpManager": return { Icon: Plug,     accent: "var(--tool-list-accent)",   category: "mcp" };
-    case "Agent":  return { Icon: Bot,         accent: "var(--tool-list-accent)",   category: "system" };
-    case "SendMessage": return { Icon: Bot,     accent: "var(--tool-list-accent)",   category: "system" };
-    case "Write":  return { Icon: FileText,    accent: "var(--tool-file-accent)",   category: "file" };
-    case "Edit":   return { Icon: FilePenLine, accent: "var(--tool-file-accent)",   category: "file" };
-    case "Delete": return { Icon: Trash2,      accent: "var(--tool-file-accent)",   category: "file" };
-    case "Glob":   return { Icon: Search,      accent: "var(--tool-search-accent)", category: "search" };
-    case "Grep":   return { Icon: Search,      accent: "var(--tool-search-accent)", category: "search" };
-    case "List":   return { Icon: FolderTree,  accent: "var(--tool-list-accent)",   category: "list" };
-    default:       return { Icon: Wrench,      accent: "var(--tool-file-accent)",   category: "other" };
+    case "ManagedProcess":
+      return { Icon: Terminal, accent: "var(--tool-bash-accent)", category: "terminal" };
+    case "Read":
+      return { Icon: Eye, accent: "var(--tool-file-accent)", category: "file" };
+    case "Image":
+      return { Icon: ImageIcon, accent: "var(--tool-file-accent)", category: "file" };
+    case "SkillsManager":
+      return { Icon: Eye, accent: "var(--tool-file-accent)", category: "file" };
+    case "MemoryManager":
+      return { Icon: Brain, accent: "var(--tool-list-accent)", category: "system" };
+    case "McpManager":
+      return { Icon: Plug, accent: "var(--tool-list-accent)", category: "mcp" };
+    case "Agent":
+      return { Icon: Bot, accent: "var(--tool-list-accent)", category: "system" };
+    case "SendMessage":
+      return { Icon: Bot, accent: "var(--tool-list-accent)", category: "system" };
+    case "Write":
+      return { Icon: FileText, accent: "var(--tool-file-accent)", category: "file" };
+    case "Edit":
+      return { Icon: FilePenLine, accent: "var(--tool-file-accent)", category: "file" };
+    case "Delete":
+      return { Icon: Trash2, accent: "var(--tool-file-accent)", category: "file" };
+    case "Glob":
+      return { Icon: Search, accent: "var(--tool-search-accent)", category: "search" };
+    case "Grep":
+      return { Icon: Search, accent: "var(--tool-search-accent)", category: "search" };
+    case "List":
+      return { Icon: FolderTree, accent: "var(--tool-list-accent)", category: "list" };
+    default:
+      return { Icon: Wrench, accent: "var(--tool-file-accent)", category: "other" };
   }
 }
 
@@ -516,7 +527,9 @@ function getDelegateAgentInlineSummary(item: ToolTraceItem) {
     displayString(args.name) ||
     displayString(args.agent_id) ||
     displayString(args.id);
-  const task = agent ? getDelegateAgentTask(agent) : displayString(args.prompt) || displayString(args.description);
+  const task = agent
+    ? getDelegateAgentTask(agent)
+    : displayString(args.prompt) || displayString(args.description);
 
   if (name && task) return `${name} - ${compactInlineText(task, 96)}`;
   return name || compactInlineText(task, 120);
@@ -576,7 +589,6 @@ type GroupedRoundBlock =
       key: string;
       items: ToolTraceItem[];
     };
-
 
 type ShellResultDetails = {
   exit_code: number;
@@ -771,11 +783,7 @@ function getDominantToolName(items: ToolTraceItem[]) {
   return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "Tool";
 }
 
-function ToolSection(props: {
-  label: string;
-  trailing?: ReactNode;
-  children: ReactNode;
-}) {
+function ToolSection(props: { label: string; trailing?: ReactNode; children: ReactNode }) {
   const { label, trailing, children } = props;
   return (
     <section className="space-y-2">
@@ -892,64 +900,94 @@ function getToolDisplay(toolCall: { name: string; arguments?: Record<string, unk
 
   switch (name) {
     case "Read":
-      if (typeof args.start_line === "number") tags.push({ label: "start", value: String(args.start_line) });
+      if (typeof args.start_line === "number")
+        tags.push({ label: "start", value: String(args.start_line) });
       if (typeof args.limit === "number") tags.push({ label: "limit", value: String(args.limit) });
-      if (typeof args.page_start === "number") tags.push({ label: "page", value: String(args.page_start) });
-      if (typeof args.page_limit === "number") tags.push({ label: "pages", value: String(args.page_limit) });
-      if (typeof args.cell_start === "number") tags.push({ label: "cell", value: String(args.cell_start) });
-      if (typeof args.cell_limit === "number") tags.push({ label: "cells", value: String(args.cell_limit) });
+      if (typeof args.page_start === "number")
+        tags.push({ label: "page", value: String(args.page_start) });
+      if (typeof args.page_limit === "number")
+        tags.push({ label: "pages", value: String(args.page_limit) });
+      if (typeof args.cell_start === "number")
+        tags.push({ label: "cell", value: String(args.cell_start) });
+      if (typeof args.cell_limit === "number")
+        tags.push({ label: "cells", value: String(args.cell_limit) });
       return { type: "file" as const, path, tags };
     case "SkillsManager":
-      if (typeof args.offset === "number") tags.push({ label: "start", value: String(args.offset + 1) });
-      if (typeof args.length === "number") tags.push({ label: "limit", value: String(args.length) });
+      if (typeof args.offset === "number")
+        tags.push({ label: "start", value: String(args.offset + 1) });
+      if (typeof args.length === "number")
+        tags.push({ label: "limit", value: String(args.length) });
       return { type: "file" as const, path, tags };
     case "MemoryManager":
-      if (typeof args.action === "string") tags.push({ label: "action", value: args.action as string });
+      if (typeof args.action === "string")
+        tags.push({ label: "action", value: args.action as string });
       if (typeof args.slug === "string") tags.push({ label: "slug", value: args.slug as string });
-      if (typeof args.scope === "string") tags.push({ label: "scope", value: args.scope as string });
+      if (typeof args.scope === "string")
+        tags.push({ label: "scope", value: args.scope as string });
       if (typeof args.type === "string") tags.push({ label: "type", value: args.type as string });
       return { type: "generic" as const, path: null, pattern: null, tags };
     case "McpManager":
-      if (typeof args.action === "string") tags.push({ label: "action", value: args.action as string });
-      if (typeof args.server_id === "string") tags.push({ label: "server", value: args.server_id as string });
-      if (Array.isArray(args.server_ids)) tags.push({ label: "servers", value: String(args.server_ids.length) });
-      if (typeof args.conflict === "string") tags.push({ label: "conflict", value: args.conflict as string });
+      if (typeof args.action === "string")
+        tags.push({ label: "action", value: args.action as string });
+      if (typeof args.server_id === "string")
+        tags.push({ label: "server", value: args.server_id as string });
+      if (Array.isArray(args.server_ids))
+        tags.push({ label: "servers", value: String(args.server_ids.length) });
+      if (typeof args.conflict === "string")
+        tags.push({ label: "conflict", value: args.conflict as string });
       if (args.include_schema === true) tags.push({ label: "schema", value: "true" });
       return { type: "generic" as const, path: null, pattern: null, tags };
     case "SendMessage":
       if (typeof args.to === "string") tags.push({ label: "to", value: args.to as string });
-      if (typeof args.channel === "string") tags.push({ label: "channel", value: args.channel as string });
-      if (typeof args.subject === "string") tags.push({ label: "subject", value: args.subject as string });
-      if (typeof args.summary === "string" && typeof args.subject !== "string") tags.push({ label: "subject", value: args.summary as string });
-      if (typeof args.message === "string") tags.push({ label: "message", value: `${(args.message as string).length} chars` });
+      if (typeof args.channel === "string")
+        tags.push({ label: "channel", value: args.channel as string });
+      if (typeof args.subject === "string")
+        tags.push({ label: "subject", value: args.subject as string });
+      if (typeof args.summary === "string" && typeof args.subject !== "string")
+        tags.push({ label: "subject", value: args.summary as string });
+      if (typeof args.message === "string")
+        tags.push({ label: "message", value: `${(args.message as string).length} chars` });
       return { type: "generic" as const, path: null, pattern: null, tags };
     case "Write":
       tags.push({ label: "mode", value: "rewrite" });
-      if (typeof args.content === "string") tags.push({ label: "content", value: `${(args.content as string).length} chars` });
+      if (typeof args.content === "string")
+        tags.push({ label: "content", value: `${(args.content as string).length} chars` });
       return { type: "file" as const, path, tags };
     case "Edit":
-      if (typeof args.old_string === "string") tags.push({ label: "old", value: `${(args.old_string as string).length}c` });
-      if (typeof args.new_string === "string") tags.push({ label: "new", value: `${(args.new_string as string).length}c` });
-      if (typeof args.expected_replacements === "number") tags.push({ label: "×", value: String(args.expected_replacements) });
+      if (typeof args.old_string === "string")
+        tags.push({ label: "old", value: `${(args.old_string as string).length}c` });
+      if (typeof args.new_string === "string")
+        tags.push({ label: "new", value: `${(args.new_string as string).length}c` });
+      if (typeof args.expected_replacements === "number")
+        tags.push({ label: "×", value: String(args.expected_replacements) });
       if (args.replace_all === true) tags.push({ label: "all", value: "true" });
       return { type: "file" as const, path, tags };
     case "Delete":
       return { type: "file" as const, path, tags };
     case "List":
       if (typeof args.depth === "number") tags.push({ label: "depth", value: String(args.depth) });
-      if (typeof args.offset === "number") tags.push({ label: "offset", value: String(args.offset) });
-      if (typeof args.max_results === "number") tags.push({ label: "max", value: String(args.max_results) });
+      if (typeof args.offset === "number")
+        tags.push({ label: "offset", value: String(args.offset) });
+      if (typeof args.max_results === "number")
+        tags.push({ label: "max", value: String(args.max_results) });
       return { type: "file" as const, path: path || "/", tags };
     case "Glob":
-      if (typeof args.offset === "number") tags.push({ label: "offset", value: String(args.offset) });
-      if (typeof args.max_results === "number") tags.push({ label: "max", value: String(args.max_results) });
+      if (typeof args.offset === "number")
+        tags.push({ label: "offset", value: String(args.offset) });
+      if (typeof args.max_results === "number")
+        tags.push({ label: "max", value: String(args.max_results) });
       return { type: "search" as const, path, pattern, tags };
     case "Grep":
-      if (typeof args.file_pattern === "string") tags.push({ label: "filter", value: args.file_pattern as string });
-      if (typeof args.output_mode === "string") tags.push({ label: "mode", value: args.output_mode as string });
-      if (typeof args.ignore_case === "boolean" && args.ignore_case) tags.push({ label: "flag", value: "-i" });
-      if (typeof args.context === "number" && args.context > 0) tags.push({ label: "ctx", value: String(args.context) });
-      if (typeof args.head_limit === "number") tags.push({ label: "head", value: String(args.head_limit) });
+      if (typeof args.file_pattern === "string")
+        tags.push({ label: "filter", value: args.file_pattern as string });
+      if (typeof args.output_mode === "string")
+        tags.push({ label: "mode", value: args.output_mode as string });
+      if (typeof args.ignore_case === "boolean" && args.ignore_case)
+        tags.push({ label: "flag", value: "-i" });
+      if (typeof args.context === "number" && args.context > 0)
+        tags.push({ label: "ctx", value: String(args.context) });
+      if (typeof args.head_limit === "number")
+        tags.push({ label: "head", value: String(args.head_limit) });
       if (args.multiline === true) tags.push({ label: "multi", value: "true" });
       return { type: "search" as const, path, pattern, tags };
     case "Bash":
@@ -958,8 +996,10 @@ function getToolDisplay(toolCall: { name: string; arguments?: Record<string, unk
       // Generic: collect all string/number/boolean args
       const entries: MetaTag[] = [];
       for (const [k, v] of Object.entries(args)) {
-        if (typeof v === "string") entries.push({ label: k, value: v.length > 60 ? `${v.slice(0, 60)}…` : v });
-        else if (typeof v === "number" || typeof v === "boolean") entries.push({ label: k, value: String(v) });
+        if (typeof v === "string")
+          entries.push({ label: k, value: v.length > 60 ? `${v.slice(0, 60)}…` : v });
+        else if (typeof v === "number" || typeof v === "boolean")
+          entries.push({ label: k, value: String(v) });
       }
       return { type: "generic" as const, path: null, pattern: null, tags: entries };
     }
@@ -994,10 +1034,7 @@ function ToolArgsDisplay({ item }: { item: ToolTraceItem }) {
 
   if (isDelegateAgentCardToolCall(toolCall)) {
     const args = toolCall.arguments || {};
-    const name =
-      displayString(args.name) ||
-      displayString(args.agent_id) ||
-      displayString(args.id);
+    const name = displayString(args.name) || displayString(args.agent_id) || displayString(args.id);
     const role = displayString(args.role);
     const task = displayString(args.prompt) || displayString(args.description);
 
@@ -1022,9 +1059,7 @@ function ToolArgsDisplay({ item }: { item: ToolTraceItem }) {
         {task ? (
           <ToolSurface>
             <ToolSurfaceLabel label="task" />
-            <div className="break-words text-[11.5px] leading-[1.6] text-foreground/82">
-              {task}
-            </div>
+            <div className="break-words text-[11.5px] leading-[1.6] text-foreground/82">{task}</div>
           </ToolSurface>
         ) : null}
       </div>
@@ -1033,12 +1068,16 @@ function ToolArgsDisplay({ item }: { item: ToolTraceItem }) {
 
   // Bash: terminal block
   if (display.type === "bash") {
-    const cmd = typeof toolCall.arguments?.command === "string" ? (toolCall.arguments.command as string).trim() : "";
+    const cmd =
+      typeof toolCall.arguments?.command === "string"
+        ? (toolCall.arguments.command as string).trim()
+        : "";
     if (!cmd) return null;
     return (
       <ToolSurface className="overflow-hidden border-emerald-500/15 bg-zinc-950/90 px-0 py-0 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] dark:border-white/[0.08] dark:bg-zinc-950/90">
         <ToolScrollablePre className="max-h-44 rounded-none text-emerald-300/90">
-          <span className="mr-1 select-none text-emerald-500/30">$</span>{cmd}
+          <span className="mr-1 select-none text-emerald-500/30">$</span>
+          {cmd}
         </ToolScrollablePre>
       </ToolSurface>
     );
@@ -1139,7 +1178,11 @@ function getImageDataUrl(image: ImageContent) {
 }
 
 function isDisplayImageItemDetails(value: unknown): value is DisplayImageItemDetails {
-  return Boolean(value) && typeof value === "object" && typeof (value as { path?: unknown }).path === "string";
+  return (
+    Boolean(value) &&
+    typeof value === "object" &&
+    typeof (value as { path?: unknown }).path === "string"
+  );
 }
 
 function getDisplayImageDetails(result: ToolResultMessage): DisplayImageItemDetails[] {
@@ -1220,7 +1263,9 @@ function parseNativeDisplayImageProxyKey(proxyKey: string): NativeDisplayImagePr
 
 function useNativeDisplayImageSources(entries: NativeDisplayImageEntry[]) {
   const proxyKey = getNativeDisplayImageProxyKey(entries);
-  const [proxySources, setProxySources] = useState<Record<number, NativeDisplayImageSourceState>>({});
+  const [proxySources, setProxySources] = useState<Record<number, NativeDisplayImageSourceState>>(
+    {},
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -1398,13 +1443,17 @@ function ToolResultImagePreview(props: {
           if (canPreview) setPreviewOpen(true);
         }}
         title={alt}
-        aria-label={canPreview ? `${t("chat.image.preview")} ${alt}` : `${t("chat.image.loading")} ${alt}`}
+        aria-label={
+          canPreview ? `${t("chat.image.preview")} ${alt}` : `${t("chat.image.loading")} ${alt}`
+        }
       >
         <div className={cn("relative w-full", imageStatus !== "loaded" && "min-h-32")}>
           {imageStatus !== "loaded" ? (
             <ToolImageStatusCard
               status={imageStatus === "error" ? "error" : "loading"}
-              title={imageStatus === "error" ? t("chat.image.unavailable") : t("chat.image.loading")}
+              title={
+                imageStatus === "error" ? t("chat.image.unavailable") : t("chat.image.loading")
+              }
               detail={imageStatus === "error" ? t("chat.image.checkGenerated") : imageDetail}
               className="absolute inset-0 min-h-32"
             />
@@ -1429,11 +1478,7 @@ function ToolResultImagePreview(props: {
         </div>
       </button>
       {previewOpen ? (
-        <ImagePreview
-          open={previewOpen}
-          slides={slides}
-          onClose={() => setPreviewOpen(false)}
-        />
+        <ImagePreview open={previewOpen} slides={slides} onClose={() => setPreviewOpen(false)} />
       ) : null}
     </>
   );
@@ -1516,7 +1561,9 @@ function NativeDisplayImageTile(props: {
       type="button"
       className={cn(
         "relative flex max-w-full items-center justify-center overflow-hidden rounded-[10px] text-left shadow-sm transition-[filter,transform] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 disabled:opacity-100",
-        canPreview ? "cursor-zoom-in hover:brightness-[0.98]" : "cursor-default hover:brightness-100",
+        canPreview
+          ? "cursor-zoom-in hover:brightness-[0.98]"
+          : "cursor-default hover:brightness-100",
         isGallery && "aspect-square w-full bg-muted/30",
         !isGallery && (isSvgImage || isWaiting) && "min-h-28 w-full max-w-3xl bg-muted/30",
         imageStatus === "error" && "shadow-none",
@@ -1649,21 +1696,46 @@ function guessLangFromPath(filePath?: string): string {
   if (!filePath) return "txt";
   const ext = filePath.split(".").pop()?.toLowerCase();
   const map: Record<string, string> = {
-    ts: "typescript", tsx: "typescript", js: "javascript", jsx: "javascript",
-    py: "python", rs: "rust", go: "go", java: "java", kt: "kotlin",
-    rb: "ruby", swift: "swift", c: "c", cpp: "cpp", h: "c", hpp: "cpp",
-    cs: "csharp", css: "css", scss: "scss", html: "html", vue: "vue",
-    json: "json", yaml: "yaml", yml: "yaml", toml: "toml", xml: "xml",
-    md: "markdown", sql: "sql", sh: "bash", zsh: "bash", bash: "bash",
-    dockerfile: "dockerfile", lua: "lua", php: "php", dart: "dart",
+    ts: "typescript",
+    tsx: "typescript",
+    js: "javascript",
+    jsx: "javascript",
+    py: "python",
+    rs: "rust",
+    go: "go",
+    java: "java",
+    kt: "kotlin",
+    rb: "ruby",
+    swift: "swift",
+    c: "c",
+    cpp: "cpp",
+    h: "c",
+    hpp: "cpp",
+    cs: "csharp",
+    css: "css",
+    scss: "scss",
+    html: "html",
+    vue: "vue",
+    json: "json",
+    yaml: "yaml",
+    yml: "yaml",
+    toml: "toml",
+    xml: "xml",
+    md: "markdown",
+    sql: "sql",
+    sh: "bash",
+    zsh: "bash",
+    bash: "bash",
+    dockerfile: "dockerfile",
+    lua: "lua",
+    php: "php",
+    dart: "dart",
   };
   return (ext && map[ext]) || "txt";
 }
 
 function useIsDark() {
-  const [isDark, setIsDark] = useState(() =>
-    document.documentElement.classList.contains("dark"),
-  );
+  const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains("dark"));
   useEffect(() => {
     const observer = new MutationObserver(() => {
       setIsDark(document.documentElement.classList.contains("dark"));
@@ -1682,9 +1754,12 @@ function EditDiffView(props: { beforeText: string; afterText: string; filePath?:
   const diffFile = useMemo(() => {
     if (!beforeText && !afterText) return undefined;
     const instance = generateDiffFile(
-      filePath ?? "old", beforeText,
-      filePath ?? "new", afterText,
-      lang, lang,
+      filePath ?? "old",
+      beforeText,
+      filePath ?? "new",
+      afterText,
+      lang,
+      lang,
     );
     instance.init();
     instance.buildSplitDiffLines();
@@ -1726,8 +1801,14 @@ function ToolResultDisplay({ item, result }: { item: ToolTraceItem; result: Tool
             ...(typeof shellDetails.effective_timeout_ms === "number"
               ? [{ label: "timeout_ms", value: `${shellDetails.effective_timeout_ms}` }]
               : []),
-            { label: "stdout", value: summarizeShellStream(shellDetails.stdout, shellDetails.stdout_truncated) },
-            { label: "stderr", value: summarizeShellStream(shellDetails.stderr, shellDetails.stderr_truncated) },
+            {
+              label: "stdout",
+              value: summarizeShellStream(shellDetails.stdout, shellDetails.stdout_truncated),
+            },
+            {
+              label: "stderr",
+              value: summarizeShellStream(shellDetails.stderr, shellDetails.stderr_truncated),
+            },
             ...(shellDetails.timed_out ? [{ label: "timeout", value: "true" }] : []),
             ...(shellDetails.cancelled ? [{ label: "cancelled", value: "true" }] : []),
           ]}
@@ -1744,14 +1825,22 @@ function ToolResultDisplay({ item, result }: { item: ToolTraceItem; result: Tool
           <MetaTags
             tags={[
               ...fileRootTags(details.root),
-              { label: "lines", value: details.numLines > 0 ? `${details.startLine}-${details.startLine + details.numLines - 1}/${details.totalLines}` : `empty/${details.totalLines}` },
+              {
+                label: "lines",
+                value:
+                  details.numLines > 0
+                    ? `${details.startLine}-${details.startLine + details.numLines - 1}/${details.totalLines}`
+                    : `empty/${details.totalLines}`,
+              },
               { label: "view", value: details.isPartialView ? "partial" : "full" },
               ...(details.truncated ? [{ label: "truncated", value: "true" }] : []),
               ...(details.reusedExisting ? [{ label: "cache", value: "unchanged" }] : []),
             ]}
           />
         </ToolSurface>
-        {!details.reusedExisting ? <CodePreview text={extractReadBody(text)} maxChars={8000} /> : null}
+        {!details.reusedExisting ? (
+          <CodePreview text={extractReadBody(text)} maxChars={8000} />
+        ) : null}
       </div>
     );
   }
@@ -1789,15 +1878,29 @@ function ToolResultDisplay({ item, result }: { item: ToolTraceItem; result: Tool
             tags={[
               { label: "action", value: details.action },
               { label: "root", value: details.rootDir },
-              ...(typeof details.skillsCount === "number" ? [{ label: "skills", value: String(details.skillsCount) }] : []),
-              ...(typeof details.installedCount === "number" ? [{ label: "installed", value: String(details.installedCount) }] : []),
+              ...(typeof details.skillsCount === "number"
+                ? [{ label: "skills", value: String(details.skillsCount) }]
+                : []),
+              ...(typeof details.installedCount === "number"
+                ? [{ label: "installed", value: String(details.installedCount) }]
+                : []),
               ...(details.createdName ? [{ label: "created", value: details.createdName }] : []),
-              ...(typeof details.clawhubResultCount === "number" ? [{ label: "clawhub", value: String(details.clawhubResultCount) }] : []),
+              ...(typeof details.clawhubResultCount === "number"
+                ? [{ label: "clawhub", value: String(details.clawhubResultCount) }]
+                : []),
               ...(details.clawhubSlug ? [{ label: "slug", value: details.clawhubSlug }] : []),
-              ...(typeof details.validationOk === "boolean" ? [{ label: "valid", value: details.validationOk ? "true" : "false" }] : []),
-              ...(details.packageArchive ? [{ label: "archive", value: details.packageArchive }] : []),
-              ...(details.clawhubNextCursor ? [{ label: "cursor", value: details.clawhubNextCursor }] : []),
-              ...(typeof details.invalidCount === "number" && details.invalidCount > 0 ? [{ label: "invalid", value: String(details.invalidCount) }] : []),
+              ...(typeof details.validationOk === "boolean"
+                ? [{ label: "valid", value: details.validationOk ? "true" : "false" }]
+                : []),
+              ...(details.packageArchive
+                ? [{ label: "archive", value: details.packageArchive }]
+                : []),
+              ...(details.clawhubNextCursor
+                ? [{ label: "cursor", value: details.clawhubNextCursor }]
+                : []),
+              ...(typeof details.invalidCount === "number" && details.invalidCount > 0
+                ? [{ label: "invalid", value: String(details.invalidCount) }]
+                : []),
               ...(details.backup ? [{ label: "backup", value: details.backup }] : []),
             ]}
           />
@@ -1817,13 +1920,25 @@ function ToolResultDisplay({ item, result }: { item: ToolTraceItem; result: Tool
               { label: "action", value: details.action },
               ...(details.serverId ? [{ label: "server", value: details.serverId }] : []),
               ...(details.transport ? [{ label: "transport", value: details.transport }] : []),
-              ...(typeof details.ok === "boolean" ? [{ label: "ok", value: details.ok ? "true" : "false" }] : []),
+              ...(typeof details.ok === "boolean"
+                ? [{ label: "ok", value: details.ok ? "true" : "false" }]
+                : []),
               ...(details.phase ? [{ label: "phase", value: details.phase }] : []),
-              ...(typeof details.serverCount === "number" ? [{ label: "servers", value: String(details.serverCount) }] : []),
-              ...(typeof details.enabledCount === "number" ? [{ label: "enabled", value: String(details.enabledCount) }] : []),
-              ...(typeof details.toolsCount === "number" ? [{ label: "tools", value: String(details.toolsCount) }] : []),
-              ...(typeof details.changed === "boolean" ? [{ label: "changed", value: details.changed ? "true" : "false" }] : []),
-              ...(typeof details.stopped === "boolean" ? [{ label: "stopped", value: details.stopped ? "true" : "false" }] : []),
+              ...(typeof details.serverCount === "number"
+                ? [{ label: "servers", value: String(details.serverCount) }]
+                : []),
+              ...(typeof details.enabledCount === "number"
+                ? [{ label: "enabled", value: String(details.enabledCount) }]
+                : []),
+              ...(typeof details.toolsCount === "number"
+                ? [{ label: "tools", value: String(details.toolsCount) }]
+                : []),
+              ...(typeof details.changed === "boolean"
+                ? [{ label: "changed", value: details.changed ? "true" : "false" }]
+                : []),
+              ...(typeof details.stopped === "boolean"
+                ? [{ label: "stopped", value: details.stopped ? "true" : "false" }]
+                : []),
             ]}
           />
         </ToolSurface>
@@ -1883,7 +1998,9 @@ function ToolResultDisplay({ item, result }: { item: ToolTraceItem; result: Tool
             ]}
           />
         </ToolSurface>
-        {!details.reusedExisting ? <CodePreview text={extractReadBody(text)} maxChars={8000} /> : null}
+        {!details.reusedExisting ? (
+          <CodePreview text={extractReadBody(text)} maxChars={8000} />
+        ) : null}
       </div>
     );
   }
@@ -1908,7 +2025,9 @@ function ToolResultDisplay({ item, result }: { item: ToolTraceItem; result: Tool
             ]}
           />
         </ToolSurface>
-        {!details.reusedExisting ? <CodePreview text={extractReadBody(text)} maxChars={8000} /> : null}
+        {!details.reusedExisting ? (
+          <CodePreview text={extractReadBody(text)} maxChars={8000} />
+        ) : null}
       </div>
     );
   }
@@ -1930,7 +2049,9 @@ function ToolResultDisplay({ item, result }: { item: ToolTraceItem; result: Tool
             ]}
           />
         </ToolSurface>
-        {!details.reusedExisting ? <CodePreview text={extractReadBody(text)} maxChars={8000} /> : null}
+        {!details.reusedExisting ? (
+          <CodePreview text={extractReadBody(text)} maxChars={8000} />
+        ) : null}
       </div>
     );
   }
@@ -1969,7 +2090,9 @@ function ToolResultDisplay({ item, result }: { item: ToolTraceItem; result: Tool
     const details = result.details as DeleteResultDetails;
     return (
       <ToolSurface>
-        <MetaTags tags={[...fileRootTags(details.root), { label: "kind", value: details.targetKind }]} />
+        <MetaTags
+          tags={[...fileRootTags(details.root), { label: "kind", value: details.targetKind }]}
+        />
       </ToolSurface>
     );
   }
@@ -1996,8 +2119,13 @@ function ToolResultDisplay({ item, result }: { item: ToolTraceItem; result: Tool
                 key={`${entry.kind}-${entry.path}`}
                 className="flex items-start gap-2 rounded-[8px] px-1.5 py-1 text-[11px] leading-[1.5] even:bg-black/[0.02] dark:even:bg-white/[0.03]"
               >
-                <span className="mt-[1px] shrink-0 text-[10px] font-semibold uppercase text-muted-foreground/35">{entry.kind}</span>
-                <PathDisplay path={entry.path} className="min-w-0 break-all font-mono text-[11px]" />
+                <span className="mt-[1px] shrink-0 text-[10px] font-semibold uppercase text-muted-foreground/35">
+                  {entry.kind}
+                </span>
+                <PathDisplay
+                  path={entry.path}
+                  className="min-w-0 break-all font-mono text-[11px]"
+                />
               </div>
             ))}
           </div>
@@ -2060,7 +2188,10 @@ function ToolResultDisplay({ item, result }: { item: ToolTraceItem; result: Tool
                   key={file.path}
                   className="space-y-1 rounded-[8px] px-1.5 py-1 even:bg-black/[0.02] dark:even:bg-white/[0.03]"
                 >
-                  <PathDisplay path={file.path} className="block break-all font-mono text-[11px] leading-[1.5]" />
+                  <PathDisplay
+                    path={file.path}
+                    className="block break-all font-mono text-[11px] leading-[1.5]"
+                  />
                   <MetaTags
                     tags={[
                       { label: "count", value: String(file.count) },
@@ -2076,16 +2207,26 @@ function ToolResultDisplay({ item, result }: { item: ToolTraceItem; result: Tool
         ) : (
           <ToolSurface className="max-h-64 overflow-auto space-y-2">
             {details.matches.map((match, index) => (
-              <div key={`${match.path}:${match.line}:${index}`} className="rounded-[8px] border border-black/[0.05] bg-white/[0.55] p-2 dark:border-white/[0.06] dark:bg-white/[0.03]">
+              <div
+                key={`${match.path}:${match.line}:${index}`}
+                className="rounded-[8px] border border-black/[0.05] bg-white/[0.55] p-2 dark:border-white/[0.06] dark:bg-white/[0.03]"
+              >
                 <div className="flex items-start gap-2">
-                  <PathDisplay path={match.path} className="min-w-0 break-all font-mono text-[11px] leading-[1.5]" />
+                  <PathDisplay
+                    path={match.path}
+                    className="min-w-0 break-all font-mono text-[11px] leading-[1.5]"
+                  />
                   <span className="shrink-0 rounded bg-black/[0.04] px-1.5 py-[1px] text-[10px] font-semibold text-muted-foreground/60 dark:bg-white/[0.05]">
                     line {match.line}
                   </span>
                 </div>
-                {match.before.length > 0 ? <CodePreview text={match.before.join("\n")} maxChars={1500} /> : null}
+                {match.before.length > 0 ? (
+                  <CodePreview text={match.before.join("\n")} maxChars={1500} />
+                ) : null}
                 <CodePreview text={match.text} maxChars={1500} />
-                {match.after.length > 0 ? <CodePreview text={match.after.join("\n")} maxChars={1500} /> : null}
+                {match.after.length > 0 ? (
+                  <CodePreview text={match.after.join("\n")} maxChars={1500} />
+                ) : null}
               </div>
             ))}
           </ToolSurface>
@@ -2145,14 +2286,16 @@ function ToolResultDisplay({ item, result }: { item: ToolTraceItem; result: Tool
           ) : null}
           {shouldShowDelegateWorktreeLocation(agent) ? (
             <div className="break-all text-[10px] text-muted-foreground/70">
-              {agent.branchName ? `${agent.branchName} | ` : ""}{agent.worktreeRoot}
+              {agent.branchName ? `${agent.branchName} | ` : ""}
+              {agent.worktreeRoot}
             </div>
           ) : null}
-          {agent.diffStat ? (
-            <CodePreview text={agent.diffStat} maxChars={1200} />
-          ) : null}
+          {agent.diffStat ? <CodePreview text={agent.diffStat} maxChars={1200} /> : null}
           {showUntrackedFiles ? (
-            <CodePreview text={`untracked:\n${untrackedFiles.map((file) => `- ${file}`).join("\n")}`} maxChars={1200} />
+            <CodePreview
+              text={`untracked:\n${untrackedFiles.map((file) => `- ${file}`).join("\n")}`}
+              maxChars={1200}
+            />
           ) : null}
           {agent.worktreeStatusError ? (
             <CodePreview text={agent.worktreeStatusError} maxChars={1200} />
@@ -2166,21 +2309,39 @@ function ToolResultDisplay({ item, result }: { item: ToolTraceItem; result: Tool
             <CodePreview text={`fallback reason:\n${agent.applyFallbackReason}`} maxChars={1200} />
           ) : null}
           {agent.applyCopiedFiles && agent.applyCopiedFiles.length > 0 ? (
-            <CodePreview text={`copied:\n${agent.applyCopiedFiles.map((file) => `- ${file}`).join("\n")}`} maxChars={1200} />
+            <CodePreview
+              text={`copied:\n${agent.applyCopiedFiles.map((file) => `- ${file}`).join("\n")}`}
+              maxChars={1200}
+            />
           ) : null}
           {agent.applyDeletedFiles && agent.applyDeletedFiles.length > 0 ? (
-            <CodePreview text={`deleted:\n${agent.applyDeletedFiles.map((file) => `- ${file}`).join("\n")}`} maxChars={1200} />
+            <CodePreview
+              text={`deleted:\n${agent.applyDeletedFiles.map((file) => `- ${file}`).join("\n")}`}
+              maxChars={1200}
+            />
           ) : null}
           {agent.applyConflictFiles && agent.applyConflictFiles.length > 0 ? (
-            <CodePreview text={`apply conflicts:\n${agent.applyConflictFiles.map((file) => `- ${file}`).join("\n")}`} maxChars={1200} />
+            <CodePreview
+              text={`apply conflicts:\n${agent.applyConflictFiles.map((file) => `- ${file}`).join("\n")}`}
+              maxChars={1200}
+            />
           ) : null}
           {agent.worktreeCleanupError ? (
-            <CodePreview text={`worktree cleanup failed:\n${agent.worktreeCleanupError}`} maxChars={1200} />
+            <CodePreview
+              text={`worktree cleanup failed:\n${agent.worktreeCleanupError}`}
+              maxChars={1200}
+            />
           ) : agent.worktreeCleanupReason && agent.worktreeCleanupStatus === "retained" ? (
-            <CodePreview text={`worktree retained: ${agent.worktreeCleanupReason}`} maxChars={1200} />
+            <CodePreview
+              text={`worktree retained: ${agent.worktreeCleanupReason}`}
+              maxChars={1200}
+            />
           ) : null}
           {showCandidateArtifacts ? (
-            <CodePreview text={`candidate artifacts:\n${candidateArtifacts.map((file) => `- ${file}`).join("\n")}`} maxChars={1200} />
+            <CodePreview
+              text={`candidate artifacts:\n${candidateArtifacts.map((file) => `- ${file}`).join("\n")}`}
+              maxChars={1200}
+            />
           ) : null}
           {agent.error ? (
             <CodePreview text={agent.error} maxChars={1200} />
@@ -2263,9 +2424,7 @@ function ToolCallItem({
   const { t } = useLocale();
   const result = item.toolResult;
   const builtinResultKind = getBuiltinResultKind(result);
-  const shouldAutoOpen =
-    item.toolCall.name === "Image" ||
-    builtinResultKind === "display_image";
+  const shouldAutoOpen = item.toolCall.name === "Image" || builtinResultKind === "display_image";
   const [open, setOpen] = useState(shouldAutoOpen);
   const isDelegateAgentCard = isDelegateAgentCardToolCall(item.toolCall);
   const hasArgs = Object.keys(item.toolCall.arguments || {}).length > 0;
@@ -2319,7 +2478,9 @@ function ToolCallItem({
       open={open}
       className={cn(
         "group/tool overflow-hidden",
-        variant === "grouped" ? "tool-card-grouped rounded-[10px]" : "tool-card-enter rounded-[12px]",
+        variant === "grouped"
+          ? "tool-card-grouped rounded-[10px]"
+          : "tool-card-enter rounded-[12px]",
         // Frosted glass with saturate
         "border border-black/[0.06] bg-white/[0.72] backdrop-blur-xl backdrop-saturate-[1.8]",
         variant === "grouped"
@@ -2368,11 +2529,14 @@ function ToolCallItem({
           {/* Inline summary — truncated */}
           {isBash && firstLine ? (
             <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground/55">
-              <span className="text-muted-foreground/30">$</span>
-              {" "}{firstLine.length > 48 ? `${firstLine.slice(0, 48)}…` : firstLine}
+              <span className="text-muted-foreground/30">$</span>{" "}
+              {firstLine.length > 48 ? `${firstLine.slice(0, 48)}…` : firstLine}
             </span>
           ) : toolArgsSummary ? (
-            <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground/55" title={toolArgsSummary}>
+            <span
+              className="min-w-0 truncate font-mono text-[11px] text-muted-foreground/55"
+              title={toolArgsSummary}
+            >
               {toolArgsSummary}
             </span>
           ) : null}
@@ -2422,9 +2586,7 @@ function ToolCallItem({
 
                   if (isBash) {
                     return (
-                      <ToolScrollablePre
-                        className="max-h-56 bg-zinc-950/85 text-zinc-300/90 shadow-[inset_0_1px_2px_rgba(0,0,0,0.25)] dark:bg-zinc-900/80"
-                      >
+                      <ToolScrollablePre className="max-h-56 bg-zinc-950/85 text-zinc-300/90 shadow-[inset_0_1px_2px_rgba(0,0,0,0.25)] dark:bg-zinc-900/80">
                         {previewText(resultText, 6000)}
                       </ToolScrollablePre>
                     );
@@ -2492,10 +2654,7 @@ const MemoToolCallItem = memo(
     areToolTraceItemsEqual(previousProps.item, nextProps.item),
 );
 
-function ToolTraceGroup(props: {
-  items: ToolTraceItem[];
-  runningToolCallIds?: string[];
-}) {
+function ToolTraceGroup(props: { items: ToolTraceItem[]; runningToolCallIds?: string[] }) {
   const { items, runningToolCallIds = [] } = props;
   const { t } = useLocale();
   const counts = useMemo(
@@ -2504,10 +2663,7 @@ function ToolTraceGroup(props: {
   );
   const composition = useMemo(() => getToolGroupComposition(items), [items]);
   const dominantToolName = useMemo(() => getDominantToolName(items), [items]);
-  const allBash = useMemo(
-    () => items.every((item) => item.toolCall.name === "Bash"),
-    [items],
-  );
+  const allBash = useMemo(() => items.every((item) => item.toolCall.name === "Bash"), [items]);
   const meta = useMemo(
     () => (allBash ? getToolMeta("Bash") : getToolMeta(dominantToolName)),
     [allBash, dominantToolName],
@@ -2614,9 +2770,7 @@ function ToolTraceGroup(props: {
               key={getToolTraceKey(item, index)}
               item={item}
               variant="grouped"
-              isRunning={Boolean(
-                item.toolCall.id && runningToolCallIds.includes(item.toolCall.id),
-              )}
+              isRunning={Boolean(item.toolCall.id && runningToolCallIds.includes(item.toolCall.id))}
             />
           ))}
         </div>
@@ -2648,13 +2802,13 @@ function RoundContent(props: {
     toolStatusVariant,
     runningToolCallIds,
     thinkingOpen,
-  } =
-    props;
+  } = props;
   const hasContent =
     round.blocks.some((block) => {
       if (block.kind === "tool" || block.kind === "hostedSearch") return true;
       return block.text.trim().length > 0;
-    }) || (isActive && isLive);
+    }) ||
+    (isActive && isLive);
   const normalizedToolStatus =
     isActive && isLive ? normalizeLiveToolStatus(toolStatus ?? null) : null;
   const isCompactionStatus = toolStatusVariant === "compaction";
@@ -2702,12 +2856,7 @@ function RoundContent(props: {
         if (block.kind === "tool") {
           const displayImagePayload = getNativeDisplayImagePayload(block.item);
           if (displayImagePayload) {
-            return (
-              <NativeDisplayImageBlock
-                key={block.key}
-                payload={displayImagePayload}
-              />
-            );
+            return <NativeDisplayImageBlock key={block.key} payload={displayImagePayload} />;
           }
 
           if (block.item.toolCall.name === "Image" && !block.item.toolResult?.isError) {
@@ -2732,7 +2881,7 @@ function RoundContent(props: {
             <ToolTraceGroup
               key={block.key}
               items={block.items}
-              runningToolCallIds={isLive ? runningToolCallIds ?? [] : []}
+              runningToolCallIds={isLive ? (runningToolCallIds ?? []) : []}
             />
           );
         }
@@ -2756,15 +2905,13 @@ function RoundContent(props: {
             isAnimating
           />
         ) : (
-          <Markdown
-            key={block.key}
-            content={block.text}
-            className="font-openai-chat"
-          />
+          <Markdown key={block.key} content={block.text} className="font-openai-chat" />
         );
       })}
 
-      {showUsage ? <UsagePanel usage={round.meta?.usage} contextWindow={usageContextWindow} /> : null}
+      {showUsage ? (
+        <UsagePanel usage={round.meta?.usage} contextWindow={usageContextWindow} />
+      ) : null}
     </div>
   );
 }

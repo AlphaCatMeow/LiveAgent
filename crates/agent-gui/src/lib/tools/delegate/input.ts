@@ -1,5 +1,10 @@
 import { MAX_AGENTS } from "./constants";
-import type { DelegateAgentInput, DelegateApplyPolicy, DelegateExecutionMode, DelegateTaskIntent } from "./types";
+import type {
+  DelegateAgentInput,
+  DelegateApplyPolicy,
+  DelegateExecutionMode,
+  DelegateTaskIntent,
+} from "./types";
 import { optionalString } from "./utils";
 
 function normalizeExecutionModeOpt(value: unknown): DelegateExecutionMode | undefined {
@@ -62,18 +67,14 @@ function normalizePathList(value: unknown): string[] {
 }
 
 function maybeOutputPath(value: string) {
-  const text = value
-    .trim()
-    .replace(/^[`"'“”‘’]+|[`"'“”‘’，,。.；;:：)）\]]+$/g, "");
-  if (!text || /[*?\[\]]/.test(text) || /^https?:\/\//i.test(text)) return "";
+  const text = value.trim().replace(/^[`"'“”‘’]+|[`"'“”‘’，,。.；;:：)）\]]+$/g, "");
+  if (!text || /[*?[\]]/.test(text) || /^https?:\/\//i.test(text)) return "";
   if (/\s/.test(text)) return "";
   if (!/\.[a-z0-9]{1,12}$/i.test(text)) return "";
   return normalizeRelativePath(text);
 }
 
-function inferAllowedOutputPaths(params: {
-  prompt?: string;
-}): string[] {
+function inferAllowedOutputPaths(params: { prompt?: string }): string[] {
   const text = params.prompt ?? "";
   const out: string[] = [];
   const pushPath = (value: string) => {
@@ -100,9 +101,7 @@ function textMatches(text: string, pattern: RegExp) {
   return pattern.test(text);
 }
 
-function inferTaskIntent(params: {
-  prompt?: string;
-}): DelegateTaskIntent {
+function inferTaskIntent(params: { prompt?: string }): DelegateTaskIntent {
   const text = (params.prompt ?? "").toLowerCase();
   if (
     textMatches(
@@ -123,7 +122,12 @@ function inferTaskIntent(params: {
   if (textMatches(text, /(review|audit|inspect|verify|check|评审|审查|审核|复核|验证|检查)/i)) {
     return "review";
   }
-  if (textMatches(text, /(research|investigate|analy[sz]e|analysis|look up|调研|调查|分析|研究|查找)/i)) {
+  if (
+    textMatches(
+      text,
+      /(research|investigate|analy[sz]e|analysis|look up|调研|调查|分析|研究|查找)/i,
+    )
+  ) {
     return "research";
   }
   if (
@@ -182,7 +186,10 @@ export function resolveResumedAgentExecutionMode(params: {
 }
 
 function normalizeAgentSpecKey(value: string) {
-  const key = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const key = value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
   if (key === "id" || key === "agent" || key === "agent_id_for_resume") return "id";
   if (key === "name" || key === "agent_name") return "name";
   if (key === "agent_id" || key === "template" || key === "template_id") return "agent_id";
@@ -198,20 +205,11 @@ function normalizeAgentSpecKey(value: string) {
     return "allowed_output_paths";
   }
   if (key === "resume") return "resume";
-  if (
-    key === "retain_worktree" ||
-    key === "keep_worktree" ||
-    key === "preserve_worktree"
-  ) {
+  if (key === "retain_worktree" || key === "keep_worktree" || key === "preserve_worktree") {
     return "retain_worktree";
   }
   if (key === "role" || key === "persona") return "role";
-  if (
-    key === "identity" ||
-    key === "system_prompt" ||
-    key === "system" ||
-    key === "profile"
-  ) {
+  if (key === "identity" || key === "system_prompt" || key === "system" || key === "profile") {
     return "identity";
   }
   if (
@@ -229,7 +227,7 @@ function normalizeAgentSpecKey(value: string) {
 function unquoteAgentSpecValue(value: string) {
   const text = value.trim();
   if (
-    (text.startsWith("\"") && text.endsWith("\"")) ||
+    (text.startsWith('"') && text.endsWith('"')) ||
     (text.startsWith("'") && text.endsWith("'"))
   ) {
     return text.slice(1, -1);
@@ -255,11 +253,7 @@ function parseAgentSpecScalar(value: string): unknown {
   return text;
 }
 
-function appendAgentSpecField(
-  record: Record<string, unknown>,
-  key: string,
-  value: string,
-) {
+function appendAgentSpecField(record: Record<string, unknown>, key: string, value: string) {
   const normalizedKey = normalizeAgentSpecKey(key);
   if (!normalizedKey) return "";
   if (normalizedKey === "resume" || normalizedKey === "retain_worktree") {
@@ -326,9 +320,7 @@ function parseAgentSpecBlock(lines: string[]) {
     }
 
     const fieldMatch = /^([a-zA-Z_][\w\s-]{0,40})\s*[:=]\s*(.*)$/.exec(trimmed);
-    const normalizedField = fieldMatch
-      ? normalizeAgentSpecKey(fieldMatch[1] ?? "")
-      : "";
+    const normalizedField = fieldMatch ? normalizeAgentSpecKey(fieldMatch[1] ?? "") : "";
     if (fieldMatch && normalizedField) {
       const rawValue = (fieldMatch[2] ?? "").trim();
       activeKey = normalizedField;
@@ -366,8 +358,7 @@ function shouldTreatTextAsAgentSpec(value: unknown) {
   if (!text) return false;
   if (/^\s*@agent\b/im.test(text)) return true;
   return (
-    /^\s*agent\s+\d+\s*:/im.test(text) &&
-    /^\s*(name|role|identity|prompt|task)\s*[:=]/im.test(text)
+    /^\s*agent\s+\d+\s*:/im.test(text) && /^\s*(name|role|identity|prompt|task)\s*[:=]/im.test(text)
   );
 }
 
@@ -389,9 +380,7 @@ function normalizeAgentInput(
   }
   const id = optionalString(rawAgent.id) ?? `agent-${index + 1}`;
   const taskIntent =
-    normalizeTaskIntent(rawAgent.task_intent) ??
-    inheritedTaskIntent ??
-    inferTaskIntent({ prompt });
+    normalizeTaskIntent(rawAgent.task_intent) ?? inheritedTaskIntent ?? inferTaskIntent({ prompt });
   const taskIntentSpecified =
     normalizeTaskIntent(rawAgent.task_intent) !== undefined || inheritedTaskIntentSpecified;
   const rawMode = normalizeExecutionModeOpt(rawAgent.mode);
@@ -451,9 +440,7 @@ export function normalizeDelegateAgents(args: Record<string, unknown>): Delegate
       : undefined;
   const agentSpec = explicitAgentSpec ?? promptAgentSpec;
   if (agentSpec) {
-    const specItems = parseAgentSpec(agentSpec).filter(
-      (item) => optionalString(item.prompt),
-    );
+    const specItems = parseAgentSpec(agentSpec).filter((item) => optionalString(item.prompt));
     if (specItems.length === 0) {
       throw new Error("Agent.agent_spec must include at least one agent with prompt.");
     }

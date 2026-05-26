@@ -1,6 +1,9 @@
 import type { Context, Message, Tool } from "@mariozechner/pi-ai";
 
-import type { SubagentIdentityRecord, SubagentRunSummary } from "../../chat/subagent/subagentHistory";
+import type {
+  SubagentIdentityRecord,
+  SubagentRunSummary,
+} from "../../chat/subagent/subagentHistory";
 import type { DelegateAgentInput, DelegateAgentTemplate, DelegateWorktreeInfo } from "./types";
 
 export function buildSubagentSystemPrompt(params: {
@@ -107,9 +110,7 @@ function buildSubagentUserPrompt(params: {
     "",
     "Current task:",
     params.task.prompt,
-    params.messageBusSnapshot
-      ? ["", params.messageBusSnapshot].join("\n")
-      : "",
+    params.messageBusSnapshot ? ["", params.messageBusSnapshot].join("\n") : "",
     "",
     params.task.applyPolicy === "none"
       ? params.messageBusEnabled
@@ -117,7 +118,9 @@ function buildSubagentUserPrompt(params: {
         : "Do not create or modify workspace files for communication. Return your answer in the final report."
       : "",
     "Return only the final report for the parent agent.",
-  ].filter((line) => line !== "").join("\n");
+  ]
+    .filter((line) => line !== "")
+    .join("\n");
 }
 
 export function buildSubagentContext(params: {
@@ -205,11 +208,7 @@ export function buildSubagentMessageBusUpdateMessage(snapshot: string): Message 
     content: [
       {
         type: "text",
-        text: [
-          "LiveAgent Message Bus snapshot refreshed for this turn.",
-          "",
-          text,
-        ].join("\n"),
+        text: ["LiveAgent Message Bus snapshot refreshed for this turn.", "", text].join("\n"),
       },
     ],
     timestamp: Date.now(),

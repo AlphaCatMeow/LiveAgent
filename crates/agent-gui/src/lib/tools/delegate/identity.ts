@@ -1,4 +1,8 @@
-import type { SubagentIdentityRecord, SubagentRunStatus, SubagentRunSummary } from "../../chat/subagent/subagentHistory";
+import type {
+  SubagentIdentityRecord,
+  SubagentRunStatus,
+  SubagentRunSummary,
+} from "../../chat/subagent/subagentHistory";
 import type { DelegateAgentInput, DelegateAgentTemplate } from "./types";
 import { truncateText } from "./utils";
 
@@ -66,9 +70,7 @@ function isSyntheticSubagentIdentity(value: string | undefined) {
   const text = value?.trim();
   if (!text) return true;
   return (
-    /^(?:agent\s*-?\s*\d+|day\s*\d+|night\s*\d+|round\s*\d+|vote|pk|final)\b/i.test(
-      text,
-    ) ||
+    /^(?:agent\s*-?\s*\d+|day\s*\d+|night\s*\d+|round\s*\d+|vote|pk|final)\b/i.test(text) ||
     /(?:会议|辩论|投票|行动|查验|最终|决定|揭晓|总结|法官|生死局|修正|round|night|day|vote|pk)/i.test(
       text,
     )
@@ -97,9 +99,7 @@ function textAddressesKnownName(text: string, knownName: string) {
   const name = knownName.trim();
   if (!name) return false;
   const escaped = escapeRegExp(name);
-  const asciiTailGuard = isAsciiWordChar(name[name.length - 1])
-    ? "(?![a-zA-Z0-9_])"
-    : "";
+  const asciiTailGuard = isAsciiWordChar(name[name.length - 1]) ? "(?![a-zA-Z0-9_])" : "";
   return new RegExp(
     `(?:你是|我是|作为|扮演|以|请用|用)\\s*(?:【|\\(|（|「|『|“|")?${escaped}${asciiTailGuard}(?:】|\\)|）|」|』|”|")?`,
     "i",
@@ -128,9 +128,7 @@ export function formatConfiguredAgents(templates: DelegateAgentTemplate[]) {
 }
 
 function normalizeSubagentRunStatus(value: string): SubagentRunStatus {
-  return value === "completed" || value === "failed" || value === "cancelled"
-    ? value
-    : "running";
+  return value === "completed" || value === "failed" || value === "cancelled" ? value : "running";
 }
 
 function titleizeStableId(value: string) {
@@ -139,9 +137,7 @@ function titleizeStableId(value: string) {
     .split(/[^a-zA-Z0-9]+/g)
     .filter(Boolean);
   if (words.length === 0) return "";
-  return words
-    .map((word) => `${word.slice(0, 1).toUpperCase()}${word.slice(1)}`)
-    .join(" ");
+  return words.map((word) => `${word.slice(0, 1).toUpperCase()}${word.slice(1)}`).join(" ");
 }
 
 export function latestRunsByLogicalAgent(runs: SubagentRunSummary[]) {
@@ -248,10 +244,7 @@ export function shouldRejectLikelyExistingAgentFork(params: {
   if (params.identitiesByLogicalAgent.size === 0) return null;
   if (params.identitiesByLogicalAgent.has(params.task.id)) return null;
   if (params.task.taskIntent !== "communication") return null;
-  const referenced = referencedKnownIdentities(
-    params.task,
-    params.identitiesByLogicalAgent,
-  );
+  const referenced = referencedKnownIdentities(params.task, params.identitiesByLogicalAgent);
   if (referenced.length === 0) return null;
   const looksLikePhaseOrAggregate =
     isSyntheticSubagentIdentity(params.task.id) ||
@@ -328,9 +321,7 @@ function buildIdentityPrompt(params: {
     params.template?.prompt.trim()
       ? `Configured template instructions:\n${params.template.prompt.trim()}`
       : "",
-    params.task.prompt.trim()
-      ? `Initial identity/task context:\n${params.task.prompt.trim()}`
-      : "",
+    params.task.prompt.trim() ? `Initial identity/task context:\n${params.task.prompt.trim()}` : "",
     `Identity summary: ${params.displayName} - ${params.role}`,
   ].filter(Boolean);
   return lines.join("\n\n");

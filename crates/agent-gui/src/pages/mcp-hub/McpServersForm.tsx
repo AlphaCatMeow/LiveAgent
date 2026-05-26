@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState, type FormEvent } from "react";
+import { type FormEvent, memo, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 
 import {
@@ -16,6 +16,7 @@ import {
 } from "../../components/icons";
 
 import { Button } from "../../components/ui/button";
+import { ConfirmDeletePopover } from "../../components/ui/confirm-action-popover";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import {
@@ -28,7 +29,6 @@ import {
 import { Textarea } from "../../components/ui/textarea";
 import { useLocale } from "../../i18n";
 import { type AppSettings, type McpServerConfig, updateMcp } from "../../lib/settings";
-import { ConfirmDeletePopover } from "../../components/ui/confirm-action-popover";
 import { useModalMotion } from "../../lib/shared/modalMotion";
 import { cn } from "../../lib/shared/utils";
 
@@ -146,9 +146,7 @@ function buildServerFromDraft(
 
   const parsedTimeout = Number(draft.timeoutMs);
   const timeoutMs =
-    Number.isFinite(parsedTimeout) && parsedTimeout > 0
-      ? Math.floor(parsedTimeout)
-      : 60_000;
+    Number.isFinite(parsedTimeout) && parsedTimeout > 0 ? Math.floor(parsedTimeout) : 60_000;
 
   if (draft.transport === "stdio") {
     const command = draft.command.trim();
@@ -328,10 +326,7 @@ const McpServerCard = memo(function McpServerCard(props: {
               </span>
             </div>
             {previewLine ? (
-              <div
-                className="truncate text-[11px] text-muted-foreground/85"
-                title={previewLine}
-              >
+              <div className="truncate text-[11px] text-muted-foreground/85" title={previewLine}>
                 <span className="text-muted-foreground/55">{previewLabel}:</span>{" "}
                 <span className="font-mono">{previewLine}</span>
               </div>
@@ -346,7 +341,9 @@ const McpServerCard = memo(function McpServerCard(props: {
         {/* Counters (≥md) */}
         {argsCount > 0 || envCount > 0 || headerCount > 0 ? (
           <div className="hidden shrink-0 items-center gap-1 md:flex">
-            {argsCount > 0 ? <CounterPill label={t("mcpHub.previewArgs")} count={argsCount} /> : null}
+            {argsCount > 0 ? (
+              <CounterPill label={t("mcpHub.previewArgs")} count={argsCount} />
+            ) : null}
             {envCount > 0 ? <CounterPill label={t("mcpHub.previewEnv")} count={envCount} /> : null}
             {headerCount > 0 ? (
               <CounterPill label={t("mcpHub.previewHeaders")} count={headerCount} />
@@ -428,12 +425,7 @@ export function McpServerEditModal(props: {
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     try {
-      const server = buildServerFromDraft(
-        draft,
-        initialServer,
-        existingIdsExcludingCurrent,
-        t,
-      );
+      const server = buildServerFromDraft(draft, initialServer, existingIdsExcludingCurrent, t);
       onSave(server);
       requestClose();
     } catch (error) {
@@ -507,8 +499,7 @@ export function McpServerEditModal(props: {
                 <Select
                   value={draft.transport}
                   onValueChange={(value) => {
-                    const transport =
-                      value === "http" ? "http" : value === "sse" ? "sse" : "stdio";
+                    const transport = value === "http" ? "http" : value === "sse" ? "sse" : "stdio";
                     updateDraft({ transport });
                   }}
                 >
@@ -674,12 +665,7 @@ export function McpServersForm(props: McpServersFormProps) {
     return servers
       .map((server, idx) => ({ server, idx }))
       .filter(({ server }) => {
-        const haystack = [
-          server.id,
-          server.command,
-          server.url,
-          server.transport ?? "",
-        ]
+        const haystack = [server.id, server.command, server.url, server.transport ?? ""]
           .join("\n")
           .toLowerCase();
         return haystack.includes(text);
@@ -709,12 +695,8 @@ export function McpServersForm(props: McpServersFormProps) {
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-border/55 bg-background/80 text-foreground/85 shadow-[0_1px_0_rgba(255,255,255,0.55)_inset]">
               <Server className="h-6 w-6" />
             </div>
-            <p className="mt-4 text-sm font-medium text-foreground">
-              {t("mcpHub.noServers")}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground/80">
-              {t("mcpHub.noServersHint")}
-            </p>
+            <p className="mt-4 text-sm font-medium text-foreground">{t("mcpHub.noServers")}</p>
+            <p className="mt-1 text-xs text-muted-foreground/80">{t("mcpHub.noServersHint")}</p>
             {onAddServer ? (
               <Button
                 variant="outline"
@@ -732,9 +714,7 @@ export function McpServersForm(props: McpServersFormProps) {
         {filter.trim() && filtered.length === 0 && serverCount > 0 ? (
           <div className="hub-panel-enter rounded-2xl border border-border/40 bg-background/55 px-6 py-8 text-center backdrop-blur-xl">
             <Plug className="mx-auto h-5 w-5 text-muted-foreground" />
-            <p className="mt-3 text-sm text-muted-foreground">
-              {t("mcpHub.noMatchInstalled")}
-            </p>
+            <p className="mt-3 text-sm text-muted-foreground">{t("mcpHub.noMatchInstalled")}</p>
           </div>
         ) : null}
 

@@ -1,5 +1,5 @@
-import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useState } from "react";
 import {
   CheckCircle2,
   ChevronRight,
@@ -17,8 +17,8 @@ import { Input } from "../../components/ui/input";
 import { SUPPORTED_LOCALES, useLocale } from "../../i18n";
 import {
   type ExecutionMode,
-  type Theme,
   isAgentExecutionMode,
+  type Theme,
   updateSystem,
 } from "../../lib/settings";
 import { CUSTOM_SYSTEM_TOOL_OPTIONS } from "../../lib/tools/customSystemTools";
@@ -71,9 +71,7 @@ export function SystemSettingsForm(props: SettingsSectionProps) {
           <button
             type="button"
             onClick={() =>
-              setSettings((prev) =>
-                updateSystem(prev, { executionMode: "text" as ExecutionMode }),
-              )
+              setSettings((prev) => updateSystem(prev, { executionMode: "text" as ExecutionMode }))
             }
             className={`group relative flex flex-col items-start gap-3 rounded-xl border-2 p-4 text-left transition-all ${
               executionMode === "text"
@@ -106,9 +104,7 @@ export function SystemSettingsForm(props: SettingsSectionProps) {
           <button
             type="button"
             onClick={() =>
-              setSettings((prev) =>
-                updateSystem(prev, { executionMode: "tools" as ExecutionMode }),
-              )
+              setSettings((prev) => updateSystem(prev, { executionMode: "tools" as ExecutionMode }))
             }
             className={`group relative flex flex-col items-start gap-3 rounded-xl border-2 p-4 text-left transition-all ${
               isClassicAgentMode
@@ -265,9 +261,7 @@ export function SystemSettingsForm(props: SettingsSectionProps) {
                       : "border-border/60 bg-background/80 hover:border-border hover:bg-muted/35"
                   }`}
                 >
-                  <span className="text-base leading-none">
-                    {locale === "zh-CN" ? "🇨🇳" : "🇺🇸"}
-                  </span>
+                  <span className="text-base leading-none">{locale === "zh-CN" ? "🇨🇳" : "🇺🇸"}</span>
                   <div className="min-w-0 flex-1 pr-5">
                     <div className="truncate text-sm font-semibold">{localeLabel}</div>
                     <div className="mt-0.5 text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
@@ -298,9 +292,7 @@ export function SystemSettingsForm(props: SettingsSectionProps) {
             </span>
           ) : null}
         </div>
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          {t("settings.workdirDesc")}
-        </p>
+        <p className="text-xs leading-relaxed text-muted-foreground">{t("settings.workdirDesc")}</p>
 
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
@@ -387,9 +379,7 @@ export function SystemSettingsForm(props: SettingsSectionProps) {
                       const next = e.currentTarget.checked
                         ? [...selectedSystemTools, tool.id]
                         : selectedSystemTools.filter((id) => id !== tool.id);
-                      setSettings((prev) =>
-                        updateSystem(prev, { selectedSystemTools: next }),
-                      );
+                      setSettings((prev) => updateSystem(prev, { selectedSystemTools: next }));
                     }}
                   />
                 </div>

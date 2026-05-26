@@ -39,15 +39,9 @@ export function resolveBashTimeoutPolicy(providerId: ProviderId): BashTimeoutPol
   return BASH_TIMEOUT_POLICIES[providerId];
 }
 
-export function normalizeBashTimeoutMs(
-  value: unknown,
-  policy: BashTimeoutPolicy,
-) {
+export function normalizeBashTimeoutMs(value: unknown, policy: BashTimeoutPolicy) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return policy.defaultTimeoutMs;
   }
-  return Math.min(
-    policy.maxTimeoutMs,
-    Math.max(MIN_BASH_TIMEOUT_MS, Math.floor(value)),
-  );
+  return Math.min(policy.maxTimeoutMs, Math.max(MIN_BASH_TIMEOUT_MS, Math.floor(value)));
 }

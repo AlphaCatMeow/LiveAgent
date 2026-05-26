@@ -131,8 +131,7 @@ function tryRecoverScopedRelPath(params: {
 }): string | null {
   const raw = typeof params.input === "string" ? params.input.trim() : "";
   if (!raw) return null;
-  const rootDir =
-    params.expectedRoot === "skills" ? params.skillsRootDir : params.workdir;
+  const rootDir = params.expectedRoot === "skills" ? params.skillsRootDir : params.workdir;
   if (!rootDir?.trim()) return null;
   return relativePathFromAbsolute(raw, rootDir);
 }

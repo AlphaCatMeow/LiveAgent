@@ -1,5 +1,5 @@
-import type { ChatHistorySummary } from "./chatHistory";
 import { mergeHistoryItem } from "../page/chatPageHelpers";
+import type { ChatHistorySummary } from "./chatHistory";
 
 export const CHAT_HISTORY_SYNC_EVENT = "chat-history:changed";
 

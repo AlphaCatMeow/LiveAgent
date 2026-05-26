@@ -1,9 +1,19 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ArrowLeft, BookOpen, Brain, Clock3, Cloud, Cpu, Info, Settings2, Zap } from "../components/icons";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
+import {
+  ArrowLeft,
+  BookOpen,
+  Brain,
+  Clock3,
+  Cloud,
+  Cpu,
+  Info,
+  Settings2,
+  Zap,
+} from "../components/icons";
 
 import { useLocale } from "../i18n";
-import { AgentsSection } from "./settings/AgentsSection";
 import { AboutSection } from "./settings/AboutSection";
+import { AgentsSection } from "./settings/AgentsSection";
 import { CronSection } from "./settings/CronSection";
 import { HooksSection } from "./settings/HooksSection";
 import { MemoryPanel } from "./settings/MemoryPanel";
@@ -12,10 +22,7 @@ import { RemoteSection } from "./settings/RemoteSection";
 import { SystemSettingsForm } from "./settings/SystemSettingsForm";
 import type { SectionId, SettingsPageProps } from "./settings/types";
 
-function getSaveIndicator(
-  state: SettingsPageProps["saveState"],
-  t: (key: string) => string,
-) {
+function getSaveIndicator(state: SettingsPageProps["saveState"], t: (key: string) => string) {
   switch (state.status) {
     case "saving":
       return {
@@ -248,7 +255,7 @@ export function SettingsPage(props: SettingsPageProps) {
         >
           <div
             className={`settings-section-shell ${
-                section === "hooks" || section === "providers" || section === "memory"
+              section === "hooks" || section === "providers" || section === "memory"
                 ? "flex min-h-0 flex-1 flex-col"
                 : "min-h-full"
             }`}

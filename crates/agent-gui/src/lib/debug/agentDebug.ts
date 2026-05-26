@@ -1,12 +1,7 @@
-import { invoke } from "@tauri-apps/api/core";
 import type { Context } from "@mariozechner/pi-ai";
+import { invoke } from "@tauri-apps/api/core";
 
-import type {
-  CodexRequestFormat,
-  ExecutionMode,
-  ProviderId,
-  ReasoningLevel,
-} from "../settings";
+import type { CodexRequestFormat, ExecutionMode, ProviderId, ReasoningLevel } from "../settings";
 
 type DebugLineType = "request" | "result" | "error";
 
@@ -79,9 +74,7 @@ function sanitizeDebugValue(value: unknown, seen = new WeakSet<object>()): unkno
       typeof sourceData === "string" &&
       typeof sourceMimeType === "string";
     const isTextDocumentSource =
-      record.type === "text" &&
-      sourceMimeType === "text/plain" &&
-      typeof sourceData === "string";
+      record.type === "text" && sourceMimeType === "text/plain" && typeof sourceData === "string";
     const isInlineDataSource =
       typeof sourceData === "string" &&
       typeof inlineDataMimeType === "string" &&

@@ -1,12 +1,8 @@
+import type { Tool, ToolCall, ToolResultMessage } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
 import { invoke } from "@tauri-apps/api/core";
 
-import type { Tool, ToolCall, ToolResultMessage } from "@mariozechner/pi-ai";
-
-import {
-  createBuiltinMetadataMap,
-  type BuiltinToolBundle,
-} from "./builtinTypes";
+import { type BuiltinToolBundle, createBuiltinMetadataMap } from "./builtinTypes";
 
 type SystemHttpGetResponse = {
   url: string;
@@ -26,10 +22,7 @@ type SystemToolDefinition = {
   parameters: Tool["parameters"];
   isReadOnly: boolean;
   runtimeScopes: readonly SystemToolRuntimeScope[];
-  execute: (
-    toolCall: ToolCall,
-    signal?: AbortSignal,
-  ) => Promise<ToolResultMessage>;
+  execute: (toolCall: ToolCall, signal?: AbortSignal) => Promise<ToolResultMessage>;
 };
 
 function asErrorMessage(err: unknown) {

@@ -8,23 +8,20 @@ import type {
 } from "@mariozechner/pi-ai";
 
 import type { StreamDebugLogger } from "../../debug/agentDebug";
-import {
-  assistantMessageToText,
-  completeAssistantMessage,
-} from "../../providers/llm";
+import { assistantMessageToText, completeAssistantMessage } from "../../providers/llm";
 import type {
   CodexRequestFormat,
   ProviderId,
   ProviderModelConfig,
   ReasoningLevel,
 } from "../../settings";
+import { sanitizeMessageForModelContext } from "../context/requestContextSanitizer";
 import {
   applyCompactionCheckpoint,
+  type ConversationViewState,
   getActiveSegment,
   replaceActiveSegmentMessages,
-  type ConversationViewState,
 } from "../conversation/conversationState";
-import { sanitizeMessageForModelContext } from "../context/requestContextSanitizer";
 
 const CLAUDE_OPTIMIZATION_FACTOR = 1.5;
 const CLAUDE_PROTECTION_FACTOR = 1.2;
@@ -175,7 +172,7 @@ export type CompactionStatus =
       trigger: "pre-send" | "mid-stream" | "post-tool";
       newSegmentIndex: number;
       completedAt: number;
-    } 
+    }
   | {
       phase: "failed";
       trigger: "pre-send" | "mid-stream" | "post-tool";
@@ -252,13 +249,11 @@ type CompactionReason = {
 type CompactionPayload = {
   compaction_reason: CompactionReason;
   system_prompt: string;
-  previous_summary:
-    | {
-        id: string;
-        content: string;
-        summaryMeta: unknown;
-      }
-    | null;
+  previous_summary: {
+    id: string;
+    content: string;
+    summaryMeta: unknown;
+  } | null;
   active_segment_messages: SerializedCompactionMessage[];
   next_user_message?: string;
 };
@@ -404,9 +399,7 @@ function serializeMessageForCompaction(
       text: text || undefined,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       usageTotalTokens:
-        typeof message.usage?.totalTokens === "number"
-          ? message.usage.totalTokens
-          : undefined,
+        typeof message.usage?.totalTokens === "number" ? message.usage.totalTokens : undefined,
     };
   }
 
@@ -504,12 +497,23 @@ function getObservedConversationTokens(params: {
 }
 
 const SUMMARY_TAGS = [
-  "task", "constraints", "state", "artifacts", "decisions",
-  "dead_ends", "knowledge", "open_loops", "next_steps", "breadcrumbs",
+  "task",
+  "constraints",
+  "state",
+  "artifacts",
+  "decisions",
+  "dead_ends",
+  "knowledge",
+  "open_loops",
+  "next_steps",
+  "breadcrumbs",
 ] as const;
 
 const REQUIRED_SUMMARY_TAGS: ReadonlyArray<(typeof SUMMARY_TAGS)[number]> = [
-  "task", "state", "next_steps", "artifacts",
+  "task",
+  "state",
+  "next_steps",
+  "artifacts",
 ];
 
 type CompactionSummaryParsed = Record<(typeof SUMMARY_TAGS)[number], string>;
@@ -553,11 +557,7 @@ function pushVerificationSignal(
   out.push(truncated);
 }
 
-function extractVerificationSignalsFromText(
-  text: string,
-  out: string[],
-  seen: Set<string>,
-) {
+function extractVerificationSignalsFromText(text: string, out: string[], seen: Set<string>) {
   if (!text.trim()) return;
 
   for (const match of text.matchAll(COMMAND_SIGNAL_RE)) {
@@ -631,11 +631,7 @@ function formatSummaryForContext(s: CompactionSummaryParsed): string {
   return sections.join("\n\n");
 }
 
-function validateCompactionSummary(
-  raw: string,
-  sourceTokens: number,
-  payload: CompactionPayload,
-) {
+function validateCompactionSummary(raw: string, sourceTokens: number, payload: CompactionPayload) {
   const parsed = parseCompactionSummaryXml(raw);
   const errors: string[] = [];
 
@@ -644,15 +640,11 @@ function validateCompactionSummary(
   }
 
   if (parsed.artifacts) {
-    const artifactLines = parsed.artifacts
-      .split("\n")
-      .filter((l) => l.trim().startsWith("-"));
+    const artifactLines = parsed.artifacts.split("\n").filter((l) => l.trim().startsWith("-"));
     if (artifactLines.length === 0) {
       errors.push("no artifact entries found (expected bullet lines starting with -)");
     } else {
-      const malformed = artifactLines.filter(
-        (l) => !ARTIFACT_LINE_RE.test(l.trim()),
-      );
+      const malformed = artifactLines.filter((l) => !ARTIFACT_LINE_RE.test(l.trim()));
       if (malformed.length === artifactLines.length) {
         errors.push("no valid artifact lines (expected: - [kind] ref | status)");
       }
@@ -701,10 +693,7 @@ export function noteCompactionRound(state: CompactionThrottleState, rounds = 1) 
   }
 }
 
-export function noteCompactionApplied(
-  state: CompactionThrottleState,
-  params?: { now?: number },
-) {
+export function noteCompactionApplied(state: CompactionThrottleState, params?: { now?: number }) {
   const now = params?.now ?? Date.now();
   if (now - state.lastCompactionTime > RECENT_COMPACTION_WINDOW_MS) {
     state.recentCompactionCount = 0;
@@ -715,9 +704,7 @@ export function noteCompactionApplied(
   state.roundsSinceLastCompaction = 0;
   state.recentCompactionCount += 1;
   state.totalSessionCompactions += 1;
-  state.consecutiveCompactions = isConsecutive
-    ? state.consecutiveCompactions + 1
-    : 1;
+  state.consecutiveCompactions = isConsecutive ? state.consecutiveCompactions + 1 : 1;
 }
 
 function cleanupThrottleWindow(state: CompactionThrottleState, now: number) {
@@ -744,9 +731,7 @@ function resolveCompactionThreshold(params: {
   }
 
   const factor =
-    params.trigger === "optimization"
-      ? CLAUDE_OPTIMIZATION_FACTOR
-      : CLAUDE_PROTECTION_FACTOR;
+    params.trigger === "optimization" ? CLAUDE_OPTIMIZATION_FACTOR : CLAUDE_PROTECTION_FACTOR;
   const effectiveFactor =
     params.trigger === "protection" &&
     params.throttleState &&
@@ -1118,9 +1103,7 @@ function trimCompactionPayloadEnvelope(payload: CompactionPayload): CompactionPa
 function aggressivelyTrimCompactionPayloadMessages(payload: CompactionPayload): CompactionPayload {
   return markReducedCompactionPayload({
     ...payload,
-    active_segment_messages: payload.active_segment_messages.map(
-      aggressivelyTrimSerializedMessage,
-    ),
+    active_segment_messages: payload.active_segment_messages.map(aggressivelyTrimSerializedMessage),
   });
 }
 
@@ -1135,8 +1118,7 @@ function resolveCompactionPayloadBudget(modelConfig?: ProviderModelConfig) {
     512,
     Math.floor(maxOutputToken * COMPACTION_OUTPUT_RESERVE_FACTOR),
   );
-  const availableTokens =
-    contextWindow - outputReserve - COMPACTION_PROMPT_TOKEN_BUDGET;
+  const availableTokens = contextWindow - outputReserve - COMPACTION_PROMPT_TOKEN_BUDGET;
   if (availableTokens <= 0) {
     return COMPACTION_PAYLOAD_TOKEN_CAP;
   }
@@ -1235,8 +1217,7 @@ function buildCompactionAssistantMessage(
     stopReason: "stop",
     content: [{ type: "text", text: assistantMessageToText(summaryAssistant).trim() }],
     responseId:
-      summaryAssistant.responseId ||
-      `liveagent-compaction-${Date.now()}-${crypto.randomUUID()}`,
+      summaryAssistant.responseId || `liveagent-compaction-${Date.now()}-${crypto.randomUUID()}`,
   } as AssistantMessage & { promptVersion: string };
 }
 
@@ -1571,10 +1552,7 @@ export function pruneConversationState(
     0,
     Math.floor(params?.protectedToolTokens ?? PRUNE_PROTECT_TOKENS),
   );
-  const protectedRecentUserTurns = Math.max(
-    1,
-    Math.floor(params?.protectedRecentUserTurns ?? 2),
-  );
+  const protectedRecentUserTurns = Math.max(1, Math.floor(params?.protectedRecentUserTurns ?? 2));
 
   const nextMessages = activeSegment.messages.slice();
   let userTurnsSeen = 0;
@@ -1754,7 +1732,9 @@ export async function runMidTurnCompaction(params: {
     throw error;
   }
   const checkpointState = applyCompactionCheckpoint(params.state, compactionMessage);
-  const resumeMessage = createSyntheticContinueUserMessage((compactionMessage.timestamp ?? Date.now()) + 1);
+  const resumeMessage = createSyntheticContinueUserMessage(
+    (compactionMessage.timestamp ?? Date.now()) + 1,
+  );
 
   return {
     applied: true,

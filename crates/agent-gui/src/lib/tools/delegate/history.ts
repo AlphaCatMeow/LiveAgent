@@ -1,8 +1,15 @@
 import type { Tool, ToolCall } from "@mariozechner/pi-ai";
 
-import type { ConversationViewState, StoredContextSegment } from "../../chat/conversation/conversationState";
+import type {
+  ConversationViewState,
+  StoredContextSegment,
+} from "../../chat/conversation/conversationState";
 import { normalizeConversationState } from "../../chat/conversation/conversationState";
-import type { SubagentIdentityRecord, SubagentRunRecord, SubagentRunSummary } from "../../chat/subagent/subagentHistory";
+import type {
+  SubagentIdentityRecord,
+  SubagentRunRecord,
+  SubagentRunSummary,
+} from "../../chat/subagent/subagentHistory";
 import type { ProviderId } from "../../settings";
 import type { DelegateAgentItemResultDetails } from "../builtinTypes";
 import { buildSubagentSystemPrompt } from "./prompts";

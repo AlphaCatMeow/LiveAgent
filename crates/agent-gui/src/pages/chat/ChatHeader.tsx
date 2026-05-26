@@ -1,4 +1,4 @@
-import { memo, useState, type ReactNode } from "react";
+import { memo, type ReactNode, useEffect, useRef, useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -7,6 +7,7 @@ import {
   Moon,
   OpenaiChatgptIcon,
   PanelLeft,
+  Search,
   Settings,
   Sun,
 } from "../../components/icons";
@@ -21,22 +22,12 @@ import {
   DropdownMenuTrigger,
 } from "../../components/ui/dropdown-menu";
 import { useLocale } from "../../i18n";
+import { type ModelOption, parseModelValue } from "../../lib/providers/llm";
+import { type AppSettings, type ProviderId, setSelectedModel } from "../../lib/settings";
 import { cn } from "../../lib/shared/utils";
-import { parseModelValue, type ModelOption } from "../../lib/providers/llm";
-import {
-  setSelectedModel,
-  type AppSettings,
-  type ProviderId,
-} from "../../lib/settings";
 import type { SectionId } from "../settings/types";
 
-function ProviderBrandIcon({
-  type,
-  className,
-}: {
-  type: ProviderId;
-  className?: string;
-}) {
+function ProviderBrandIcon({ type, className }: { type: ProviderId; className?: string }) {
   const cls = cn("h-4 w-4 shrink-0", className);
   if (type === "claude_code") return <ClaudeIcon className={cls} />;
   if (type === "gemini") return <FileTypeGeminiIcon className={cls} />;
@@ -73,6 +64,17 @@ export const ChatHeader = memo(function ChatHeader(props: {
   } = props;
   const { t } = useLocale();
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
+  const [modelSearch, setModelSearch] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isModelMenuOpen) {
+      setModelSearch("");
+      setTimeout(() => searchInputRef.current?.focus(), 0);
+    }
+  }, [isModelMenuOpen]);
+
+  const normalizedSearch = modelSearch.trim().toLowerCase();
   const groups: {
     name: string;
     providerType: ProviderId;
@@ -112,31 +114,30 @@ export const ChatHeader = memo(function ChatHeader(props: {
         ) : null}
 
         <DropdownMenu open={isModelMenuOpen} onOpenChange={setIsModelMenuOpen}>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              disabled={!hasModels}
-              className={cn(
-                "model-selector-trigger h-9 max-w-[min(20rem,calc(100vw-8.5rem))] justify-between gap-1.5 overflow-hidden rounded-lg px-3 text-base font-semibold text-foreground transition-all duration-200 ease-out hover:bg-muted/60 dark:text-white",
-                isModelMenuOpen && "bg-muted/70 shadow-sm",
-              )}
-            >
-              <span className="model-selector-current-label flex min-w-0 items-center gap-1.5 text-left">
-                {selectedOption ? (
-                  <ProviderBrandIcon
-                    type={selectedOption.providerType}
-                    className="opacity-80"
-                  />
-                ) : null}
-                <span className="min-w-0 truncate">{currentModelLabel}</span>
-              </span>
-              <ChevronDown
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                disabled={!hasModels}
                 className={cn(
-                  "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 ease-out dark:text-white",
-                  isModelMenuOpen && "rotate-180",
+                  "model-selector-trigger h-9 max-w-[min(20rem,calc(100vw-8.5rem))] justify-between gap-1.5 overflow-hidden rounded-lg px-3 text-base font-semibold text-foreground transition-all duration-200 ease-out hover:bg-muted/60 dark:text-white",
+                  isModelMenuOpen && "bg-muted/70 shadow-sm",
                 )}
               />
-            </Button>
+            }
+          >
+            <span className="model-selector-current-label flex min-w-0 items-center gap-1.5 text-left">
+              {selectedOption ? (
+                <ProviderBrandIcon type={selectedOption.providerType} className="opacity-80" />
+              ) : null}
+              <span className="min-w-0 truncate">{currentModelLabel}</span>
+            </span>
+            <ChevronDown
+              className={cn(
+                "h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 ease-out dark:text-white",
+                isModelMenuOpen && "rotate-180",
+              )}
+            />
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="start"
@@ -148,22 +149,52 @@ export const ChatHeader = memo(function ChatHeader(props: {
               {t("chat.selectModel")}
             </DropdownMenuLabel>
             <DropdownMenuSeparator className="my-0 bg-border/40" />
-            <div className="max-h-[min(24rem,var(--radix-dropdown-menu-content-available-height))] overflow-y-auto overscroll-contain px-1 pb-1">
+            <div className="px-2 py-1.5">
+              <div className="flex items-center gap-1.5 rounded-md border border-border/50 bg-muted/40 px-2 py-1">
+                <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
+                <input
+                  ref={searchInputRef}
+                  value={modelSearch}
+                  onChange={(e) => setModelSearch(e.target.value)}
+                  placeholder={t("chat.searchModel")}
+                  className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground/60"
+                  onKeyDown={(e) => e.stopPropagation()}
+                />
+              </div>
+            </div>
+            <div className="max-h-[min(20rem,var(--available-height,20rem))] overflow-y-auto overscroll-contain px-1 pb-1">
               {(() => {
                 let animationIndex = 0;
-                return groups.map((group, groupIndex) => (
+                const filteredGroups = normalizedSearch
+                  ? groups
+                      .map((group) => ({
+                        ...group,
+                        opts: group.opts.filter(
+                          (o) =>
+                            o.model.toLowerCase().includes(normalizedSearch) ||
+                            o.providerName.toLowerCase().includes(normalizedSearch),
+                        ),
+                      }))
+                      .filter((g) => g.opts.length > 0)
+                  : groups;
+
+                if (filteredGroups.length === 0) {
+                  return (
+                    <div className="px-2 py-6 text-center text-xs text-muted-foreground">
+                      {t("chat.noModelFound")}
+                    </div>
+                  );
+                }
+
+                return filteredGroups.map((group, groupIndex) => (
                   <div key={group.name}>
-                    {groupIndex > 0 ? (
-                      <DropdownMenuSeparator className="bg-border/30" />
-                    ) : null}
+                    {groupIndex > 0 ? <DropdownMenuSeparator className="bg-border/30" /> : null}
                     <DropdownMenuLabel className="model-selector-group-label sticky top-0 z-10 flex items-center gap-1.5 bg-popover/60 px-2 py-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80 backdrop-blur-xl supports-[backdrop-filter]:bg-popover/40 dark:text-white/80">
                       <ProviderBrandIcon
                         type={group.providerType}
                         className="h-3.5 w-3.5 opacity-90"
                       />
-                      <span className="truncate normal-case tracking-normal">
-                        {group.name}
-                      </span>
+                      <span className="truncate normal-case tracking-normal">{group.name}</span>
                     </DropdownMenuLabel>
                     {group.opts.map((option) => {
                       const isSelected = option.value === selectedValue;
@@ -193,9 +224,7 @@ export const ChatHeader = memo(function ChatHeader(props: {
                             />
                             <span className="min-w-0 truncate">{option.model}</span>
                           </span>
-                          {isSelected ? (
-                            <Check className="h-4 w-4 shrink-0 text-primary" />
-                          ) : null}
+                          {isSelected ? <Check className="h-4 w-4 shrink-0 text-primary" /> : null}
                         </DropdownMenuItem>
                       );
                     })}
@@ -213,11 +242,7 @@ export const ChatHeader = memo(function ChatHeader(props: {
           variant="ghost"
           size="icon"
           onClick={onToggleTheme}
-          title={
-            settings.theme === "dark"
-              ? t("tooltip.switchToLight")
-              : t("tooltip.switchToDark")
-          }
+          title={settings.theme === "dark" ? t("tooltip.switchToLight") : t("tooltip.switchToDark")}
           className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground"
         >
           {settings.theme === "dark" ? (

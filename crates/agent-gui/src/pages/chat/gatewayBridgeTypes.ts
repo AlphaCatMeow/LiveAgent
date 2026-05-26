@@ -1,14 +1,13 @@
 import type { MutableRefObject } from "react";
-
-import type { ChatHistorySummary } from "../../lib/chat/history/chatHistory";
 import type { ConversationViewState } from "../../lib/chat/conversation/conversationState";
+import type { ChatHistorySummary } from "../../lib/chat/history/chatHistory";
+import type { PendingUploadedFile } from "../../lib/chat/messages/uploadedFiles";
 import type {
   ChatRuntimeControls,
   ExecutionMode,
   ProviderId,
   SystemToolId,
 } from "../../lib/settings";
-import type { PendingUploadedFile } from "../../lib/chat/messages/uploadedFiles";
 import type { ConversationRuntimeEntry } from "./chatPageRuntime";
 
 export type GatewaySelectedModelEvent = {
@@ -84,10 +83,7 @@ export type GatewayBridgeRuntimeRefs = {
   appliedHistoryTruncationsRef: MutableRefObject<Map<string, string>>;
   historyItemsRef: MutableRefObject<ChatHistorySummary[]>;
   ensureGatewayBridgeConversationReadyRef: MutableRefObject<
-    (
-      id: string,
-      options?: EnsureGatewayBridgeConversationReadyOptions,
-    ) => Promise<string>
+    (id: string, options?: EnsureGatewayBridgeConversationReadyOptions) => Promise<string>
   >;
   sendActionRef: MutableRefObject<SendChatAction>;
 };

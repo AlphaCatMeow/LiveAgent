@@ -1,18 +1,15 @@
-import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { useEffect } from "react";
 
 import {
-  truncateConversationFromMessage,
   type ConversationViewState,
+  truncateConversationFromMessage,
 } from "../../lib/chat/conversation/conversationState";
+import { normalizeChatRuntimeControls, normalizeSystemToolSelection } from "../../lib/settings";
 import {
-  normalizeChatRuntimeControls,
-  normalizeSystemToolSelection,
-} from "../../lib/settings";
-import {
+  type ConversationRuntimeEntry,
   createConversationRuntimeEntry,
   setConversationRuntimeCacheEntry,
-  type ConversationRuntimeEntry,
 } from "./chatPageRuntime";
 import {
   type ActiveGatewayBridgeRequest,
@@ -25,16 +22,10 @@ import {
 } from "./gatewayBridgeTypes";
 
 type UseGatewayBridgeListenersParams = GatewayBridgeRuntimeRefs & {
-  queueGatewayBridgeEventForRequest: (
-    requestId: string,
-    event: Record<string, unknown>,
-  ) => void;
+  queueGatewayBridgeEventForRequest: (requestId: string, event: Record<string, unknown>) => void;
   isConversationRunning: (conversationId: string) => boolean;
   getConversationAbortController: (conversationId: string) => AbortController | null;
-  syncVisibleConversationRuntime: (
-    conversationId: string,
-    entry: ConversationRuntimeEntry,
-  ) => void;
+  syncVisibleConversationRuntime: (conversationId: string, entry: ConversationRuntimeEntry) => void;
   invalidateSubagentsForConversation?: (conversationId: string) => void;
 };
 
@@ -198,11 +189,13 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
         claimedRequest = true;
 
         try {
-          resolvedConversationId =
-            await ensureGatewayBridgeConversationReadyRef.current(targetConversationId, {
+          resolvedConversationId = await ensureGatewayBridgeConversationReadyRef.current(
+            targetConversationId,
+            {
               forceHydrate: event.payload.forceHydrate === true,
               historyTruncationKey: event.payload.historyTruncationKey,
-            });
+            },
+          );
 
           const runningRequest =
             getActiveGatewayBridgeRequestByConversationId(resolvedConversationId) ||
@@ -243,8 +236,7 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
             conversationIdOverride: resolvedConversationId,
             executionModeOverride: gatewayBridgeRequest.executionModeOverride,
             workdirOverride: gatewayBridgeRequest.workdirOverride,
-            selectedSystemToolIdsOverride:
-              gatewayBridgeRequest.selectedSystemToolIdsOverride,
+            selectedSystemToolIdsOverride: gatewayBridgeRequest.selectedSystemToolIdsOverride,
             runtimeControlsOverride: gatewayBridgeRequest.runtimeControlsOverride,
             gatewayBridgeRequestOverride: gatewayBridgeRequest,
           });
@@ -257,11 +249,7 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
           });
         } finally {
           if (claimedRequest) {
-            releaseGatewayBridgeRequestClaim(
-              requestId,
-              clientRequestId,
-              gatewayBridgeRequest,
-            );
+            releaseGatewayBridgeRequestClaim(requestId, clientRequestId, gatewayBridgeRequest);
           }
         }
       })();
@@ -338,10 +326,7 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
         nextEntry,
       );
       persistedConversationStateRef.current.set(conversationId, nextState);
-      appliedHistoryTruncationsRef.current.set(
-        conversationId,
-        `${segmentIndex}:${messageIndex}`,
-      );
+      appliedHistoryTruncationsRef.current.set(conversationId, `${segmentIndex}:${messageIndex}`);
 
       if (currentConversationIdRef.current === conversationId) {
         syncVisibleConversationRuntime(conversationId, nextEntry);

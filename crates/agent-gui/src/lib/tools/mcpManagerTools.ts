@@ -1,17 +1,16 @@
-import { invoke } from "@tauri-apps/api/core";
-import { Type } from "@sinclair/typebox";
-
 import type { Tool, ToolCall, ToolResultMessage } from "@mariozechner/pi-ai";
+import { Type } from "@sinclair/typebox";
+import { invoke } from "@tauri-apps/api/core";
 
 import {
-  normalizeMcpServerConfig,
-  normalizeMcpSettings,
   type McpServerConfig,
   type McpSettings,
+  normalizeMcpServerConfig,
+  normalizeMcpSettings,
 } from "../settings";
 import {
-  createBuiltinMetadataMap,
   type BuiltinToolBundle,
+  createBuiltinMetadataMap,
   type McpManagerResultDetails,
 } from "./builtinTypes";
 import type { SystemToolRuntimeScope } from "./customSystemTools";
@@ -263,30 +262,31 @@ function normalizeInlineServer(input: unknown): McpServerConfig {
 }
 
 function validateRawServerShape(raw: Record<string, unknown>, label: string) {
-  if (Object.prototype.hasOwnProperty.call(raw, "args")) {
+  if (Object.hasOwn(raw, "args")) {
     const value = raw.args;
     if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
       throw new Error(`${label}.args must be a string array.`);
     }
   }
-  if (Object.prototype.hasOwnProperty.call(raw, "env")) {
+  if (Object.hasOwn(raw, "env")) {
     normalizeStringMap(raw.env, `${label}.env`);
   }
-  if (Object.prototype.hasOwnProperty.call(raw, "headers")) {
+  if (Object.hasOwn(raw, "headers")) {
     normalizeStringMap(raw.headers, `${label}.headers`);
   }
 }
 
 function normalizePatch(input: unknown): Partial<McpServerConfig> {
   const raw = asObject(input, "McpManager.patch");
-  if (Object.prototype.hasOwnProperty.call(raw, "id")) {
+  if (Object.hasOwn(raw, "id")) {
     throw new Error("McpManager.update does not allow changing server id.");
   }
   const patch: Partial<McpServerConfig> = {};
   for (const [key, value] of Object.entries(raw)) {
     switch (key) {
       case "enabled":
-        if (typeof value !== "boolean") throw new Error("McpManager.patch.enabled must be a boolean.");
+        if (typeof value !== "boolean")
+          throw new Error("McpManager.patch.enabled must be a boolean.");
         patch.enabled = value;
         break;
       case "transport":
@@ -300,9 +300,8 @@ function normalizePatch(input: unknown): Partial<McpServerConfig> {
       case "cwd":
       case "messageUrl":
         if (typeof value !== "string") throw new Error(`McpManager.patch.${key} must be a string.`);
-        (patch as Record<string, unknown>)[key] = key === "cwd" || key === "messageUrl"
-          ? value.trim() || undefined
-          : value.trim();
+        (patch as Record<string, unknown>)[key] =
+          key === "cwd" || key === "messageUrl" ? value.trim() || undefined : value.trim();
         break;
       case "args":
         if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
@@ -312,7 +311,10 @@ function normalizePatch(input: unknown): Partial<McpServerConfig> {
         break;
       case "env":
       case "headers":
-        (patch as Record<string, unknown>)[key] = normalizeStringMap(value, `McpManager.patch.${key}`);
+        (patch as Record<string, unknown>)[key] = normalizeStringMap(
+          value,
+          `McpManager.patch.${key}`,
+        );
         break;
       case "timeoutMs": {
         const numeric = typeof value === "number" ? value : Number(value);
@@ -435,7 +437,9 @@ function summarizeTool(tool: McpDiagnosticToolInfo, includeSchema: boolean): Mcp
 
 async function stopRuntime(serverId: string, warnings: string[]) {
   try {
-    const stopped = await invoke<McpStopServerResponse>("mcp_stop_server", { server_id: serverId } as any);
+    const stopped = await invoke<McpStopServerResponse>("mcp_stop_server", {
+      server_id: serverId,
+    } as any);
     return stopped.stopped;
   } catch (err) {
     warnings.push(`failed to stop runtime for ${serverId}: ${asErrorMessage(err)}`);
@@ -487,7 +491,9 @@ function buildSuggestions(result: {
     suggestions.push("Check that the stdio command exists in PATH or set cwd/env explicitly.");
   }
   if (/timed out|timeout/i.test(message)) {
-    suggestions.push("Increase timeoutMs or check whether the MCP server is hanging during initialize/tools/list.");
+    suggestions.push(
+      "Increase timeoutMs or check whether the MCP server is hanging during initialize/tools/list.",
+    );
   }
   if (/401|403|Unauthorized|Forbidden/i.test(message)) {
     suggestions.push("Check headers/env credentials for this MCP server.");
@@ -510,8 +516,10 @@ function formatMcpManagerResult(result: McpManagerExecutionResult) {
   const lines = [`McpManager action=${result.action}`];
   if (result.serverId) lines.push(`server=${result.serverId}`);
   if (result.serverIds?.length) lines.push(`servers=${result.serverIds.join(",")}`);
-  if (typeof result.changed === "boolean") lines.push(`changed=${result.changed ? "true" : "false"}`);
-  if (typeof result.stopped === "boolean") lines.push(`stopped=${result.stopped ? "true" : "false"}`);
+  if (typeof result.changed === "boolean")
+    lines.push(`changed=${result.changed ? "true" : "false"}`);
+  if (typeof result.stopped === "boolean")
+    lines.push(`stopped=${result.stopped ? "true" : "false"}`);
   if (result.validation) {
     lines.push(`validation=${result.validation.ok ? "ok" : "failed"}`);
     for (const error of result.validation.errors) lines.push(`- error: ${error}`);
@@ -524,7 +532,9 @@ function formatMcpManagerResult(result: McpManagerExecutionResult) {
     if (result.runtime.lastError) lines.push(`runtimeError=${result.runtime.lastError}`);
   }
   if (result.test) {
-    lines.push(`test=${result.test.ok ? "ok" : "failed"} phase=${result.test.phase} durationMs=${result.test.durationMs}`);
+    lines.push(
+      `test=${result.test.ok ? "ok" : "failed"} phase=${result.test.phase} durationMs=${result.test.durationMs}`,
+    );
     lines.push(`tools=${result.test.toolsCount}`);
     if (result.test.error) lines.push(`error=${result.test.error}`);
     if (result.test.stderrTail) lines.push(result.test.stderrTail);
@@ -576,12 +586,13 @@ function detailsForResult(result: McpManagerExecutionResult): McpManagerResultDe
         : true,
     phase: result.test?.phase,
     serverCount: result.servers?.length,
-    enabledCount:
-      result.servers
-        ? result.servers.filter((server) => server.enabled).length
-        : result.server
-          ? (result.server.enabled ? 1 : 0)
-          : undefined,
+    enabledCount: result.servers
+      ? result.servers.filter((server) => server.enabled).length
+      : result.server
+        ? result.server.enabled
+          ? 1
+          : 0
+        : undefined,
     toolsCount: result.test?.toolsCount ?? result.tools?.length,
     changed: result.changed,
     stopped: result.stopped,
@@ -619,7 +630,7 @@ export function createMcpManagerTools(params: {
 
     const settings = currentSettings();
     const includeSchema = args.include_schema === true;
-    const includeStderr = Object.prototype.hasOwnProperty.call(args, "include_stderr")
+    const includeStderr = Object.hasOwn(args, "include_stderr")
       ? args.include_stderr === true
       : false;
 
@@ -647,7 +658,14 @@ export function createMcpManagerTools(params: {
     if (action === "create") {
       const server = normalizeServerForCreate(args.server);
       const validation = validateServer(server);
-      if (!validation.ok) return { action, serverId: server.id, server: redactMcpServerConfig(server), validation, changed: false };
+      if (!validation.ok)
+        return {
+          action,
+          serverId: server.id,
+          server: redactMcpServerConfig(server),
+          validation,
+          changed: false,
+        };
 
       const conflict = args.conflict === "overwrite" ? "overwrite" : "fail";
       const existingIndex = settings.servers.findIndex((item) => item.id === server.id);
@@ -682,7 +700,14 @@ export function createMcpManagerTools(params: {
       const patch = normalizePatch(args.patch);
       const updated = normalizeMcpServerConfig({ ...existing, ...patch, id: existing.id });
       const validation = validateServer(updated);
-      if (!validation.ok) return { action, serverId, server: redactMcpServerConfig(updated), validation, changed: false };
+      if (!validation.ok)
+        return {
+          action,
+          serverId,
+          server: redactMcpServerConfig(updated),
+          validation,
+          changed: false,
+        };
       const servers = settings.servers.map((server) => (server.id === serverId ? updated : server));
       commitSettings({ servers, selected: settings.selected });
       const runtimeWarnings: string[] = [];
@@ -744,7 +769,9 @@ export function createMcpManagerTools(params: {
 
     if (action === "stop") {
       const serverId = requireServerId(args.server_id);
-      const stopped = await invoke<McpStopServerResponse>("mcp_stop_server", { server_id: serverId } as any);
+      const stopped = await invoke<McpStopServerResponse>("mcp_stop_server", {
+        server_id: serverId,
+      } as any);
       return { action, serverId, stopped: stopped.stopped, changed: false };
     }
 
@@ -776,7 +803,7 @@ export function createMcpManagerTools(params: {
           suggestions,
         };
       }
-      const shouldIncludeStderr = Object.prototype.hasOwnProperty.call(args, "include_stderr")
+      const shouldIncludeStderr = Object.hasOwn(args, "include_stderr")
         ? includeStderr
         : action === "diagnose";
       const test = applyRuntimeTestOutputOptions(
@@ -791,7 +818,10 @@ export function createMcpManagerTools(params: {
         validation,
         runtime,
         test,
-        tools: action === "tools" || args.include_tools === true || action === "diagnose" ? tools : undefined,
+        tools:
+          action === "tools" || args.include_tools === true || action === "diagnose"
+            ? tools
+            : undefined,
         changed: false,
         suggestions: buildSuggestions({ validation, test, server }),
       };
@@ -807,7 +837,10 @@ export function createMcpManagerTools(params: {
     parameters: MCP_MANAGER_PARAMETERS,
   };
 
-  async function executeToolCall(toolCall: ToolCall, signal?: AbortSignal): Promise<ToolResultMessage> {
+  async function executeToolCall(
+    toolCall: ToolCall,
+    signal?: AbortSignal,
+  ): Promise<ToolResultMessage> {
     const now = Date.now();
     if (signal?.aborted) {
       return {
@@ -849,7 +882,12 @@ export function createMcpManagerTools(params: {
         toolCallId: toolCall.id,
         toolName: toolCall.name,
         content: [{ type: "text", text: `McpManager failed: ${asErrorMessage(err)}` }],
-        details: { kind: "manage_mcp", action: "unknown", ok: false, errors: [asErrorMessage(err)] },
+        details: {
+          kind: "manage_mcp",
+          action: "unknown",
+          ok: false,
+          errors: [asErrorMessage(err)],
+        },
         isError: true,
         timestamp: now,
       };

@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { type MouseEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import iconSimpleUrl from "../../src-tauri/icons/icon-simple.png";
-import { Maximize2, Minimize2, Minus, X } from "./icons";
 import { useLocale } from "../i18n";
 import { cn } from "../lib/shared/utils";
+import { Maximize2, Minimize2, Minus, X } from "./icons";
 
 type TauriRuntimeWindow = Window & {
   __TAURI__?: unknown;
@@ -122,14 +122,17 @@ export function WindowsTitleBar() {
     };
   }, [getAppWindow, isVisible, syncMaximized]);
 
-  const startDragging = useCallback((event: MouseEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || event.detail !== 1) {
-      return;
-    }
-    void getAppWindow()
-      .startDragging()
-      .catch((error) => reportWindowChromeError("drag", error));
-  }, [getAppWindow]);
+  const startDragging = useCallback(
+    (event: MouseEvent<HTMLDivElement>) => {
+      if (event.button !== 0 || event.detail !== 1) {
+        return;
+      }
+      void getAppWindow()
+        .startDragging()
+        .catch((error) => reportWindowChromeError("drag", error));
+    },
+    [getAppWindow],
+  );
 
   const toggleMaximize = useCallback(() => {
     const appWindow = getAppWindow();
@@ -140,12 +143,15 @@ export function WindowsTitleBar() {
       .catch((error) => reportWindowChromeError("toggle maximized state for", error));
   }, [getAppWindow]);
 
-  const handleTitleDoubleClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
-    if (event.button !== 0) {
-      return;
-    }
-    toggleMaximize();
-  }, [toggleMaximize]);
+  const handleTitleDoubleClick = useCallback(
+    (event: MouseEvent<HTMLDivElement>) => {
+      if (event.button !== 0) {
+        return;
+      }
+      toggleMaximize();
+    },
+    [toggleMaximize],
+  );
 
   const minimizeWindow = useCallback(() => {
     void getAppWindow()

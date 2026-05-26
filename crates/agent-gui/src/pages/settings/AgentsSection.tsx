@@ -5,11 +5,7 @@ import { Button } from "../../components/ui/button";
 import { useLocale } from "../../i18n";
 import { type AgentPromptTemplate, updateAgents } from "../../lib/settings";
 import { AgentPromptTemplateModal } from "./AgentPromptTemplateModal";
-import {
-  AgentActivationSwitch,
-  ConfirmDeletePopover,
-  PromptTag,
-} from "./shared";
+import { AgentActivationSwitch, ConfirmDeletePopover, PromptTag } from "./shared";
 import type { SettingsSectionProps } from "./types";
 
 export function AgentsSection(props: SettingsSectionProps) {
@@ -57,7 +53,10 @@ export function AgentsSection(props: SettingsSectionProps) {
 
   function handleDelete(id: string) {
     setSettings((prev) =>
-      updateAgents(prev, prev.agents.filter((template) => template.id !== id)),
+      updateAgents(
+        prev,
+        prev.agents.filter((template) => template.id !== id),
+      ),
     );
   }
 
@@ -95,9 +94,7 @@ export function AgentsSection(props: SettingsSectionProps) {
           <div className="flex items-center gap-2">
             {templates.length > 0 ? (
               <div className="flex items-center gap-2 rounded-lg bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground">
-                <span className="tabular-nums font-medium text-foreground">
-                  {templates.length}
-                </span>
+                <span className="tabular-nums font-medium text-foreground">{templates.length}</span>
                 {t("settings.agentsCount")}
                 {enabledCount > 0 ? (
                   <>
@@ -242,9 +239,7 @@ export function AgentsSection(props: SettingsSectionProps) {
                     ) : null}
                     {isExpanded ? (
                       <div className="mt-2 max-h-48 overflow-y-auto rounded-lg bg-muted/50 p-3 font-mono text-xs leading-relaxed text-foreground/80">
-                        <pre className="whitespace-pre-wrap break-words">
-                          {template.prompt}
-                        </pre>
+                        <pre className="whitespace-pre-wrap break-words">{template.prompt}</pre>
                       </div>
                     ) : null}
                   </div>

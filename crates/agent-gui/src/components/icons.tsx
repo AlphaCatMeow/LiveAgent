@@ -1,8 +1,6 @@
 import type { ComponentType, SVGProps } from "react";
-
-import AlertTriangleSource from "~icons/lucide/triangle-alert";
 import ClaudeSource from "~icons/logos/claude-icon";
-import FileTypeGeminiSource from "~icons/vscode-icons/file-type-gemini";
+import OpenAISource from "~icons/logos/openai-icon";
 import ArrowLeftSource from "~icons/lucide/arrow-left";
 import BanSource from "~icons/lucide/ban";
 import BookOpenSource from "~icons/lucide/book-open";
@@ -10,35 +8,38 @@ import BotSource from "~icons/lucide/bot";
 import BrainSource from "~icons/lucide/brain";
 import BrushCleaningSource from "~icons/lucide/brush-cleaning";
 import CheckSource from "~icons/lucide/check";
-import CheckCircle2Source from "~icons/lucide/circle-check";
 import ChevronDownSource from "~icons/lucide/chevron-down";
 import ChevronRightSource from "~icons/lucide/chevron-right";
 import ChevronUpSource from "~icons/lucide/chevron-up";
 import CircleSource from "~icons/lucide/circle";
+import CheckCircle2Source from "~icons/lucide/circle-check";
+import XCircleSource from "~icons/lucide/circle-x";
 import Clock3Source from "~icons/lucide/clock-3";
 import CloudSource from "~icons/lucide/cloud";
 import CopySource from "~icons/lucide/copy";
 import CpuSource from "~icons/lucide/cpu";
 import DownloadSource from "~icons/lucide/download";
-import Edit3Source from "~icons/lucide/pen-line";
+import Globe2Source from "~icons/lucide/earth";
+import MoreHorizontalSource from "~icons/lucide/ellipsis";
 import ExternalLinkSource from "~icons/lucide/external-link";
 import EyeSource from "~icons/lucide/eye";
 import EyeOffSource from "~icons/lucide/eye-off";
 import FileSource from "~icons/lucide/file";
+import fileIconSvgSource from "~icons/lucide/file?raw";
 import FilePenLineSource from "~icons/lucide/file-pen-line";
 import FileTextSource from "~icons/lucide/file-text";
 import FolderSource from "~icons/lucide/folder";
+import folderIconSvgSource from "~icons/lucide/folder?raw";
 import FolderOpenSource from "~icons/lucide/folder-open";
 import FolderTreeSource from "~icons/lucide/folder-tree";
 import GlobeSource from "~icons/lucide/globe";
-import Globe2Source from "~icons/lucide/earth";
 import HistorySource from "~icons/lucide/history";
 import ImageIconSource from "~icons/lucide/image";
 import ImageOffSource from "~icons/lucide/image-off";
 import InfoSource from "~icons/lucide/info";
 import KeySource from "~icons/lucide/key";
-import Link2Source from "~icons/lucide/link-2";
 import LightbulbSource from "~icons/lucide/lightbulb";
+import Link2Source from "~icons/lucide/link-2";
 import Loader2Source from "~icons/lucide/loader-circle";
 import LoaderCircleSource from "~icons/lucide/loader-circle";
 import LockSource from "~icons/lucide/lock";
@@ -49,11 +50,10 @@ import Minimize2Source from "~icons/lucide/minimize-2";
 import MinusSource from "~icons/lucide/minus";
 import MonitorSmartphoneSource from "~icons/lucide/monitor-smartphone";
 import MoonSource from "~icons/lucide/moon";
-import MoreHorizontalSource from "~icons/lucide/ellipsis";
-import OpenAISource from "~icons/logos/openai-icon";
 import PanelLeftSource from "~icons/lucide/panel-left";
 import PanelLeftCloseSource from "~icons/lucide/panel-left-close";
 import PaperclipSource from "~icons/lucide/paperclip";
+import Edit3Source from "~icons/lucide/pen-line";
 import PencilSource from "~icons/lucide/pencil";
 import PinSource from "~icons/lucide/pin";
 import PinOffSource from "~icons/lucide/pin-off";
@@ -76,15 +76,14 @@ import SquarePenSource from "~icons/lucide/square-pen";
 import SunSource from "~icons/lucide/sun";
 import TerminalSource from "~icons/lucide/terminal";
 import Trash2Source from "~icons/lucide/trash-2";
+import AlertTriangleSource from "~icons/lucide/triangle-alert";
 import UploadSource from "~icons/lucide/upload";
 import WifiSource from "~icons/lucide/wifi";
 import WifiOffSource from "~icons/lucide/wifi-off";
 import WrenchSource from "~icons/lucide/wrench";
 import XSource from "~icons/lucide/x";
-import XCircleSource from "~icons/lucide/circle-x";
 import ZapSource from "~icons/lucide/zap";
-import fileIconSvgSource from "~icons/lucide/file?raw";
-import folderIconSvgSource from "~icons/lucide/folder?raw";
+import FileTypeGeminiSource from "~icons/vscode-icons/file-type-gemini";
 
 type IconSource = ComponentType<SVGProps<SVGSVGElement> & { title?: string }>;
 
@@ -97,7 +96,13 @@ type IconProps = SVGProps<SVGSVGElement> & {
 export type IconComponent = ComponentType<IconProps>;
 
 function createIcon(Source: IconSource): IconComponent {
-  return function Icon({ absoluteStrokeWidth: _absoluteStrokeWidth, height, size, width, ...props }) {
+  return function Icon({
+    absoluteStrokeWidth: _absoluteStrokeWidth,
+    height,
+    size,
+    width,
+    ...props
+  }) {
     const nextProps: IconProps = { ...props };
     if (size !== undefined) {
       nextProps.width = width ?? size;
@@ -195,4 +200,5 @@ export const XCircle = createIcon(XCircleSource);
 export const Zap = createIcon(ZapSource);
 const fileIconSvg = fileIconSvgSource as unknown as string;
 const folderIconSvg = folderIconSvgSource as unknown as string;
+
 export { fileIconSvg, folderIconSvg };

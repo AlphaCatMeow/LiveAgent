@@ -1,10 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import type {
-  ConversationHook,
-  ConversationHookType,
-  HookLifecycleEventType,
-} from "../settings";
+import type { ConversationHook, ConversationHookType, HookLifecycleEventType } from "../settings";
 
 export type ConversationHookWarning = {
   hookName: string;

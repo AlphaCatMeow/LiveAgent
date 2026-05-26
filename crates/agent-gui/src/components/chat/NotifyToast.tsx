@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef } from "react";
-import { AlertTriangle, XCircle, X } from "../icons";
+import { AlertTriangle, X, XCircle } from "../icons";
 
 export type NotifyItem = {
   id: string;
@@ -64,9 +64,7 @@ const ToastEntry = memo(function ToastEntry(props: {
       )}
       <p
         className={`min-w-0 flex-1 leading-relaxed ${
-          isWarning
-            ? "text-amber-800 dark:text-amber-200"
-            : "text-red-800 dark:text-red-200"
+          isWarning ? "text-amber-800 dark:text-amber-200" : "text-red-800 dark:text-red-200"
         }`}
       >
         {item.message}

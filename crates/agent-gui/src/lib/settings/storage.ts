@@ -1,16 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
-import { normalizeLocale, type Locale } from "../../i18n/config";
+import { type Locale, normalizeLocale } from "../../i18n/config";
 
 import {
+  type AppSettings,
+  type ChatRuntimeControls,
   getDefaultSettings,
+  normalizeChatRuntimeControls,
   normalizeSelectedModel,
   normalizeSettings,
-  normalizeChatRuntimeControls,
-  type ChatRuntimeControls,
   normalizeSkillsSettings,
-  normalizeUpdateSettings,
   normalizeTheme,
-  type AppSettings,
+  normalizeUpdateSettings,
   type SelectedModel,
   type SkillsSettings,
   type Theme,
@@ -106,7 +106,18 @@ function readLocalUiSettings(): {
   }
 }
 
-function writeLocalUiSettings(settings: Pick<AppSettings, "skills" | "chatRuntimeControls" | "customSettings" | "updates" | "selectedModel" | "theme" | "locale">) {
+function writeLocalUiSettings(
+  settings: Pick<
+    AppSettings,
+    | "skills"
+    | "chatRuntimeControls"
+    | "customSettings"
+    | "updates"
+    | "selectedModel"
+    | "theme"
+    | "locale"
+  >,
+) {
   const payload = {
     skills: settings.skills,
     chatRuntimeControls: settings.chatRuntimeControls,
@@ -160,7 +171,8 @@ export async function loadPersistedSettingsWithDefaults(): Promise<PersistedSett
       persisted?.system ?? defaults.system,
       defaultWorkdir,
     ) as AppSettings["system"],
-    customProviders: (persisted?.providers ?? defaults.customProviders) as AppSettings["customProviders"],
+    customProviders: (persisted?.providers ??
+      defaults.customProviders) as AppSettings["customProviders"],
     mcp: (persisted?.mcp ?? defaults.mcp) as AppSettings["mcp"],
     agents: (persisted?.agents ?? defaults.agents) as AppSettings["agents"],
     hooks: (persisted?.hooks ?? defaults.hooks) as AppSettings["hooks"],

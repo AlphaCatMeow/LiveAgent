@@ -1,31 +1,30 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
-
 import {
+  type ConversationViewState,
+  createConversationStateFromContext,
+  normalizeConversationState,
+} from "../../lib/chat/conversation/conversationState";
+import {
+  type ChatHistorySummary,
+  deleteChatHistory,
   getChatHistory,
   getChatHistoryActiveSegment,
   persistConversationState,
   renameChatHistory,
   setChatHistoryPinned,
-  deleteChatHistory,
-  type ChatHistorySummary,
 } from "../../lib/chat/history/chatHistory";
 import {
-  createConversationStateFromContext,
-  normalizeConversationState,
-  type ConversationViewState,
-} from "../../lib/chat/conversation/conversationState";
-import {
+  createConversationIdentity,
   mergeHistoryItem,
   normalizeConversationTitle,
-  waitForTitleLookahead,
-  createConversationIdentity,
   PENDING_CONVERSATION_TITLE,
+  waitForTitleLookahead,
 } from "../../lib/chat/page/chatPageHelpers";
 import {
+  type ConversationRuntimeEntry,
   createConversationRuntimeEntry,
   pruneIdleConversationRuntimeCaches,
   setConversationRuntimeCacheEntry,
-  type ConversationRuntimeEntry,
 } from "./chatPageRuntime";
 
 type TitleJobRefValue = {
@@ -47,10 +46,7 @@ type PersistConversationParams = {
 };
 
 type IdleSchedulerWindow = Window & {
-  requestIdleCallback?: (
-    callback: IdleRequestCallback,
-    options?: IdleRequestOptions,
-  ) => number;
+  requestIdleCallback?: (callback: IdleRequestCallback, options?: IdleRequestOptions) => number;
   cancelIdleCallback?: (handle: number) => void;
 };
 
@@ -70,10 +66,7 @@ type UseConversationHistoryActionsParams = {
   renamingId: string | null;
   renameDraft: string;
   buildRuntimeEntryFromVisibleState: () => ConversationRuntimeEntry;
-  syncVisibleConversationRuntime: (
-    conversationId: string,
-    entry: ConversationRuntimeEntry,
-  ) => void;
+  syncVisibleConversationRuntime: (conversationId: string, entry: ConversationRuntimeEntry) => void;
   updateConversationRuntimeEntry: (
     conversationId: string,
     updater: (prev: ConversationRuntimeEntry) => ConversationRuntimeEntry,
@@ -426,8 +419,7 @@ export function useConversationHistoryActions(params: UseConversationHistoryActi
 
     const currentItem = historyItemsRef.current.find((item) => item.id === conversationId);
     let titleToStore =
-      currentItem &&
-      (!currentItem.isPending || currentItem.title !== PENDING_CONVERSATION_TITLE)
+      currentItem && (!currentItem.isPending || currentItem.title !== PENDING_CONVERSATION_TITLE)
         ? currentItem.title
         : fallbackTitle;
     if (titlePromise && titleLookahead) {

@@ -1,14 +1,7 @@
-import {
-  normalizeChatRuntimeControls,
-  normalizeSettings,
-  type AppSettings,
-} from "./index";
+import { type AppSettings, normalizeChatRuntimeControls, normalizeSettings } from "./index";
 
 export type GatewayProviderApiKeyUpdates = Record<string, string>;
-export type GatewaySettingsSyncProvider = Omit<
-  AppSettings["customProviders"][number],
-  "apiKey"
-> & {
+export type GatewaySettingsSyncProvider = Omit<AppSettings["customProviders"][number], "apiKey"> & {
   apiKeyConfigured?: boolean;
 };
 
@@ -111,10 +104,7 @@ function mergeSyncedCustomProviders(
     const apiKeyUpdate = id ? apiKeyUpdates[id] : undefined;
     const sourceApiKey = typeof source.apiKey === "string" ? source.apiKey.trim() : "";
     const apiKey = (apiKeyUpdate ?? sourceApiKey) || currentProvider?.apiKey || "";
-    const sourceHasConfiguredFlag = Object.prototype.hasOwnProperty.call(
-      source,
-      "apiKeyConfigured",
-    );
+    const sourceHasConfiguredFlag = Object.hasOwn(source, "apiKeyConfigured");
 
     return {
       ...source,
@@ -164,13 +154,13 @@ export function applyGatewaySettingsSyncPayload(
   const selectedModel =
     source.selectedModel === null
       ? undefined
-      : (source.selectedModel as AppSettings["selectedModel"] | undefined) ??
-        current.selectedModel;
-  const memory = Object.prototype.hasOwnProperty.call(source, "memory")
-    ? (source.memory as AppSettings["memory"] | null | undefined) ?? {}
+      : ((source.selectedModel as AppSettings["selectedModel"] | undefined) ??
+        current.selectedModel);
+  const memory = Object.hasOwn(source, "memory")
+    ? ((source.memory as AppSettings["memory"] | null | undefined) ?? {})
     : current.memory;
-  const customSettings = Object.prototype.hasOwnProperty.call(source, "customSettings")
-    ? (source.customSettings as AppSettings["customSettings"] | null | undefined) ?? {}
+  const customSettings = Object.hasOwn(source, "customSettings")
+    ? ((source.customSettings as AppSettings["customSettings"] | null | undefined) ?? {})
     : current.customSettings;
 
   return normalizeSettings({
@@ -188,7 +178,7 @@ export function applyGatewaySettingsSyncPayload(
     memory: memory as AppSettings["memory"],
     customSettings: customSettings as AppSettings["customSettings"],
     skills: (source.skills as AppSettings["skills"] | undefined) ?? current.skills,
-    chatRuntimeControls: Object.prototype.hasOwnProperty.call(source, "chatRuntimeControls")
+    chatRuntimeControls: Object.hasOwn(source, "chatRuntimeControls")
       ? normalizeChatRuntimeControls(source.chatRuntimeControls)
       : current.chatRuntimeControls,
     selectedModel,

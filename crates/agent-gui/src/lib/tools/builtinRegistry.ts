@@ -1,39 +1,38 @@
 import type { ToolCall, ToolResultMessage } from "@mariozechner/pi-ai";
-
-import type { McpServerConfig } from "../settings";
 import {
   listSubagentIdentities,
   listSubagentRuns,
   type SubagentIdentityRecord,
   type SubagentRunSummary,
 } from "../chat/subagent/subagentHistory";
+import type { SubagentRuntimeManager } from "../chat/subagent/subagentRuntimeManager";
+import type { SubagentScheduler } from "../chat/subagent/subagentScheduler";
 import type {
   AgentPromptTemplate,
   CodexRequestFormat,
+  McpServerConfig,
   ProviderId,
   ProviderModelConfig,
   ReasoningLevel,
 } from "../settings";
-import type { SubagentScheduler } from "../chat/subagent/subagentScheduler";
-import type { SubagentRuntimeManager } from "../chat/subagent/subagentRuntimeManager";
-import type { SystemToolId, SystemToolRuntimeScope } from "./customSystemTools";
-import { createCronTools } from "./cronTools";
-import { createCustomSystemTools } from "./customSystemTools";
-import { createSubagentMessageTools } from "./delegate/messageTools";
-import { createDelegateTools } from "./delegateTools";
-import { createFsTools } from "./fsTools";
-import { createFileToolState, type FileToolState } from "./fileToolState";
-import { createMcpTools } from "./mcpTools";
-import { createMcpManagerTools } from "./mcpManagerTools";
-import { createMemoryTools } from "./memoryTools";
-import { createShellTools } from "./shellTools";
-import { createSkillTools } from "./skillTools";
-import type { SkillAccessPolicy } from "./skillAccessPolicy";
 import type {
   BuiltinToolBundle,
   BuiltinToolExecutionContext,
   BuiltinToolMetadata,
 } from "./builtinTypes";
+import { createCronTools } from "./cronTools";
+import type { SystemToolId, SystemToolRuntimeScope } from "./customSystemTools";
+import { createCustomSystemTools } from "./customSystemTools";
+import { createSubagentMessageTools } from "./delegate/messageTools";
+import { createDelegateTools } from "./delegateTools";
+import { createFileToolState, type FileToolState } from "./fileToolState";
+import { createFsTools } from "./fsTools";
+import { createMcpManagerTools } from "./mcpManagerTools";
+import { createMcpTools } from "./mcpTools";
+import { createMemoryTools } from "./memoryTools";
+import { createShellTools } from "./shellTools";
+import type { SkillAccessPolicy } from "./skillAccessPolicy";
+import { createSkillTools } from "./skillTools";
 
 export type BuiltinToolRegistry = {
   tools: BuiltinToolBundle["tools"];
@@ -67,9 +66,7 @@ export type DelegateToolRuntimeConfig = {
   subagentScheduler?: SubagentScheduler;
 };
 
-async function loadExistingSubagentRuns(
-  conversationId?: string,
-): Promise<SubagentRunSummary[]> {
+async function loadExistingSubagentRuns(conversationId?: string): Promise<SubagentRunSummary[]> {
   const parentConversationId = conversationId?.trim();
   if (!parentConversationId) return [];
   try {
@@ -102,10 +99,7 @@ async function loadExistingSubagentIdentities(
 function createBuiltinToolRegistry(bundles: BuiltinToolBundle[]): BuiltinToolRegistry {
   const tools: BuiltinToolBundle["tools"] = [];
   const metadataByName = new Map<string, BuiltinToolMetadata>();
-  const executorsByName = new Map<
-    string,
-    BuiltinToolBundle["executeToolCall"]
-  >();
+  const executorsByName = new Map<string, BuiltinToolBundle["executeToolCall"]>();
 
   for (const bundle of bundles) {
     for (const tool of bundle.tools) {
@@ -241,9 +235,11 @@ async function buildBaseBuiltinToolBundles(params: BuildBuiltinBaseToolRegistryP
   return baseBundles;
 }
 
-export async function buildBuiltinToolRegistry(params: BuildBuiltinBaseToolRegistryParams & {
-  delegateRuntime?: DelegateToolRuntimeConfig;
-}) {
+export async function buildBuiltinToolRegistry(
+  params: BuildBuiltinBaseToolRegistryParams & {
+    delegateRuntime?: DelegateToolRuntimeConfig;
+  },
+) {
   const baseBundles = await buildBaseBuiltinToolBundles(params);
 
   if (!params.delegateRuntime) {
@@ -258,9 +254,7 @@ export async function buildBuiltinToolRegistry(params: BuildBuiltinBaseToolRegis
         currentAgentName: "Parent Agent",
       })
     : null;
-  const parentBundles = parentMessageBundle
-    ? [...baseBundles, parentMessageBundle]
-    : baseBundles;
+  const parentBundles = parentMessageBundle ? [...baseBundles, parentMessageBundle] : baseBundles;
   const storedSubagentRuns = Array.isArray(params.delegateRuntime.conversationSubagentRuns)
     ? []
     : await loadExistingSubagentRuns(params.delegateRuntime.conversationId);

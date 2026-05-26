@@ -1,24 +1,23 @@
-import { useEffect, useRef } from "react";
+import type { Context } from "@mariozechner/pi-ai";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { Context } from "@mariozechner/pi-ai";
-
-import { createStreamDebugLogger } from "../../lib/debug/agentDebug";
+import { useEffect, useRef } from "react";
 import { runAssistantWithTools } from "../../lib/chat/runner/agentRunner";
+import { createStreamDebugLogger } from "../../lib/debug/agentDebug";
 import { assistantMessageToText } from "../../lib/providers/llm";
+import {
+  type AppSettings,
+  DEFAULT_CHAT_RUNTIME_CONTROLS,
+  findProviderModelConfig,
+  isAgentDevMode,
+  isAgentExecutionMode,
+} from "../../lib/settings";
 import {
   buildSkillsSystemPrompt,
   discoverSkills,
   isAlwaysEnabledSkillName,
   type SkillSummary,
 } from "../../lib/skills";
-import {
-  DEFAULT_CHAT_RUNTIME_CONTROLS,
-  findProviderModelConfig,
-  isAgentExecutionMode,
-  isAgentDevMode,
-  type AppSettings,
-} from "../../lib/settings";
 import { buildBuiltinToolRegistry } from "../../lib/tools/builtinRegistry";
 import { createFileToolState } from "../../lib/tools/fileToolState";
 import type { SkillAccessPolicy } from "../../lib/tools/skillAccessPolicy";
@@ -274,10 +273,7 @@ function warnIfAlreadyFinishedCompletion(
   executionId: string,
 ) {
   if (result.status === "already_finished") {
-    console.warn(
-      "Cron Auto Prompt completion reached an already-finished run",
-      executionId,
-    );
+    console.warn("Cron Auto Prompt completion reached an already-finished run", executionId);
   }
 }
 
@@ -321,10 +317,7 @@ function remainingPromptRunTimeoutMs(startedAt: number) {
   return CRON_PROMPT_TIMEOUT_MS - elapsed;
 }
 
-function abortPromptExecution(
-  executionId: string,
-  reason: "local_timeout" | "server_expired",
-) {
+function abortPromptExecution(executionId: string, reason: "local_timeout" | "server_expired") {
   const normalizedExecutionId = normalizeExecutionId(executionId);
   if (!normalizedExecutionId) {
     return;
@@ -359,9 +352,7 @@ function registerLocalPromptTimeout(
   executionTimeoutHandles.set(normalizedExecutionId, timer);
 }
 
-function normalizeQueuedCompletion(
-  value: unknown,
-): CronCompletePromptRunInput | null {
+function normalizeQueuedCompletion(value: unknown): CronCompletePromptRunInput | null {
   if (!value || typeof value !== "object") {
     return null;
   }

@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import type { ChatHistorySummary } from "../../lib/chat/history/chatHistory";
+import { cn } from "../../lib/shared/utils";
 import {
   Check,
   Copy,
-  Eye,
   ExternalLink,
+  Eye,
   EyeOff,
   Link2,
   Loader2,
@@ -12,9 +14,6 @@ import {
   Share2,
   X,
 } from "../icons";
-
-import type { ChatHistorySummary } from "../../lib/chat/history/chatHistory";
-import { cn } from "../../lib/shared/utils";
 import { Button } from "../ui/button";
 
 export type ManagedHistoryShareStatus = {
@@ -103,10 +102,7 @@ function formatConversationTime(timestamp?: number) {
   }).format(new Date(timestamp));
 }
 
-function ShareSwitch(props: {
-  disabled: boolean;
-  onDisable: () => void;
-}) {
+function ShareSwitch(props: { disabled: boolean; onDisable: () => void }) {
   const { disabled, onDisable } = props;
   return (
     <button
@@ -293,7 +289,9 @@ export function SharedHistoryManagerModal({
               <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
                 已分享
               </div>
-              <div className="mt-1 text-lg font-semibold text-foreground">{conversations.length}</div>
+              <div className="mt-1 text-lg font-semibold text-foreground">
+                {conversations.length}
+              </div>
             </div>
             <div className="rounded-2xl border border-border/60 bg-muted/25 px-3 py-2">
               <div className="text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
@@ -350,7 +348,7 @@ export function SharedHistoryManagerModal({
             <div className="space-y-2.5">
               {filteredConversations.map((conversation) => {
                 const status = statuses[conversation.id];
-                const token = status?.enabled === true ? status.token?.trim() ?? "" : "";
+                const token = status?.enabled === true ? (status.token?.trim() ?? "") : "";
                 const redactToolContent = isShareStatusRedacted(status);
                 const shareUrl = buildShareUrl(token, publicOrigin);
                 const isLoading = loadingIds.has(conversation.id);
@@ -388,7 +386,9 @@ export function SharedHistoryManagerModal({
                         </div>
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
-                        {isLoading ? <Loader2 className="h-4 w-4 animate-spin text-sky-500" /> : null}
+                        {isLoading ? (
+                          <Loader2 className="h-4 w-4 animate-spin text-sky-500" />
+                        ) : null}
                         <ShareSwitch
                           disabled={isUpdating}
                           onDisable={() => onDisableShare(conversation)}

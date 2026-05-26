@@ -62,6 +62,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.copy": "复制",
     "chat.edit": "编辑",
     "chat.selectModel": "选择模型",
+    "chat.searchModel": "搜索模型...",
+    "chat.noModelFound": "未找到匹配的模型",
     "chat.aborted": "已取消",
     "chat.contextWindow": "上下文窗口",
     "chat.usage": "用量",
@@ -165,7 +167,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.memoryQuotaFull": "已满",
     "settings.memoryQuotaWarningMessage": "记忆用量已超过 80%，建议优先合并或删除低价值条目。",
     "settings.memoryQuotaNearLimitMessage": "记忆用量已超过 95%，新增记忆很快会被拒绝。",
-    "settings.memoryQuotaFullMessage": "当前 scope 已达到 500 条普通记忆上限；新增记忆会被拒绝，请先删除或合并旧条目。",
+    "settings.memoryQuotaFullMessage":
+      "当前 scope 已达到 500 条普通记忆上限；新增记忆会被拒绝，请先删除或合并旧条目。",
     "settings.memoryRefresh": "刷新",
     "settings.memoryOpenSettings": "记忆设置",
     "settings.memorySettingsTitle": "记忆设置",
@@ -217,17 +220,21 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.memoryOrganizerNoModel": "请先在「记忆整理」中选择一个模型。",
     "settings.memoryOrganizerAlreadyRunning": "已有记忆整理正在运行，请稍后查看历史记录。",
     "settings.memoryOrganizerQueued": "记忆整理已加入队列，将在后台执行。",
-    "settings.memoryOrganizerQueuedRemote": "记忆整理已提交到桌面端后台队列；请保持桌面端运行以执行整理。",
+    "settings.memoryOrganizerQueuedRemote":
+      "记忆整理已提交到桌面端后台队列；请保持桌面端运行以执行整理。",
     "settings.memoryOrganizerHistory": "历史记录",
-    "settings.memoryOrganizerHistoryDescription": "查看每次记忆整理后的模型最终总结、统计与裁剪协议。",
+    "settings.memoryOrganizerHistoryDescription":
+      "查看每次记忆整理后的模型最终总结、统计与裁剪协议。",
     "settings.memoryOrganizerHistoryAll": "全部状态",
     "settings.memoryOrganizerHistoryEmpty": "暂无记忆整理历史。",
     "settings.memoryOrganizerHistoryPending": "整理运行中，完成后会显示模型最终总结。",
     "settings.memoryOrganizerClearHistory": "清空历史记录",
     "settings.memoryOrganizerClearHistoryConfirmTitle": "清空记忆整理历史？",
-    "settings.memoryOrganizerClearHistoryConfirmDescription": "将删除所有已结束的整理历史记录；正在排队或运行中的任务会保留，避免中断当前整理。此操作不可撤销。",
+    "settings.memoryOrganizerClearHistoryConfirmDescription":
+      "将删除所有已结束的整理历史记录；正在排队或运行中的任务会保留，避免中断当前整理。此操作不可撤销。",
     "settings.memoryOrganizerHistoryCleared": "历史记录已清空。",
-    "settings.memoryOrganizerHistoryClearedActiveRetained": "历史记录已清空；正在排队或运行中的任务已保留。",
+    "settings.memoryOrganizerHistoryClearedActiveRetained":
+      "历史记录已清空；正在排队或运行中的任务已保留。",
     "settings.memoryOrganizerStatusPending": "排队中",
     "settings.memoryOrganizerStatusRunning": "运行中",
     "settings.memoryOrganizerStatusSucceeded": "成功",
@@ -251,7 +258,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.memoryOrganizerClusterSummaries": "分组总结",
     "settings.memoryOrganizerTrimmedProtocol": "裁剪后的模型协议",
     "settings.memoryOrganizerManualPreview": "手动整理预览",
-    "settings.memoryOrganizerManualPreviewDescription": "默认选中客户端判定为安全的建议，确认后才会写入记忆。",
+    "settings.memoryOrganizerManualPreviewDescription":
+      "默认选中客户端判定为安全的建议，确认后才会写入记忆。",
     "settings.memoryOrganizerApplySelected": "应用选中建议",
     "settings.memoryOrganizerApplied": "选中建议已应用。",
     "settings.memoryOrganizerPartiallyApplied": "选中建议已部分应用；请查看失败项。",
@@ -348,7 +356,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.aboutUpToDate": "已是最新版本",
     "settings.aboutUpToDateDesc": "当前通道没有比本机更新的 Release。",
     "settings.aboutUpdaterNotConfigured": "更新未配置",
-    "settings.aboutUpdaterNotConfiguredDesc": "Release 构建需要注入 updater 公钥后才能检查和安装更新。",
+    "settings.aboutUpdaterNotConfiguredDesc":
+      "Release 构建需要注入 updater 公钥后才能检查和安装更新。",
     "settings.aboutUpdateError": "更新检查失败",
     "settings.aboutUpdateCheckFailed": "检查更新失败。",
     "settings.aboutUpdateInstallFailed": "安装更新失败。",
@@ -359,9 +368,11 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.aboutChannelPrerelease": "预发布",
     "settings.aboutPrereleaseTitle": "接收预发布版本",
     "settings.aboutPrereleaseToggle": "接收预发布版本",
-    "settings.aboutPrereleaseDesc": "关闭后只会检查正式 Release；开启后会把 beta、rc 等预发布版本纳入候选。",
+    "settings.aboutPrereleaseDesc":
+      "关闭后只会检查正式 Release；开启后会把 beta、rc 等预发布版本纳入候选。",
     "settings.aboutNotesTitle": "说明",
-    "settings.aboutNotesBody": "自动更新只使用 GitHub Release 中的 Tauri updater 清单，版本号高于当前应用时才会提示安装。",
+    "settings.aboutNotesBody":
+      "自动更新只使用 GitHub Release 中的 Tauri updater 清单，版本号高于当前应用时才会提示安装。",
     "settings.aboutSecurityBody": "更新包会通过签名校验；未通过校验的包不会安装。",
 
     /* ── Settings System ── */
@@ -375,7 +386,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.chinese": "简体中文",
     "settings.english": "English",
     "settings.executionMode": "执行模式",
-    "settings.executionModeDesc": "选择当前对话的运行方式。Chat 模式仅输出文本，Agent 模式允许模型调用工具执行操作。",
+    "settings.executionModeDesc":
+      "选择当前对话的运行方式。Chat 模式仅输出文本，Agent 模式允许模型调用工具执行操作。",
     "settings.chatMode": "Chat 模式",
     "settings.chatModeDesc": "纯文本对话，模型只输出文本与 Markdown",
     "settings.agentMode": "Agent 模式",
@@ -385,13 +397,15 @@ export const translations: Record<Locale, Record<string, string>> = {
       "与 Agent 模式一致，但会把当前对话的流式请求与返回逐行写入 ~/.liveagent/debug/<对话ID>.jsonl",
     "settings.workdir": "工作目录",
     "settings.workdirRequired": "必填",
-    "settings.workdirDesc": "Agent 模式下所有文件操作的根目录。仅允许在该目录及子目录内进行读写/搜索。",
+    "settings.workdirDesc":
+      "Agent 模式下所有文件操作的根目录。仅允许在该目录及子目录内进行读写/搜索。",
     "settings.workdirPlaceholder": "点击右侧按钮选择目录，或直接输入路径...",
     "settings.selectWorkdir": "选择工作目录",
     "settings.workdirWarning": "Agent 模式需要填写工作目录，否则无法执行文件工具。",
     "settings.workdirOpenFailed": "打开目录选择器失败：",
     "settings.systemTools": "自定义系统工具",
-    "settings.systemToolsDesc": "这里仅展示用户自定义的系统工具；选中的工具会在 Agent 模式下注册，供模型在对话中调用。",
+    "settings.systemToolsDesc":
+      "这里仅展示用户自定义的系统工具；选中的工具会在 Agent 模式下注册，供模型在对话中调用。",
     "settings.noSystemTools": "暂无可用的自定义系统工具",
 
     /* ── Settings Providers ── */
@@ -516,9 +530,12 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.cronPromptModelRequired": "请选择 Auto Prompt 要使用的模型。",
     "settings.cronPromptModelEmpty": "请先在供应商配置中至少启用一个模型。",
     "settings.cronPromptRequired": "请输入要执行的 Prompt 内容。",
-    "settings.cronPromptRunHint": "Auto Prompt 会在后台独立执行，不会进入主页面最近对话，只会将最终结论写入当前任务的日志列表。",
-    "settings.cronPromptAgentModeOnlyHint": "Auto Prompt 仅在系统执行模式为 Agent 模式或 Agent dev 模式时可运行。",
-    "settings.cronPromptAgentModeRequired": "请先将 系统设置 -> 执行模式 切换为 Agent 模式或 Agent dev 模式，再运行 Auto Prompt。",
+    "settings.cronPromptRunHint":
+      "Auto Prompt 会在后台独立执行，不会进入主页面最近对话，只会将最终结论写入当前任务的日志列表。",
+    "settings.cronPromptAgentModeOnlyHint":
+      "Auto Prompt 仅在系统执行模式为 Agent 模式或 Agent dev 模式时可运行。",
+    "settings.cronPromptAgentModeRequired":
+      "请先将 系统设置 -> 执行模式 切换为 Agent 模式或 Agent dev 模式，再运行 Auto Prompt。",
     "settings.cronPromptPlaceholder": "输入要执行的 Prompt 内容...",
     "settings.cronCommandList": "脚本",
     "settings.cronCommandHint": "输入普通 Shell 脚本，可多行",
@@ -586,7 +603,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.remoteGrpcPort": "gRPC 端口",
     "settings.remoteGrpcPortHint": "Gateway 上 gRPC 服务的监听端口，默认 50051",
     "settings.remoteGrpcEndpoint": "gRPC Endpoint",
-    "settings.remoteGrpcEndpointHint": "可选。Railway TCP Proxy 等场景可填写独立 gRPC 地址，留空则使用 Gateway 地址加 gRPC 端口。",
+    "settings.remoteGrpcEndpointHint":
+      "可选。Railway TCP Proxy 等场景可填写独立 gRPC 地址，留空则使用 Gateway 地址加 gRPC 端口。",
     "settings.remoteAuth": "身份认证",
     "settings.remoteToken": "访问令牌",
     "settings.remoteTokenPlaceholder": "输入与 Gateway 配置一致的 Token",
@@ -667,7 +685,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "mcpHub.storeConfigureTitle": "配置 MCP Server",
     "mcpHub.storeConfigureSubtitle": "补全 {name} 的连接信息后添加到本地 MCP Servers",
     "mcpHub.storeConfigureRequiredTitle": "必填配置",
-    "mcpHub.storeConfigureRequiredDesc": "这些值会按 Registry 提供的目标写入 Env、Header、URL 或 Args。",
+    "mcpHub.storeConfigureRequiredDesc":
+      "这些值会按 Registry 提供的目标写入 Env、Header、URL 或 Args。",
     "mcpHub.storeConfigureSubmit": "添加到本地",
     "mcpHub.storeConfigureNameRequired": "请填写 Server Name",
     "mcpHub.storeConfigureCommandRequired": "请填写启动命令",
@@ -711,9 +730,11 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.skillsScan": "扫描",
     "settings.skillsScanning": "扫描中",
     "settings.skillsDisabledHint": "Skills 功能已关闭，开启后才会将选中的技能注入 system prompt",
-    "settings.skillsDisabledInChatMode": "Chat 模式下不启用 Skills。切换到 Agent 模式后，才会恢复扫描、选择和注入能力。",
+    "settings.skillsDisabledInChatMode":
+      "Chat 模式下不启用 Skills。切换到 Agent 模式后，才会恢复扫描、选择和注入能力。",
     "settings.skillsNotFound": "未发现任何 Skill",
-    "settings.skillsNotFoundHint": "在应用 Skills 目录中添加 skill.json、SKILL.md 或 README.md 文件",
+    "settings.skillsNotFoundHint":
+      "在应用 Skills 目录中添加 skill.json、SKILL.md 或 README.md 文件",
     "settings.skillsRescan": "重新扫描",
     "settings.skillsSearch": "搜索 Skill...",
     "settings.skillsNoMatch": "没有匹配「{filter}」的 Skill",
@@ -746,7 +767,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.skillsStorePreviewDownloads": "下载",
     "settings.skillsStorePreviewStars": "星标",
     "settings.skillsStorePreviewInstalls": "安装",
-    "settings.skillsStorePreviewDetailUnavailable": "ClawHub 详情暂不可用，已显示列表中的基础信息。",
+    "settings.skillsStorePreviewDetailUnavailable":
+      "ClawHub 详情暂不可用，已显示列表中的基础信息。",
     "settings.skillsStorePreviewMetadata": "信息",
     "settings.skillsStorePreviewOwner": "作者",
     "settings.skillsStorePreviewVersion": "版本",
@@ -877,7 +899,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.runtime.reasoning": "Thinking effort",
     "chat.emptyRound": "(No reply)",
     "chat.inputHint": "Type a message, @ to mention files, Enter to send, Shift+Enter for newline",
-    "chat.inputHintWithSkills": "Type a message, @ to mention files, $ to reference Skills, Enter to send, Shift+Enter for newline",
+    "chat.inputHintWithSkills":
+      "Type a message, @ to mention files, $ to reference Skills, Enter to send, Shift+Enter for newline",
     "chat.compactingContext": "Compressing context",
     "chat.compactingContextWait": "Compressing context, please wait...",
     "chat.editMessage": "Edit Message",
@@ -885,6 +908,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.copy": "Copy",
     "chat.edit": "Edit",
     "chat.selectModel": "Select Model",
+    "chat.searchModel": "Search models...",
+    "chat.noModelFound": "No matching models found",
     "chat.aborted": "Cancelled",
     "chat.contextWindow": "Context Window",
     "chat.usage": "Usage",
@@ -986,9 +1011,12 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.memoryQuotaWarning": "Near limit",
     "settings.memoryQuotaNearLimit": "Almost full",
     "settings.memoryQuotaFull": "Full",
-    "settings.memoryQuotaWarningMessage": "Memory usage is above 80%. Prefer merging or deleting low-value entries.",
-    "settings.memoryQuotaNearLimitMessage": "Memory usage is above 95%. New memories will soon be rejected.",
-    "settings.memoryQuotaFullMessage": "This scope has reached the 500 ordinary-memory limit. New memories will be rejected until old entries are deleted or merged.",
+    "settings.memoryQuotaWarningMessage":
+      "Memory usage is above 80%. Prefer merging or deleting low-value entries.",
+    "settings.memoryQuotaNearLimitMessage":
+      "Memory usage is above 95%. New memories will soon be rejected.",
+    "settings.memoryQuotaFullMessage":
+      "This scope has reached the 500 ordinary-memory limit. New memories will be rejected until old entries are deleted or merged.",
     "settings.memoryRefresh": "Refresh",
     "settings.memoryOpenSettings": "Memory settings",
     "settings.memorySettingsTitle": "Memory settings",
@@ -1002,7 +1030,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.memorySettingsCapacity": "Capacity",
     "settings.memorySettingsReview": "Review",
     "settings.memorySettingsDangerZone": "Danger zone",
-    "settings.memorySettingsWipeDescription": "Wipe moves existing memories to quarantine and rebuilds an empty memory store.",
+    "settings.memorySettingsWipeDescription":
+      "Wipe moves existing memories to quarantine and rebuilds an empty memory store.",
     "settings.memoryDriverModels": "Driver models",
     "settings.memoryOrganizerModel": "Memory organization",
     "settings.memorySummaryModel": "Conversation summary",
@@ -1038,19 +1067,26 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.memoryOrganizerNextRun": "Next automatic run:",
     "settings.memoryOrganizerRunNow": "Organize now",
     "settings.memoryOrganizerNoModel": "Choose a memory organization model first.",
-    "settings.memoryOrganizerAlreadyRunning": "Memory organization is already running. Check history again shortly.",
-    "settings.memoryOrganizerQueued": "Memory organization has been queued and will run in the background.",
-    "settings.memoryOrganizerQueuedRemote": "Memory organization has been submitted to the desktop background queue. Keep the desktop app running to execute it.",
+    "settings.memoryOrganizerAlreadyRunning":
+      "Memory organization is already running. Check history again shortly.",
+    "settings.memoryOrganizerQueued":
+      "Memory organization has been queued and will run in the background.",
+    "settings.memoryOrganizerQueuedRemote":
+      "Memory organization has been submitted to the desktop background queue. Keep the desktop app running to execute it.",
     "settings.memoryOrganizerHistory": "History",
-    "settings.memoryOrganizerHistoryDescription": "Review each memory organization run's final model summary, stats, and trimmed protocol.",
+    "settings.memoryOrganizerHistoryDescription":
+      "Review each memory organization run's final model summary, stats, and trimmed protocol.",
     "settings.memoryOrganizerHistoryAll": "All statuses",
     "settings.memoryOrganizerHistoryEmpty": "No memory organization history yet.",
-    "settings.memoryOrganizerHistoryPending": "Run in progress. The final model summary will appear after completion.",
+    "settings.memoryOrganizerHistoryPending":
+      "Run in progress. The final model summary will appear after completion.",
     "settings.memoryOrganizerClearHistory": "Clear history",
     "settings.memoryOrganizerClearHistoryConfirmTitle": "Clear memory organization history?",
-    "settings.memoryOrganizerClearHistoryConfirmDescription": "This deletes all finished memory organization history records. Pending or running tasks are retained so the current organization pass is not interrupted. This action cannot be undone.",
+    "settings.memoryOrganizerClearHistoryConfirmDescription":
+      "This deletes all finished memory organization history records. Pending or running tasks are retained so the current organization pass is not interrupted. This action cannot be undone.",
     "settings.memoryOrganizerHistoryCleared": "History has been cleared.",
-    "settings.memoryOrganizerHistoryClearedActiveRetained": "History has been cleared; pending or running tasks were retained.",
+    "settings.memoryOrganizerHistoryClearedActiveRetained":
+      "History has been cleared; pending or running tasks were retained.",
     "settings.memoryOrganizerStatusPending": "Pending",
     "settings.memoryOrganizerStatusRunning": "Running",
     "settings.memoryOrganizerStatusSucceeded": "Succeeded",
@@ -1074,11 +1110,14 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.memoryOrganizerClusterSummaries": "Cluster summaries",
     "settings.memoryOrganizerTrimmedProtocol": "Trimmed model protocol",
     "settings.memoryOrganizerManualPreview": "Manual preview",
-    "settings.memoryOrganizerManualPreviewDescription": "Safe client-validated suggestions are selected by default and are written only after confirmation.",
+    "settings.memoryOrganizerManualPreviewDescription":
+      "Safe client-validated suggestions are selected by default and are written only after confirmation.",
     "settings.memoryOrganizerApplySelected": "Apply selected",
     "settings.memoryOrganizerApplied": "Selected suggestions have been applied.",
-    "settings.memoryOrganizerPartiallyApplied": "Selected suggestions were partially applied; review failed items.",
-    "settings.memoryOrganizerApplyFailed": "Selected suggestions could not be written; review failed items.",
+    "settings.memoryOrganizerPartiallyApplied":
+      "Selected suggestions were partially applied; review failed items.",
+    "settings.memoryOrganizerApplyFailed":
+      "Selected suggestions could not be written; review failed items.",
     "settings.memoryOrganizerSelectAtLeastOne": "Select at least one suggestion.",
     "settings.memoryOrganizerDecisionDelete": "Delete",
     "settings.memoryOrganizerDecisionUpsert": "Rewrite",
@@ -1120,7 +1159,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.memoryTypeDaily": "Journal",
     "settings.memoryUnknownProject": "Project with no recorded path",
     "settings.memoryUnknownProjectId": "unknown project",
-    "settings.memoryProjectRequiresWorkdir": "Project memory requires a workspace directory in System settings.",
+    "settings.memoryProjectRequiresWorkdir":
+      "Project memory requires a workspace directory in System settings.",
     "settings.memorySearchPlaceholder": "Search memory",
     "settings.memoryNew": "New memory",
     "settings.memoryNoEntries": "No memory entries.",
@@ -1139,7 +1179,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.memoryAppendBlockPlaceholder": "Append memory block",
     "settings.memoryEmptyBody": "<empty>",
     "settings.memoryWipeConfirmTitle": "Wipe all memories?",
-    "settings.memoryWipeConfirmDescription": "Existing memories will be moved to quarantine and the memory store will be rebuilt empty.",
+    "settings.memoryWipeConfirmDescription":
+      "Existing memories will be moved to quarantine and the memory store will be rebuilt empty.",
     "settings.memoryWipeAll": "Wipe all",
     "settings.memorySelectEntry": "Select a memory entry.",
 
@@ -1152,26 +1193,31 @@ export const translations: Record<Locale, Record<string, string>> = {
 
     /* ── Settings About ── */
     "settings.aboutTitle": "About LiveAgent",
-    "settings.aboutDescription": "View the current version, release notes, and desktop update status.",
+    "settings.aboutDescription":
+      "View the current version, release notes, and desktop update status.",
     "settings.aboutCurrentVersion": "Current Version",
     "settings.aboutOpenRelease": "Release",
     "settings.aboutCheckUpdate": "Check",
     "settings.aboutInstallUpdate": "Install Update",
     "settings.aboutRestartApp": "Restart App",
     "settings.aboutChecking": "Checking for updates",
-    "settings.aboutCheckingDesc": "Reading the GitHub Release manifest and filtering by the selected channel.",
+    "settings.aboutCheckingDesc":
+      "Reading the GitHub Release manifest and filtering by the selected channel.",
     "settings.aboutInstalling": "Installing update",
     "settings.aboutInstallingDesc": "Downloading and verifying the update package.",
     "settings.aboutInstalled": "Update installed",
-    "settings.aboutInstalledDesc": "The update package has been installed. Restart LiveAgent to use it.",
+    "settings.aboutInstalledDesc":
+      "The update package has been installed. Restart LiveAgent to use it.",
     "settings.aboutRestarting": "Restarting app",
     "settings.aboutRestartingDesc": "LiveAgent is quitting and opening again.",
     "settings.aboutUpdateAvailable": "New version available",
-    "settings.aboutUpdateAvailableDesc": "This version passed updater manifest validation and can be installed.",
+    "settings.aboutUpdateAvailableDesc":
+      "This version passed updater manifest validation and can be installed.",
     "settings.aboutUpToDate": "Up to date",
     "settings.aboutUpToDateDesc": "No newer Release is available in the current channel.",
     "settings.aboutUpdaterNotConfigured": "Updater not configured",
-    "settings.aboutUpdaterNotConfiguredDesc": "Release builds must embed the updater public key before updates can be checked and installed.",
+    "settings.aboutUpdaterNotConfiguredDesc":
+      "Release builds must embed the updater public key before updates can be checked and installed.",
     "settings.aboutUpdateError": "Update check failed",
     "settings.aboutUpdateCheckFailed": "Failed to check for updates.",
     "settings.aboutUpdateInstallFailed": "Failed to install update.",
@@ -1182,14 +1228,18 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.aboutChannelPrerelease": "Pre-release",
     "settings.aboutPrereleaseTitle": "Receive Pre-releases",
     "settings.aboutPrereleaseToggle": "Receive pre-release versions",
-    "settings.aboutPrereleaseDesc": "When disabled, only stable Releases are checked. When enabled, beta, rc, and other pre-releases are eligible.",
+    "settings.aboutPrereleaseDesc":
+      "When disabled, only stable Releases are checked. When enabled, beta, rc, and other pre-releases are eligible.",
     "settings.aboutNotesTitle": "Notes",
-    "settings.aboutNotesBody": "Automatic updates use the Tauri updater manifest attached to GitHub Releases and only prompt when the release version is newer than this app.",
-    "settings.aboutSecurityBody": "Update packages are verified with signatures. Packages that fail verification are not installed.",
+    "settings.aboutNotesBody":
+      "Automatic updates use the Tauri updater manifest attached to GitHub Releases and only prompt when the release version is newer than this app.",
+    "settings.aboutSecurityBody":
+      "Update packages are verified with signatures. Packages that fail verification are not installed.",
 
     /* ── Settings System ── */
     "settings.appearance": "Appearance",
-    "settings.appearanceDesc": "Choose the color theme for the application. Your preference will be saved automatically.",
+    "settings.appearanceDesc":
+      "Choose the color theme for the application. Your preference will be saved automatically.",
     "settings.light": "Light",
     "settings.lightDesc": "Bright and clean light interface",
     "settings.dark": "Dark",
@@ -1198,7 +1248,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.chinese": "简体中文",
     "settings.english": "English",
     "settings.executionMode": "Execution Mode",
-    "settings.executionModeDesc": "Choose how the current conversation runs. Chat mode outputs text only; Agent mode allows the model to call tools.",
+    "settings.executionModeDesc":
+      "Choose how the current conversation runs. Chat mode outputs text only; Agent mode allows the model to call tools.",
     "settings.chatMode": "Chat Mode",
     "settings.chatModeDesc": "Plain text conversation, model outputs text and Markdown only",
     "settings.agentMode": "Agent Mode",
@@ -1208,13 +1259,17 @@ export const translations: Record<Locale, Record<string, string>> = {
       "Same as Agent mode, but also writes each streaming request and response line-by-line to ~/.liveagent/debug/<conversationId>.jsonl",
     "settings.workdir": "Work Directory",
     "settings.workdirRequired": "Required",
-    "settings.workdirDesc": "Root directory for all file operations in Agent mode. Read/write/search is restricted to this directory and its subdirectories.",
-    "settings.workdirPlaceholder": "Click the button on the right to select a directory, or enter a path...",
+    "settings.workdirDesc":
+      "Root directory for all file operations in Agent mode. Read/write/search is restricted to this directory and its subdirectories.",
+    "settings.workdirPlaceholder":
+      "Click the button on the right to select a directory, or enter a path...",
     "settings.selectWorkdir": "Select Work Directory",
-    "settings.workdirWarning": "Agent mode requires a work directory; file tools will not work without it.",
+    "settings.workdirWarning":
+      "Agent mode requires a work directory; file tools will not work without it.",
     "settings.workdirOpenFailed": "Failed to open directory picker: ",
     "settings.systemTools": "Custom System Tools",
-    "settings.systemToolsDesc": "Only user-defined system tools are shown here. Selected tools are registered in Agent mode and can be called by the model during conversation.",
+    "settings.systemToolsDesc":
+      "Only user-defined system tools are shown here. Selected tools are registered in Agent mode and can be called by the model during conversation.",
     "settings.noSystemTools": "No custom system tools available",
 
     /* ── Settings Providers ── */
@@ -1276,8 +1331,10 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.conversationTitleGeneration": "Conversation title generation",
     "settings.conversationTitleModel": "Title generation model",
     "settings.conversationTitleModelFollowCurrent": "Use current chat model",
-    "settings.conversationTitleModelHint": "When unselected, title generation uses the model from the current chat.",
-    "settings.customSettingsModelEmpty": "No active models are configured for the current providers.",
+    "settings.conversationTitleModelHint":
+      "When unselected, title generation uses the model from the current chat.",
+    "settings.customSettingsModelEmpty":
+      "No active models are configured for the current providers.",
 
     /* ── Settings Prompt ── */
     "settings.agentsTitle": "Prompt",
@@ -1287,7 +1344,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.agentsName": "Name",
     "settings.agentsNamePlaceholder": "e.g. Code Review Assistant",
     "settings.agentsDescription": "Description",
-    "settings.agentsDescriptionPlaceholder": "Briefly describe what this global prompt template is for",
+    "settings.agentsDescriptionPlaceholder":
+      "Briefly describe what this global prompt template is for",
     "settings.agentsTags": "Tags",
     "settings.agentsTagsPlaceholder": "e.g. review, writing, global prompt",
     "settings.agentsPrompt": "Prompt",
@@ -1296,7 +1354,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.agentsActive": "active",
     "settings.agentsActiveLabel": "Active",
     "settings.agentsNoTemplates": "No global prompt templates yet",
-    "settings.agentsNoTemplatesHint": "Create reusable prompt templates to quickly apply common Agent instructions in your chats",
+    "settings.agentsNoTemplatesHint":
+      "Create reusable prompt templates to quickly apply common Agent instructions in your chats",
     "settings.agentsNoDescription": "No description",
     "settings.agentsNoTags": "No tags",
     "settings.agentsShowPrompt": "View Prompt",
@@ -1309,7 +1368,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.cronDesc": "Configure and manage automated scheduled tasks",
     "settings.cronAdd": "Add Task",
     "settings.cronEmpty": "No scheduled tasks",
-    "settings.cronEmptyDesc": "Click \"Add Task\" to create your first scheduled task",
+    "settings.cronEmptyDesc": 'Click "Add Task" to create your first scheduled task',
     "settings.cronCount": "tasks",
     "settings.cronTaskName": "Task Name",
     "settings.cronTaskNamePlaceholder": "Enter task name",
@@ -1325,7 +1384,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.cronRemainingExecutionsUnlimitedShort": "unlimited",
     "settings.cronRemainingExecutionsUnit": "remaining",
     "settings.cronRemainingExecutionsUnitShort": "left",
-    "settings.cronRemainingExecutionsEditRequired": "Run count is exhausted. Edit this task and change the run count first.",
+    "settings.cronRemainingExecutionsEditRequired":
+      "Run count is exhausted. Edit this task and change the run count first.",
     "settings.cronTaskType": "Task Type",
     "settings.cronTypeBash": "Shell Script",
     "settings.cronTypeBashHint": "Run a multi-line script with the platform shell",
@@ -1339,9 +1399,12 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.cronPromptModelRequired": "Select the model for this Auto Prompt task.",
     "settings.cronPromptModelEmpty": "Enable at least one model in provider settings first.",
     "settings.cronPromptRequired": "Enter the prompt content to execute.",
-    "settings.cronPromptRunHint": "Auto Prompt runs in the background, does not appear in recent conversations, and only writes the final conclusion to this task's log list.",
-    "settings.cronPromptAgentModeOnlyHint": "Auto Prompt runs only when System -> Execution Mode is Agent Mode or Agent Dev Mode.",
-    "settings.cronPromptAgentModeRequired": "Switch System -> Execution Mode to Agent Mode or Agent Dev Mode before running Auto Prompt.",
+    "settings.cronPromptRunHint":
+      "Auto Prompt runs in the background, does not appear in recent conversations, and only writes the final conclusion to this task's log list.",
+    "settings.cronPromptAgentModeOnlyHint":
+      "Auto Prompt runs only when System -> Execution Mode is Agent Mode or Agent Dev Mode.",
+    "settings.cronPromptAgentModeRequired":
+      "Switch System -> Execution Mode to Agent Mode or Agent Dev Mode before running Auto Prompt.",
     "settings.cronPromptPlaceholder": "Enter the prompt content to execute...",
     "settings.cronCommandList": "Script",
     "settings.cronCommandHint": "Enter a regular Shell script. Multiple lines are supported.",
@@ -1349,13 +1412,15 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.cronCommandRequired": "Script is required.",
     "settings.cronHttpRequests": "HTTP Requests",
     "settings.cronRequestsCount": "requests",
-    "settings.cronHttpHeadersInvalid": "Headers must be a JSON object and values will be stringified.",
+    "settings.cronHttpHeadersInvalid":
+      "Headers must be a JSON object and values will be stringified.",
     "settings.cronHttpBodyInvalid": "Body must be valid JSON.",
     "settings.cronHttpRequestRequired": "At least one HTTP request is required.",
     "settings.cronHttpUrlRequired": "Request URL is required",
     "settings.cronHttpUrlInvalid": "Request URL is invalid",
     "settings.cronHttpBodyDisabled": "This HTTP method does not support a request body here",
-    "settings.cronPromptUnavailable": "Auto Prompt is not implemented yet. Only Bash and HTTP tasks are supported now.",
+    "settings.cronPromptUnavailable":
+      "Auto Prompt is not implemented yet. Only Bash and HTTP tasks are supported now.",
     "settings.cronView": "View",
     "settings.cronEdit": "Edit",
     "settings.cronDelete": "Delete",
@@ -1405,18 +1470,22 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.remoteDisable": "Disable remote access",
     "settings.remoteGatewayConnection": "Gateway Connection",
     "settings.remoteGatewayUrl": "Gateway URL",
-    "settings.remoteGatewayUrlHint": "HTTPS address of the cloud Gateway for WebUI access and gRPC connection",
+    "settings.remoteGatewayUrlHint":
+      "HTTPS address of the cloud Gateway for WebUI access and gRPC connection",
     "settings.remoteGrpcPort": "gRPC Port",
     "settings.remoteGrpcPortHint": "The gRPC service port on the Gateway, default 50051",
     "settings.remoteGrpcEndpoint": "gRPC Endpoint",
-    "settings.remoteGrpcEndpointHint": "Optional. Use a separate gRPC address for Railway TCP Proxy or similar hosts. Leave empty to use the Gateway URL plus gRPC port.",
+    "settings.remoteGrpcEndpointHint":
+      "Optional. Use a separate gRPC address for Railway TCP Proxy or similar hosts. Leave empty to use the Gateway URL plus gRPC port.",
     "settings.remoteAuth": "Authentication",
     "settings.remoteToken": "Access Token",
     "settings.remoteTokenPlaceholder": "Enter the token matching Gateway config",
-    "settings.remoteTokenHint": "Must match the --token argument used when starting the Gateway, used for mutual authentication",
+    "settings.remoteTokenHint":
+      "Must match the --token argument used when starting the Gateway, used for mutual authentication",
     "settings.remoteAgentId": "Agent ID",
     "settings.remoteAgentIdPlaceholder": "e.g. macbook-pro",
-    "settings.remoteAgentIdHint": "Unique identifier for this Agent shown in WebUI. Leave empty to use hostname",
+    "settings.remoteAgentIdHint":
+      "Unique identifier for this Agent shown in WebUI. Leave empty to use hostname",
     "settings.remoteAdvanced": "Advanced Options",
     "settings.remoteAutoReconnect": "Auto Reconnect",
     "settings.remoteAutoReconnectHint": "Automatically reconnect to Gateway after connection drops",
@@ -1488,9 +1557,11 @@ export const translations: Record<Locale, Record<string, string>> = {
     "mcpHub.storeManualOnly": "Manual",
     "mcpHub.storeConfigure": "Configure",
     "mcpHub.storeConfigureTitle": "Configure MCP Server",
-    "mcpHub.storeConfigureSubtitle": "Fill in connection details for {name} and add it to local MCP Servers",
+    "mcpHub.storeConfigureSubtitle":
+      "Fill in connection details for {name} and add it to local MCP Servers",
     "mcpHub.storeConfigureRequiredTitle": "Required Config",
-    "mcpHub.storeConfigureRequiredDesc": "Values are written to Env, Header, URL, or Args according to the Registry target.",
+    "mcpHub.storeConfigureRequiredDesc":
+      "Values are written to Env, Header, URL, or Args according to the Registry target.",
     "mcpHub.storeConfigureSubmit": "Add locally",
     "mcpHub.storeConfigureNameRequired": "Server Name is required",
     "mcpHub.storeConfigureCommandRequired": "Command is required",
@@ -1515,7 +1586,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "mcpHub.storePreviewRemote": "Remote",
     "mcpHub.storePreviewLocal": "Local",
     "mcpHub.storePreviewLoadingDetail": "Loading details",
-    "mcpHub.storePreviewDetailUnavailable": "Details are unavailable. Showing the basic list information.",
+    "mcpHub.storePreviewDetailUnavailable":
+      "Details are unavailable. Showing the basic list information.",
     "mcpHub.storePreviewTags": "Tags",
     "mcpHub.storePreviewInstallPreview": "Install Preview",
     "mcpHub.storePreviewRequiredConfig": "Required Config",
@@ -1533,13 +1605,16 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.skillsAlwaysOn": "Built-in",
     "settings.skillsScan": "Scan",
     "settings.skillsScanning": "Scanning",
-    "settings.skillsDisabledHint": "Skills is off. Enable it to inject selected skills into the system prompt.",
-    "settings.skillsDisabledInChatMode": "Skills stays disabled in Chat mode. Switch to Agent mode to scan, select, and inject skills again.",
+    "settings.skillsDisabledHint":
+      "Skills is off. Enable it to inject selected skills into the system prompt.",
+    "settings.skillsDisabledInChatMode":
+      "Skills stays disabled in Chat mode. Switch to Agent mode to scan, select, and inject skills again.",
     "settings.skillsNotFound": "No Skills found",
-    "settings.skillsNotFoundHint": "Add skill.json, SKILL.md, or README.md files to the Skills directory",
+    "settings.skillsNotFoundHint":
+      "Add skill.json, SKILL.md, or README.md files to the Skills directory",
     "settings.skillsRescan": "Rescan",
     "settings.skillsSearch": "Search Skills...",
-    "settings.skillsNoMatch": "No skills matching \"{filter}\"",
+    "settings.skillsNoMatch": 'No skills matching "{filter}"',
     "settings.skillsStoreSearch": "Search ClawHub Skills",
     "settings.skillsStoreSortMostDownloaded": "Most Downloaded",
     "settings.skillsStoreSortMostStarred": "Most Starred",
@@ -1569,7 +1644,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.skillsStorePreviewDownloads": "Downloads",
     "settings.skillsStorePreviewStars": "Stars",
     "settings.skillsStorePreviewInstalls": "Installs",
-    "settings.skillsStorePreviewDetailUnavailable": "ClawHub details are unavailable. Showing the basic list information.",
+    "settings.skillsStorePreviewDetailUnavailable":
+      "ClawHub details are unavailable. Showing the basic list information.",
     "settings.skillsStorePreviewMetadata": "Details",
     "settings.skillsStorePreviewOwner": "Owner",
     "settings.skillsStorePreviewVersion": "Version",
@@ -1584,7 +1660,8 @@ export const translations: Record<Locale, Record<string, string>> = {
 
     /* ── Settings Hooks ── */
     "settings.hooksTitle": "Hooks",
-    "settings.hooksDesc": "Configure Shell script or HTTP hooks for main conversation lifecycle events.",
+    "settings.hooksDesc":
+      "Configure Shell script or HTTP hooks for main conversation lifecycle events.",
     "settings.hooksCount": "hooks",
     "settings.hooksEnabledCount": "enabled",
     "settings.hooksLifecycle": "Lifecycle",
@@ -1599,7 +1676,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.hooksTypeHttp": "http",
     "settings.hooksNoDescription": "No description",
     "settings.hooksEmptyTitle": "No hooks configured for this lifecycle yet",
-    "settings.hooksEmptyDesc": "Add a hook to run Shell scripts or HTTP requests in sequence for this event.",
+    "settings.hooksEmptyDesc":
+      "Add a hook to run Shell scripts or HTTP requests in sequence for this event.",
     "settings.hooksScriptLinesCount": "script lines",
     "settings.hooksRequestsCount": "requests",
     "settings.hooksCommandList": "Script",
@@ -1617,7 +1695,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.hooksHttpBodyDisabled": "This HTTP method does not support a request body here",
     "settings.hooksHttpUrlRequired": "Request URL is required",
     "settings.hooksHttpUrlInvalid": "Request URL is invalid",
-    "settings.hooksHttpHeadersInvalid": "Headers must be a JSON object and values will be stringified.",
+    "settings.hooksHttpHeadersInvalid":
+      "Headers must be a JSON object and values will be stringified.",
     "settings.hooksHttpBodyInvalid": "Body must be valid JSON.",
     "settings.hooksHttpRequestRequired": "At least one HTTP request is required.",
     "settings.hooksNameRequired": "Hook name is required.",
@@ -1626,11 +1705,14 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.hooksEventTurnStart": "turn_start",
     "settings.hooksEventTurnStartDesc": "Fires when each model turn begins.",
     "settings.hooksEventMessageStart": "message_start",
-    "settings.hooksEventMessageStartDesc": "Fires when the current turn starts streaming a message.",
+    "settings.hooksEventMessageStartDesc":
+      "Fires when the current turn starts streaming a message.",
     "settings.hooksEventMessageUpdate": "message_update",
-    "settings.hooksEventMessageUpdateDesc": "Fires on every incremental message update in the current turn.",
+    "settings.hooksEventMessageUpdateDesc":
+      "Fires on every incremental message update in the current turn.",
     "settings.hooksEventMessageEnd": "message_end",
-    "settings.hooksEventMessageEndDesc": "Fires when the current turn finishes generating its message.",
+    "settings.hooksEventMessageEndDesc":
+      "Fires when the current turn finishes generating its message.",
     "settings.hooksEventToolExecutionStart": "tool_execution_start",
     "settings.hooksEventToolExecutionStartDesc": "Fires when a tool begins actual execution.",
     "settings.hooksEventToolExecutionUpdate": "tool_execution_update",

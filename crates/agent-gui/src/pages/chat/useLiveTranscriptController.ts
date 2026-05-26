@@ -1,17 +1,16 @@
 import {
+  type MutableRefObject,
+  type RefObject,
   useCallback,
   useEffect,
   useMemo,
   useRef,
-  type MutableRefObject,
-  type RefObject,
 } from "react";
-
+import { createCompactionThrottleState } from "../../lib/chat/compaction/contextCompaction";
 import {
   cloneLiveRoundSnapshots,
   type LiveRoundSnapshot,
 } from "../../lib/chat/conversation/chatAbort";
-import { createCompactionThrottleState } from "../../lib/chat/compaction/contextCompaction";
 import {
   createLiveTranscriptStore,
   type LiveTranscriptStore,
@@ -185,10 +184,7 @@ export function useLiveTranscriptController(params: UseLiveTranscriptControllerP
     [],
   );
 
-  const hasActiveBottomLock = useCallback(
-    () => Date.now() <= bottomLockUntilRef.current,
-    [],
-  );
+  const hasActiveBottomLock = useCallback(() => Date.now() <= bottomLockUntilRef.current, []);
 
   const attachAutoScroll = useCallback(() => {
     shouldAutoScrollRef.current = true;
@@ -232,12 +228,7 @@ export function useLiveTranscriptController(params: UseLiveTranscriptControllerP
         autoScrollRafIdRef.current = requestAnimationFrame(tick);
       }
     });
-  }, [
-    attachAutoScroll,
-    getAdaptiveStreamInterval,
-    hasActiveBottomLock,
-    scrollAreaRef,
-  ]);
+  }, [attachAutoScroll, getAdaptiveStreamInterval, hasActiveBottomLock, scrollAreaRef]);
 
   const scrollToBottomNow = useCallback(() => {
     const viewport = viewportRef.current ?? resolveScrollViewport(scrollAreaRef.current);
@@ -271,10 +262,7 @@ export function useLiveTranscriptController(params: UseLiveTranscriptControllerP
   }, []);
 
   const flushPendingLiveUpdates = useCallback(
-    (
-      targetStore: LiveTranscriptStore = liveTranscriptStore,
-      shouldAutoScroll = false,
-    ) => {
+    (targetStore: LiveTranscriptStore = liveTranscriptStore, shouldAutoScroll = false) => {
       const artifacts = resolveLiveTranscriptArtifacts(targetStore);
       if (!artifacts) return;
 
@@ -436,11 +424,7 @@ export function useLiveTranscriptController(params: UseLiveTranscriptControllerP
         }
       });
     },
-    [
-      liveTranscriptStore,
-      requestAutoScroll,
-      resolveLiveTranscriptArtifacts,
-    ],
+    [liveTranscriptStore, requestAutoScroll, resolveLiveTranscriptArtifacts],
   );
 
   const batchLiveRoundsUpdate = useCallback(
@@ -463,8 +447,7 @@ export function useLiveTranscriptController(params: UseLiveTranscriptControllerP
       const shouldApplyImmediately =
         artifacts.pendingLRUpdates.length === 0 &&
         artifacts.lrRafId === null &&
-        (snapshot.liveRounds.length === 0 ||
-          (lastRound?.blocks.length ?? 0) === 0);
+        (snapshot.liveRounds.length === 0 || (lastRound?.blocks.length ?? 0) === 0);
       if (shouldApplyImmediately) {
         targetStore.updateLiveRounds(updater);
         if (shouldAutoScroll) {
@@ -496,11 +479,7 @@ export function useLiveTranscriptController(params: UseLiveTranscriptControllerP
         }
       });
     },
-    [
-      liveTranscriptStore,
-      requestAutoScroll,
-      resolveLiveTranscriptArtifacts,
-    ],
+    [liveTranscriptStore, requestAutoScroll, resolveLiveTranscriptArtifacts],
   );
 
   const updateToolStatus = useCallback(

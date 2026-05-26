@@ -1,20 +1,19 @@
+import type { Tool, ToolCall, ToolResultMessage } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
 import { invoke } from "@tauri-apps/api/core";
-
-import type { Tool, ToolCall, ToolResultMessage } from "@mariozechner/pi-ai";
-
+import type { ProviderId } from "../settings";
 import {
-  createBuiltinMetadataMap,
-  type BuiltinToolBundle,
-  type FileToolRoot,
-} from "./builtinTypes";
-import {
+  type BashTimeoutPolicy,
   GLOBAL_BASH_MAX_TIMEOUT_MS,
   MIN_BASH_TIMEOUT_MS,
   normalizeBashTimeoutMs,
   resolveBashTimeoutPolicy,
-  type BashTimeoutPolicy,
 } from "./bashTimeoutPolicy";
+import {
+  type BuiltinToolBundle,
+  createBuiltinMetadataMap,
+  type FileToolRoot,
+} from "./builtinTypes";
 import { normalizeOptionalScopedRelPath, normalizeToolFileRoot } from "./pathUtils";
 import {
   assertSkillPathAllowedByPolicy,
@@ -22,7 +21,6 @@ import {
   isSkillAccessPolicyRestrictive,
   type SkillAccessPolicy,
 } from "./skillAccessPolicy";
-import type { ProviderId } from "../settings";
 
 type ShellRunResponse = {
   exit_code: number;
@@ -253,15 +251,10 @@ function validateBashBackgroundStdio(command: string) {
 
 function normalizeProcessAction(input: unknown) {
   const action = typeof input === "string" ? input.trim().toLowerCase() : "";
-  if (
-    action === "start" ||
-    action === "status" ||
-    action === "read_log" ||
-    action === "stop"
-  ) {
+  if (action === "start" || action === "status" || action === "read_log" || action === "stop") {
     return action;
   }
-  throw new Error('ManagedProcess.action must be one of: start, status, read_log, stop');
+  throw new Error("ManagedProcess.action must be one of: start, status, read_log, stop");
 }
 
 function formatManagedProcessRecord(process: ManagedProcessRecord) {
@@ -277,7 +270,9 @@ function formatManagedProcessRecord(process: ManagedProcessRecord) {
       ? `exit_code=${process.exit_code}`
       : null,
     `command=${process.command}`,
-  ].filter(Boolean).join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function buildManagedProcessToolResult(params: {
@@ -404,9 +399,7 @@ export function createShellTools(params: {
     const value = normalizeCommandForPolicy(command);
     if (!commandReferencesFixedSkillsRoot(value)) return false;
     const root = cachedSkillsRootDir.trim().replace(/\\/g, "/");
-    const escapedRoot = root
-      ? root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-      : null;
+    const escapedRoot = root ? root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : null;
     const skillPathPrefix = escapedRoot
       ? `(?:~/\\.liveagent/skills|/\\.liveagent/skills|${escapedRoot})`
       : "(?:~/\\.liveagent/skills|/\\.liveagent/skills)";
@@ -421,9 +414,7 @@ export function createShellTools(params: {
     const value = normalizeCommandForPolicy(command);
     if (!commandReferencesFixedSkillsRoot(value)) return false;
     const root = cachedSkillsRootDir.trim().replace(/\\/g, "/");
-    const escapedRoot = root
-      ? root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-      : null;
+    const escapedRoot = root ? root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : null;
     const skillPathPrefix = escapedRoot
       ? `(?:~/\\.liveagent/skills|/\\.liveagent/skills|${escapedRoot})`
       : "(?:~/\\.liveagent/skills|/\\.liveagent/skills)";
@@ -474,24 +465,18 @@ export function createShellTools(params: {
     );
   }
 
-  function validateBashSkillAccess(params: {
-    root: FileToolRoot;
-    cwd?: string;
-    command: string;
-  }) {
+  function validateBashSkillAccess(params: { root: FileToolRoot; cwd?: string; command: string }) {
     if (params.root === "skills") {
       if (!params.cwd && isSkillAccessPolicyRestrictive(skillAccessPolicy)) {
-        throw new Error(buildSkillAccessDeniedMessage({
-          operation: 'Bash(root="skills")',
-          allowedSkillNames: skillAccessPolicy?.allowedSkillNames,
-        }));
+        throw new Error(
+          buildSkillAccessDeniedMessage({
+            operation: 'Bash(root="skills")',
+            allowedSkillNames: skillAccessPolicy?.allowedSkillNames,
+          }),
+        );
       }
       if (params.cwd) {
-        assertSkillPathAllowedByPolicy(
-          skillAccessPolicy,
-          params.cwd,
-          'Bash(root="skills")',
-        );
+        assertSkillPathAllowedByPolicy(skillAccessPolicy, params.cwd, 'Bash(root="skills")');
       }
       if (commandReferencesFixedSkillsRoot(params.command)) {
         throw new Error(
@@ -536,7 +521,7 @@ export function createShellTools(params: {
         );
       }
       for (const baseDir of referencedSkills) {
-        assertSkillPathAllowedByPolicy(skillAccessPolicy, `${baseDir}/`, 'Bash');
+        assertSkillPathAllowedByPolicy(skillAccessPolicy, `${baseDir}/`, "Bash");
       }
       // All referenced Skills are enabled — allow the absolute path through.
     }
@@ -547,7 +532,7 @@ export function createShellTools(params: {
     }
     if (commandSearchesFilesystemForSkills(params.command)) {
       throw new Error(
-        'Bash cannot run find / to discover installed Skills. Use enabled Skills via SkillsManager and scoped file tools instead.',
+        "Bash cannot run find / to discover installed Skills. Use enabled Skills via SkillsManager and scoped file tools instead.",
       );
     }
   }
@@ -581,7 +566,9 @@ export function createShellTools(params: {
 
     if (
       params.root === "skills" &&
-      /No such file or directory|can't open file|not found|没有那个文件|无法打开文件/i.test(combined)
+      /No such file or directory|can't open file|not found|没有那个文件|无法打开文件/i.test(
+        combined,
+      )
     ) {
       hints.push(
         'Hint: Use List/Glob with root="skills" and the same skill directory to locate the script or file, then retry Bash with root="skills" and a relative cwd.',
@@ -589,7 +576,9 @@ export function createShellTools(params: {
     }
 
     if (
-      /(no such table|unable to open database file|ModuleNotFoundError|ImportError|Missing content|ValueError)/i.test(combined)
+      /(no such table|unable to open database file|ModuleNotFoundError|ImportError|Missing content|ValueError)/i.test(
+        combined,
+      )
     ) {
       hints.push(
         'Hint: This is an application or script error rather than a path normalization error. Inspect the script help or source with Read(root="skills", ...), then retry with the required arguments or dependency setup.',
@@ -601,8 +590,7 @@ export function createShellTools(params: {
 
   const toolBash: Tool = {
     name: "Bash",
-    description:
-      `Execute a non-interactive shell command on the local machine for builds, tests, package managers, external CLIs, curl/API calls, running Skill scripts, or explicitly requested shell work. Reserve it for commands that truly require a shell — do NOT use Bash for file operations the dedicated tools handle: use Read/List/Glob/Grep instead of cat/ls/find/grep/rg for any workspace or Skill content; use Delete instead of rm/rmdir/unlink/find -delete; use Image instead of open/xdg-open/file paths to show pictures. Use curl with an explicit timeout such as \`--max-time 30\` for endpoint tests. Background commands using \`&\` must detach stdout and stderr first, for example \`nohup command > /tmp/liveagent-task.log 2>&1 < /dev/null &\`; otherwise the tool rejects them because inherited pipes can keep Bash running forever. Running a Skill script: two forms are both supported — (a) preferred, canonical: root="skills" with cwd="<skill-name>/scripts" and a command relative to that cwd; (b) direct absolute script path in command, e.g. \`python ~/.liveagent/skills/<skill-name>/scripts/foo.py\`, without cd into the fixed Skills root — the referenced Skill must be enabled in this conversation. Use / as the path separator; Windows \\ is auto-normalized. ${windowsShellPolicy} macOS prefers zsh, then Bash/sh; Linux prefers Bash. Returns stdout, stderr, and exit_code. For ${timeoutPolicy.providerLabel}, timeout defaults to ${timeoutPolicy.defaultTimeoutMs}ms and is capped at ${timeoutPolicy.maxTimeoutMs}ms; larger timeout_ms values are accepted by the schema but clamped before execution. High risk: use carefully.`,
+    description: `Execute a non-interactive shell command on the local machine for builds, tests, package managers, external CLIs, curl/API calls, running Skill scripts, or explicitly requested shell work. Reserve it for commands that truly require a shell — do NOT use Bash for file operations the dedicated tools handle: use Read/List/Glob/Grep instead of cat/ls/find/grep/rg for any workspace or Skill content; use Delete instead of rm/rmdir/unlink/find -delete; use Image instead of open/xdg-open/file paths to show pictures. Use curl with an explicit timeout such as \`--max-time 30\` for endpoint tests. Background commands using \`&\` must detach stdout and stderr first, for example \`nohup command > /tmp/liveagent-task.log 2>&1 < /dev/null &\`; otherwise the tool rejects them because inherited pipes can keep Bash running forever. Running a Skill script: two forms are both supported — (a) preferred, canonical: root="skills" with cwd="<skill-name>/scripts" and a command relative to that cwd; (b) direct absolute script path in command, e.g. \`python ~/.liveagent/skills/<skill-name>/scripts/foo.py\`, without cd into the fixed Skills root — the referenced Skill must be enabled in this conversation. Use / as the path separator; Windows \\ is auto-normalized. ${windowsShellPolicy} macOS prefers zsh, then Bash/sh; Linux prefers Bash. Returns stdout, stderr, and exit_code. For ${timeoutPolicy.providerLabel}, timeout defaults to ${timeoutPolicy.defaultTimeoutMs}ms and is capped at ${timeoutPolicy.maxTimeoutMs}ms; larger timeout_ms values are accepted by the schema but clamped before execution. High risk: use carefully.`,
     parameters: Type.Object({
       ...(allowSkillsRoot
         ? {
@@ -614,7 +602,9 @@ export function createShellTools(params: {
             ),
           }
         : {}),
-      command: Type.String({ description: "Shell command to execute (prefer non-interactive, idempotent commands)." }),
+      command: Type.String({
+        description: "Shell command to execute (prefer non-interactive, idempotent commands).",
+      }),
       cwd: Type.Optional(
         Type.String({
           description:
@@ -636,33 +626,49 @@ export function createShellTools(params: {
     description:
       'Start, inspect, read logs for, or stop a long-running local process such as a dev server, watcher, or preview server. Use this instead of `Bash ... &`. action="start" runs a foreground command under LiveAgent process management, redirects stdout/stderr to a log file, and returns immediately with process_id, pid, and log_path. Use action="status" to list or inspect processes, action="read_log" to read recent log output, and action="stop" to terminate the process tree.',
     parameters: Type.Object({
-      action: Type.Union([
-        Type.Literal("start"),
-        Type.Literal("status"),
-        Type.Literal("read_log"),
-        Type.Literal("stop"),
-      ], {
-        description: "Process action to run.",
-      }),
-      command: Type.Optional(Type.String({
-        description:
-          'Required for action="start". Foreground command to run. Do not append `&`; ManagedProcess handles background lifecycle and log redirection.',
-      })),
-      cwd: Type.Optional(Type.String({
-        description:
-          'Optional working directory relative to the workspace root for action="start". Omit to use the workspace root.',
-      })),
-      label: Type.Optional(Type.String({
-        description: 'Optional human-readable label for action="start", such as "survival-agent dev server".',
-      })),
-      process_id: Type.Optional(Type.String({
-        description: 'Required for action="read_log" and action="stop"; optional filter for action="status".',
-      })),
-      max_bytes: Type.Optional(Type.Number({
-        minimum: 1,
-        maximum: 512 * 1024,
-        description: 'Maximum recent log bytes to return for action="read_log" (default 65536, maximum 524288).',
-      })),
+      action: Type.Union(
+        [
+          Type.Literal("start"),
+          Type.Literal("status"),
+          Type.Literal("read_log"),
+          Type.Literal("stop"),
+        ],
+        {
+          description: "Process action to run.",
+        },
+      ),
+      command: Type.Optional(
+        Type.String({
+          description:
+            'Required for action="start". Foreground command to run. Do not append `&`; ManagedProcess handles background lifecycle and log redirection.',
+        }),
+      ),
+      cwd: Type.Optional(
+        Type.String({
+          description:
+            'Optional working directory relative to the workspace root for action="start". Omit to use the workspace root.',
+        }),
+      ),
+      label: Type.Optional(
+        Type.String({
+          description:
+            'Optional human-readable label for action="start", such as "survival-agent dev server".',
+        }),
+      ),
+      process_id: Type.Optional(
+        Type.String({
+          description:
+            'Required for action="read_log" and action="stop"; optional filter for action="status".',
+        }),
+      ),
+      max_bytes: Type.Optional(
+        Type.Number({
+          minimum: 1,
+          maximum: 512 * 1024,
+          description:
+            'Maximum recent log bytes to return for action="read_log" (default 65536, maximum 524288).',
+        }),
+      ),
     }),
   };
 
@@ -689,7 +695,9 @@ export function createShellTools(params: {
         role: "toolResult",
         toolCallId: toolCall.id,
         toolName: toolCall.name,
-        content: [{ type: "text", text: "Working directory is not configured; cannot manage processes." }],
+        content: [
+          { type: "text", text: "Working directory is not configured; cannot manage processes." },
+        ],
         details: {},
         isError: true,
         timestamp: now,
@@ -698,17 +706,19 @@ export function createShellTools(params: {
 
     try {
       const action = normalizeProcessAction(toolCall.arguments?.action);
-      const processId = typeof toolCall.arguments?.process_id === "string"
-        ? toolCall.arguments.process_id.trim()
-        : "";
+      const processId =
+        typeof toolCall.arguments?.process_id === "string"
+          ? toolCall.arguments.process_id.trim()
+          : "";
 
       if (action === "start") {
-        const command = typeof toolCall.arguments?.command === "string"
-          ? toolCall.arguments.command.trim()
-          : "";
+        const command =
+          typeof toolCall.arguments?.command === "string" ? toolCall.arguments.command.trim() : "";
         if (!command) throw new Error('ManagedProcess.command is required for action="start"');
         if (scanShellSyntax(command).background) {
-          throw new Error("ManagedProcess.command must be a foreground command. Remove `&`; ManagedProcess starts it in the background and captures logs automatically.");
+          throw new Error(
+            "ManagedProcess.command must be a foreground command. Remove `&`; ManagedProcess starts it in the background and captures logs automatically.",
+          );
         }
         const cwdRaw = toolCall.arguments?.cwd;
         const cwd =
@@ -720,9 +730,10 @@ export function createShellTools(params: {
                 workdir,
               })
             : undefined;
-        const label = typeof toolCall.arguments?.label === "string"
-          ? toolCall.arguments.label.trim()
-          : undefined;
+        const label =
+          typeof toolCall.arguments?.label === "string"
+            ? toolCall.arguments.label.trim()
+            : undefined;
         const response = await invoke<ManagedProcessStartResponse>("managed_process_start", {
           workdir,
           command,
@@ -758,13 +769,16 @@ export function createShellTools(params: {
       }
 
       if (!processId) {
-        throw new Error(`ManagedProcess.process_id is required for action=${JSON.stringify(action)}`);
+        throw new Error(
+          `ManagedProcess.process_id is required for action=${JSON.stringify(action)}`,
+        );
       }
 
       if (action === "read_log") {
-        const maxBytes = typeof toolCall.arguments?.max_bytes === "number"
-          ? Math.floor(toolCall.arguments.max_bytes)
-          : undefined;
+        const maxBytes =
+          typeof toolCall.arguments?.max_bytes === "number"
+            ? Math.floor(toolCall.arguments.max_bytes)
+            : undefined;
         const response = await invoke<ManagedProcessLogResponse>("managed_process_read_log", {
           process_id: processId,
           max_bytes: maxBytes,
@@ -836,16 +850,17 @@ export function createShellTools(params: {
         role: "toolResult",
         toolCallId: toolCall.id,
         toolName: toolCall.name,
-        content: [{ type: "text", text: "Working directory is not configured; cannot run the shell tool." }],
+        content: [
+          { type: "text", text: "Working directory is not configured; cannot run the shell tool." },
+        ],
         details: {},
         isError: true,
         timestamp: now,
       };
     }
 
-    const command = typeof toolCall.arguments?.command === "string"
-      ? toolCall.arguments.command.trim()
-      : "";
+    const command =
+      typeof toolCall.arguments?.command === "string" ? toolCall.arguments.command.trim() : "";
 
     if (signal?.aborted) {
       return buildCancelledResult({
@@ -1001,14 +1016,15 @@ export function createShellTools(params: {
         `${stderrLabel}:`,
         res.stderr || "",
       ].join("\n");
-      const hint = res.exit_code !== 0 || Boolean(res.timed_out) || Boolean(res.cancelled)
-        ? buildShellFailureHint({
-            root,
-            command,
-            stdout: res.stdout || "",
-            stderr: res.stderr || "",
-          })
-        : "";
+      const hint =
+        res.exit_code !== 0 || res.timed_out || res.cancelled
+          ? buildShellFailureHint({
+              root,
+              command,
+              stdout: res.stdout || "",
+              stderr: res.stderr || "",
+            })
+          : "";
 
       return {
         role: "toolResult",

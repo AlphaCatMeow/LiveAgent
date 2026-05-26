@@ -106,12 +106,7 @@ const GEMINI_INLINE_NATIVE_ATTACHMENT_DATA_BUDGET_BYTES =
   GEMINI_INLINE_NATIVE_ATTACHMENT_MAX_REQUEST_BYTES -
   GEMINI_INLINE_NATIVE_ATTACHMENT_REQUEST_RESERVE_BYTES;
 
-const NATIVE_IMAGE_MIME_TYPES = new Set([
-  "image/png",
-  "image/jpeg",
-  "image/gif",
-  "image/webp",
-]);
+const NATIVE_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
 
 const NATIVE_INPUT_FILE_KINDS = new Set<PendingUploadedFile["kind"]>([
   "text",
@@ -128,10 +123,7 @@ const ANTHROPIC_NATIVE_IMAGE_MIME_TYPES = new Set([
   "image/webp",
 ]);
 
-const ANTHROPIC_NATIVE_DOCUMENT_MIME_TYPES = new Set([
-  "application/pdf",
-  "text/plain",
-]);
+const ANTHROPIC_NATIVE_DOCUMENT_MIME_TYPES = new Set(["application/pdf", "text/plain"]);
 
 const GEMINI_NATIVE_IMAGE_MIME_TYPES = new Set([
   "image/png",
@@ -585,10 +577,7 @@ async function buildGeminiNativeContentParts(params: {
         file,
       });
       if (!candidate) continue;
-      if (
-        usedRequestBytes + candidate.requestBytes >
-        params.availableRequestBytes
-      ) {
+      if (usedRequestBytes + candidate.requestBytes > params.availableRequestBytes) {
         continue;
       }
       parts.push(candidate.part);
@@ -847,7 +836,9 @@ async function applyNativeAttachmentsToGeminiPayload(params: {
   return changed ? { ...payload, contents: nextContents } : payload;
 }
 
-export function attachOpenAIResponsesNativeAttachments<TOptions extends StreamOptionsWithPayloadHook>(
+export function attachOpenAIResponsesNativeAttachments<
+  TOptions extends StreamOptionsWithPayloadHook,
+>(
   options: TOptions,
   params: {
     context?: Context;
@@ -886,7 +877,9 @@ export function attachOpenAIResponsesNativeAttachments<TOptions extends StreamOp
   };
 }
 
-export function attachOpenAICompletionsNativeAttachments<TOptions extends StreamOptionsWithPayloadHook>(
+export function attachOpenAICompletionsNativeAttachments<
+  TOptions extends StreamOptionsWithPayloadHook,
+>(
   options: TOptions,
   params: {
     context?: Context;
@@ -925,7 +918,9 @@ export function attachOpenAICompletionsNativeAttachments<TOptions extends Stream
   };
 }
 
-export function attachAnthropicMessagesNativeAttachments<TOptions extends StreamOptionsWithPayloadHook>(
+export function attachAnthropicMessagesNativeAttachments<
+  TOptions extends StreamOptionsWithPayloadHook,
+>(
   options: TOptions,
   params: {
     context?: Context;
@@ -964,7 +959,9 @@ export function attachAnthropicMessagesNativeAttachments<TOptions extends Stream
   };
 }
 
-export function attachGeminiGenerativeAINativeAttachments<TOptions extends StreamOptionsWithPayloadHook>(
+export function attachGeminiGenerativeAINativeAttachments<
+  TOptions extends StreamOptionsWithPayloadHook,
+>(
   options: TOptions,
   params: {
     context?: Context;

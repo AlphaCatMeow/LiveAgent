@@ -1,14 +1,13 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
-
-import { assistantMessageToText, streamAssistantMessage } from "../../lib/providers/llm";
+import type { GatewayBridgeEventController } from "../../lib/chat/conversation/run";
+import type { ChatHistorySummary } from "../../lib/chat/history/chatHistory";
 import {
   buildConversationTitlePrompt,
   mergeHistoryItem,
   normalizeConversationTitle,
 } from "../../lib/chat/page/chatPageHelpers";
-import type { ChatHistorySummary } from "../../lib/chat/history/chatHistory";
+import { assistantMessageToText, streamAssistantMessage } from "../../lib/providers/llm";
 import type { ProviderId } from "../../lib/settings";
-import type { GatewayBridgeEventController } from "../../lib/chat/conversation/run";
 
 type TitleJobRefValue = {
   conversationId: string;
@@ -82,7 +81,8 @@ export function startConversationTitleJob(params: StartConversationTitleJobParam
     cacheRetention: "none",
     nativeWebSearch: false,
     context: {
-      systemPrompt: "You generate concise conversation titles. Output the title only, with no extra explanation.",
+      systemPrompt:
+        "You generate concise conversation titles. Output the title only, with no extra explanation.",
       messages: [
         {
           role: "user",

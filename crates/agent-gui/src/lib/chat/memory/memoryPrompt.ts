@@ -1,7 +1,7 @@
 import {
-  memoryIndexOverview,
   type MemoryOverviewEntry,
   type MemoryOverviewResponse,
+  memoryIndexOverview,
 } from "../../memory/api";
 import {
   buildDailyMemoryOverviewLines,
@@ -62,9 +62,10 @@ function lineFor(entry: MemoryOverviewEntry, nowMs: number = Date.now()): string
   // entries never carry the marker because their content is append-only. For
   // unreviewed entries, append confidence as h/m/l/? so the model can calibrate
   // how directly to use the working memory while staying open to correction.
-  const unreviewedFlag = entry.unreviewed && entry.memoryType !== "daily"
-    ? `*:${confidenceInitial(entry.confidence)}`
-    : "";
+  const unreviewedFlag =
+    entry.unreviewed && entry.memoryType !== "daily"
+      ? `*:${confidenceInitial(entry.confidence)}`
+      : "";
   const initial = typeInitial(entry.memoryType);
   const days = daysAgo(entry.updatedAt, nowMs);
   return `- ${label || "<no description>"} [${entry.slug}|${initial}${unreviewedFlag}|${days}d]`;
@@ -112,7 +113,11 @@ export function formatMemoryOverview(overview: MemoryOverviewResponse, workdir?:
   const unreviewedUserMemory = overview.user.filter((entry) => entry.unreviewed);
 
   appendSection(lines, "## User memory (cross-project identity & preferences)", reviewedUser);
-  appendSection(lines, "## Unreviewed user memory (usable; auto-review via dialogue)", unreviewedUserMemory);
+  appendSection(
+    lines,
+    "## Unreviewed user memory (usable; auto-review via dialogue)",
+    unreviewedUserMemory,
+  );
   appendSection(
     lines,
     `## Project memory${workdir ? ` (workdir: ${workdir})` : ""}`,
@@ -120,17 +125,10 @@ export function formatMemoryOverview(overview: MemoryOverviewResponse, workdir?:
   );
   appendSection(lines, "## Global memory (cross-project facts & references)", overview.global);
   if (overview.recentDays.length > 0) {
-    lines.push(
-      "",
-      ...buildDailyMemoryOverviewLines(),
-      ...overview.recentDays.map(recentDayLine),
-    );
+    lines.push("", ...buildDailyMemoryOverviewLines(), ...overview.recentDays.map(recentDayLine));
   }
 
-  lines.push(
-    "",
-    MEMORY_OVERVIEW_FINAL_LINE,
-  );
+  lines.push("", MEMORY_OVERVIEW_FINAL_LINE);
 
   const text = lines.join("\n").trim();
   if (text.length <= MAX_MEMORY_PROMPT_CHARS) return text;

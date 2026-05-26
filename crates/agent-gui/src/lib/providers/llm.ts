@@ -1,4 +1,3 @@
-import { getModel } from "@mariozechner/pi-ai";
 import type {
   AssistantMessage,
   CacheRetention,
@@ -7,60 +6,53 @@ import type {
   OpenAICompletionsCompat,
   SimpleStreamOptions,
 } from "@mariozechner/pi-ai";
+import { getModel } from "@mariozechner/pi-ai";
 import { streamAnthropic } from "@mariozechner/pi-ai/anthropic";
+import { type GoogleOptions, streamGoogle } from "@mariozechner/pi-ai/google";
 import {
-  streamOpenAICompletions,
   type OpenAICompletionsOptions,
+  streamOpenAICompletions,
 } from "@mariozechner/pi-ai/openai-completions";
 import {
-  streamOpenAIResponses,
   type OpenAIResponsesOptions,
+  streamOpenAIResponses,
 } from "@mariozechner/pi-ai/openai-responses";
 import {
-  streamGoogle,
-  type GoogleOptions,
-} from "@mariozechner/pi-ai/google";
-
+  appendHostedSearchBlocksToAssistant,
+  type HostedSearchBlock,
+  type HostedSearchOrderedBlock,
+  mergeHostedSearchBlocks,
+} from "../chat/messages/hostedSearch";
+import { buildStreamRequestDebugPayload, type StreamDebugLogger } from "../debug/agentDebug";
 import {
-  buildStreamRequestDebugPayload,
-  type StreamDebugLogger,
-} from "../debug/agentDebug";
-import { withPowerActivity } from "../system/powerActivity";
-import {
-  getProviderModelDefaults,
   type CodexRequestFormat,
+  getProviderModelDefaults,
   type ProviderId,
   type ProviderModelConfig,
   type ReasoningLevel,
 } from "../settings";
-
-import { providerSupportsNativeWebSearch } from "./nativeWebSearch";
+import { withPowerActivity } from "../system/powerActivity";
 import {
-  createHostedSearchProbeId,
   createHostedSearchEventAggregator,
+  createHostedSearchProbeId,
   startHostedSearchFetchProbe,
   withHostedSearchProbeHeader,
 } from "./hostedSearchEvents";
-import { prepareProxyRequest } from "./proxy";
 import {
   attachAnthropicMessagesNativeAttachments,
   attachGeminiGenerativeAINativeAttachments,
   attachOpenAICompletionsNativeAttachments,
   attachOpenAIResponsesNativeAttachments,
 } from "./nativeResponsesAttachments";
-import {
-  appendHostedSearchBlocksToAssistant,
-  mergeHostedSearchBlocks,
-  type HostedSearchBlock,
-  type HostedSearchOrderedBlock,
-} from "../chat/messages/hostedSearch";
+import { providerSupportsNativeWebSearch } from "./nativeWebSearch";
+import { prepareProxyRequest } from "./proxy";
 
 export { providerSupportsNativeWebSearch } from "./nativeWebSearch";
 
 export type ModelOption = {
-  value: string;         // encodes customProviderId::model
-  label: string;         // model id
-  providerName: string;  // provider display name (for grouping)
+  value: string; // encodes customProviderId::model
+  label: string; // model id
+  providerName: string; // provider display name (for grouping)
   providerType: ProviderId; // routes Claude Code, Codex, Gemini, etc.
   model: string;
 };
@@ -128,9 +120,7 @@ export function buildProviderAuthHeaders(
   providerId: ProviderId,
   apiKey: string,
 ): Record<string, string> {
-  return providerId === "gemini"
-    ? buildGeminiAuthHeaders(apiKey)
-    : buildDualAuthHeaders(apiKey);
+  return providerId === "gemini" ? buildGeminiAuthHeaders(apiKey) : buildDualAuthHeaders(apiKey);
 }
 
 function appendSystemPrompt(base: string | undefined, suffix: string) {
@@ -170,9 +160,7 @@ function isClaudeFamilyVersionAtLeast(
   family: "opus" | "sonnet",
   minimumMinor: number,
 ) {
-  const match = normalizedModelId.match(
-    new RegExp(`${family}[-.]4[-.](\\d+)`),
-  );
+  const match = normalizedModelId.match(new RegExp(`${family}[-.]4[-.](\\d+)`));
   if (!match) return false;
   const minor = Number(match[1]);
   return Number.isFinite(minor) && minor >= minimumMinor;
@@ -194,10 +182,7 @@ function supportsMaxAnthropicEffort(modelId: string) {
   );
 }
 
-const ANTHROPIC_THINKING_BUDGETS: Record<
-  NonNullable<SimpleStreamOptions["reasoning"]>,
-  number
-> = {
+const ANTHROPIC_THINKING_BUDGETS: Record<NonNullable<SimpleStreamOptions["reasoning"]>, number> = {
   minimal: 1_024,
   low: 2_048,
   medium: 8_192,
@@ -314,10 +299,7 @@ function hasEnabledAnthropicThinkingPayload(payload: Record<string, unknown>) {
   return thinking.type === "enabled" || thinking.type === "adaptive";
 }
 
-function isSameAnthropicReplayAssistant(
-  assistant: AssistantMessage,
-  model: Model<any>,
-) {
+function isSameAnthropicReplayAssistant(assistant: AssistantMessage, model: Model<any>) {
   return (
     assistant.provider === model.provider &&
     assistant.api === model.api &&
@@ -332,9 +314,7 @@ function getDeepSeekReplayThinkingBlocks(
   const existingSignatures = new Set(
     payloadBlocks.flatMap((block) => {
       if (!isRecord(block) || block.type !== "thinking") return [];
-      return typeof block.signature === "string" && block.signature.trim()
-        ? [block.signature]
-        : [];
+      return typeof block.signature === "string" && block.signature.trim() ? [block.signature] : [];
     }),
   );
 
@@ -342,11 +322,13 @@ function getDeepSeekReplayThinkingBlocks(
     if (block.type !== "thinking") return [];
     const signature = block.thinkingSignature?.trim();
     if (!signature || existingSignatures.has(signature)) return [];
-    return [{
-      type: "thinking",
-      thinking: block.thinking,
-      signature,
-    }];
+    return [
+      {
+        type: "thinking",
+        thinking: block.thinking,
+        signature,
+      },
+    ];
   });
 }
 
@@ -401,19 +383,13 @@ export function repairDeepSeekAnthropicThinkingReplayPayload(
     );
     if (!hasToolUse || hasThinking) return message;
 
-    const replayThinkingBlocks = getDeepSeekReplayThinkingBlocks(
-      sourceAssistant,
-      message.content,
-    );
+    const replayThinkingBlocks = getDeepSeekReplayThinkingBlocks(sourceAssistant, message.content);
     if (replayThinkingBlocks.length === 0) return message;
 
     changed = true;
     return {
       ...message,
-      content: insertThinkingBeforeFirstToolUse(
-        message.content,
-        replayThinkingBlocks,
-      ),
+      content: insertThinkingBeforeFirstToolUse(message.content, replayThinkingBlocks),
     };
   });
 
@@ -434,11 +410,7 @@ function attachDeepSeekAnthropicThinkingReplayRepair(
   return {
     ...options,
     onPayload: async (payload, streamModel) => {
-      let nextPayload = repairDeepSeekAnthropicThinkingReplayPayload(
-        payload,
-        context,
-        streamModel,
-      );
+      let nextPayload = repairDeepSeekAnthropicThinkingReplayPayload(payload, context, streamModel);
       if (previousOnPayload) {
         const overridden = await previousOnPayload(nextPayload, streamModel);
         if (overridden !== undefined) {
@@ -560,10 +532,7 @@ function mapToolChoiceToGoogle(
   return "auto";
 }
 
-function buildOpenAIBaseOptions(
-  model: Model<any>,
-  options: StreamOptionsEx,
-) {
+function buildOpenAIBaseOptions(model: Model<any>, options: StreamOptionsEx) {
   return {
     temperature: options.temperature,
     maxTokens: resolveMaxTokens(options.maxTokens, model.maxTokens),
@@ -578,10 +547,7 @@ function buildOpenAIBaseOptions(
   };
 }
 
-function resolveMaxTokens(
-  requestedMaxTokens: number | undefined,
-  modelMaxTokens: number,
-) {
+function resolveMaxTokens(requestedMaxTokens: number | undefined, modelMaxTokens: number) {
   if (!requestedMaxTokens || requestedMaxTokens <= 0) return modelMaxTokens;
   return Math.min(requestedMaxTokens, modelMaxTokens);
 }
@@ -603,9 +569,7 @@ function buildAnthropicAutomaticCacheControl(
 
   return {
     type: "ephemeral",
-    ...(cacheRetention === "long" && baseUrl.includes("api.anthropic.com")
-      ? { ttl: "1h" }
-      : {}),
+    ...(cacheRetention === "long" && baseUrl.includes("api.anthropic.com") ? { ttl: "1h" } : {}),
   };
 }
 
@@ -650,10 +614,12 @@ function normalizeAnthropicMessagesForCaching(messages: unknown): unknown {
     changed = true;
     return {
       ...message,
-      content: [{
-        type: "text",
-        text: message.content,
-      }],
+      content: [
+        {
+          type: "text",
+          text: message.content,
+        },
+      ],
     };
   });
 
@@ -757,10 +723,7 @@ export function attachAnthropicAutomaticCaching(
   baseUrl: string,
   options: StreamOptionsEx,
 ): StreamOptionsEx {
-  const cacheControl = buildAnthropicAutomaticCacheControl(
-    baseUrl,
-    options.cacheRetention,
-  );
+  const cacheControl = buildAnthropicAutomaticCacheControl(baseUrl, options.cacheRetention);
   const previousOnPayload = options.onPayload;
 
   if (providerId !== "claude_code" || !cacheControl) {
@@ -776,7 +739,10 @@ export function attachAnthropicAutomaticCaching(
         // Keep Anthropic payloads in a stable shape for exact-prefix matching.
         // For Anthropic-compatible proxies that ignore top-level automatic caching,
         // fall back to an explicit breakpoint on the last cacheable block.
-        const sanitizedPayload = stripNestedAnthropicCacheControl(nextPayload) as Record<string, unknown>;
+        const sanitizedPayload = stripNestedAnthropicCacheControl(nextPayload) as Record<
+          string,
+          unknown
+        >;
         nextPayload = supportsAnthropicTopLevelAutomaticCaching(baseUrl)
           ? {
               ...normalizeAnthropicPayloadMessages(sanitizedPayload),
@@ -837,11 +803,7 @@ function hasAnthropicWebSearchTool(tool: unknown) {
   if (!isRecord(tool)) return false;
   const type = tool.type;
   const name = tool.name;
-  return (
-    name === "web_search" ||
-    type === "web_search_20260209" ||
-    type === "web_search_20250305"
-  );
+  return name === "web_search" || type === "web_search_20260209" || type === "web_search_20250305";
 }
 
 function hasGeminiGoogleSearchTool(tool: unknown) {
@@ -871,10 +833,7 @@ function appendGeminiGoogleSearchTool(payload: Record<string, unknown>) {
     ...payload,
     config: {
       ...config,
-      tools: [
-        ...tools,
-        { googleSearch: {} },
-      ],
+      tools: [...tools, { googleSearch: {} }],
     },
   };
 }
@@ -897,8 +856,9 @@ function hasOpenAIChatCompletionsWebSearchFunctionTool(tool: unknown) {
 }
 
 function hasOpenAIChatCompletionsNativeWebSearchTool(tool: unknown) {
-  return hasOpenAIResponsesWebSearchTool(tool) ||
-    hasOpenAIChatCompletionsWebSearchFunctionTool(tool);
+  return (
+    hasOpenAIResponsesWebSearchTool(tool) || hasOpenAIChatCompletionsWebSearchFunctionTool(tool)
+  );
 }
 
 function buildOpenAIChatCompletionsWebSearchFunctionTool() {
@@ -906,7 +866,8 @@ function buildOpenAIChatCompletionsWebSearchFunctionTool() {
     type: "function",
     function: {
       name: "web_search",
-      description: "Search the web for current information when the answer needs recent or external context.",
+      description:
+        "Search the web for current information when the answer needs recent or external context.",
       parameters: {
         type: "object",
         properties: {
@@ -960,10 +921,7 @@ function isOpenAIWebSearchMinimalReasoningUnsupportedModel(modelId: string) {
   return normalized === "gpt-5" || normalized.startsWith("gpt-5-");
 }
 
-function normalizeOpenAIWebSearchReasoning(
-  payload: Record<string, unknown>,
-  model: Model<any>,
-) {
+function normalizeOpenAIWebSearchReasoning(payload: Record<string, unknown>, model: Model<any>) {
   if (!isOpenAIWebSearchMinimalReasoningUnsupportedModel(model.id)) return payload;
   if (!isRecord(payload.reasoning) || payload.reasoning.effort !== "minimal") return payload;
   return {
@@ -1126,11 +1084,7 @@ export function finalizeProviderStreamOptions(params: {
     sessionId?: string;
   };
 }): StreamOptionsEx {
-  let options = attachAnthropicAutomaticCaching(
-    params.providerId,
-    params.baseUrl,
-    params.options,
-  );
+  let options = attachAnthropicAutomaticCaching(params.providerId, params.baseUrl, params.options);
   options = attachCodexResponsesStorage(params.providerId, options);
   options = attachProviderNativeWebSearch(params.providerId, options, params.nativeWebSearch, {
     baseUrl: params.baseUrl,
@@ -1359,8 +1313,7 @@ function resolveCodexOpenAICompletionsCompat(params: {
   const isGroq = compatBaseUrl.includes("groq.com");
   const isChutes = compatBaseUrl.includes("chutes.ai");
   const isDeepSeek =
-    compatBaseUrl.includes("deepseek.com") ||
-    normalizedModelId.includes("deepseek");
+    compatBaseUrl.includes("deepseek.com") || normalizedModelId.includes("deepseek");
   const isKnownNonOpenAIModel =
     isDeepSeek ||
     normalizedModelId.includes("qwen") ||
@@ -1435,10 +1388,7 @@ function normalizeCodexBaseUrl(baseUrl: string): {
   };
 }
 
-function inferCodexApi(
-  requestFormat?: CodexRequestFormat,
-  preferredApi?: CodexApi,
-): CodexApi {
+function inferCodexApi(requestFormat?: CodexRequestFormat, preferredApi?: CodexApi): CodexApi {
   return requestFormat ?? preferredApi ?? "openai-responses";
 }
 
@@ -1481,10 +1431,7 @@ function mapGeminiThinkingLevel(
   }
 }
 
-function mapGeminiThinkingBudget(
-  modelId: string,
-  reasoning: GeminiReasoningLevel,
-) {
+function mapGeminiThinkingBudget(modelId: string, reasoning: GeminiReasoningLevel) {
   const normalizedModelId = modelId.toLowerCase();
   if (normalizedModelId.includes("2.5-pro")) {
     return {
@@ -1540,10 +1487,7 @@ export function createModelFromConfig(
   const maxTokens = modelConfig?.maxOutputToken ?? defaults.maxOutputToken;
 
   if (providerId === "codex") {
-    const {
-      baseUrl: normalizedBaseUrl,
-      preferredApi,
-    } = normalizeCodexBaseUrl(baseUrl);
+    const { baseUrl: normalizedBaseUrl, preferredApi } = normalizeCodexBaseUrl(baseUrl);
     const api = inferCodexApi(requestFormat, preferredApi);
     const known = resolveKnownModel("openai", modelId, normalizedBaseUrl);
     if (known && known.api === api) {
@@ -1632,13 +1576,9 @@ export function createModelFromConfig(
   return custom;
 }
 
-export function streamSimpleByApi(
-  model: Model<any>,
-  context: Context,
-  options: StreamOptionsEx,
-) {
+export function streamSimpleByApi(model: Model<any>, context: Context, options: StreamOptionsEx) {
   switch (model.api) {
-    case "anthropic-messages":
+    case "anthropic-messages": {
       // Anthropic：需要我们自己调用 streamAnthropic()，以便显式传 toolChoice（以及启用/禁用 thinking）。
       const anthropicThinking = resolveAnthropicThinkingRuntime(model, options);
       let anthropicOptions = attachDeepSeekAnthropicThinkingReplayRepair(
@@ -1669,6 +1609,7 @@ export function streamSimpleByApi(
           : {}),
         toolChoice: anthropicOptions.toolChoice ?? "none",
       });
+    }
     case "openai-completions": {
       const openAIOptions: OpenAICompletionsOptions = {
         ...buildOpenAIBaseOptions(model, options),
@@ -1732,19 +1673,14 @@ function buildTextOnlyStreamOptions(params: {
   debugLogger?: StreamDebugLogger;
 }): StreamOptionsEx {
   const sessionId = normalizeSessionId(params.sessionId);
-  const nativeWebSearch = providerSupportsNativeWebSearch(
-    params.providerId,
-    params.model.api,
-    {
+  const nativeWebSearch =
+    providerSupportsNativeWebSearch(params.providerId, params.model.api, {
       baseUrl: params.runtime.baseUrl,
       modelId: params.model.id,
-    },
-  ) && params.nativeWebSearch;
+    }) && params.nativeWebSearch;
   const usesOpenAIChatNativeWebSearch =
-    nativeWebSearch &&
-    params.providerId === "codex" &&
-    params.model.api === "openai-completions";
-  let options: StreamOptionsEx = {
+    nativeWebSearch && params.providerId === "codex" && params.model.api === "openai-completions";
+  const options: StreamOptionsEx = {
     apiKey: params.runtime.apiKey,
     headers: withHostedSearchProbeHeader(params.headers, params.hostedSearchProbeId),
     signal: params.signal,
@@ -1757,19 +1693,14 @@ function buildTextOnlyStreamOptions(params: {
     metadata: buildProviderRequestMetadata(params.providerId, sessionId),
     reasoning:
       (params.providerId === "codex" &&
-        (params.model.api === "openai-responses" ||
-          params.model.api === "openai-completions")) ||
+        (params.model.api === "openai-responses" || params.model.api === "openai-completions")) ||
       (params.providerId === "claude_code" && params.model.api === "anthropic-messages") ||
       (params.providerId === "gemini" && params.model.api === "google-generative-ai")
         ? toSimpleStreamReasoning(params.runtime.reasoning)
         : undefined,
     // Text-only mode cannot execute local tools. Provider-native web search is
     // hosted by the upstream provider, so it can stay on auto when explicitly enabled.
-    toolChoice: usesOpenAIChatNativeWebSearch
-      ? undefined
-      : nativeWebSearch
-        ? "auto"
-        : "none",
+    toolChoice: usesOpenAIChatNativeWebSearch ? undefined : nativeWebSearch ? "auto" : "none",
   };
   return finalizeProviderStreamOptions({
     providerId: params.providerId,

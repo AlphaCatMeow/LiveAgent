@@ -659,14 +659,15 @@ function graphMergeBranchPath(x1: number, y1: number, x2: number, y2: number) {
 }
 
 function orderedCommitRefs(refs: readonly string[]) {
-  return refs
-    .map((ref) => ref.trim())
-    .filter((ref, index, all) => ref.length > 0 && all.indexOf(ref) === index)
-    .sort((a, b) => {
-      const aRemote = a.includes("/") ? 0 : 1;
-      const bRemote = b.includes("/") ? 0 : 1;
-      return aRemote - bRemote;
-    });
+  const orderedRefs: string[] = [];
+  const seenRefs = new Set<string>();
+  for (const rawRef of refs) {
+    const ref = rawRef.trim();
+    if (!ref || seenRefs.has(ref)) continue;
+    seenRefs.add(ref);
+    orderedRefs.push(ref);
+  }
+  return orderedRefs;
 }
 
 function commitHistoryTitle(commit: GitCommitSummary) {

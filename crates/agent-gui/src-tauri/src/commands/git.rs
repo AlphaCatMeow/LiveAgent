@@ -9,6 +9,8 @@ use serde_json::Value;
 use tempfile::NamedTempFile;
 use wait_timeout::ChildExt;
 
+use crate::runtime::process::{configure_child_process_group, kill_child_process_tree_best_effort};
+
 const GIT_DIFF_MAX_BYTES: usize = 512 * 1024;
 const GIT_UNTRACKED_FILE_MAX_BYTES: u64 = 128 * 1024;
 const GIT_COMMAND_TIMEOUT_SECS: u64 = 60;
@@ -172,7 +174,9 @@ fn git_output(workdir: &str, args: &[&str]) -> Result<Output, String> {
     let stderr_target = stderr_file
         .reopen()
         .map_err(|error| format!("打开 git stderr 缓存失败：{error}"))?;
-    let mut child = Command::new("git")
+    let mut command = Command::new("git");
+    configure_child_process_group(&mut command);
+    let mut child = command
         .args(args)
         .current_dir(workdir)
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -186,8 +190,7 @@ fn git_output(workdir: &str, args: &[&str]) -> Result<Output, String> {
         .wait_timeout(timeout)
         .map_err(|error| format!("等待 git 命令失败：{error}"))?
     else {
-        let _ = child.kill();
-        let _ = child.wait();
+        kill_child_process_tree_best_effort(&mut child);
         return Err(format!(
             "git 命令超时（{GIT_COMMAND_TIMEOUT_SECS} 秒）：git {}",
             args.join(" ")
@@ -498,10 +501,25 @@ fn ensure_ready_state(workdir: &str) -> Result<GitRepositoryState, String> {
     }
 }
 
+#[cfg(any(windows, test))]
+fn looks_like_windows_drive_path(path: &str) -> bool {
+    path.as_bytes().get(1).is_some_and(|byte| *byte == b':')
+        && path
+            .as_bytes()
+            .first()
+            .is_some_and(|byte| byte.is_ascii_alphabetic())
+}
+
 fn validate_repo_relative_path(path: &str) -> Result<String, String> {
     let trimmed = path.trim().replace('\\', "/");
     if trimmed.is_empty() {
         return Err("Git 文件路径不能为空。".to_string());
+    }
+    #[cfg(windows)]
+    {
+        if looks_like_windows_drive_path(&trimmed) || trimmed.starts_with("//") {
+            return Err("Git 文件路径不能是绝对路径。".to_string());
+        }
     }
     let path = Path::new(&trimmed);
     if path.is_absolute() {
@@ -566,6 +584,30 @@ fn append_output(target: &mut String, value: &str) {
     target.push_str(value);
 }
 
+fn empty_git_output() -> GitOutput {
+    GitOutput {
+        stdout: String::new(),
+        stderr: String::new(),
+    }
+}
+
+fn merge_git_outputs(outputs: impl IntoIterator<Item = GitOutput>) -> GitOutput {
+    let mut stdout_parts = Vec::new();
+    let mut stderr_parts = Vec::new();
+    for output in outputs {
+        if !output.stdout.trim().is_empty() {
+            stdout_parts.push(output.stdout);
+        }
+        if !output.stderr.trim().is_empty() {
+            stderr_parts.push(output.stderr);
+        }
+    }
+    GitOutput {
+        stdout: stdout_parts.join("\n"),
+        stderr: stderr_parts.join("\n"),
+    }
+}
+
 fn build_untracked_file_patch(repo_root: &str, path: &str) -> Result<Option<String>, String> {
     let clean_path = validate_repo_relative_path(path)?;
     let repo_root_path =
@@ -601,7 +643,7 @@ fn build_untracked_file_patch(repo_root: &str, path: &str) -> Result<Option<Stri
         return Ok(Some(patch));
     }
     for line in content.split_inclusive('\n') {
-        let line = line.trim_end_matches('\n').trim_end_matches('\r');
+        let line = line.trim_end_matches('\n');
         patch.push('+');
         patch.push_str(line);
         patch.push('\n');
@@ -908,6 +950,58 @@ fn parse_name_status_line(line: &str) -> Option<GitCommitFile> {
     })
 }
 
+fn parse_name_status_records(raw: &str) -> Vec<GitCommitFile> {
+    let mut files = Vec::new();
+    let mut parts = raw.split('\0').filter(|part| !part.is_empty());
+    while let Some(raw_status) = parts.next() {
+        let raw_status = raw_status.trim();
+        if raw_status.is_empty() {
+            continue;
+        }
+        let status = raw_status
+            .chars()
+            .next()
+            .unwrap_or('M')
+            .to_ascii_uppercase()
+            .to_string();
+        if status == "R" || status == "C" {
+            let Some(old_path) = parts.next() else {
+                break;
+            };
+            let Some(path) = parts.next() else {
+                break;
+            };
+            if path.is_empty() {
+                continue;
+            }
+            files.push(GitCommitFile {
+                path: path.to_string(),
+                old_path: if old_path.is_empty() {
+                    None
+                } else {
+                    Some(old_path.to_string())
+                },
+                status,
+                kind: commit_file_kind(raw_status),
+            });
+            continue;
+        }
+        let Some(path) = parts.next() else {
+            break;
+        };
+        if path.is_empty() {
+            continue;
+        }
+        files.push(GitCommitFile {
+            path: path.to_string(),
+            old_path: None,
+            status,
+            kind: commit_file_kind(raw_status),
+        });
+    }
+    files
+}
+
 fn clean_git_ref_label(raw: &str) -> Option<String> {
     let mut value = raw.trim();
     if value.is_empty() {
@@ -948,11 +1042,13 @@ fn parse_git_log(raw: &str) -> Vec<GitCommitSummary> {
     raw.split('\x1e')
         .filter_map(|record| {
             let record = record.trim_start_matches('\n');
-            if record.trim().is_empty() {
+            if record
+                .trim_matches(|ch: char| ch == '\0' || ch.is_whitespace())
+                .is_empty()
+            {
                 return None;
             }
-            let mut lines = record.lines();
-            let header = lines.next()?;
+            let (header, file_data) = record.split_once('\n').unwrap_or((record, ""));
             let fields: Vec<&str> = header.split('\x1f').collect();
             if fields.len() < 8 {
                 return None;
@@ -961,7 +1057,14 @@ fn parse_git_log(raw: &str) -> Vec<GitCommitSummary> {
             if sha.is_empty() {
                 return None;
             }
-            let files: Vec<GitCommitFile> = lines.filter_map(parse_name_status_line).collect();
+            let files: Vec<GitCommitFile> = if file_data.contains('\0') {
+                parse_name_status_records(file_data)
+            } else {
+                file_data
+                    .lines()
+                    .filter_map(parse_name_status_line)
+                    .collect()
+            };
             Some(GitCommitSummary {
                 sha,
                 short_sha: fields[1].trim().to_string(),
@@ -1026,6 +1129,7 @@ pub(crate) fn git_log_sync(
         "--topo-order".to_string(),
         "--parents".to_string(),
         "--name-status".to_string(),
+        "-z".to_string(),
         "--find-renames".to_string(),
         "--max-count".to_string(),
         limit,
@@ -1227,6 +1331,18 @@ pub(crate) fn git_unstage_sync(
 ) -> Result<GitOperationResponse, String> {
     let state = ensure_ready_state(&workdir)?;
     let path = validate_repo_relative_path(&path)?;
+    let staged_without_head = !ref_exists(&state.repo_root, "HEAD")
+        && state
+            .entries
+            .iter()
+            .any(|entry| entry.path == path && !entry.untracked && entry.index_status != ".");
+    if staged_without_head {
+        return operation_response(
+            &workdir,
+            git_success(&state.repo_root, &["rm", "--cached", "--", path.as_str()]),
+            "文件已取消暂存。",
+        );
+    }
     operation_response(
         &workdir,
         git_success(
@@ -1239,6 +1355,14 @@ pub(crate) fn git_unstage_sync(
 
 pub(crate) fn git_unstage_all_sync(workdir: String) -> Result<GitOperationResponse, String> {
     let state = ensure_ready_state(&workdir)?;
+    if !ref_exists(&state.repo_root, "HEAD") {
+        let result = if state.dirty_counts.staged > 0 {
+            git_success(&state.repo_root, &["rm", "--cached", "-r", "--", "."])
+        } else {
+            Ok(empty_git_output())
+        };
+        return operation_response(&workdir, result, "所有改动已取消暂存。");
+    }
     operation_response(
         &workdir,
         git_success(&state.repo_root, &["restore", "--staged", "--", "."]),
@@ -1262,8 +1386,15 @@ pub(crate) fn git_discard_sync(
         .entries
         .iter()
         .any(|entry| entry.path == path && entry.untracked);
+    let staged_without_head = !ref_exists(&state.repo_root, "HEAD")
+        && state
+            .entries
+            .iter()
+            .any(|entry| entry.path == path && !entry.untracked && entry.index_status != ".");
     let result = if is_untracked {
         git_success(&state.repo_root, &["clean", "-fd", "--", path.as_str()])
+    } else if staged_without_head {
+        git_success(&state.repo_root, &["rm", "-f", "--", path.as_str()])
     } else {
         let mut args = vec!["restore", "--staged", "--worktree", "--", path.as_str()];
         if let Some(old_path) = old_path.as_deref() {
@@ -1278,24 +1409,26 @@ pub(crate) fn git_discard_sync(
 
 pub(crate) fn git_discard_all_sync(workdir: String) -> Result<GitOperationResponse, String> {
     let state = ensure_ready_state(&workdir)?;
-    let result = git_success(
-        &state.repo_root,
-        &["restore", "--staged", "--worktree", "--", "."],
-    )
-    .and_then(|restore_output| {
-        git_success(&state.repo_root, &["clean", "-fd", "--", "."]).map(|clean_output| GitOutput {
-            stdout: [restore_output.stdout, clean_output.stdout]
-                .into_iter()
-                .filter(|value| !value.trim().is_empty())
-                .collect::<Vec<_>>()
-                .join("\n"),
-            stderr: [restore_output.stderr, clean_output.stderr]
-                .into_iter()
-                .filter(|value| !value.trim().is_empty())
-                .collect::<Vec<_>>()
-                .join("\n"),
+    let result = if !ref_exists(&state.repo_root, "HEAD") {
+        let remove_result = if state.dirty_counts.staged > 0 {
+            git_success(&state.repo_root, &["rm", "-f", "-r", "--", "."])
+        } else {
+            Ok(empty_git_output())
+        };
+        remove_result.and_then(|remove_output| {
+            git_success(&state.repo_root, &["clean", "-fd", "--", "."])
+                .map(|clean_output| merge_git_outputs([remove_output, clean_output]))
         })
-    });
+    } else {
+        git_success(
+            &state.repo_root,
+            &["restore", "--staged", "--worktree", "--", "."],
+        )
+        .and_then(|restore_output| {
+            git_success(&state.repo_root, &["clean", "-fd", "--", "."])
+                .map(|clean_output| merge_git_outputs([restore_output, clean_output]))
+        })
+    };
     operation_response(&workdir, result, "所有改动已放弃。")
 }
 
@@ -1666,8 +1799,26 @@ mod tests {
     #[test]
     fn rejects_unsafe_repo_relative_paths() {
         assert!(validate_repo_relative_path("src/main.rs").is_ok());
+        assert_eq!(
+            validate_repo_relative_path("src\\main.rs").as_deref(),
+            Ok("src/main.rs")
+        );
         assert!(validate_repo_relative_path("../secret").is_err());
         assert!(validate_repo_relative_path("/tmp/secret").is_err());
+        assert!(looks_like_windows_drive_path(
+            "C:/Users/liveagent/secret.txt"
+        ));
+        assert!(looks_like_windows_drive_path(
+            "C:\\Users\\liveagent\\secret.txt"
+        ));
+        assert!(looks_like_windows_drive_path("C:relative\\secret.txt"));
+        #[cfg(windows)]
+        {
+            assert!(validate_repo_relative_path("C:/Users/liveagent/secret.txt").is_err());
+            assert!(validate_repo_relative_path("C:\\Users\\liveagent\\secret.txt").is_err());
+            assert!(validate_repo_relative_path("C:relative\\secret.txt").is_err());
+            assert!(validate_repo_relative_path("\\\\server\\share\\secret.txt").is_err());
+        }
     }
 
     #[test]
@@ -1702,21 +1853,39 @@ mod tests {
 
     #[test]
     fn parses_git_log_commits_refs_and_renames() {
-        let raw = "\x1e0123456789abcdef\x1f0123456\x1ffedcba9\x1fHEAD -> refs/heads/feature, refs/remotes/origin/feature\x1fAlice\x1falice@example.com\x1f2026-05-29T10:11:12+08:00\x1frename file\nR100\told.txt\tnew.txt\n";
+        let raw = "\x1e0123456789abcdef\x1f0123456\x1ffedcba9\x1fHEAD -> refs/heads/feature, refs/remotes/origin/feature\x1fAlice\x1falice@example.com\x1f2026-05-29T10:11:12+08:00\x1frename file\nR100\0old\tname.txt\0new name.txt\0A\0src/tab\tfile.txt\0";
         let commits = parse_git_log(raw);
         assert_eq!(commits.len(), 1);
         let commit = &commits[0];
         assert_eq!(commit.short_sha, "0123456");
         assert_eq!(commit.refs, vec!["feature", "origin/feature"]);
         assert_eq!(commit.parents, vec!["fedcba9"]);
-        assert_eq!(commit.files.len(), 1);
+        assert_eq!(commit.files.len(), 2);
         assert_eq!(commit.files[0].status, "R");
-        assert_eq!(commit.files[0].old_path.as_deref(), Some("old.txt"));
-        assert_eq!(commit.files[0].path, "new.txt");
+        assert_eq!(commit.files[0].old_path.as_deref(), Some("old\tname.txt"));
+        assert_eq!(commit.files[0].path, "new name.txt");
+        assert_eq!(commit.files[1].status, "A");
+        assert_eq!(commit.files[1].path, "src/tab\tfile.txt");
+    }
+
+    #[test]
+    fn untracked_file_patch_preserves_crlf_lines() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let file_path = temp.path().join("crlf.txt");
+        fs::write(&file_path, "first\r\nsecond\r\n").expect("write crlf file");
+        let patch = build_untracked_file_patch(&temp.path().to_string_lossy(), "crlf.txt")
+            .expect("build patch")
+            .expect("text patch");
+        assert!(
+            patch.contains("+first\r\n+second\r\n"),
+            "untracked patch should preserve CRLF line endings:\n{patch:?}"
+        );
     }
 
     fn run_temp_git(repo_root: &Path, args: &[&str]) {
-        let output = Command::new("git")
+        let mut command = Command::new("git");
+        configure_child_process_group(&mut command);
+        let output = command
             .args(args)
             .current_dir(repo_root)
             .env("GIT_TERMINAL_PROMPT", "0")
@@ -1807,6 +1976,71 @@ mod tests {
             "working tree diff patch:\n{}",
             diff.patch
         );
+    }
+
+    #[test]
+    fn git_unborn_repo_can_unstage_and_discard_changes() {
+        if Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+        let temp = tempfile::tempdir().expect("temp repo");
+        let workdir = temp.path().to_string_lossy().to_string();
+        let initialized =
+            git_init_sync(workdir.clone(), "main".to_string(), None, None).expect("init repo");
+        assert!(initialized.ok, "init failed: {}", initialized.message);
+        assert!(!ref_exists(&workdir, "HEAD"));
+
+        fs::write(temp.path().join("staged.txt"), "staged\n").expect("write staged file");
+        let staged = git_stage_sync(workdir.clone(), "staged.txt".to_string()).expect("stage");
+        assert!(staged.ok, "stage failed: {}", staged.message);
+        assert_eq!(staged.state.dirty_counts.staged, 1);
+
+        let unstaged =
+            git_unstage_sync(workdir.clone(), "staged.txt".to_string()).expect("unstage");
+        assert!(unstaged.ok, "unstage failed: {}", unstaged.message);
+        assert_eq!(unstaged.state.dirty_counts.staged, 0);
+        assert_eq!(unstaged.state.dirty_counts.untracked, 1);
+        assert!(temp.path().join("staged.txt").exists());
+
+        let restaged = git_stage_sync(workdir.clone(), "staged.txt".to_string()).expect("restage");
+        assert!(restaged.ok, "restage failed: {}", restaged.message);
+        let unstaged_all = git_unstage_all_sync(workdir.clone()).expect("unstage all");
+        assert!(
+            unstaged_all.ok,
+            "unstage all failed: {}",
+            unstaged_all.message
+        );
+        assert_eq!(unstaged_all.state.dirty_counts.staged, 0);
+        assert_eq!(unstaged_all.state.dirty_counts.untracked, 1);
+        assert!(temp.path().join("staged.txt").exists());
+
+        let restaged_again =
+            git_stage_sync(workdir.clone(), "staged.txt".to_string()).expect("stage again");
+        assert!(
+            restaged_again.ok,
+            "stage again failed: {}",
+            restaged_again.message
+        );
+        let discarded =
+            git_discard_sync(workdir.clone(), "staged.txt".to_string(), None).expect("discard");
+        assert!(discarded.ok, "discard failed: {}", discarded.message);
+        assert!(!temp.path().join("staged.txt").exists());
+
+        fs::write(temp.path().join("bulk-staged.txt"), "staged\n").expect("write bulk staged");
+        fs::write(temp.path().join("bulk-untracked.txt"), "untracked\n")
+            .expect("write bulk untracked");
+        let bulk_staged =
+            git_stage_sync(workdir.clone(), "bulk-staged.txt".to_string()).expect("stage bulk");
+        assert!(bulk_staged.ok, "stage bulk failed: {}", bulk_staged.message);
+        let discarded_all = git_discard_all_sync(workdir.clone()).expect("discard all");
+        assert!(
+            discarded_all.ok,
+            "discard all failed: {}",
+            discarded_all.message
+        );
+        assert!(discarded_all.state.entries.is_empty());
+        assert!(!temp.path().join("bulk-staged.txt").exists());
+        assert!(!temp.path().join("bulk-untracked.txt").exists());
     }
 
     #[test]

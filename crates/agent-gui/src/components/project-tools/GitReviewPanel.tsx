@@ -35,6 +35,7 @@ import {
   Loader2,
   MoreHorizontal,
   RefreshCw,
+  Tag,
   Trash2,
   Upload,
 } from "../icons";
@@ -689,7 +690,15 @@ const GRAPH_COL_WIDTH = 16;
 const GRAPH_ROW_HEIGHT = 28;
 const GRAPH_DOT_Y = 14;
 const GRAPH_DOT_R = 3.5;
+const GRAPH_ANCHOR_R = 5.2;
+const GRAPH_ANCHOR_CENTER_R = 1.9;
 const GRAPH_LINE_W = 2;
+const GRAPH_CURVE_HORIZONTAL_TENSION = 0.7;
+const GRAPH_CURVE_VERTICAL_TENSION = 0.82;
+const GRAPH_MERGE_BRANCH_HORIZONTAL_TENSION = 0.92;
+const GRAPH_MERGE_BRANCH_VERTICAL_TENSION = 0.55;
+const COMMIT_REF_TAG_LIMIT = 1;
+const COMMIT_DETAIL_REF_TAG_LIMIT = 3;
 
 function graphLayoutWidth(row: GraphRow) {
   return graphDrawWidth(row);
@@ -716,23 +725,161 @@ function graphLaneX(col: number) {
   return col * GRAPH_COL_WIDTH + GRAPH_COL_WIDTH / 2;
 }
 
-function graphCurvePath(x1: number, y1: number, x2: number, y2: number) {
-  const handle = Math.min(10, Math.abs(y2 - y1) * 0.72);
-  return `M${x1} ${y1}C${x1} ${y1 + handle},${x2} ${y2 - handle},${x2} ${y2}`;
+function graphAnchorSideX(cx: number, targetX: number) {
+  if (targetX === cx) return cx;
+  return cx + (targetX > cx ? GRAPH_ANCHOR_R : -GRAPH_ANCHOR_R);
+}
+
+function graphBezierPath(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  commitAnchor: "from" | "to",
+) {
+  const xDirection = x2 > x1 ? 1 : -1;
+  const yDirection = y2 > y1 ? 1 : -1;
+  const xHandle = Math.abs(x2 - x1) * GRAPH_CURVE_HORIZONTAL_TENSION;
+  const yHandle = Math.abs(y2 - y1) * GRAPH_CURVE_VERTICAL_TENSION;
+
+  if (commitAnchor === "from") {
+    return `M${x1} ${y1}C${x1 + xDirection * xHandle} ${y1},${x2} ${y2 - yDirection * yHandle},${x2} ${y2}`;
+  }
+
+  return `M${x1} ${y1}C${x1} ${y1 + yDirection * yHandle},${x2 - xDirection * xHandle} ${y2},${x2} ${y2}`;
+}
+
+function graphMergeBranchPath(x1: number, y1: number, x2: number, y2: number) {
+  const xDirection = x2 > x1 ? 1 : -1;
+  const yDirection = y2 > y1 ? 1 : -1;
+  const xHandle = Math.abs(x2 - x1) * GRAPH_MERGE_BRANCH_HORIZONTAL_TENSION;
+  const yHandle = Math.abs(y2 - y1) * GRAPH_MERGE_BRANCH_VERTICAL_TENSION;
+
+  return `M${x1} ${y1}C${x1 + xDirection * xHandle} ${y1},${x2} ${y2 - yDirection * yHandle},${x2} ${y2}`;
+}
+
+function orderedCommitRefs(refs: readonly string[]) {
+  return refs
+    .map((ref) => ref.trim())
+    .filter((ref, index, all) => ref.length > 0 && all.indexOf(ref) === index)
+    .sort((a, b) => {
+      const aRemote = a.includes("/") ? 0 : 1;
+      const bRemote = b.includes("/") ? 0 : 1;
+      return aRemote - bRemote;
+    });
+}
+
+function commitHistoryTitle(commit: GitCommitSummary) {
+  const label = commit.subject || commit.shortSha;
+  const refs = orderedCommitRefs(commit.refs);
+  return refs.length > 0 ? `${label} - ${refs.join(", ")}` : label;
+}
+
+function CommitRefTags({
+  refs,
+  selected,
+  variant = "list",
+  limit = COMMIT_REF_TAG_LIMIT,
+}: {
+  refs: readonly string[];
+  selected: boolean;
+  variant?: "list" | "detail";
+  limit?: number;
+}) {
+  const orderedRefs = orderedCommitRefs(refs);
+  if (orderedRefs.length === 0) return null;
+
+  const visibleRefs = orderedRefs.slice(0, Math.max(0, limit));
+  const hiddenCount = orderedRefs.length - visibleRefs.length;
+  const chipClass = cn(
+    "inline-flex h-5 min-w-0 items-center gap-1 rounded-full border px-1.5 text-[10px] font-semibold leading-[14px] shadow-sm ring-1 ring-inset",
+    selected
+      ? "border-accent-foreground/35 bg-accent-foreground/15 text-accent-foreground ring-accent-foreground/20"
+      : "border-sky-300/60 bg-sky-50 text-sky-700 ring-sky-200/70 dark:border-sky-300/35 dark:bg-sky-950/45 dark:text-sky-200 dark:ring-sky-300/15",
+  );
+
+  return (
+    <span
+      className={
+        variant === "detail"
+          ? "mt-1.5 flex min-w-0 flex-wrap items-center gap-1 overflow-visible"
+          : "mt-0.5 flex max-w-[52%] shrink-0 items-center justify-end gap-1 overflow-x-hidden overflow-y-visible"
+      }
+      title={orderedRefs.join(", ")}
+    >
+      {visibleRefs.map((ref) => (
+        <span
+          key={ref}
+          className={cn(
+            chipClass,
+            variant === "detail" ? "max-w-[12rem] shrink-0" : "max-w-[8.5rem] shrink",
+          )}
+        >
+          <Tag className={cn("shrink-0 opacity-85", variant === "detail" ? "h-3 w-3" : "h-2.5 w-2.5")} />
+          <span className="truncate leading-[14px]">{ref}</span>
+        </span>
+      ))}
+      {hiddenCount > 0 ? (
+        <span className={cn(chipClass, "shrink-0 px-1.5 leading-[14px]")}>
+          +{hiddenCount}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function GitGraphCommitMarker({ cx, color, isMerge }: { cx: number; color: string; isMerge: boolean }) {
+  if (!isMerge) {
+    return (
+      <circle
+        cx={cx}
+        cy={GRAPH_DOT_Y}
+        r={GRAPH_DOT_R}
+        fill={color}
+        stroke="var(--background)"
+        strokeWidth={2}
+      />
+    );
+  }
+
+  return (
+    <g>
+      <circle
+        cx={cx}
+        cy={GRAPH_DOT_Y}
+        r={GRAPH_ANCHOR_R}
+        fill="none"
+        stroke={color}
+        strokeWidth={1.7}
+      />
+      <path
+        d={`M${cx} ${GRAPH_DOT_Y - GRAPH_ANCHOR_R - 2.2}V${GRAPH_DOT_Y - GRAPH_ANCHOR_R - 0.2}M${cx} ${GRAPH_DOT_Y + GRAPH_ANCHOR_R + 0.2}V${GRAPH_DOT_Y + GRAPH_ANCHOR_R + 2.2}`}
+        fill="none"
+        stroke={color}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.7}
+      />
+      <circle cx={cx} cy={GRAPH_DOT_Y} r={GRAPH_ANCHOR_CENTER_R} fill={color} />
+    </g>
+  );
 }
 
 function GitGraphSvgCell({
   row,
   isFirst,
   isLast,
+  isMerge,
 }: {
   row: GraphRow;
   isFirst: boolean;
   isLast: boolean;
+  isMerge: boolean;
 }) {
   const drawW = graphDrawWidth(row);
   const layoutW = graphLayoutWidth(row);
   const cx = graphLaneX(row.commitCol);
+  const commitColor = GRAPH_COLORS[row.commitColor % GRAPH_COLORS.length];
 
   return (
     <div className="h-7 shrink-0 overflow-visible" style={{ width: layoutW, minWidth: layoutW }}>
@@ -746,26 +893,18 @@ function GitGraphSvgCell({
         {row.topPipes.map((p, i) => {
           const x1 = graphLaneX(p.fromCol);
           const x2 = graphLaneX(p.toCol);
+          const isMergeBranch = isMerge && p.toCol === row.commitCol && p.fromCol !== row.commitCol;
+          const branchX2 = isMergeBranch ? graphAnchorSideX(x2, x1) : x2;
+          const y2 =
+            isMerge && p.toCol === row.commitCol && !isMergeBranch
+              ? GRAPH_DOT_Y - GRAPH_ANCHOR_R
+              : GRAPH_DOT_Y;
           const c = GRAPH_COLORS[p.color % GRAPH_COLORS.length];
           if (isFirst) return null;
-          if (x1 === x2) {
-            return (
-              <line
-                key={`t${i}`}
-                x1={x1}
-                y1={0}
-                x2={x2}
-                y2={GRAPH_DOT_Y}
-                stroke={c}
-                strokeWidth={GRAPH_LINE_W}
-                strokeLinecap="round"
-              />
-            );
-          }
           return (
             <path
               key={`t${i}`}
-              d={graphCurvePath(x1, 0, x2, GRAPH_DOT_Y)}
+              d={graphBezierPath(x1, 0, branchX2, y2, "to")}
               fill="none"
               stroke={c}
               strokeWidth={GRAPH_LINE_W}
@@ -778,26 +917,22 @@ function GitGraphSvgCell({
         {row.bottomPipes.map((p, i) => {
           const x1 = graphLaneX(p.fromCol);
           const x2 = graphLaneX(p.toCol);
+          const isMergeBranch = isMerge && p.fromCol === row.commitCol && p.toCol !== row.commitCol;
+          const branchX1 = isMergeBranch ? graphAnchorSideX(x1, x2) : x1;
+          const y1 =
+            isMerge && p.fromCol === row.commitCol && !isMergeBranch
+              ? GRAPH_DOT_Y + GRAPH_ANCHOR_R
+              : GRAPH_DOT_Y;
           const c = GRAPH_COLORS[p.color % GRAPH_COLORS.length];
           if (isLast) return null;
-          if (x1 === x2) {
-            return (
-              <line
-                key={`b${i}`}
-                x1={x1}
-                y1={GRAPH_DOT_Y}
-                x2={x2}
-                y2={GRAPH_ROW_HEIGHT}
-                stroke={c}
-                strokeWidth={GRAPH_LINE_W}
-                strokeLinecap="round"
-              />
-            );
-          }
           return (
             <path
               key={`b${i}`}
-              d={graphCurvePath(x1, GRAPH_DOT_Y, x2, GRAPH_ROW_HEIGHT)}
+              d={
+                isMergeBranch
+                  ? graphMergeBranchPath(branchX1, y1, x2, GRAPH_ROW_HEIGHT)
+                  : graphBezierPath(x1, y1, x2, GRAPH_ROW_HEIGHT, "from")
+              }
               fill="none"
               stroke={c}
               strokeWidth={GRAPH_LINE_W}
@@ -807,14 +942,7 @@ function GitGraphSvgCell({
           );
         })}
 
-        <circle
-          cx={cx}
-          cy={GRAPH_DOT_Y}
-          r={GRAPH_DOT_R}
-          fill={GRAPH_COLORS[row.commitColor % GRAPH_COLORS.length]}
-          stroke="var(--background)"
-          strokeWidth={2}
-        />
+        <GitGraphCommitMarker cx={cx} color={commitColor} isMerge={isMerge} />
       </svg>
     </div>
   );
@@ -838,6 +966,7 @@ function GitGraphContinuationCell({ row, isLast }: { row: GraphRow; isLast: bool
             className="absolute bottom-0 top-0"
             style={{
               backgroundColor: GRAPH_COLORS[pipe.color % GRAPH_COLORS.length],
+              borderRadius: GRAPH_LINE_W,
               left: x - GRAPH_LINE_W / 2,
               width: GRAPH_LINE_W,
             }}
@@ -1317,7 +1446,9 @@ export function GitReviewPanel(props: {
     historyCommits.forEach((commit, commitIndex) => {
       rows.push({ type: "commit", commit, commitIndex });
       if (commit.sha === expandedCommitSha) {
-        commit.files.forEach((file) => rows.push({ type: "file", commit, commitIndex, file }));
+        commit.files.forEach((file) => {
+          rows.push({ type: "file", commit, commitIndex, file });
+        });
       }
     });
     return rows;
@@ -1902,21 +2033,23 @@ export function GitReviewPanel(props: {
                               row={graphRow}
                               isFirst={row.commitIndex === 0}
                               isLast={row.commitIndex === historyCommits.length - 1}
+                              isMerge={commit.parents.length > 1}
                             />
                           ) : null}
                           <button
                             type="button"
                             className={cn(
-                              "flex h-7 min-w-0 flex-1 items-center rounded px-1.5 pr-1 text-left text-xs transition-colors hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                              "flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded px-1.5 pr-1 text-left text-xs transition-colors hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
                               commitSelected && "bg-accent/80 text-accent-foreground",
                             )}
-                            title={commit.subject || commit.shortSha}
+                            title={commitHistoryTitle(commit)}
                             aria-expanded={commitExpanded}
                             onClick={() => selectCommit(commit)}
                           >
                             <span className="min-w-0 flex-1 truncate text-[12px] font-medium">
                               {commit.subject || commit.shortSha}
                             </span>
+                            <CommitRefTags refs={commit.refs} selected={commitSelected} />
                           </button>
                         </div>
                       </div>
@@ -1934,10 +2067,16 @@ export function GitReviewPanel(props: {
                   <div className="min-w-0 flex-1">
                     <div
                       className="truncate font-medium text-foreground"
-                      title={selectedCommit.subject}
+                      title={commitHistoryTitle(selectedCommit)}
                     >
                       {selectedCommit.subject || selectedCommit.shortSha}
                     </div>
+                    <CommitRefTags
+                      refs={selectedCommit.refs}
+                      selected={false}
+                      variant="detail"
+                      limit={COMMIT_DETAIL_REF_TAG_LIMIT}
+                    />
                     <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
                       <span className="font-mono">{selectedCommit.shortSha}</span>
                       <span>{selectedCommit.authorName}</span>

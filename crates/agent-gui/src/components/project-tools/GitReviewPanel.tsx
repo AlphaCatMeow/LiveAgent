@@ -1944,6 +1944,8 @@ export function GitReviewPanel(props: {
   const [useSplitReviewLayout, setUseSplitReviewLayout] = useState(false);
   const [changesStackedPane, setChangesStackedPane] = useState<GitReviewStackedPane>("list");
   const [historyStackedPane, setHistoryStackedPane] = useState<GitReviewStackedPane>("list");
+  const [changesStackedDir, setChangesStackedDir] = useState<"forward" | "back">("forward");
+  const [historyStackedDir, setHistoryStackedDir] = useState<"forward" | "back">("forward");
   const [collapsedChangeSections, setCollapsedChangeSections] = useState<
     Record<ChangeListSection, boolean>
   >({
@@ -1961,6 +1963,10 @@ export function GitReviewPanel(props: {
   const commitDetailsCacheRef = useRef<Map<string, GitCommitDetails>>(new Map());
   const panelRef = useRef<HTMLDivElement | null>(null);
   const historyListRef = useRef<HTMLDivElement | null>(null);
+  const changesListPaneRef = useRef<HTMLElement | null>(null);
+  const changesDetailPaneRef = useRef<HTMLElement | null>(null);
+  const historyListPaneRef = useRef<HTMLElement | null>(null);
+  const historyDetailPaneRef = useRef<HTMLElement | null>(null);
   const busyRef = useRef("");
   const statusSignatureRef = useRef("");
   const historySignatureRef = useRef("");
@@ -2030,6 +2036,38 @@ export function GitReviewPanel(props: {
   useEffect(() => {
     expandedCommitShasRef.current = expandedCommitShas;
   }, [expandedCommitShas]);
+
+  useEffect(() => {
+    if (useSplitReviewLayout) return;
+    const el =
+      changesStackedPane === "list"
+        ? changesListPaneRef.current
+        : changesDetailPaneRef.current;
+    if (!el) return;
+    const cls =
+      changesStackedDir === "back"
+        ? "git-review-pane-enter-back"
+        : "git-review-pane-enter-forward";
+    el.classList.remove("git-review-pane-enter-forward", "git-review-pane-enter-back");
+    void el.offsetHeight;
+    el.classList.add(cls);
+  }, [changesStackedPane, useSplitReviewLayout, changesStackedDir]);
+
+  useEffect(() => {
+    if (useSplitReviewLayout) return;
+    const el =
+      historyStackedPane === "list"
+        ? historyListPaneRef.current
+        : historyDetailPaneRef.current;
+    if (!el) return;
+    const cls =
+      historyStackedDir === "back"
+        ? "git-review-pane-enter-back"
+        : "git-review-pane-enter-forward";
+    el.classList.remove("git-review-pane-enter-forward", "git-review-pane-enter-back");
+    void el.offsetHeight;
+    el.classList.add(cls);
+  }, [historyStackedPane, useSplitReviewLayout, historyStackedDir]);
 
   const clearDiffs = useCallback(() => {
     diffRequestIdRef.current += 1;
@@ -2745,6 +2783,7 @@ export function GitReviewPanel(props: {
       selectedPathRef.current = entry.path;
       setSelectedPath(entry.path);
       if (!useSplitReviewLayout) {
+        setChangesStackedDir("forward");
         setChangesStackedPane("detail");
       }
       void loadDiffForPath(entry.path);
@@ -2783,6 +2822,7 @@ export function GitReviewPanel(props: {
       setSelectedCommitSha(commit.sha);
       setSelectedCommitFilePath(file.path);
       if (!useSplitReviewLayout) {
+        setHistoryStackedDir("forward");
         setHistoryStackedPane("detail");
       }
       setHistoryDiffTitle(t("projectTools.gitReview.commitDiff"));
@@ -2801,6 +2841,7 @@ export function GitReviewPanel(props: {
     setSelectedCommitSha(commit.sha);
     setSelectedCommitFilePath("");
     if (!useSplitReviewLayout) {
+      setHistoryStackedDir("forward");
       setHistoryStackedPane("detail");
     }
     clearCommitDiff();
@@ -3530,8 +3571,10 @@ export function GitReviewPanel(props: {
                 )}
                 onClick={() => {
                   if (reviewMode === "changes") {
+                    setChangesStackedDir("back");
                     setChangesStackedPane("list");
                   } else {
+                    setHistoryStackedDir("back");
                     setHistoryStackedPane("list");
                   }
                 }}
@@ -3560,8 +3603,10 @@ export function GitReviewPanel(props: {
                 )}
                 onClick={() => {
                   if (reviewMode === "changes") {
+                    setChangesStackedDir("forward");
                     setChangesStackedPane("detail");
                   } else {
+                    setHistoryStackedDir("forward");
                     setHistoryStackedPane("detail");
                   }
                 }}
@@ -3581,14 +3626,16 @@ export function GitReviewPanel(props: {
 
       {reviewMode === "changes" ? (
         <div
+          key="changes"
           className={cn(
-            "min-h-0 flex-1 gap-3 overflow-hidden p-3",
+            "git-review-tab-enter min-h-0 flex-1 gap-3 overflow-hidden p-3",
             useSplitReviewLayout
               ? `grid ${GIT_REVIEW_SPLIT_GRID_CLASS}`
               : "flex flex-col",
           )}
         >
           <aside
+            ref={changesListPaneRef}
             className={cn(
               "min-h-0 flex-col overflow-hidden rounded-lg border border-border/70 bg-background",
               useSplitReviewLayout || changesStackedPane === "list" ? "flex" : "hidden",
@@ -3641,6 +3688,7 @@ export function GitReviewPanel(props: {
             </div>
           </aside>
           <main
+            ref={changesDetailPaneRef}
             className={cn(
               "h-full min-h-0 flex-col overflow-hidden",
               useSplitReviewLayout || changesStackedPane === "detail" ? "flex" : "hidden",
@@ -3704,14 +3752,16 @@ export function GitReviewPanel(props: {
         </div>
       ) : (
         <div
+          key="history"
           className={cn(
-            "min-h-0 flex-1 gap-3 overflow-hidden p-3",
+            "git-review-tab-enter min-h-0 flex-1 gap-3 overflow-hidden p-3",
             useSplitReviewLayout
               ? `grid ${GIT_REVIEW_SPLIT_GRID_CLASS}`
               : "flex flex-col",
           )}
         >
           <aside
+            ref={historyListPaneRef}
             className={cn(
               "min-h-0 flex-col overflow-hidden rounded-lg border border-border/70 bg-background",
               useSplitReviewLayout || historyStackedPane === "list" ? "flex" : "hidden",
@@ -3873,6 +3923,7 @@ export function GitReviewPanel(props: {
             </div>
           </aside>
           <main
+            ref={historyDetailPaneRef}
             className={cn(
               "h-full min-h-0 flex-col overflow-hidden",
               useSplitReviewLayout || historyStackedPane === "detail" ? "flex" : "hidden",

@@ -1145,22 +1145,34 @@ function DiffStatView(props: { stat: string }) {
   );
 }
 
-function DiffContent(props: { diff?: GitDiffResponse | null; title: string; error?: string }) {
-  const { diff, title, error } = props;
+function DiffContent(props: {
+  diff?: GitDiffResponse | null;
+  title: string;
+  error?: string;
+  loading?: boolean;
+  showStat?: boolean;
+}) {
+  const { diff, title, error, loading = false, showStat = true } = props;
   const { t } = useLocale();
   const isDark = useIsDark();
   const patchChunks = useMemo(
     () => buildPatchChunks(diff?.patch ?? "", title),
     [diff?.patch, title],
   );
+  const showLoadingState = loading && !error && !diff;
+  const showDiffStat = showStat && Boolean(diff?.stat);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {error ? <div className="shrink-0 px-3 py-3 text-xs text-destructive">{error}</div> : null}
-      {!error && diff?.stat ? (
-        <DiffStatView stat={diff.stat} />
+      {!error && showDiffStat ? <DiffStatView stat={diff?.stat ?? ""} /> : null}
+      {showLoadingState ? (
+        <div className="flex min-h-0 flex-1 items-center justify-center gap-2 px-3 py-8 text-center text-xs text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          <span>{t("projectTools.loading")}</span>
+        </div>
       ) : null}
-      {!error && patchChunks.length > 0 ? (
+      {!error && !showLoadingState && patchChunks.length > 0 ? (
         <div
           className={cn(GIT_REVIEW_TRANSIENT_SCROLLBAR_CLASS, "min-h-0 flex-1 overflow-auto")}
           onScroll={handleGitReviewTransientScroll}
@@ -1170,7 +1182,7 @@ function DiffContent(props: { diff?: GitDiffResponse | null; title: string; erro
           ))}
         </div>
       ) : null}
-      {!error && diff?.patch.trim() && patchChunks.length === 0 ? (
+      {!error && !showLoadingState && diff?.patch.trim() && patchChunks.length === 0 ? (
         <pre
           className={cn(
             GIT_REVIEW_TRANSIENT_SCROLLBAR_CLASS,
@@ -1181,7 +1193,7 @@ function DiffContent(props: { diff?: GitDiffResponse | null; title: string; erro
           {diff.patch}
         </pre>
       ) : null}
-      {!error && !diff?.patch.trim() && patchChunks.length === 0 ? (
+      {!error && !showLoadingState && diff && !diff.patch.trim() && patchChunks.length === 0 ? (
         <div className="flex min-h-0 flex-1 items-center justify-center px-3 py-8 text-center text-xs text-muted-foreground">
           {t("projectTools.gitReview.noDiff")}
         </div>
@@ -1201,6 +1213,7 @@ function DiffReviewCard(props: {
   branchError?: string;
   diffLoading?: boolean;
   onActiveViewChange: (view: DiffViewKind) => void;
+  showStat?: boolean;
   worktreeDiff?: GitDiffResponse | null;
 }) {
   const {
@@ -1209,6 +1222,7 @@ function DiffReviewCard(props: {
     branchError,
     diffLoading,
     onActiveViewChange,
+    showStat,
     worktreeDiff,
   } = props;
   const { t } = useLocale();
@@ -1255,7 +1269,13 @@ function DiffReviewCard(props: {
           </Button>
         </div>
       </div>
-      <DiffContent title={activeTitle} diff={activeDiff} error={activeError} />
+      <DiffContent
+        title={activeTitle}
+        diff={activeDiff}
+        error={activeError}
+        loading={diffLoading}
+        showStat={showStat}
+      />
     </section>
   );
 }
@@ -1960,6 +1980,7 @@ export function GitReviewPanel(props: {
   const diffRequestIdRef = useRef(0);
   const diffInFlightRequestIdRef = useRef(0);
   const commitDiffRequestIdRef = useRef(0);
+  const diffPathRef = useRef("");
   const commitDetailsCacheRef = useRef<Map<string, GitCommitDetails>>(new Map());
   const panelRef = useRef<HTMLDivElement | null>(null);
   const historyListRef = useRef<HTMLDivElement | null>(null);
@@ -2072,6 +2093,7 @@ export function GitReviewPanel(props: {
   const clearDiffs = useCallback(() => {
     diffRequestIdRef.current += 1;
     diffInFlightRequestIdRef.current = 0;
+    diffPathRef.current = "";
     branchDiffSignatureRef.current = "";
     worktreeDiffSignatureRef.current = "";
     setBranchDiff(null);
@@ -2097,6 +2119,13 @@ export function GitReviewPanel(props: {
         clearDiffs();
         return;
       }
+      if (diffPathRef.current !== cleanPath) {
+        branchDiffSignatureRef.current = "";
+        worktreeDiffSignatureRef.current = "";
+        setBranchDiff(null);
+        setWorktreeDiff(null);
+      }
+      diffPathRef.current = cleanPath;
       if (!options.silent) {
         setDiffLoading(true);
       }
@@ -3681,6 +3710,7 @@ export function GitReviewPanel(props: {
                 branchError={branchError}
                 diffLoading={diffLoading}
                 onActiveViewChange={setActiveDiffView}
+                showStat={useSplitReviewLayout}
                 worktreeDiff={worktreeDiff}
               />
             </div>
@@ -3896,17 +3926,13 @@ export function GitReviewPanel(props: {
                         <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
                       ) : null}
                     </div>
-                    {commitDiffLoading && !commitDiff && !historyError ? (
-                      <div className="flex min-h-0 flex-1 items-center justify-center text-muted-foreground">
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      </div>
-                    ) : (
-                      <DiffContent
-                        title={historyDiffTitle || t("projectTools.gitReview.commitDiff")}
-                        diff={commitDiff}
-                        error={historyError}
-                      />
-                    )}
+                    <DiffContent
+                      title={historyDiffTitle || t("projectTools.gitReview.commitDiff")}
+                      diff={commitDiff}
+                      error={historyError}
+                      loading={commitDiffLoading}
+                      showStat={useSplitReviewLayout}
+                    />
                   </section>
                 ) : (
                   <div className="flex min-h-0 flex-1 items-center justify-center rounded-lg border border-border/70 bg-muted/10 px-4 text-center text-xs text-muted-foreground">

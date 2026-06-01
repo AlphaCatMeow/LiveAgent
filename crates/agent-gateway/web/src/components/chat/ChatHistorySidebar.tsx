@@ -112,17 +112,12 @@ const PROJECT_HEADER_BUTTON_CLASS =
   "transition-colors hover:!bg-foreground/[0.06] hover:text-foreground active:!bg-foreground/[0.1] focus-visible:!bg-foreground/[0.08] focus-visible:ring-2 focus-visible:ring-ring";
 const PROJECT_ICON_BUTTON_CLASS =
   "h-7 w-7 rounded-lg text-muted-foreground transition-colors hover:!bg-foreground/[0.08] hover:text-foreground active:!bg-foreground/[0.1] focus-visible:!bg-foreground/[0.08] data-[state=open]:!bg-foreground/[0.08] data-[state=open]:text-foreground";
-const SIDEBAR_SECTION_TRANSITION_MS = 200;
-const SIDEBAR_SECTION_TRANSITION_CLASS =
-  "overflow-hidden transition-[flex-grow,flex-basis,opacity,border-color] duration-200 ease-out motion-reduce:transition-none";
-const SIDEBAR_COLLAPSIBLE_PANEL_CLASS =
-  "grid min-h-0 overflow-hidden transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none";
-const SIDEBAR_COLLAPSIBLE_CONTENT_CLASS =
-  "min-h-0 transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none";
+const SIDEBAR_SECTION_ROWS_TRANSITION_CLASS =
+  "transition-[grid-template-rows] duration-300 ease-out motion-reduce:transition-none";
+const SIDEBAR_SECTION_BODY_CLASS =
+  "min-h-0 overflow-hidden transition-opacity duration-300 ease-out motion-reduce:transition-none";
 const SIDEBAR_SECTION_CHEVRON_CLASS =
-  "h-3.5 w-3.5 shrink-0 transition-transform duration-200 ease-out motion-reduce:transition-none";
-const SIDEBAR_PROJECTS_RESIZE_MIN_HEIGHT = 92;
-const SIDEBAR_RECENT_RESIZE_MIN_HEIGHT = 156;
+  "h-3.5 w-3.5 shrink-0 transition-transform duration-300 ease-out motion-reduce:transition-none";
 const EMPTY_PROJECT_PATH_KEYS = new Set<string>();
 const EMPTY_PROJECT_ACTIVITY_UPDATED_ATS = new Map<string, number>();
 const HISTORY_LOADING_SKELETON_ROWS = [
@@ -1079,14 +1074,25 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [isMobileMenuLayout, setIsMobileMenuLayout] = useState(isMobileSidebarLayout);
   const [projectSectionHeight, setProjectSectionHeight] = useState<number | null>(null);
-  const [sidebarSectionsContainerHeight, setSidebarSectionsContainerHeight] = useState(0);
   const [isProjectSectionResizing, setIsProjectSectionResizing] = useState(false);
-  const [isRecentCollapseLayoutSettled, setIsRecentCollapseLayoutSettled] =
-    useState(recentCollapsed);
+  const [sidebarSectionMetrics, setSidebarSectionMetrics] = useState({
+    containerHeight: 0,
+    projectsHeaderHeight: 0,
+    recentHeaderHeight: 0,
+    handleHeight: 0,
+    projectsContentHeight: 0,
+  });
   const sidebarSectionsRef = useRef<HTMLDivElement | null>(null);
-  const projectsSectionRef = useRef<HTMLDivElement | null>(null);
+  const projectsHeaderRef = useRef<HTMLDivElement | null>(null);
+  const recentHeaderRef = useRef<HTMLDivElement | null>(null);
+  const sectionResizeHandleRef = useRef<HTMLButtonElement | null>(null);
+  const projectsBodyRef = useRef<HTMLDivElement | null>(null);
+  const sidebarSectionLayoutRef = useRef({
+    projectsBodyHeight: 0,
+    resizeMinHeight: 0,
+    resizeMaxHeight: 0,
+  });
   const projectSectionResizeFrameRef = useRef<number | null>(null);
-  const pendingProjectSectionHeightRef = useRef<number | null>(null);
   const projectSectionResizeCleanupRef = useRef<(() => void) | null>(null);
   const handleSelectConversation = useStableEvent(onSelectConversation);
   const handleStartRenaming = useStableEvent(onStartRenaming);
@@ -1135,34 +1141,66 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
     });
   }, [projectActivityUpdatedAts, projects, runningProjectPathKeys]);
   const canResizeProjectSections = showProjects && !projectsCollapsed && !recentCollapsed;
-  const maxProjectSectionHeight =
-    sidebarSectionsContainerHeight > 0
-      ? Math.max(
-          SIDEBAR_PROJECTS_RESIZE_MIN_HEIGHT,
-          sidebarSectionsContainerHeight - SIDEBAR_RECENT_RESIZE_MIN_HEIGHT,
-        )
-      : SIDEBAR_PROJECTS_RESIZE_MIN_HEIGHT;
-  const effectiveProjectSectionHeight =
-    projectSectionHeight === null
-      ? null
-      : clampSidebarSectionHeight(
+  const sidebarSectionLayout = useMemo(() => {
+    const {
+      containerHeight,
+      projectsHeaderHeight,
+      recentHeaderHeight,
+      handleHeight,
+      projectsContentHeight,
+    } = sidebarSectionMetrics;
+    const measured = containerHeight > 0;
+    const available = Math.max(
+      0,
+      containerHeight - projectsHeaderHeight - recentHeaderHeight - handleHeight,
+    );
+    const resizeMaxHeight = Math.floor(available / 2);
+    const resizeMinHeight = Math.max(0, Math.min(projectsContentHeight, resizeMaxHeight));
+
+    let projectsBodyHeight = 0;
+    if (showProjects && !projectsCollapsed) {
+      if (recentCollapsed) {
+        projectsBodyHeight = available;
+      } else if (projectSectionHeight !== null) {
+        projectsBodyHeight = clampSidebarSectionHeight(
           projectSectionHeight,
-          SIDEBAR_PROJECTS_RESIZE_MIN_HEIGHT,
-          maxProjectSectionHeight,
+          resizeMinHeight,
+          resizeMaxHeight,
         );
-  const activeProjectSectionHeight = isProjectSectionResizing
-    ? pendingProjectSectionHeightRef.current ?? effectiveProjectSectionHeight
-    : effectiveProjectSectionHeight;
-  const hasCustomProjectSectionHeight =
-    canResizeProjectSections && activeProjectSectionHeight !== null;
-  const shouldExpandProjectSectionForCollapsedRecent =
-    showProjects && !projectsCollapsed && recentCollapsed && isRecentCollapseLayoutSettled;
-  const shouldUseProjectSectionAvailableHeight = hasCustomProjectSectionHeight;
-  const shouldStretchProjectSection =
-    shouldUseProjectSectionAvailableHeight || shouldExpandProjectSectionForCollapsedRecent;
-  const projectsSectionStyle = hasCustomProjectSectionHeight
-    ? { flexBasis: `${activeProjectSectionHeight}px` }
-    : undefined;
+      } else {
+        projectsBodyHeight = resizeMinHeight;
+      }
+    }
+    const recentBodyHeight = recentCollapsed ? 0 : Math.max(0, available - projectsBodyHeight);
+
+    const projectsBodyTrack =
+      !showProjects || projectsCollapsed
+        ? "0px"
+        : measured
+          ? `${projectsBodyHeight}px`
+          : "min-content";
+    const recentBodyTrack = recentCollapsed
+      ? "0px"
+      : measured
+        ? `${recentBodyHeight}px`
+        : "minmax(0, 1fr)";
+    const gridTemplateRows = showProjects
+      ? `auto ${projectsBodyTrack} auto auto ${recentBodyTrack}`
+      : `auto ${recentBodyTrack}`;
+
+    return { projectsBodyHeight, resizeMinHeight, resizeMaxHeight, gridTemplateRows };
+  }, [
+    projectSectionHeight,
+    projectsCollapsed,
+    recentCollapsed,
+    showProjects,
+    sidebarSectionMetrics,
+  ]);
+  sidebarSectionLayoutRef.current = {
+    projectsBodyHeight: sidebarSectionLayout.projectsBodyHeight,
+    resizeMinHeight: sidebarSectionLayout.resizeMinHeight,
+    resizeMaxHeight: sidebarSectionLayout.resizeMaxHeight,
+  };
   const handleMenuOpenChange = useCallback((id: string, open: boolean) => {
     setOpenMenuId((current) => {
       if (open) {
@@ -1192,17 +1230,13 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
   }, [isOpen]);
 
   useEffect(() => {
-    if (!recentCollapsed) {
-      setIsRecentCollapseLayoutSettled(false);
+    if (!pendingProjectRemoveId) {
       return;
     }
-
-    const timeoutId = window.setTimeout(() => {
-      setIsRecentCollapseLayoutSettled(true);
-    }, SIDEBAR_SECTION_TRANSITION_MS);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [recentCollapsed]);
+    if (!projects.some((project) => project.id === pendingProjectRemoveId)) {
+      setPendingProjectRemoveId(null);
+    }
+  }, [pendingProjectRemoveId, projects]);
 
   useEffect(() => {
     if (pendingDeleteId !== null || renamingId !== null) {
@@ -1255,41 +1289,68 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
     }
   }, [pendingProjectRemoveId, projects]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run to (re)observe section refs when sections mount/unmount or toggle
   useEffect(() => {
-    if (!isOpen || !showProjects) {
-      setSidebarSectionsContainerHeight(0);
+    if (!isOpen) {
       return;
     }
-
     const container = sidebarSectionsRef.current;
-    if (!container) {
+    if (!container || typeof ResizeObserver === "undefined") {
       return;
     }
 
     let frameId = 0;
-    const updateHeight = () => {
+    const measure = () => {
       frameId = 0;
-      setSidebarSectionsContainerHeight(container.clientHeight);
+      setSidebarSectionMetrics((previous) => {
+        const next = {
+          containerHeight: container.clientHeight,
+          projectsHeaderHeight: projectsHeaderRef.current?.offsetHeight ?? 0,
+          recentHeaderHeight: recentHeaderRef.current?.offsetHeight ?? 0,
+          handleHeight: sectionResizeHandleRef.current?.offsetHeight ?? 0,
+          projectsContentHeight: projectsBodyRef.current?.offsetHeight ?? 0,
+        };
+        if (
+          previous.containerHeight === next.containerHeight &&
+          previous.projectsHeaderHeight === next.projectsHeaderHeight &&
+          previous.recentHeaderHeight === next.recentHeaderHeight &&
+          previous.handleHeight === next.handleHeight &&
+          previous.projectsContentHeight === next.projectsContentHeight
+        ) {
+          return previous;
+        }
+        return next;
+      });
     };
-    const scheduleUpdate = () => {
+    const scheduleMeasure = () => {
       if (frameId !== 0) {
         return;
       }
-      frameId = window.requestAnimationFrame(updateHeight);
+      frameId = window.requestAnimationFrame(measure);
     };
 
-    scheduleUpdate();
-    window.addEventListener("resize", scheduleUpdate);
-    const resizeObserver =
-      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(scheduleUpdate);
-    resizeObserver?.observe(container);
+    scheduleMeasure();
+    window.addEventListener("resize", scheduleMeasure);
+    const resizeObserver = new ResizeObserver(scheduleMeasure);
+    resizeObserver.observe(container);
+    const observedTargets = [
+      projectsHeaderRef.current,
+      recentHeaderRef.current,
+      sectionResizeHandleRef.current,
+      projectsBodyRef.current,
+    ];
+    for (const target of observedTargets) {
+      if (target) {
+        resizeObserver.observe(target);
+      }
+    }
 
     return () => {
-      window.removeEventListener("resize", scheduleUpdate);
+      window.removeEventListener("resize", scheduleMeasure);
       if (frameId !== 0) {
         window.cancelAnimationFrame(frameId);
       }
-      resizeObserver?.disconnect();
+      resizeObserver.disconnect();
     };
   }, [isOpen, projectsCollapsed, recentCollapsed, showProjects]);
 
@@ -1308,46 +1369,33 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
         return;
       }
 
-      const projectsSection = projectsSectionRef.current;
-      const sidebarSections = sidebarSectionsRef.current;
-      if (!projectsSection || !sidebarSections) {
-        return;
-      }
-
       event.preventDefault();
       projectSectionResizeCleanupRef.current?.();
 
       const pointerId = event.pointerId;
       const resizeTarget = event.currentTarget;
       const startY = event.clientY;
-      const containerHeight = sidebarSections.clientHeight;
+      const layout = sidebarSectionLayoutRef.current;
       const startHeight = clampSidebarSectionHeight(
-        projectsSection.getBoundingClientRect().height,
-        SIDEBAR_PROJECTS_RESIZE_MIN_HEIGHT,
-        Math.max(
-          SIDEBAR_PROJECTS_RESIZE_MIN_HEIGHT,
-          containerHeight - SIDEBAR_RECENT_RESIZE_MIN_HEIGHT,
-        ),
+        layout.projectsBodyHeight,
+        layout.resizeMinHeight,
+        layout.resizeMaxHeight,
       );
       const previousCursor = document.body.style.cursor;
       const previousUserSelect = document.body.style.userSelect;
 
-      pendingProjectSectionHeightRef.current = startHeight;
       setIsProjectSectionResizing(true);
       document.body.style.cursor = "row-resize";
       document.body.style.userSelect = "none";
-      projectsSection.style.flexBasis = `${startHeight}px`;
       resizeTarget.setPointerCapture(pointerId);
 
       const scheduleProjectSectionHeight = (nextHeight: number) => {
-        pendingProjectSectionHeightRef.current = nextHeight;
         if (projectSectionResizeFrameRef.current !== null) {
           return;
         }
         projectSectionResizeFrameRef.current = window.requestAnimationFrame(() => {
           projectSectionResizeFrameRef.current = null;
-          const draftHeight = pendingProjectSectionHeightRef.current ?? startHeight;
-          projectsSection.style.flexBasis = `${draftHeight}px`;
+          setProjectSectionHeight(nextHeight);
         });
       };
 
@@ -1370,11 +1418,7 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
           window.cancelAnimationFrame(projectSectionResizeFrameRef.current);
           projectSectionResizeFrameRef.current = null;
         }
-        const finalHeight = pendingProjectSectionHeightRef.current ?? startHeight;
-        projectsSection.style.flexBasis = `${finalHeight}px`;
-        setProjectSectionHeight(finalHeight);
         setIsProjectSectionResizing(false);
-        pendingProjectSectionHeightRef.current = null;
       };
 
       const handleMove = (moveEvent: globalThis.PointerEvent) => {
@@ -1382,16 +1426,12 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
           return;
         }
         moveEvent.preventDefault();
-        const nextContainerHeight = sidebarSectionsRef.current?.clientHeight ?? containerHeight;
-        const nextMaxHeight = Math.max(
-          SIDEBAR_PROJECTS_RESIZE_MIN_HEIGHT,
-          nextContainerHeight - SIDEBAR_RECENT_RESIZE_MIN_HEIGHT,
-        );
+        const liveLayout = sidebarSectionLayoutRef.current;
         scheduleProjectSectionHeight(
           clampSidebarSectionHeight(
             startHeight + moveEvent.clientY - startY,
-            SIDEBAR_PROJECTS_RESIZE_MIN_HEIGHT,
-            nextMaxHeight,
+            liveLayout.resizeMinHeight,
+            liveLayout.resizeMaxHeight,
           ),
         );
       };
@@ -1565,20 +1605,20 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
           </div>
         </div>
 
-        <div ref={sidebarSectionsRef} className="flex min-h-0 flex-1 flex-col">
+        <div
+          ref={sidebarSectionsRef}
+          style={{ gridTemplateRows: sidebarSectionLayout.gridTemplateRows }}
+          className={cn(
+            "grid min-h-0 flex-1 content-start",
+            isProjectSectionResizing ? undefined : SIDEBAR_SECTION_ROWS_TRANSITION_CLASS,
+          )}
+        >
           {showProjects ? (
-            <div
-              ref={projectsSectionRef}
-              style={projectsSectionStyle}
-              className={cn(
-                "flex min-h-0 flex-col overflow-hidden border-b border-border/35 px-2 pb-1.5 pt-2",
-                shouldExpandProjectSectionForCollapsedRecent ? "basis-0 flex-1" : "shrink-0",
-                isProjectSectionResizing || shouldExpandProjectSectionForCollapsedRecent
-                  ? "transition-none motion-reduce:transition-none"
-                  : SIDEBAR_SECTION_TRANSITION_CLASS,
-              )}
-            >
-              <div className="flex shrink-0 items-center justify-between px-1 pb-1">
+            <>
+              <div
+                ref={projectsHeaderRef}
+                className="flex items-center justify-between px-3 pb-1 pt-2"
+              >
                 <button
                   type="button"
                   aria-expanded={!projectsCollapsed}
@@ -1620,21 +1660,11 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
                 aria-hidden={projectsCollapsed}
                 inert={projectsCollapsed}
                 className={cn(
-                  SIDEBAR_COLLAPSIBLE_PANEL_CLASS,
-                  projectsCollapsed ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr] opacity-100",
-                  shouldStretchProjectSection && "flex-1",
+                  "min-h-0 overflow-y-auto overflow-x-hidden transition-opacity duration-300 ease-out motion-reduce:transition-none",
+                  projectsCollapsed ? "opacity-0" : "opacity-100",
                 )}
               >
-                <div
-                  className={cn(
-                    "space-y-1 overflow-y-scroll overflow-x-hidden pr-1",
-                    shouldStretchProjectSection ? "h-full" : "max-h-[min(300px,36vh)]",
-                    SIDEBAR_COLLAPSIBLE_CONTENT_CLASS,
-                    projectsCollapsed
-                      ? "pointer-events-none -translate-y-1 opacity-0"
-                      : "translate-y-0 opacity-100",
-                  )}
-                >
+                <div ref={projectsBodyRef} className="space-y-1 px-2 pb-0.5 pr-1">
                   {renderedProjects.map((project) => {
                     const pathKey = workspaceProjectPathKey(project.path);
                     return (
@@ -1664,160 +1694,143 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
                   })}
                 </div>
               </div>
-            </div>
-          ) : null}
-
-          {canResizeProjectSections ? (
-            <button
-              type="button"
-              aria-label={t("chat.resizeSidebarSections")}
-              title={t("chat.resizeSidebarSections")}
-              className={cn(
-                "group hidden h-3 shrink-0 cursor-row-resize touch-none items-center justify-center border-0 bg-transparent p-0 md:flex",
-                "focus-visible:outline-none",
-              )}
-              onPointerDown={handleProjectSectionResizeStart}
-            >
-              <span
-                aria-hidden="true"
+              <button
+                ref={sectionResizeHandleRef}
+                type="button"
+                aria-label={t("chat.resizeSidebarSections")}
+                title={t("chat.resizeSidebarSections")}
+                disabled={!canResizeProjectSections}
+                onPointerDown={handleProjectSectionResizeStart}
                 className={cn(
-                  "h-0.5 w-10 rounded-full bg-muted-foreground/25 opacity-70 shadow-sm transition-[width,background-color,opacity]",
-                  "group-hover:w-16 group-hover:bg-primary/60 group-hover:opacity-100 group-focus-visible:w-16 group-focus-visible:bg-primary group-focus-visible:opacity-100",
-                  isProjectSectionResizing && "w-20 bg-primary opacity-100",
+                  "group items-center justify-center border-0 bg-transparent p-0 focus-visible:outline-none",
+                  canResizeProjectSections
+                    ? "hidden h-2 cursor-row-resize touch-none md:flex"
+                    : "flex h-0 overflow-hidden",
                 )}
-              />
-            </button>
+              >
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "h-0.5 w-10 rounded-full bg-muted-foreground/25 opacity-70 shadow-sm transition-[width,background-color,opacity]",
+                    "group-hover:w-16 group-hover:bg-primary/60 group-hover:opacity-100 group-focus-visible:w-16 group-focus-visible:bg-primary group-focus-visible:opacity-100",
+                    isProjectSectionResizing && "w-20 bg-primary opacity-100",
+                    !canResizeProjectSections && "hidden",
+                  )}
+                />
+              </button>
+            </>
           ) : null}
 
           <div
+            ref={recentHeaderRef}
             className={cn(
-              "flex min-h-0 flex-col",
-              shouldExpandProjectSectionForCollapsedRecent
-                ? "overflow-hidden transition-none motion-reduce:transition-none"
-                : SIDEBAR_SECTION_TRANSITION_CLASS,
-              shouldExpandProjectSectionForCollapsedRecent ? "shrink-0" : "basis-0 flex-1",
+              "flex items-center justify-between px-3 pb-2",
+              showProjects ? "border-t border-border/35 pt-0.5" : "pt-3",
             )}
           >
-            <div
-              className={cn(
-                "flex shrink-0 items-center justify-between px-3 pb-2",
-                showProjects ? "pt-1.5" : "pt-3",
-              )}
+            <button
+              type="button"
+              aria-expanded={!recentCollapsed}
+              className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground outline-hidden hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => onRecentCollapsedChange?.(!recentCollapsed)}
             >
-              <button
-                type="button"
-                aria-expanded={!recentCollapsed}
-                className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground outline-hidden hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                onClick={() => onRecentCollapsedChange?.(!recentCollapsed)}
-              >
-                <ChevronRight
-                  className={cn(SIDEBAR_SECTION_CHEVRON_CLASS, !recentCollapsed && "rotate-90")}
-                />
-                <MessageSquareText className="h-3.5 w-3.5" />
-                <span className="min-w-0 truncate">{t("chat.recentConversation")}</span>
-              </button>
-              <div className="flex items-center gap-1.5">
-                <div className="rounded-full border border-border/60 bg-background/80 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                  {Math.max(totalItems, items.length)}
-                </div>
-                {canShareConversations ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={handleOpenSharedConversations}
-                    className="h-7 w-7 rounded-full border border-border/50 bg-background/70 text-muted-foreground shadow-xs shadow-black/5 transition-colors hover:border-sky-500/25 hover:bg-sky-500/10 hover:text-sky-600 dark:hover:text-sky-400"
-                    title={t("chat.manageSharedConversations").replace(
-                      "{count}",
-                      String(sharedConversationCount),
-                    )}
-                    aria-label={t("chat.manageSharedConversations").replace(
-                      "{count}",
-                      String(sharedConversationCount),
-                    )}
-                  >
-                    <Share2 className="h-3.5 w-3.5" />
-                  </Button>
-                ) : null}
+              <ChevronRight
+                className={cn(SIDEBAR_SECTION_CHEVRON_CLASS, !recentCollapsed && "rotate-90")}
+              />
+              <MessageSquareText className="h-3.5 w-3.5" />
+              <span className="min-w-0 truncate">{t("chat.recentConversation")}</span>
+            </button>
+            <div className="flex items-center gap-1.5">
+              <div className="rounded-full border border-border/60 bg-background/80 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                {Math.max(totalItems, items.length)}
               </div>
-            </div>
-
-            <div
-              aria-hidden={recentCollapsed}
-              inert={recentCollapsed}
-              className={cn(
-                SIDEBAR_COLLAPSIBLE_PANEL_CLASS,
-                recentCollapsed
-                  ? "grid-rows-[0fr] opacity-0"
-                  : "grid-rows-[1fr] flex-1 opacity-100",
-              )}
-            >
-              <div
-                className={cn(
-                  "flex flex-col",
-                  SIDEBAR_COLLAPSIBLE_CONTENT_CLASS,
-                  recentCollapsed
-                    ? "pointer-events-none -translate-y-1 opacity-0"
-                    : "translate-y-0 opacity-100",
-                )}
-              >
-                {errorMessage ? (
-                  <div className="shrink-0 px-3 pb-2">
-                    <SidebarStateCard
-                      title={t("chat.historyReadFailed")}
-                      description={errorMessage}
-                      tone="error"
-                    />
-                  </div>
-                ) : null}
-                <div
-                  ref={historyScrollRef}
-                  aria-busy={isLoading || isLoadingMore}
-                  className="chat-history-list min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 pb-3"
-                >
-                  {isLoading ? (
-                    <HistoryListLoadingSkeleton />
-                  ) : items.length === 0 ? (
-                    <div className="flex flex-col items-center px-2 pt-6 pb-4 text-center">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500/10 to-blue-500/10 ring-1 ring-violet-500/15">
-                        <MessageSquareText className="h-5 w-5 text-violet-500/70" />
-                      </div>
-                      <p className="mt-3.5 text-[13px] font-medium text-foreground/70">
-                        {t("chat.emptyChatHistory")}
-                      </p>
-                      <p className="mt-1 text-[11px] leading-4 text-muted-foreground/80">
-                        {t("chat.clickNewConversation")}
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="relative" style={{ height: historyVirtualizer.getTotalSize() }}>
-                      {virtualHistoryRows.map((virtualRow) => {
-                        const item = items[virtualRow.index];
-                        if (!item) return null;
-
-                        return (
-                          <div
-                            key={virtualRow.key}
-                            data-index={virtualRow.index}
-                            ref={historyVirtualizer.measureElement}
-                            className="absolute left-0 right-1 top-0 pb-1.5"
-                            style={{ transform: `translateY(${virtualRow.start}px)` }}
-                          >
-                            {renderHistoryRow(item)}
-                          </div>
-                        );
-                      })}
-                    </div>
+              {canShareConversations ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleOpenSharedConversations}
+                  className="h-7 w-7 rounded-full border border-border/50 bg-background/70 text-muted-foreground shadow-xs shadow-black/5 transition-colors hover:border-sky-500/25 hover:bg-sky-500/10 hover:text-sky-600 dark:hover:text-sky-400"
+                  title={t("chat.manageSharedConversations").replace(
+                    "{count}",
+                    String(sharedConversationCount),
                   )}
-                  {!isLoading && items.length > 0 && (hasMore || isLoadingMore) ? (
-                    <div className="px-2 pb-2 pt-1 text-center text-[11px] leading-5 text-muted-foreground/70">
-                      {isLoadingMore
-                        ? t("sidebar.loadingMoreHistory")
-                        : t("sidebar.continueLoadingHistory")}
-                    </div>
-                  ) : null}
-                </div>
+                  aria-label={t("chat.manageSharedConversations").replace(
+                    "{count}",
+                    String(sharedConversationCount),
+                  )}
+                >
+                  <Share2 className="h-3.5 w-3.5" />
+                </Button>
+              ) : null}
+            </div>
+          </div>
+
+          <div
+            aria-hidden={recentCollapsed}
+            inert={recentCollapsed}
+            className={cn(
+              "flex min-h-0 flex-col transition-[opacity,transform] duration-300 ease-out motion-reduce:transition-none",
+              recentCollapsed
+                ? "pointer-events-none -translate-y-2 opacity-0"
+                : "translate-y-0 opacity-100",
+            )}
+          >
+            {errorMessage ? (
+              <div className="shrink-0 px-3 pb-2">
+                <SidebarStateCard
+                  title={t("chat.historyReadFailed")}
+                  description={errorMessage}
+                  tone="error"
+                />
               </div>
+            ) : null}
+            <div
+              ref={historyScrollRef}
+              aria-busy={isLoading || isLoadingMore}
+              className="chat-history-list min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 pb-3"
+            >
+              {isLoading ? (
+                <HistoryListLoadingSkeleton />
+              ) : items.length === 0 ? (
+                <div className="flex flex-col items-center px-2 pt-6 pb-4 text-center">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500/10 to-blue-500/10 ring-1 ring-violet-500/15">
+                    <MessageSquareText className="h-5 w-5 text-violet-500/70" />
+                  </div>
+                  <p className="mt-3.5 text-[13px] font-medium text-foreground/70">
+                    {t("chat.emptyChatHistory")}
+                  </p>
+                  <p className="mt-1 text-[11px] leading-4 text-muted-foreground/80">
+                    {t("chat.clickNewConversation")}
+                  </p>
+                </div>
+              ) : (
+                <div className="relative" style={{ height: historyVirtualizer.getTotalSize() }}>
+                  {virtualHistoryRows.map((virtualRow) => {
+                    const item = items[virtualRow.index];
+                    if (!item) return null;
+
+                    return (
+                      <div
+                        key={virtualRow.key}
+                        data-index={virtualRow.index}
+                        ref={historyVirtualizer.measureElement}
+                        className="absolute left-0 right-1 top-0 pb-1.5"
+                        style={{ transform: `translateY(${virtualRow.start}px)` }}
+                      >
+                        {renderHistoryRow(item)}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {!isLoading && items.length > 0 && (hasMore || isLoadingMore) ? (
+                <div className="px-2 pb-2 pt-1 text-center text-[11px] leading-5 text-muted-foreground/70">
+                  {isLoadingMore
+                    ? t("sidebar.loadingMoreHistory")
+                    : t("sidebar.continueLoadingHistory")}
+                </div>
+              ) : null}
             </div>
           </div>
         </div>

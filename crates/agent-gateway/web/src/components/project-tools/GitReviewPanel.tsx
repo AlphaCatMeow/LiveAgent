@@ -6,6 +6,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   memo,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type UIEvent as ReactUIEvent,
   useCallback,
   useEffect,
@@ -17,7 +18,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useLocale } from "../../i18n";
-import { computeGitGraph, GRAPH_COLORS, type GraphRow } from "../../lib/git/gitGraph";
+import { computeGitGraph, GRAPH_COLORS, type GraphColor, type GraphRow } from "../../lib/git/gitGraph";
 import type {
   GitClient,
   GitCommitDetails,
@@ -36,7 +37,9 @@ import {
   BrushCleaning,
   ChevronRight,
   CheckCircle2,
+  Cloud,
   Copy,
+  Download,
   ExternalLink,
   Eye,
   FilePenLine,
@@ -73,6 +76,9 @@ const GIT_REVIEW_SPLIT_GRID_CLASS =
   "grid-cols-[clamp(9.5rem,38%,18rem)_minmax(10rem,1fr)] grid-rows-1";
 const GIT_REVIEW_STACKED_PANE_BUTTON_CLASS =
   "inline-flex h-7 w-7 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+const DIFF_SELECTION_AUTOSCROLL_EDGE_PX = 40;
+const DIFF_SELECTION_AUTOSCROLL_MAX_STEP_PX = 22;
+const DIFF_HORIZONTAL_SCROLLBAR_MIN_THUMB_PX = 32;
 const gitReviewScrollbarTimers = new WeakMap<HTMLElement, number>();
 type GitReviewScrollbarAxis = "vertical" | "horizontal";
 type GitReviewScrollbarOverlay = {
@@ -327,6 +333,152 @@ function handleGitReviewTransientScroll(event: ReactUIEvent<HTMLElement>) {
   scheduleGitReviewScrollbarHide(element);
 }
 
+function diffSelectionAutoScrollDelta(
+  pointer: number,
+  start: number,
+  end: number,
+  canScroll: boolean,
+) {
+  if (!canScroll) return 0;
+  if (pointer < start + DIFF_SELECTION_AUTOSCROLL_EDGE_PX) {
+    const ratio = Math.min(
+      1,
+      (start + DIFF_SELECTION_AUTOSCROLL_EDGE_PX - pointer) /
+        DIFF_SELECTION_AUTOSCROLL_EDGE_PX,
+    );
+    return -Math.max(2, Math.round(ratio * DIFF_SELECTION_AUTOSCROLL_MAX_STEP_PX));
+  }
+  if (pointer > end - DIFF_SELECTION_AUTOSCROLL_EDGE_PX) {
+    const ratio = Math.min(
+      1,
+      (pointer - (end - DIFF_SELECTION_AUTOSCROLL_EDGE_PX)) /
+        DIFF_SELECTION_AUTOSCROLL_EDGE_PX,
+    );
+    return Math.max(2, Math.round(ratio * DIFF_SELECTION_AUTOSCROLL_MAX_STEP_PX));
+  }
+  return 0;
+}
+
+type DiffSelectionScrollAxis = "vertical" | "horizontal";
+
+function scrollDiffSelectionViewportForPointer(
+  viewport: HTMLElement,
+  clientX: number,
+  clientY: number,
+  axis: DiffSelectionScrollAxis,
+) {
+  const rect = viewport.getBoundingClientRect();
+  const maxScrollTop = viewport.scrollHeight - viewport.clientHeight;
+  const maxScrollLeft = viewport.scrollWidth - viewport.clientWidth;
+
+  if (axis === "vertical") {
+    const topDelta = diffSelectionAutoScrollDelta(clientY, rect.top, rect.bottom, maxScrollTop > 0);
+    if (topDelta === 0) return false;
+    const previousTop = viewport.scrollTop;
+    viewport.scrollTop = Math.min(maxScrollTop, Math.max(0, previousTop + topDelta));
+    return viewport.scrollTop !== previousTop;
+  }
+
+  const leftDelta = diffSelectionAutoScrollDelta(clientX, rect.left, rect.right, maxScrollLeft > 0);
+  if (leftDelta === 0) return false;
+  const previousLeft = viewport.scrollLeft;
+  viewport.scrollLeft = Math.min(maxScrollLeft, Math.max(0, previousLeft + leftDelta));
+  return viewport.scrollLeft !== previousLeft;
+}
+
+function isScrollableDiffSelectionElement(element: HTMLElement) {
+  const style = window.getComputedStyle(element);
+  const canScrollY =
+    /(auto|scroll)/.test(style.overflowY) && element.scrollHeight > element.clientHeight + 1;
+  const canScrollX =
+    /(auto|scroll)/.test(style.overflowX) && element.scrollWidth > element.clientWidth + 1;
+  return canScrollY || canScrollX;
+}
+
+function syncGitReviewAutoscrollScrollbar(viewport: HTMLElement) {
+  if (!viewport.classList.contains(GIT_REVIEW_TRANSIENT_SCROLLBAR_CLASS)) return;
+  viewport.dataset.scrollActive = "true";
+  updateGitReviewScrollbarOverlay(viewport);
+  scheduleGitReviewScrollbarHide(viewport);
+}
+
+function resolveDiffSelectionScrollViewports(
+  target: Element | null,
+  root: HTMLElement | null,
+  fallback: HTMLElement | null,
+) {
+  const viewports: HTMLElement[] = [];
+  const addViewport = (element: HTMLElement | null) => {
+    if (!element || viewports.includes(element) || !isScrollableDiffSelectionElement(element)) {
+      return;
+    }
+    viewports.push(element);
+  };
+
+  if (!target || !root) {
+    addViewport(fallback);
+    return viewports;
+  }
+
+  let current: HTMLElement | null =
+    target instanceof HTMLElement ? target : target.parentElement;
+  while (current && current !== root) {
+    addViewport(current);
+    current = current.parentElement;
+  }
+  addViewport(fallback);
+  return viewports;
+}
+
+function getDiffHorizontalScrollOverflow(element: HTMLElement) {
+  return Math.max(0, element.scrollWidth - element.clientWidth);
+}
+
+function isDiffHorizontalScrollableElement(element: HTMLElement) {
+  return getDiffHorizontalScrollOverflow(element) > 0;
+}
+
+function resolveDiffHorizontalScrollTargets(
+  root: HTMLElement | null,
+  fallback: HTMLElement | null,
+) {
+  const targets: HTMLElement[] = [];
+  const addTarget = (element: HTMLElement | null) => {
+    if (!element || targets.includes(element) || !isDiffHorizontalScrollableElement(element)) {
+      return;
+    }
+    targets.push(element);
+  };
+
+  if (fallback) {
+    addTarget(fallback);
+  }
+  if (!root) return targets;
+
+  root.querySelectorAll<HTMLElement>(".diff-table-scroll-container").forEach(addTarget);
+  return targets;
+}
+
+function chooseDiffHorizontalScrollTarget(
+  targets: HTMLElement[],
+  preferred: HTMLElement | null,
+) {
+  if (preferred && targets.includes(preferred) && isDiffHorizontalScrollableElement(preferred)) {
+    return preferred;
+  }
+
+  let bestTarget: HTMLElement | null = null;
+  let bestOverflow = 0;
+  for (const target of targets) {
+    const overflow = getDiffHorizontalScrollOverflow(target);
+    if (overflow > bestOverflow) {
+      bestOverflow = overflow;
+      bestTarget = target;
+    }
+  }
+  return bestTarget;
+}
+
 type PatchChunk = {
   key: string;
   label: string;
@@ -371,6 +523,9 @@ type GitHistoryRow =
       commit: GitCommitSummary;
       commitIndex: number;
       file: GitCommitFile;
+    }
+  | {
+      type: "loadMore";
     };
 
 type ChangeListSection = "staged" | "changes";
@@ -396,6 +551,20 @@ type HistoryContextMenuState =
       commitSha: string;
       path: string;
     };
+
+type DiffSelectionContextMenuState = {
+  x: number;
+  y: number;
+  selectedText: string;
+};
+
+type DiffHorizontalScrollbarState = {
+  visible: boolean;
+  thumbWidth: number;
+  thumbLeft: number;
+  maxScrollLeft: number;
+  scrollLeft: number;
+};
 
 type ChangesMenuState = {
   x: number;
@@ -426,12 +595,17 @@ const CHANGES_MENU_HEIGHT = 170;
 const HISTORY_CONTEXT_MENU_WIDTH = 232;
 const HISTORY_CONTEXT_MENU_HEIGHT = 270;
 const HISTORY_FILE_CONTEXT_MENU_HEIGHT = 90;
-const GIT_HISTORY_LIMIT = 120;
+const DIFF_SELECTION_CONTEXT_MENU_WIDTH = 184;
+const DIFF_SELECTION_CONTEXT_MENU_HEIGHT = 52;
+const DIFF_SELECTION_CONTEXT_MENU_MARGIN = 12;
+const GIT_HISTORY_PAGE_SIZE = 50;
+const GIT_HISTORY_LOAD_MORE_SCROLL_THRESHOLD_PX = 96;
 const CHANGE_CONTEXT_MENU_ITEM_CLASS =
   "flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-45";
 const GIT_REVIEW_POLL_INTERVAL_MS = 1500;
 
 type GitRefreshOptions = {
+  append?: boolean;
   force?: boolean;
   notifyChanged?: boolean;
   silent?: boolean;
@@ -1006,7 +1180,7 @@ const DiffChunkView = memo(function DiffChunkView(props: {
 
   return (
     <div className="border-b border-border/60 last:border-b-0">
-      <div className="flex items-center gap-2 border-b border-border/60 bg-muted/20 px-3 py-1.5 text-[11px] font-medium text-muted-foreground">
+      <div className="flex select-none items-center gap-2 border-b border-border/60 bg-muted/20 px-3 py-1.5 text-[11px] font-medium text-muted-foreground">
         <span className="min-w-0 flex-1 truncate">{item.label}</span>
         {item.large ? (
           <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-300">
@@ -1027,7 +1201,7 @@ const DiffChunkView = memo(function DiffChunkView(props: {
         <pre
           className={cn(
             GIT_REVIEW_TRANSIENT_SCROLLBAR_CLASS,
-            "max-h-[26rem] overflow-auto px-3 py-3 text-[11px] leading-relaxed text-muted-foreground",
+            "git-review-diff-selectable-content max-h-[26rem] select-text overflow-auto px-3 py-3 text-[11px] leading-relaxed text-muted-foreground",
           )}
           onScroll={handleGitReviewTransientScroll}
         >
@@ -1153,17 +1327,438 @@ function DiffContent(props: {
   showStat?: boolean;
 }) {
   const { diff, title, error, loading = false, showStat = true } = props;
-  const { t } = useLocale();
+  const { locale, t } = useLocale();
   const isDark = useIsDark();
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const scrollViewportRef = useRef<HTMLElement | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  const selectionAutoscrollViewportsRef = useRef<HTMLElement[]>([]);
+  const selectionAutoscrollPointerRef = useRef<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const selectionAutoscrollFrameRef = useRef<number | null>(null);
+  const diffHorizontalScrollbarTrackRef = useRef<HTMLDivElement | null>(null);
+  const diffHorizontalScrollTargetsRef = useRef<HTMLElement[]>([]);
+  const diffHorizontalActiveTargetRef = useRef<HTMLElement | null>(null);
+  const [selectionContextMenu, setSelectionContextMenu] =
+    useState<DiffSelectionContextMenuState | null>(null);
+  const [diffHorizontalScrollbar, setDiffHorizontalScrollbar] =
+    useState<DiffHorizontalScrollbarState>({
+      visible: false,
+      thumbWidth: 0,
+      thumbLeft: 0,
+      maxScrollLeft: 0,
+      scrollLeft: 0,
+    });
   const patchChunks = useMemo(
     () => buildPatchChunks(diff?.patch ?? "", title),
     [diff?.patch, title],
   );
   const showLoadingState = loading && !error && !diff;
   const showDiffStat = showStat && Boolean(diff?.stat);
+  const closeSelectionContextMenu = useCallback(() => {
+    setSelectionContextMenu(null);
+  }, []);
+
+  const updateDiffHorizontalScrollbar = useCallback(() => {
+    const root = rootRef.current;
+    const trackWidth =
+      diffHorizontalScrollbarTrackRef.current?.clientWidth ??
+      scrollViewportRef.current?.clientWidth ??
+      root?.clientWidth ??
+      0;
+    const target = chooseDiffHorizontalScrollTarget(
+      diffHorizontalScrollTargetsRef.current,
+      diffHorizontalActiveTargetRef.current,
+    );
+
+    if (!target || trackWidth <= 0) {
+      diffHorizontalActiveTargetRef.current = null;
+      setDiffHorizontalScrollbar((current) =>
+        current.visible
+          ? { visible: false, thumbWidth: 0, thumbLeft: 0, maxScrollLeft: 0, scrollLeft: 0 }
+          : current,
+      );
+      return;
+    }
+
+    diffHorizontalActiveTargetRef.current = target;
+    const maxScrollLeft = getDiffHorizontalScrollOverflow(target);
+    if (maxScrollLeft <= 0 || target.scrollWidth <= 0) {
+      setDiffHorizontalScrollbar((current) =>
+        current.visible
+          ? { visible: false, thumbWidth: 0, thumbLeft: 0, maxScrollLeft: 0, scrollLeft: 0 }
+          : current,
+      );
+      return;
+    }
+
+    const thumbWidth = Math.max(
+      DIFF_HORIZONTAL_SCROLLBAR_MIN_THUMB_PX,
+      Math.min(trackWidth, (target.clientWidth / target.scrollWidth) * trackWidth),
+    );
+    const travelWidth = Math.max(1, trackWidth - thumbWidth);
+    const thumbLeft = (target.scrollLeft / maxScrollLeft) * travelWidth;
+    setDiffHorizontalScrollbar((current) => {
+      if (
+        current.visible &&
+        Math.abs(current.thumbWidth - thumbWidth) < 0.5 &&
+        Math.abs(current.thumbLeft - thumbLeft) < 0.5 &&
+        Math.abs(current.maxScrollLeft - maxScrollLeft) < 0.5 &&
+        Math.abs(current.scrollLeft - target.scrollLeft) < 0.5
+      ) {
+        return current;
+      }
+      return {
+        visible: true,
+        thumbWidth,
+        thumbLeft,
+        maxScrollLeft,
+        scrollLeft: target.scrollLeft,
+      };
+    });
+  }, []);
+
+  const setDiffHorizontalScrollRatio = useCallback(
+    (ratio: number) => {
+      const nextRatio = Math.min(1, Math.max(0, ratio));
+      for (const target of diffHorizontalScrollTargetsRef.current) {
+        const maxScrollLeft = getDiffHorizontalScrollOverflow(target);
+        if (maxScrollLeft <= 0) continue;
+        target.scrollLeft = Math.min(maxScrollLeft, Math.max(0, nextRatio * maxScrollLeft));
+      }
+      updateDiffHorizontalScrollbar();
+    },
+    [updateDiffHorizontalScrollbar],
+  );
+
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+
+    let animationFrame: number | null = null;
+    let targets: HTMLElement[] = [];
+    const scheduleUpdate = () => {
+      if (animationFrame !== null) return;
+      animationFrame = window.requestAnimationFrame(() => {
+        animationFrame = null;
+        updateDiffHorizontalScrollbar();
+      });
+    };
+    const handleTargetScroll = (event: Event) => {
+      if (event.currentTarget instanceof HTMLElement) {
+        diffHorizontalActiveTargetRef.current = event.currentTarget;
+      }
+      scheduleUpdate();
+    };
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => {
+            scheduleUpdate();
+          });
+
+    const detachTargets = () => {
+      for (const target of targets) {
+        target.removeEventListener("scroll", handleTargetScroll);
+        resizeObserver?.unobserve(target);
+      }
+    };
+    const attachTargets = (nextTargets: HTMLElement[]) => {
+      for (const target of nextTargets) {
+        target.addEventListener("scroll", handleTargetScroll, { passive: true });
+        resizeObserver?.observe(target);
+      }
+    };
+    const refreshTargets = () => {
+      detachTargets();
+      targets = resolveDiffHorizontalScrollTargets(root, scrollViewportRef.current);
+      diffHorizontalScrollTargetsRef.current = targets;
+      diffHorizontalActiveTargetRef.current = chooseDiffHorizontalScrollTarget(
+        targets,
+        diffHorizontalActiveTargetRef.current,
+      );
+      attachTargets(targets);
+      scheduleUpdate();
+    };
+
+    resizeObserver?.observe(root);
+    if (scrollViewportRef.current) {
+      resizeObserver?.observe(scrollViewportRef.current);
+    }
+    const mutationObserver =
+      typeof MutationObserver === "undefined"
+        ? null
+        : new MutationObserver(() => {
+            refreshTargets();
+          });
+    mutationObserver?.observe(root, { childList: true, subtree: true });
+    window.addEventListener("resize", refreshTargets);
+    refreshTargets();
+
+    return () => {
+      if (animationFrame !== null) {
+        window.cancelAnimationFrame(animationFrame);
+      }
+      window.removeEventListener("resize", refreshTargets);
+      mutationObserver?.disconnect();
+      detachTargets();
+      resizeObserver?.disconnect();
+      diffHorizontalScrollTargetsRef.current = [];
+      diffHorizontalActiveTargetRef.current = null;
+    };
+  }, [diff?.patch, error, loading, patchChunks.length, updateDiffHorizontalScrollbar]);
+
+  const handleDiffHorizontalScrollbarPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0 || !diffHorizontalScrollbar.visible) return;
+      const track = diffHorizontalScrollbarTrackRef.current;
+      if (!track) return;
+      const target = chooseDiffHorizontalScrollTarget(
+        diffHorizontalScrollTargetsRef.current,
+        diffHorizontalActiveTargetRef.current,
+      );
+      if (!target) return;
+
+      const maxScrollLeft = getDiffHorizontalScrollOverflow(target);
+      if (maxScrollLeft <= 0) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      diffHorizontalActiveTargetRef.current = target;
+
+      const rect = track.getBoundingClientRect();
+      const thumbWidth = Math.max(
+        DIFF_HORIZONTAL_SCROLLBAR_MIN_THUMB_PX,
+        Math.min(rect.width, (target.clientWidth / target.scrollWidth) * rect.width),
+      );
+      const travelWidth = Math.max(1, rect.width - thumbWidth);
+      const clickedThumb =
+        event.target instanceof HTMLElement &&
+        event.target.closest(".git-review-diff-horizontal-scrollbar-thumb") !== null;
+      const pointerStartX = event.clientX;
+      const scrollStart = clickedThumb
+        ? target.scrollLeft
+        : Math.min(
+            maxScrollLeft,
+            Math.max(
+              0,
+              ((event.clientX - rect.left - thumbWidth / 2) / travelWidth) * maxScrollLeft,
+            ),
+          );
+      setDiffHorizontalScrollRatio(scrollStart / maxScrollLeft);
+
+      let cleanup = () => {};
+      const handleMove = (moveEvent: PointerEvent) => {
+        if ((moveEvent.buttons & 1) === 0) {
+          cleanup();
+          return;
+        }
+        const nextScrollLeft = Math.min(
+          maxScrollLeft,
+          Math.max(
+            0,
+            scrollStart + ((moveEvent.clientX - pointerStartX) / travelWidth) * maxScrollLeft,
+          ),
+        );
+        setDiffHorizontalScrollRatio(nextScrollLeft / maxScrollLeft);
+      };
+      cleanup = () => {
+        window.removeEventListener("pointermove", handleMove, true);
+        window.removeEventListener("pointerup", cleanup, true);
+        window.removeEventListener("pointercancel", cleanup, true);
+        window.removeEventListener("blur", cleanup);
+      };
+
+      window.addEventListener("pointermove", handleMove, true);
+      window.addEventListener("pointerup", cleanup, true);
+      window.addEventListener("pointercancel", cleanup, true);
+      window.addEventListener("blur", cleanup);
+    },
+    [diffHorizontalScrollbar.visible, setDiffHorizontalScrollRatio],
+  );
+
+  const runSelectionAutoscroll = useCallback(() => {
+    selectionAutoscrollFrameRef.current = null;
+    const viewports = selectionAutoscrollViewportsRef.current;
+    const pointer = selectionAutoscrollPointerRef.current;
+    if (viewports.length === 0 || !pointer) return;
+
+    let verticalScrolled = false;
+    let horizontalScrolled = false;
+    for (const viewport of viewports) {
+      if (!viewport.isConnected) continue;
+      if (
+        !verticalScrolled &&
+        scrollDiffSelectionViewportForPointer(viewport, pointer.x, pointer.y, "vertical")
+      ) {
+        verticalScrolled = true;
+        syncGitReviewAutoscrollScrollbar(viewport);
+      }
+      if (
+        !horizontalScrolled &&
+        scrollDiffSelectionViewportForPointer(viewport, pointer.x, pointer.y, "horizontal")
+      ) {
+        horizontalScrolled = true;
+        syncGitReviewAutoscrollScrollbar(viewport);
+      }
+      if (verticalScrolled && horizontalScrolled) break;
+    }
+
+    selectionAutoscrollFrameRef.current = window.requestAnimationFrame(runSelectionAutoscroll);
+  }, []);
+
+  const requestSelectionAutoscroll = useCallback(() => {
+    if (selectionAutoscrollFrameRef.current !== null) return;
+    selectionAutoscrollFrameRef.current = window.requestAnimationFrame(runSelectionAutoscroll);
+  }, [runSelectionAutoscroll]);
+
+  const stopSelectionAutoscroll = useCallback(() => {
+    if (selectionAutoscrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(selectionAutoscrollFrameRef.current);
+      selectionAutoscrollFrameRef.current = null;
+    }
+    selectionAutoscrollViewportsRef.current = [];
+    selectionAutoscrollPointerRef.current = null;
+  }, []);
+
+  useEffect(() => stopSelectionAutoscroll, [stopSelectionAutoscroll]);
+
+  useEffect(() => {
+    closeSelectionContextMenu();
+  }, [closeSelectionContextMenu, diff?.patch, error, loading]);
+
+  useEffect(() => {
+    if (!selectionContextMenu) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        closeSelectionContextMenu();
+        return;
+      }
+      if (contextMenuRef.current?.contains(target)) {
+        return;
+      }
+      closeSelectionContextMenu();
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeSelectionContextMenu();
+      }
+    };
+
+    const handleSelectionChange = () => {
+      if (!resolveContainedSelectionText(rootRef.current)) {
+        closeSelectionContextMenu();
+      }
+    };
+
+    const handleViewportChange = () => {
+      closeSelectionContextMenu();
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("keydown", handleKeyDown, true);
+    window.addEventListener("scroll", handleViewportChange, true);
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("blur", handleViewportChange);
+    document.addEventListener("selectionchange", handleSelectionChange);
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("keydown", handleKeyDown, true);
+      window.removeEventListener("scroll", handleViewportChange, true);
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("blur", handleViewportChange);
+      document.removeEventListener("selectionchange", handleSelectionChange);
+    };
+  }, [closeSelectionContextMenu, selectionContextMenu]);
+
+  const handleContextMenu = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      if (!isDiffSelectableContentTarget(rootRef.current, event.target)) {
+        closeSelectionContextMenu();
+        return;
+      }
+      const selectedText = resolveContainedSelectionText(rootRef.current);
+      if (!selectedText) {
+        closeSelectionContextMenu();
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setSelectionContextMenu({
+        x: event.clientX,
+        y: event.clientY,
+        selectedText,
+      });
+    },
+    [closeSelectionContextMenu],
+  );
+
+  const handleSelectionPointerDownCapture = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
+      if (!isDiffSelectableContentTarget(rootRef.current, event.target)) return;
+
+      const target = event.target instanceof Element ? event.target : null;
+      const viewports = resolveDiffSelectionScrollViewports(
+        target,
+        rootRef.current,
+        scrollViewportRef.current,
+      );
+      if (viewports.length === 0) return;
+
+      closeSelectionContextMenu();
+      selectionAutoscrollViewportsRef.current = viewports;
+      selectionAutoscrollPointerRef.current = { x: event.clientX, y: event.clientY };
+      requestSelectionAutoscroll();
+
+      let cleanup = () => {};
+      const handleMove = (moveEvent: PointerEvent) => {
+        if ((moveEvent.buttons & 1) === 0) {
+          cleanup();
+          return;
+        }
+        selectionAutoscrollPointerRef.current = {
+          x: moveEvent.clientX,
+          y: moveEvent.clientY,
+        };
+      };
+      cleanup = () => {
+        stopSelectionAutoscroll();
+        window.removeEventListener("pointermove", handleMove, true);
+        window.removeEventListener("pointerup", cleanup, true);
+        window.removeEventListener("pointercancel", cleanup, true);
+        window.removeEventListener("blur", cleanup);
+      };
+
+      window.addEventListener("pointermove", handleMove, true);
+      window.addEventListener("pointerup", cleanup, true);
+      window.addEventListener("pointercancel", cleanup, true);
+      window.addEventListener("blur", cleanup);
+    },
+    [closeSelectionContextMenu, requestSelectionAutoscroll, stopSelectionAutoscroll],
+  );
+
+  const selectionContextMenuPosition = selectionContextMenu
+    ? clampDiffSelectionContextMenuPosition(selectionContextMenu.x, selectionContextMenu.y)
+    : null;
+  const copySelectedTextLabel =
+    locale === "en-US" ? "Copy selected text" : "复制选中文本";
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <div
+      ref={rootRef}
+      role="group"
+      aria-label={title}
+      className="git-review-diff-selectable flex min-h-0 flex-1 select-none flex-col overflow-hidden"
+      onContextMenu={handleContextMenu}
+      onPointerDownCapture={handleSelectionPointerDownCapture}
+    >
       {error ? <div className="shrink-0 px-3 py-3 text-xs text-destructive">{error}</div> : null}
       {!error && showDiffStat ? <DiffStatView stat={diff?.stat ?? ""} /> : null}
       {showLoadingState ? (
@@ -1174,7 +1769,13 @@ function DiffContent(props: {
       ) : null}
       {!error && !showLoadingState && patchChunks.length > 0 ? (
         <div
-          className={cn(GIT_REVIEW_TRANSIENT_SCROLLBAR_CLASS, "min-h-0 flex-1 overflow-auto")}
+          ref={(node) => {
+            scrollViewportRef.current = node;
+          }}
+          className={cn(
+            GIT_REVIEW_TRANSIENT_SCROLLBAR_CLASS,
+            "git-review-diff-selectable-content min-h-0 flex-1 select-text overflow-auto",
+          )}
           onScroll={handleGitReviewTransientScroll}
         >
           {patchChunks.map((item) => (
@@ -1184,9 +1785,12 @@ function DiffContent(props: {
       ) : null}
       {!error && !showLoadingState && diff?.patch.trim() && patchChunks.length === 0 ? (
         <pre
+          ref={(node) => {
+            scrollViewportRef.current = node;
+          }}
           className={cn(
             GIT_REVIEW_TRANSIENT_SCROLLBAR_CLASS,
-            "min-h-0 flex-1 overflow-auto px-3 py-3 text-[11px] leading-relaxed text-muted-foreground",
+            "git-review-diff-selectable-content min-h-0 flex-1 select-text overflow-auto px-3 py-3 text-[11px] leading-relaxed text-muted-foreground",
           )}
           onScroll={handleGitReviewTransientScroll}
         >
@@ -1203,6 +1807,60 @@ function DiffContent(props: {
           {t("projectTools.gitReview.diffOutputTruncated")}
         </div>
       ) : null}
+      {diffHorizontalScrollbar.visible ? (
+        <div className="shrink-0 border-t border-border/70 bg-background/80 px-2 py-0.5">
+          <div
+            ref={diffHorizontalScrollbarTrackRef}
+            role="scrollbar"
+            aria-label={locale === "en-US" ? "Horizontal diff scrollbar" : "diff 横向滚动条"}
+            aria-orientation="horizontal"
+            aria-valuemin={0}
+            aria-valuemax={Math.round(diffHorizontalScrollbar.maxScrollLeft)}
+            aria-valuenow={Math.round(diffHorizontalScrollbar.scrollLeft)}
+            className="relative h-1.5 overflow-hidden rounded-full bg-muted/35"
+            onPointerDown={handleDiffHorizontalScrollbarPointerDown}
+          >
+            <div
+              className="git-review-diff-horizontal-scrollbar-thumb absolute left-0 top-0 h-full rounded-full bg-muted-foreground/35 shadow-sm transition-colors hover:bg-muted-foreground/55"
+              style={{
+                width: `${diffHorizontalScrollbar.thumbWidth}px`,
+                transform: `translateX(${diffHorizontalScrollbar.thumbLeft}px)`,
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
+      {selectionContextMenu && selectionContextMenuPosition
+        ? createPortal(
+            <div
+              ref={contextMenuRef}
+              role="menu"
+              className="fixed z-[120] w-max min-w-[9.5rem] max-w-[calc(100vw-1.5rem)] select-none overflow-hidden rounded-lg border border-border/70 bg-popover p-1.5 text-popover-foreground shadow-[0_20px_60px_-20px_rgba(15,23,42,0.35)]"
+              style={{
+                left: selectionContextMenuPosition.left,
+                top: selectionContextMenuPosition.top,
+              }}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-foreground/90 transition-colors hover:bg-accent hover:text-accent-foreground"
+                onClick={() => {
+                  writeTextToClipboard(selectionContextMenu.selectedText);
+                  closeSelectionContextMenu();
+                }}
+              >
+                <Copy className="h-3.5 w-3.5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">{copySelectedTextLabel}</span>
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
@@ -1311,77 +1969,79 @@ function commitFileStatusLabel(file: GitCommitFile) {
   return status === "R" || status === "C" || status === "A" || status === "D" ? status : "M";
 }
 
-const GRAPH_COL_WIDTH = 16;
-const GRAPH_ROW_HEIGHT = 28;
-const GRAPH_DOT_Y = 14;
-const GRAPH_DOT_R = 3.5;
-const GRAPH_LOCAL_ONLY_DOT_R = GRAPH_DOT_R + 0.9;
-const GRAPH_ANCHOR_R = 5.2;
-const GRAPH_ANCHOR_CENTER_R = 1.9;
-const GRAPH_LINE_W = 2;
-const GRAPH_CURVE_HORIZONTAL_TENSION = 0.7;
-const GRAPH_CURVE_VERTICAL_TENSION = 0.82;
-const GRAPH_MERGE_BRANCH_HORIZONTAL_TENSION = 0.92;
-const GRAPH_MERGE_BRANCH_VERTICAL_TENSION = 0.55;
+const GRAPH_SWIMLANE_WIDTH = 11;
+const GRAPH_SVG_HEIGHT = 22;
+const GRAPH_DOT_Y = GRAPH_SWIMLANE_WIDTH;
+const GRAPH_DOT_R = 4;
+const GRAPH_STROKE_W = 2;
+const GRAPH_LINE_W = 1;
+const GRAPH_CURVE_R = 5;
 const COMMIT_REF_TAG_LIMIT = 1;
 const COMMIT_DETAIL_REF_TAG_LIMIT = 3;
 
 function graphLayoutWidth(row: GraphRow) {
-  return graphDrawWidth(row);
+  return graphLaneWidth(graphColumnCount(row));
 }
 
-function graphDrawWidth(row: GraphRow) {
-  const maxPipeCol = Math.max(
-    row.commitCol,
-    ...row.topPipes.flatMap((pipe) => [pipe.fromCol, pipe.toCol]),
-    ...row.bottomPipes.flatMap((pipe) => [pipe.fromCol, pipe.toCol]),
-  );
-  return (maxPipeCol + 1) * GRAPH_COL_WIDTH;
+function graphColumnCount(row: GraphRow) {
+  return Math.max(row.inputLanes.length, row.outputLanes.length, row.commitCol + 1, 1);
 }
 
-function graphContinuationWidth(row: GraphRow) {
-  const maxPipeCol = Math.max(
-    row.commitCol,
-    ...row.bottomPipes.flatMap((pipe) => [pipe.fromCol, pipe.toCol]),
-  );
-  return (maxPipeCol + 1) * GRAPH_COL_WIDTH;
+function graphLaneWidth(columnCount: number) {
+  return GRAPH_SWIMLANE_WIDTH * (columnCount + 1);
 }
 
 function graphLaneX(col: number) {
-  return col * GRAPH_COL_WIDTH + GRAPH_COL_WIDTH / 2;
+  return GRAPH_SWIMLANE_WIDTH * (col + 1);
 }
 
-function graphAnchorSideX(cx: number, targetX: number) {
-  if (targetX === cx) return cx;
-  return cx + (targetX > cx ? GRAPH_ANCHOR_R : -GRAPH_ANCHOR_R);
+function graphColor(color: GraphColor) {
+  if (typeof color === "string") return color;
+  return GRAPH_COLORS[((color % GRAPH_COLORS.length) + GRAPH_COLORS.length) % GRAPH_COLORS.length];
 }
 
-function graphBezierPath(
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number,
-  commitAnchor: "from" | "to",
-) {
-  const xDirection = x2 > x1 ? 1 : -1;
-  const yDirection = y2 > y1 ? 1 : -1;
-  const xHandle = Math.abs(x2 - x1) * GRAPH_CURVE_HORIZONTAL_TENSION;
-  const yHandle = Math.abs(y2 - y1) * GRAPH_CURVE_VERTICAL_TENSION;
-
-  if (commitAnchor === "from") {
-    return `M${x1} ${y1}C${x1 + xDirection * xHandle} ${y1},${x2} ${y2 - yDirection * yHandle},${x2} ${y2}`;
+function findLastGraphLaneIndex(lanes: GraphRow["outputLanes"], id: string) {
+  for (let index = lanes.length - 1; index >= 0; index--) {
+    if (lanes[index].id === id) return index;
   }
-
-  return `M${x1} ${y1}C${x1} ${y1 + yDirection * yHandle},${x2 - xDirection * xHandle} ${y2},${x2} ${y2}`;
+  return -1;
 }
 
-function graphMergeBranchPath(x1: number, y1: number, x2: number, y2: number) {
-  const xDirection = x2 > x1 ? 1 : -1;
-  const yDirection = y2 > y1 ? 1 : -1;
-  const xHandle = Math.abs(x2 - x1) * GRAPH_MERGE_BRANCH_HORIZONTAL_TENSION;
-  const yHandle = Math.abs(y2 - y1) * GRAPH_MERGE_BRANCH_VERTICAL_TENSION;
+function graphVerticalPath(col: number, y1 = 0, y2 = GRAPH_SVG_HEIGHT) {
+  const x = graphLaneX(col);
+  return `M ${x} ${y1} V ${y2}`;
+}
 
-  return `M${x1} ${y1}C${x1 + xDirection * xHandle} ${y1},${x2} ${y2 - yDirection * yHandle},${x2} ${y2}`;
+function graphCommitJoinPath(fromCol: number, toCol: number) {
+  if (fromCol === toCol) return graphVerticalPath(fromCol, 0, GRAPH_DOT_Y);
+  const x1 = graphLaneX(fromCol);
+  const x2 = graphLaneX(toCol);
+  const direction = toCol > fromCol ? 1 : -1;
+  return [
+    `M ${x1} 0`,
+    `A ${GRAPH_SWIMLANE_WIDTH} ${GRAPH_SWIMLANE_WIDTH} 0 0 ${direction > 0 ? 0 : 1} ${
+      x1 + direction * GRAPH_SWIMLANE_WIDTH
+    } ${GRAPH_DOT_Y}`,
+    `H ${x2}`,
+  ].join(" ");
+}
+
+function graphParentBranchPath(fromCol: number, toCol: number) {
+  if (fromCol === toCol) return "";
+  const circleX = graphLaneX(fromCol);
+  const branchX = GRAPH_SWIMLANE_WIDTH * toCol;
+  const parentX = graphLaneX(toCol);
+  return [
+    `M ${branchX} ${GRAPH_DOT_Y}`,
+    `A ${GRAPH_SWIMLANE_WIDTH} ${GRAPH_SWIMLANE_WIDTH} 0 0 1 ${parentX} ${GRAPH_SVG_HEIGHT}`,
+    `M ${branchX} ${GRAPH_DOT_Y}`,
+    `H ${circleX}`,
+  ].join(" ");
+}
+
+function graphCircleColor(row: GraphRow) {
+  const lane = row.outputLanes[row.commitCol] ?? row.inputLanes[row.commitCol];
+  return graphColor(lane?.color ?? row.commitColor);
 }
 
 function orderedCommitRefs(refs: readonly string[]) {
@@ -1458,23 +2118,46 @@ function CommitRefTags({
 function GitGraphCommitMarker({
   cx,
   color,
+  isHead,
   isMerge,
-  localOnly,
 }: {
   cx: number;
   color: string;
+  isHead: boolean;
   isMerge: boolean;
-  localOnly: boolean;
 }) {
+  if (isHead) {
+    return (
+      <g>
+        <circle
+          cx={cx}
+          cy={GRAPH_DOT_Y}
+          r={GRAPH_DOT_R + 3}
+          fill={color}
+          stroke="var(--git-review-graph-background)"
+          strokeWidth={GRAPH_STROKE_W}
+        />
+        <circle
+          cx={cx}
+          cy={GRAPH_DOT_Y}
+          r={GRAPH_DOT_R - 2}
+          fill="var(--git-review-graph-background)"
+          stroke="var(--git-review-graph-background)"
+          strokeWidth={GRAPH_DOT_R}
+        />
+      </g>
+    );
+  }
+
   if (!isMerge) {
     return (
       <circle
         cx={cx}
         cy={GRAPH_DOT_Y}
-        r={localOnly ? GRAPH_LOCAL_ONLY_DOT_R : GRAPH_DOT_R}
-        fill={localOnly ? "none" : color}
-        stroke={localOnly ? color : "var(--background)"}
-        strokeWidth={2}
+        r={GRAPH_DOT_R + 1}
+        fill={color}
+        stroke="var(--git-review-graph-background)"
+        strokeWidth={GRAPH_STROKE_W}
       />
     );
   }
@@ -1484,72 +2167,124 @@ function GitGraphCommitMarker({
       <circle
         cx={cx}
         cy={GRAPH_DOT_Y}
-        r={GRAPH_ANCHOR_R}
-        fill="none"
-        stroke={color}
-        strokeWidth={1.7}
+        r={GRAPH_DOT_R + 2}
+        fill={color}
+        stroke="var(--git-review-graph-background)"
+        strokeWidth={GRAPH_STROKE_W}
       />
-      <path
-        d={`M${cx} ${GRAPH_DOT_Y - GRAPH_ANCHOR_R - 2.2}V${GRAPH_DOT_Y - GRAPH_ANCHOR_R - 0.2}M${cx} ${GRAPH_DOT_Y + GRAPH_ANCHOR_R + 0.2}V${GRAPH_DOT_Y + GRAPH_ANCHOR_R + 2.2}`}
-        fill="none"
-        stroke={color}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.7}
+      <circle
+        cx={cx}
+        cy={GRAPH_DOT_Y}
+        r={GRAPH_DOT_R - 1}
+        fill={color}
+        stroke="var(--git-review-graph-background)"
+        strokeWidth={GRAPH_STROKE_W}
       />
-      {localOnly ? null : (
-        <circle cx={cx} cy={GRAPH_DOT_Y} r={GRAPH_ANCHOR_CENTER_R} fill={color} />
-      )}
     </g>
   );
 }
 
-function GitGraphSvgCell({
-  row,
-  isFirst,
-  isLast,
-  isMerge,
-  localOnly,
-}: {
-  row: GraphRow;
-  isFirst: boolean;
-  isLast: boolean;
-  isMerge: boolean;
-  localOnly: boolean;
-}) {
-  const drawW = graphDrawWidth(row);
+function GitGraphSvgCell({ row }: { row: GraphRow }) {
   const layoutW = graphLayoutWidth(row);
   const cx = graphLaneX(row.commitCol);
-  const commitColor = GRAPH_COLORS[row.commitColor % GRAPH_COLORS.length];
+  const commitColor = graphCircleColor(row);
+  const commitInputColor = graphColor(row.commitColor);
+  let outputIndex = 0;
 
   return (
-    <div className="h-7 shrink-0 overflow-visible" style={{ width: layoutW, minWidth: layoutW }}>
+    <div
+      className="shrink-0 self-center overflow-visible"
+      style={{ width: layoutW, minWidth: layoutW, height: GRAPH_SVG_HEIGHT }}
+    >
       <svg
-        width={drawW}
-        height={GRAPH_ROW_HEIGHT}
+        width={layoutW}
+        height={GRAPH_SVG_HEIGHT}
         className="block overflow-visible"
         aria-hidden="true"
         style={{ shapeRendering: "geometricPrecision" }}
       >
-        {row.topPipes.map((pipe, index) => {
-          const x1 = graphLaneX(pipe.fromCol);
-          const x2 = graphLaneX(pipe.toCol);
-          const isMergeBranch = isMerge && pipe.toCol === row.commitCol && pipe.fromCol !== row.commitCol;
-          const branchX2 = isMergeBranch ? graphAnchorSideX(x2, x1) : x2;
-          const y2 =
-            isMerge && pipe.toCol === row.commitCol && !isMergeBranch
-              ? GRAPH_DOT_Y - GRAPH_ANCHOR_R
-              : localOnly && !isMerge && pipe.toCol === row.commitCol
-                ? GRAPH_DOT_Y - GRAPH_LOCAL_ONLY_DOT_R
-              : GRAPH_DOT_Y;
-          const color = GRAPH_COLORS[pipe.color % GRAPH_COLORS.length];
-          if (isFirst) return null;
+        {row.inputLanes.map((lane, index) => {
+          if (lane.id === row.sha) {
+            if (index !== row.commitCol) {
+              return (
+                <path
+                  key={`join-${index}-${lane.id}`}
+                  d={graphCommitJoinPath(index, row.commitCol)}
+                  fill="none"
+                  stroke={graphColor(lane.color)}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={GRAPH_LINE_W}
+                />
+              );
+            }
+
+            outputIndex++;
+            return null;
+          }
+
+          if (
+            outputIndex < row.outputLanes.length &&
+            lane.id === row.outputLanes[outputIndex].id
+          ) {
+            if (index === outputIndex) {
+              outputIndex++;
+              return (
+                <path
+                  key={`lane-${index}-${lane.id}`}
+                  d={graphVerticalPath(index)}
+                  fill="none"
+                  stroke={graphColor(lane.color)}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={GRAPH_LINE_W}
+                />
+              );
+            }
+
+            const d: string[] = [];
+            d.push(`M ${graphLaneX(index)} 0`);
+            d.push(`V 6`);
+            d.push(
+              `A ${GRAPH_CURVE_R} ${GRAPH_CURVE_R} 0 0 1 ${graphLaneX(index) - GRAPH_CURVE_R} ${GRAPH_DOT_Y}`,
+            );
+            d.push(`H ${graphLaneX(outputIndex) + GRAPH_CURVE_R}`);
+            d.push(
+              `A ${GRAPH_CURVE_R} ${GRAPH_CURVE_R} 0 0 0 ${graphLaneX(outputIndex)} ${
+                GRAPH_DOT_Y + GRAPH_CURVE_R
+              }`,
+            );
+            d.push(`V ${GRAPH_SVG_HEIGHT}`);
+
+            outputIndex++;
+            return (
+              <path
+                key={`lane-${index}-${lane.id}`}
+                d={d.join(" ")}
+                fill="none"
+                stroke={graphColor(lane.color)}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={GRAPH_LINE_W}
+              />
+            );
+          }
+
+          return null;
+        })}
+
+        {row.parents.slice(1).map((parentId, index) => {
+          const parentIndex = findLastGraphLaneIndex(row.outputLanes, parentId);
+          if (parentIndex === -1 || parentIndex === row.commitCol) {
+            return null;
+          }
+
           return (
             <path
-              key={`t${index}`}
-              d={graphBezierPath(x1, 0, branchX2, y2, "to")}
+              key={`parent-${index}-${parentId}`}
+              d={graphParentBranchPath(row.commitCol, parentIndex)}
               fill="none"
-              stroke={color}
+              stroke={graphColor(row.outputLanes[parentIndex].color)}
               strokeLinecap="round"
               strokeLinejoin="round"
               strokeWidth={GRAPH_LINE_W}
@@ -1557,72 +2292,65 @@ function GitGraphSvgCell({
           );
         })}
 
-        {row.bottomPipes.map((pipe, index) => {
-          const x1 = graphLaneX(pipe.fromCol);
-          const x2 = graphLaneX(pipe.toCol);
-          const isMergeBranch = isMerge && pipe.fromCol === row.commitCol && pipe.toCol !== row.commitCol;
-          const branchX1 = isMergeBranch ? graphAnchorSideX(x1, x2) : x1;
-          const y1 =
-            isMerge && pipe.fromCol === row.commitCol && !isMergeBranch
-              ? GRAPH_DOT_Y + GRAPH_ANCHOR_R
-              : localOnly && !isMerge && pipe.fromCol === row.commitCol
-                ? GRAPH_DOT_Y + GRAPH_LOCAL_ONLY_DOT_R
-              : GRAPH_DOT_Y;
-          const color = GRAPH_COLORS[pipe.color % GRAPH_COLORS.length];
-          if (isLast) return null;
-          return (
-            <path
-              key={`b${index}`}
-              d={
-                isMergeBranch
-                  ? graphMergeBranchPath(branchX1, y1, x2, GRAPH_ROW_HEIGHT)
-                  : graphBezierPath(x1, y1, x2, GRAPH_ROW_HEIGHT, "from")
-              }
-              fill="none"
-              stroke={color}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={GRAPH_LINE_W}
-            />
-          );
-        })}
+        {row.inputLanes.some((lane) => lane.id === row.sha) ? (
+          <path
+            d={graphVerticalPath(row.commitCol, 0, GRAPH_DOT_Y)}
+            fill="none"
+            stroke={commitInputColor}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={GRAPH_LINE_W}
+          />
+        ) : null}
+
+        {row.parents.length > 0 ? (
+          <path
+            d={graphVerticalPath(row.commitCol, GRAPH_DOT_Y, GRAPH_SVG_HEIGHT)}
+            fill="none"
+            stroke={commitColor}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={GRAPH_LINE_W}
+          />
+        ) : null}
 
         <GitGraphCommitMarker
           cx={cx}
           color={commitColor}
-          isMerge={isMerge}
-          localOnly={localOnly}
+          isHead={row.isHead}
+          isMerge={row.isMerge}
         />
       </svg>
     </div>
   );
 }
 
-function GitGraphContinuationCell({ row, isLast }: { row: GraphRow; isLast: boolean }) {
-  const layoutW = graphContinuationWidth(row);
-  const pipes = isLast ? [] : row.bottomPipes;
+function GitGraphContinuationCell({ row }: { row: GraphRow }) {
+  const layoutW = graphLayoutWidth(row);
 
   return (
     <div
-      className="relative shrink-0 self-stretch overflow-visible"
-      style={{ width: layoutW, minWidth: layoutW }}
+      className="shrink-0 self-center overflow-visible"
+      style={{ width: layoutW, minWidth: layoutW, height: GRAPH_SVG_HEIGHT }}
       aria-hidden="true"
     >
-      {pipes.map((pipe, index) => {
-        const x = graphLaneX(pipe.toCol);
-        return (
-          <span
-            key={`c${index}:${pipe.toCol}:${pipe.color}`}
-            className="absolute bottom-0 top-0"
-            style={{
-              backgroundColor: GRAPH_COLORS[pipe.color % GRAPH_COLORS.length],
-              borderRadius: GRAPH_LINE_W,
-              left: x - GRAPH_LINE_W / 2,
-              width: GRAPH_LINE_W,
-            }}
+      <svg
+        width={layoutW}
+        height={GRAPH_SVG_HEIGHT}
+        className="block overflow-visible"
+        style={{ shapeRendering: "geometricPrecision" }}
+      >
+        {row.outputLanes.map((lane, index) => (
+          <path
+            key={`c${index}:${lane.id}:${lane.color}`}
+            d={graphVerticalPath(index)}
+            fill="none"
+            stroke={graphColor(lane.color)}
+            strokeLinecap="round"
+            strokeWidth={GRAPH_LINE_W}
           />
-        );
-      })}
+        ))}
+      </svg>
     </div>
   );
 }
@@ -1802,8 +2530,8 @@ function revealTargetForEntry(entry: GitStatusEntry) {
 }
 
 function writeTextToClipboard(text: string) {
-  const value = text.trim();
-  if (!value) return;
+  if (!text.trim()) return;
+  const value = text;
   if (navigator.clipboard?.writeText) {
     void navigator.clipboard.writeText(value).catch(() => {
       fallbackWriteTextToClipboard(value);
@@ -1824,6 +2552,63 @@ function fallbackWriteTextToClipboard(text: string) {
   textarea.select();
   document.execCommand("copy");
   document.body.removeChild(textarea);
+}
+
+function elementForSelectionNode(node: Node) {
+  return node instanceof Element ? node : node.parentElement;
+}
+
+function isDiffSelectableContentNode(root: HTMLElement | null, node: Node) {
+  const element = elementForSelectionNode(node);
+  const selectable = element?.closest(".git-review-diff-selectable-content");
+  return Boolean(root && selectable && root.contains(selectable));
+}
+
+function isDiffSelectableContentTarget(root: HTMLElement | null, target: EventTarget | null) {
+  if (!(target instanceof Node)) return false;
+  return isDiffSelectableContentNode(root, target);
+}
+
+function resolveContainedSelectionText(root: HTMLElement | null) {
+  if (!root) return "";
+
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+    return "";
+  }
+
+  const selectedText = selection.toString();
+  if (!selectedText.trim()) return "";
+
+  const range = selection.getRangeAt(0);
+  if (
+    !isDiffSelectableContentNode(root, range.startContainer) ||
+    !isDiffSelectableContentNode(root, range.endContainer)
+  ) {
+    return "";
+  }
+
+  return selectedText;
+}
+
+function clampDiffSelectionContextMenuPosition(x: number, y: number) {
+  const maxLeft = Math.max(
+    DIFF_SELECTION_CONTEXT_MENU_MARGIN,
+    window.innerWidth -
+      DIFF_SELECTION_CONTEXT_MENU_WIDTH -
+      DIFF_SELECTION_CONTEXT_MENU_MARGIN,
+  );
+  const maxTop = Math.max(
+    DIFF_SELECTION_CONTEXT_MENU_MARGIN,
+    window.innerHeight -
+      DIFF_SELECTION_CONTEXT_MENU_HEIGHT -
+      DIFF_SELECTION_CONTEXT_MENU_MARGIN,
+  );
+
+  return {
+    left: Math.min(Math.max(DIFF_SELECTION_CONTEXT_MENU_MARGIN, x), maxLeft),
+    top: Math.min(Math.max(DIFF_SELECTION_CONTEXT_MENU_MARGIN, y), maxTop),
+  };
 }
 
 function gitRepositoryStateSignature(state: GitRepositoryState) {
@@ -1947,6 +2732,9 @@ export function GitReviewPanel(props: {
   const [reviewMode, setReviewMode] = useState<GitReviewMode>("changes");
   const [historyCommits, setHistoryCommits] = useState<GitCommitSummary[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
+  const [historyHasMore, setHistoryHasMore] = useState(false);
+  const [historyLoadMoreError, setHistoryLoadMoreError] = useState("");
   const [historyError, setHistoryError] = useState("");
   const [selectedCommitSha, setSelectedCommitSha] = useState("");
   const [selectedCommitFilePath, setSelectedCommitFilePath] = useState("");
@@ -1975,6 +2763,8 @@ export function GitReviewPanel(props: {
   const selectedPathRef = useRef("");
   const selectedCommitShaRef = useRef("");
   const selectedCommitFilePathRef = useRef("");
+  const historyCommitsRef = useRef<GitCommitSummary[]>([]);
+  const historyHasMoreRef = useRef(false);
   const expandedCommitShasRef = useRef<Set<string>>(new Set());
   const reviewModeRef = useRef<GitReviewMode>("changes");
   const diffRequestIdRef = useRef(0);
@@ -2038,6 +2828,11 @@ export function GitReviewPanel(props: {
     setBusy("");
   }, []);
 
+  const setHistoryHasMoreValue = useCallback((value: boolean) => {
+    historyHasMoreRef.current = value;
+    setHistoryHasMore(value);
+  }, []);
+
   useEffect(() => {
     selectedPathRef.current = selectedPath;
   }, [selectedPath]);
@@ -2053,6 +2848,14 @@ export function GitReviewPanel(props: {
   useEffect(() => {
     selectedCommitFilePathRef.current = selectedCommitFilePath;
   }, [selectedCommitFilePath]);
+
+  useEffect(() => {
+    historyCommitsRef.current = historyCommits;
+  }, [historyCommits]);
+
+  useEffect(() => {
+    historyHasMoreRef.current = historyHasMore;
+  }, [historyHasMore]);
 
   useEffect(() => {
     expandedCommitShasRef.current = expandedCommitShas;
@@ -2296,14 +3099,20 @@ export function GitReviewPanel(props: {
   );
 
   const loadHistory = useCallback(async (options: GitRefreshOptions = {}) => {
+    const append = options.append === true && historyCommitsRef.current.length > 0;
+    if (append && !historyHasMoreRef.current) {
+      return;
+    }
     if (historyInFlightRef.current) {
       return;
     }
     historyInFlightRef.current = true;
     const silent = options.silent === true;
     const force = options.force !== false;
+    const skip = append ? historyCommitsRef.current.length : 0;
     if (!gitClient || !cwd.trim()) {
       historySignatureRef.current = "";
+      historyCommitsRef.current = [];
       setHistoryCommits([]);
       selectedCommitShaRef.current = "";
       selectedCommitFilePathRef.current = "";
@@ -2311,24 +3120,64 @@ export function GitReviewPanel(props: {
       setSelectedCommitSha("");
       setSelectedCommitFilePath("");
       setExpandedCommitShas(new Set());
+      setHistoryHasMoreValue(false);
+      setHistoryLoadMoreError("");
+      setHistoryLoading(false);
+      setHistoryLoadingMore(false);
       clearCommitDiff();
       setHistoryError("");
       historyInFlightRef.current = false;
       return;
     }
-    if (!silent) {
+    if (append) {
+      setHistoryLoadingMore(true);
+      setHistoryLoadMoreError("");
+    } else if (!silent) {
       setHistoryLoading(true);
       setHistoryError("");
+      setHistoryLoadMoreError("");
     }
     try {
-      const response = await gitClient.log(cwd, GIT_HISTORY_LIMIT);
-      const nextSignature = gitHistorySignature(response.state, response.commits);
-      const historyChanged = historySignatureRef.current !== nextSignature;
+      const response = await gitClient.log(cwd, {
+        limit: GIT_HISTORY_PAGE_SIZE,
+        skip,
+      });
       const previousStatusSignature = statusSignatureRef.current;
       const nextStatusSignature = gitRepositoryStateSignature(response.state);
       const statusChanged = previousStatusSignature !== nextStatusSignature;
-      historySignatureRef.current = nextSignature;
       statusSignatureRef.current = nextStatusSignature;
+      const pageHasMore = response.commits.length >= GIT_HISTORY_PAGE_SIZE;
+      if (append) {
+        setState(response.state);
+        if (response.state.status !== "ready") {
+          historySignatureRef.current = "";
+          historyCommitsRef.current = [];
+          setHistoryCommits([]);
+          selectedCommitShaRef.current = "";
+          selectedCommitFilePathRef.current = "";
+          expandedCommitShasRef.current = new Set();
+          setSelectedCommitSha("");
+          setSelectedCommitFilePath("");
+          setExpandedCommitShas(new Set());
+          setHistoryHasMoreValue(false);
+          clearCommitDiff();
+          return;
+        }
+        const existingCommits = historyCommitsRef.current;
+        const existingShas = new Set(existingCommits.map((commit) => commit.sha));
+        const nextCommits = [
+          ...existingCommits,
+          ...response.commits.filter((commit) => !existingShas.has(commit.sha)),
+        ];
+        historyCommitsRef.current = nextCommits;
+        setHistoryCommits(nextCommits);
+        setHistoryHasMoreValue(pageHasMore);
+        setHistoryLoadMoreError("");
+        return;
+      }
+      const nextSignature = gitHistorySignature(response.state, response.commits);
+      const historyChanged = historySignatureRef.current !== nextSignature;
+      historySignatureRef.current = nextSignature;
       if (historyChanged) {
         commitDetailsCacheRef.current.clear();
       }
@@ -2336,10 +3185,20 @@ export function GitReviewPanel(props: {
         suppressNextGitChangedRef.current = true;
         dispatchGitChanged(cwd);
       }
+      setHistoryHasMoreValue(
+        !force &&
+          !historyChanged &&
+          historyCommitsRef.current.length > response.commits.length &&
+          !historyHasMoreRef.current
+          ? false
+          : pageHasMore,
+      );
+      setHistoryLoadMoreError("");
       if (!force && !historyChanged) {
         return;
       }
       setState(response.state);
+      historyCommitsRef.current = response.commits;
       setHistoryCommits(response.commits);
       if (response.state.status !== "ready" || response.commits.length === 0) {
         selectedCommitShaRef.current = "";
@@ -2348,6 +3207,7 @@ export function GitReviewPanel(props: {
         setSelectedCommitSha("");
         setSelectedCommitFilePath("");
         setExpandedCommitShas(new Set());
+        setHistoryHasMoreValue(false);
         clearCommitDiff();
         return;
       }
@@ -2377,7 +3237,12 @@ export function GitReviewPanel(props: {
         clearCommitDiff();
       }
     } catch (err) {
-      if (!silent || force) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (append) {
+        setHistoryLoadMoreError(message);
+        setHistoryHasMoreValue(true);
+      } else if (!silent || force) {
+        historyCommitsRef.current = [];
         setHistoryCommits([]);
         selectedCommitShaRef.current = "";
         selectedCommitFilePathRef.current = "";
@@ -2385,16 +3250,47 @@ export function GitReviewPanel(props: {
         setSelectedCommitSha("");
         setSelectedCommitFilePath("");
         setExpandedCommitShas(new Set());
+        setHistoryHasMoreValue(false);
+        setHistoryLoadMoreError("");
         clearCommitDiff();
-        setHistoryError(err instanceof Error ? err.message : String(err));
+        setHistoryError(message);
       }
     } finally {
       historyInFlightRef.current = false;
-      if (!silent) {
+      if (append) {
+        setHistoryLoadingMore(false);
+      } else if (!silent) {
         setHistoryLoading(false);
       }
     }
-  }, [clearCommitDiff, cwd, gitClient, loadCommitDiff]);
+  }, [clearCommitDiff, cwd, gitClient, loadCommitDiff, setHistoryHasMoreValue]);
+
+  const maybeLoadMoreHistory = useCallback(
+    (element: HTMLElement | null) => {
+      if (
+        !element ||
+        !(useSplitReviewLayout || historyStackedPane === "list") ||
+        !historyHasMoreRef.current ||
+        historyInFlightRef.current ||
+        historyLoadMoreError
+      ) {
+        return;
+      }
+      const distanceToBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+      if (distanceToBottom <= GIT_HISTORY_LOAD_MORE_SCROLL_THRESHOLD_PX) {
+        void loadHistory({ append: true, silent: true });
+      }
+    },
+    [historyLoadMoreError, historyStackedPane, loadHistory, useSplitReviewLayout],
+  );
+
+  const handleHistoryListScroll = useCallback(
+    (event: ReactUIEvent<HTMLElement>) => {
+      handleGitReviewTransientScroll(event);
+      maybeLoadMoreHistory(event.currentTarget);
+    },
+    [maybeLoadMoreHistory],
+  );
 
   useEffect(() => {
     void refresh();
@@ -2711,7 +3607,15 @@ export function GitReviewPanel(props: {
   const historyContextCommitGithubUrl = historyContextCommit
     ? gitHubCommitUrl(state.remoteUrl, historyContextCommit.sha)
     : "";
-  const gitGraph = useMemo(() => computeGitGraph(historyCommits), [historyCommits]);
+  const gitGraph = useMemo(
+    () =>
+      computeGitGraph(historyCommits, {
+        currentRef: state.head,
+        remoteRef: state.upstream,
+        remoteName: state.remoteName,
+      }),
+    [historyCommits, state.head, state.remoteName, state.upstream],
+  );
   const historyRows = useMemo<GitHistoryRow[]>(() => {
     const rows: GitHistoryRow[] = [];
     historyCommits.forEach((commit, commitIndex) => {
@@ -2722,20 +3626,31 @@ export function GitReviewPanel(props: {
         });
       }
     });
+    if (historyHasMore || historyLoadingMore || historyLoadMoreError) {
+      rows.push({ type: "loadMore" });
+    }
     return rows;
-  }, [expandedCommitShas, historyCommits]);
+  }, [expandedCommitShas, historyCommits, historyHasMore, historyLoadMoreError, historyLoadingMore]);
   const historyVirtualizer = useVirtualizer({
     count: historyRows.length,
     getScrollElement: () => historyListRef.current,
-    estimateSize: (index) => (historyRows[index]?.type === "file" ? 26 : 28),
+    estimateSize: () => 22,
     overscan: 8,
     getItemKey: (index) => {
       const row = historyRows[index];
       if (!row) return index;
       if (row.type === "commit") return `commit:${row.commit.sha}`;
+      if (row.type === "loadMore") return "load-more";
       return `file:${row.commit.sha}:${row.file.status}:${row.file.oldPath ?? ""}:${row.file.path}`;
     },
   });
+
+  useEffect(() => {
+    if (reviewMode !== "history") {
+      return;
+    }
+    maybeLoadMoreHistory(historyListRef.current);
+  }, [historyRows.length, maybeLoadMoreHistory, reviewMode]);
 
   useEffect(() => {
     if (!changeContextMenu) return;
@@ -3401,6 +4316,7 @@ export function GitReviewPanel(props: {
             size="sm"
             variant="ghost"
             disabled={loading || historyLoading || operationBusy}
+            className="h-7 w-7 px-0"
             title={t("projectTools.gitReview.refresh")}
             aria-label={t("projectTools.gitReview.refresh")}
             onClick={() => {
@@ -3419,22 +4335,30 @@ export function GitReviewPanel(props: {
             variant="ghost"
             disabled={writeDisabled || operationBusy}
             title={t("projectTools.gitReview.fetch")}
-            className="gap-1.5"
+            aria-label={t("projectTools.gitReview.fetch")}
+            className="h-7 w-7 px-0"
             onClick={() => void runOperation("fetch", () => gitClient!.fetch(cwd), "fetch")}
           >
-            {busy === "fetch" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-            {t("projectTools.gitReview.fetch")}
+            {busy === "fetch" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Cloud className="h-3.5 w-3.5" />
+            )}
           </Button>
           <Button
             size="sm"
             variant="ghost"
             disabled={writeDisabled || operationBusy}
             title={t("projectTools.gitReview.pull")}
-            className="gap-1.5"
+            aria-label={t("projectTools.gitReview.pull")}
+            className="h-7 w-7 px-0"
             onClick={() => void runOperation("pull", () => gitClient!.pull(cwd), "pull")}
           >
-            {busy === "pull" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-            {t("projectTools.gitReview.pull")}
+            {busy === "pull" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Download className="h-3.5 w-3.5" />
+            )}
           </Button>
           <Button
             size="sm"
@@ -3442,6 +4366,7 @@ export function GitReviewPanel(props: {
             disabled={writeDisabled || operationBusy}
             title={t("projectTools.gitReview.push")}
             aria-label={t("projectTools.gitReview.push")}
+            className="h-7 w-7 px-0"
             onClick={() => void pushCurrentBranch()}
           >
             {busy === "push" ? (
@@ -3748,7 +4673,7 @@ export function GitReviewPanel(props: {
             <div
               ref={historyListRef}
               className={cn(GIT_REVIEW_TRANSIENT_SCROLLBAR_CLASS, "min-h-0 flex-1 overflow-auto")}
-              onScroll={handleGitReviewTransientScroll}
+              onScroll={handleHistoryListScroll}
             >
               {historyLoading && historyCommits.length === 0 ? (
                 <div className="flex items-center justify-center gap-2 px-3 py-6 text-xs text-muted-foreground">
@@ -3764,6 +4689,36 @@ export function GitReviewPanel(props: {
                   {historyVirtualizer.getVirtualItems().map((virtualRow) => {
                     const row = historyRows[virtualRow.index];
                     if (!row) return null;
+                    if (row.type === "loadMore") {
+                      return (
+                        <div
+                          key={virtualRow.key}
+                          ref={historyVirtualizer.measureElement}
+                          data-index={virtualRow.index}
+                          className="absolute left-0 top-0 w-full"
+                          style={{ transform: `translateY(${virtualRow.start}px)` }}
+                        >
+                          <button
+                            type="button"
+                            className="flex min-h-[28px] w-full items-center justify-center gap-2 px-3 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-70"
+                            disabled={historyLoadingMore}
+                            title={historyLoadMoreError || undefined}
+                            onClick={() => void loadHistory({ append: true, silent: true })}
+                          >
+                            {historyLoadingMore ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : null}
+                            <span>
+                              {historyLoadingMore
+                                ? t("projectTools.gitReview.loadingMoreCommits")
+                                : historyLoadMoreError
+                                  ? t("projectTools.gitReview.loadMoreCommitsFailed")
+                                  : t("projectTools.gitReview.loadMoreCommits")}
+                            </span>
+                          </button>
+                        </div>
+                      );
+                    }
                     if (row.type === "file") {
                       const TypeIcon = getFileTypeIcon(row.file.path, "file");
                       const fileSelected =
@@ -3785,42 +4740,35 @@ export function GitReviewPanel(props: {
                           className="absolute left-0 top-0 w-full"
                           style={{ transform: `translateY(${virtualRow.start}px)` }}
                         >
-                          <div
-                            className="flex min-w-0"
+                          <button
+                            type="button"
+                            className="git-review-history-row flex h-[22px] w-full min-w-0 select-none items-center gap-1.5 px-1.5 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            data-selected={fileSelected || undefined}
+                            data-context-open={fileContextMenuOpen || undefined}
+                            title={
+                              row.file.oldPath
+                                ? `${row.file.oldPath} -> ${row.file.path}`
+                                : row.file.path
+                            }
                             onContextMenu={(event) =>
                               openHistoryFileContextMenu(event, row.commit, row.file)
                             }
+                            onClick={() => selectCommitFile(row.commit, row.file)}
                           >
                             {graphRow ? (
-                              <GitGraphContinuationCell
-                                row={graphRow}
-                                isLast={row.commitIndex === historyCommits.length - 1}
-                              />
+                              <GitGraphContinuationCell row={graphRow} />
                             ) : null}
-                            <button
-                              type="button"
-                              className={cn(
-                                "mr-1 flex h-6 min-w-0 flex-1 select-none items-center gap-1.5 rounded px-1.5 text-left text-xs transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-                                fileSelected && "bg-accent text-accent-foreground",
-                                fileContextMenuOpen &&
-                                  "bg-primary/10 text-foreground ring-1 ring-inset ring-primary/35",
-                              )}
-                              title={row.file.oldPath ? `${row.file.oldPath} -> ${row.file.path}` : row.file.path}
-                              onContextMenu={(event) => openHistoryFileContextMenu(event, row.commit, row.file)}
-                              onClick={() => selectCommitFile(row.commit, row.file)}
-                            >
-                              <TypeIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
-                              <span className="min-w-0 flex-1 truncate">
-                                <span className="font-medium">{fileName}</span>
-                                <span className="ml-1 text-[10px] text-muted-foreground">
-                                  {filePath}
-                                </span>
+                            <TypeIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                            <span className="min-w-0 flex-1 truncate">
+                              <span className="font-medium">{fileName}</span>
+                              <span className="ml-1 text-[10px] text-muted-foreground">
+                                {filePath}
                               </span>
-                              <span className={cn("shrink-0 text-[10px] font-semibold", commitFileStatusTone(row.file))}>
-                                {commitFileStatusLabel(row.file)}
-                              </span>
-                            </button>
-                          </div>
+                            </span>
+                            <span className={cn("shrink-0 text-[10px] font-semibold", commitFileStatusTone(row.file))}>
+                              {commitFileStatusLabel(row.file)}
+                            </span>
+                          </button>
                         </div>
                       );
                     }
@@ -3839,38 +4787,24 @@ export function GitReviewPanel(props: {
                         className="absolute left-0 top-0 w-full"
                         style={{ transform: `translateY(${virtualRow.start}px)` }}
                       >
-                        <div
-                          className="flex min-w-0"
+                        <button
+                          type="button"
+                          className="git-review-history-row flex h-[22px] w-full min-w-0 select-none items-center gap-1 px-1.5 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          data-selected={commitSelected || undefined}
+                          data-context-open={commitContextMenuOpen || undefined}
+                          title={commitHistoryTitle(commit)}
+                          aria-expanded={commitExpanded}
                           onContextMenu={(event) => openHistoryCommitContextMenu(event, commit)}
+                          onClick={() => selectCommit(commit)}
                         >
                           {graphRow ? (
-                            <GitGraphSvgCell
-                              row={graphRow}
-                              isFirst={row.commitIndex === 0}
-                              isLast={row.commitIndex === historyCommits.length - 1}
-                              isMerge={commit.parents.length > 1}
-                              localOnly={commit.localOnly}
-                            />
+                            <GitGraphSvgCell row={graphRow} />
                           ) : null}
-                          <button
-                            type="button"
-                            className={cn(
-                              "flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded px-1.5 pr-1 text-left text-xs transition-colors hover:bg-muted/45 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-                              commitSelected && "bg-accent/80 text-accent-foreground",
-                              commitContextMenuOpen &&
-                                "bg-primary/10 text-foreground ring-1 ring-inset ring-primary/35",
-                            )}
-                            title={commitHistoryTitle(commit)}
-                            aria-expanded={commitExpanded}
-                            onContextMenu={(event) => openHistoryCommitContextMenu(event, commit)}
-                            onClick={() => selectCommit(commit)}
-                          >
-                            <span className="min-w-0 flex-1 truncate text-[12px] font-medium">
-                              {commit.subject || commit.shortSha}
-                            </span>
-                            <CommitRefTags refs={commit.refs} selected={commitSelected} />
-                          </button>
-                        </div>
+                          <span className="min-w-0 flex-1 truncate text-[12px] font-medium">
+                            {commit.subject || commit.shortSha}
+                          </span>
+                          <CommitRefTags refs={commit.refs} selected={commitSelected} />
+                        </button>
                       </div>
                     );
                   })}

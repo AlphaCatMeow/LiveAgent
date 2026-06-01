@@ -103,6 +103,11 @@
     --checkpoint-border: 0 0% 0% / 0.06;
     --checkpoint-icon-bg: 220 10% 95%;
     --checkpoint-icon-fg: 220 9% 46%;
+
+    /* VS Code SCM graph reference colors */
+    --git-review-graph-ref-local: #0063d3;
+    --git-review-graph-ref-remote: #652d90;
+    --git-review-graph-ref-base: #ea5c00;
   }
 
   .dark {
@@ -170,6 +175,11 @@
     --checkpoint-border: 0 0% 100% / 0.14;
     --checkpoint-icon-bg: 220 12% 22%;
     --checkpoint-icon-fg: 220 14% 76%;
+
+    /* VS Code SCM graph reference colors (dark) */
+    --git-review-graph-ref-local: #59a4f9;
+    --git-review-graph-ref-remote: #b180d7;
+    --git-review-graph-ref-base: #ea5c00;
   }
 }
 
@@ -305,12 +315,36 @@
     background-color: hsl(var(--muted-foreground) / 0.52);
   }
   .git-review-floating-scrollbar-vertical {
-    width: 4px;
-    min-height: 28px;
+    width: 3px;
+    min-height: 24px;
   }
   .git-review-floating-scrollbar-horizontal {
-    height: 4px;
-    min-width: 28px;
+    height: 3px;
+    min-width: 24px;
+  }
+
+  .git-review-history-row {
+    color: inherit;
+    background: transparent;
+    --git-review-graph-background: hsl(var(--background));
+  }
+
+  .git-review-history-row:hover:not([data-selected="true"]):not([data-context-open="true"]) {
+    background: hsl(var(--muted) / 0.38);
+    --git-review-graph-background: hsl(var(--muted) / 0.38);
+  }
+
+  .git-review-history-row[data-selected="true"] {
+    background: hsl(var(--accent) / 0.8);
+    color: hsl(var(--accent-foreground));
+    --git-review-graph-background: hsl(var(--accent) / 0.8);
+  }
+
+  .git-review-history-row[data-context-open="true"] {
+    background: hsl(var(--primary) / 0.1);
+    color: hsl(var(--foreground));
+    box-shadow: inset 0 0 0 1px hsl(var(--primary) / 0.35);
+    --git-review-graph-background: hsl(var(--primary) / 0.1);
   }
 
   /* Git review tab & pane transition animations */
@@ -1667,4 +1701,22 @@ body > div:has([data-streamdown="table-fullscreen"]):not(#root) {
 body > div:not(#root) [data-streamdown="mermaid"] svg {
   -webkit-transform: translateZ(0);
   transform: translateZ(0);
+}
+
+/* Git review diff views live under app chrome that disables selection by default. */
+.git-review-diff-selectable-content,
+.git-review-diff-selectable-content pre,
+.git-review-diff-selectable-content .diff-tailwindcss-wrapper,
+.git-review-diff-selectable-content .diff-line-content,
+.git-review-diff-selectable-content .diff-line-content-item,
+.git-review-diff-selectable-content .diff-line-content-raw,
+.git-review-diff-selectable-content .diff-line-syntax-raw,
+.git-review-diff-selectable-content .diff-line-content-raw *,
+.git-review-diff-selectable-content .diff-line-syntax-raw * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+.git-review-diff-selectable-content .select-none {
+  -webkit-user-select: none;
+  user-select: none;
 }

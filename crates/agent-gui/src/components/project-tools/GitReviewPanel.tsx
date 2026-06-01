@@ -6,6 +6,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   memo,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type UIEvent as ReactUIEvent,
   useCallback,
   useEffect,
@@ -75,6 +76,9 @@ const GIT_REVIEW_SPLIT_GRID_CLASS =
   "grid-cols-[clamp(9.5rem,38%,18rem)_minmax(10rem,1fr)] grid-rows-1";
 const GIT_REVIEW_STACKED_PANE_BUTTON_CLASS =
   "inline-flex h-7 w-7 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+const DIFF_SELECTION_AUTOSCROLL_EDGE_PX = 40;
+const DIFF_SELECTION_AUTOSCROLL_MAX_STEP_PX = 22;
+const DIFF_HORIZONTAL_SCROLLBAR_MIN_THUMB_PX = 32;
 const gitReviewScrollbarTimers = new WeakMap<HTMLElement, number>();
 type GitReviewScrollbarAxis = "vertical" | "horizontal";
 type GitReviewScrollbarOverlay = {
@@ -333,6 +337,152 @@ function handleGitReviewTransientScroll(event: ReactUIEvent<HTMLElement>) {
   scheduleGitReviewScrollbarHide(element);
 }
 
+function diffSelectionAutoScrollDelta(
+  pointer: number,
+  start: number,
+  end: number,
+  canScroll: boolean,
+) {
+  if (!canScroll) return 0;
+  if (pointer < start + DIFF_SELECTION_AUTOSCROLL_EDGE_PX) {
+    const ratio = Math.min(
+      1,
+      (start + DIFF_SELECTION_AUTOSCROLL_EDGE_PX - pointer) /
+        DIFF_SELECTION_AUTOSCROLL_EDGE_PX,
+    );
+    return -Math.max(2, Math.round(ratio * DIFF_SELECTION_AUTOSCROLL_MAX_STEP_PX));
+  }
+  if (pointer > end - DIFF_SELECTION_AUTOSCROLL_EDGE_PX) {
+    const ratio = Math.min(
+      1,
+      (pointer - (end - DIFF_SELECTION_AUTOSCROLL_EDGE_PX)) /
+        DIFF_SELECTION_AUTOSCROLL_EDGE_PX,
+    );
+    return Math.max(2, Math.round(ratio * DIFF_SELECTION_AUTOSCROLL_MAX_STEP_PX));
+  }
+  return 0;
+}
+
+type DiffSelectionScrollAxis = "vertical" | "horizontal";
+
+function scrollDiffSelectionViewportForPointer(
+  viewport: HTMLElement,
+  clientX: number,
+  clientY: number,
+  axis: DiffSelectionScrollAxis,
+) {
+  const rect = viewport.getBoundingClientRect();
+  const maxScrollTop = viewport.scrollHeight - viewport.clientHeight;
+  const maxScrollLeft = viewport.scrollWidth - viewport.clientWidth;
+
+  if (axis === "vertical") {
+    const topDelta = diffSelectionAutoScrollDelta(clientY, rect.top, rect.bottom, maxScrollTop > 0);
+    if (topDelta === 0) return false;
+    const previousTop = viewport.scrollTop;
+    viewport.scrollTop = Math.min(maxScrollTop, Math.max(0, previousTop + topDelta));
+    return viewport.scrollTop !== previousTop;
+  }
+
+  const leftDelta = diffSelectionAutoScrollDelta(clientX, rect.left, rect.right, maxScrollLeft > 0);
+  if (leftDelta === 0) return false;
+  const previousLeft = viewport.scrollLeft;
+  viewport.scrollLeft = Math.min(maxScrollLeft, Math.max(0, previousLeft + leftDelta));
+  return viewport.scrollLeft !== previousLeft;
+}
+
+function isScrollableDiffSelectionElement(element: HTMLElement) {
+  const style = window.getComputedStyle(element);
+  const canScrollY =
+    /(auto|scroll)/.test(style.overflowY) && element.scrollHeight > element.clientHeight + 1;
+  const canScrollX =
+    /(auto|scroll)/.test(style.overflowX) && element.scrollWidth > element.clientWidth + 1;
+  return canScrollY || canScrollX;
+}
+
+function syncGitReviewAutoscrollScrollbar(viewport: HTMLElement) {
+  if (!viewport.classList.contains(GIT_REVIEW_TRANSIENT_SCROLLBAR_CLASS)) return;
+  viewport.dataset.scrollActive = "true";
+  updateGitReviewScrollbarOverlay(viewport);
+  scheduleGitReviewScrollbarHide(viewport);
+}
+
+function resolveDiffSelectionScrollViewports(
+  target: Element | null,
+  root: HTMLElement | null,
+  fallback: HTMLElement | null,
+) {
+  const viewports: HTMLElement[] = [];
+  const addViewport = (element: HTMLElement | null) => {
+    if (!element || viewports.includes(element) || !isScrollableDiffSelectionElement(element)) {
+      return;
+    }
+    viewports.push(element);
+  };
+
+  if (!target || !root) {
+    addViewport(fallback);
+    return viewports;
+  }
+
+  let current: HTMLElement | null =
+    target instanceof HTMLElement ? target : target.parentElement;
+  while (current && current !== root) {
+    addViewport(current);
+    current = current.parentElement;
+  }
+  addViewport(fallback);
+  return viewports;
+}
+
+function getDiffHorizontalScrollOverflow(element: HTMLElement) {
+  return Math.max(0, element.scrollWidth - element.clientWidth);
+}
+
+function isDiffHorizontalScrollableElement(element: HTMLElement) {
+  return getDiffHorizontalScrollOverflow(element) > 0;
+}
+
+function resolveDiffHorizontalScrollTargets(
+  root: HTMLElement | null,
+  fallback: HTMLElement | null,
+) {
+  const targets: HTMLElement[] = [];
+  const addTarget = (element: HTMLElement | null) => {
+    if (!element || targets.includes(element) || !isDiffHorizontalScrollableElement(element)) {
+      return;
+    }
+    targets.push(element);
+  };
+
+  if (fallback) {
+    addTarget(fallback);
+  }
+  if (!root) return targets;
+
+  root.querySelectorAll<HTMLElement>(".diff-table-scroll-container").forEach(addTarget);
+  return targets;
+}
+
+function chooseDiffHorizontalScrollTarget(
+  targets: HTMLElement[],
+  preferred: HTMLElement | null,
+) {
+  if (preferred && targets.includes(preferred) && isDiffHorizontalScrollableElement(preferred)) {
+    return preferred;
+  }
+
+  let bestTarget: HTMLElement | null = null;
+  let bestOverflow = 0;
+  for (const target of targets) {
+    const overflow = getDiffHorizontalScrollOverflow(target);
+    if (overflow > bestOverflow) {
+      bestOverflow = overflow;
+      bestTarget = target;
+    }
+  }
+  return bestTarget;
+}
+
 type PatchChunk = {
   key: string;
   label: string;
@@ -406,6 +556,20 @@ type HistoryContextMenuState =
       path: string;
     };
 
+type DiffSelectionContextMenuState = {
+  x: number;
+  y: number;
+  selectedText: string;
+};
+
+type DiffHorizontalScrollbarState = {
+  visible: boolean;
+  thumbWidth: number;
+  thumbLeft: number;
+  maxScrollLeft: number;
+  scrollLeft: number;
+};
+
 type ChangesMenuState = {
   x: number;
   y: number;
@@ -435,6 +599,9 @@ const CHANGES_MENU_HEIGHT = 170;
 const HISTORY_CONTEXT_MENU_WIDTH = 232;
 const HISTORY_CONTEXT_MENU_HEIGHT = 270;
 const HISTORY_FILE_CONTEXT_MENU_HEIGHT = 90;
+const DIFF_SELECTION_CONTEXT_MENU_WIDTH = 184;
+const DIFF_SELECTION_CONTEXT_MENU_HEIGHT = 52;
+const DIFF_SELECTION_CONTEXT_MENU_MARGIN = 12;
 const GIT_HISTORY_PAGE_SIZE = 50;
 const GIT_HISTORY_LOAD_MORE_SCROLL_THRESHOLD_PX = 96;
 const CHANGE_CONTEXT_MENU_ITEM_CLASS =
@@ -1018,7 +1185,7 @@ const DiffChunkView = memo(function DiffChunkView(props: { item: PatchChunk; isD
 
   return (
     <div className="border-b border-border/60 last:border-b-0">
-      <div className="flex items-center gap-2 border-b border-border/60 bg-muted/20 px-3 py-1.5 text-[11px] font-medium text-muted-foreground">
+      <div className="flex select-none items-center gap-2 border-b border-border/60 bg-muted/20 px-3 py-1.5 text-[11px] font-medium text-muted-foreground">
         <span className="min-w-0 flex-1 truncate">{item.label}</span>
         {item.large ? (
           <span className="shrink-0 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-700 dark:text-amber-300">
@@ -1039,7 +1206,7 @@ const DiffChunkView = memo(function DiffChunkView(props: { item: PatchChunk; isD
         <pre
           className={cn(
             GIT_REVIEW_TRANSIENT_SCROLLBAR_CLASS,
-            "max-h-[26rem] overflow-auto px-3 py-3 text-[11px] leading-relaxed text-muted-foreground",
+            "git-review-diff-selectable-content max-h-[26rem] select-text overflow-auto px-3 py-3 text-[11px] leading-relaxed text-muted-foreground",
           )}
           onScroll={handleGitReviewTransientScroll}
         >
@@ -1165,17 +1332,438 @@ function DiffContent(props: {
   showStat?: boolean;
 }) {
   const { diff, title, error, loading = false, showStat = true } = props;
-  const { t } = useLocale();
+  const { locale, t } = useLocale();
   const isDark = useIsDark();
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const scrollViewportRef = useRef<HTMLElement | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  const selectionAutoscrollViewportsRef = useRef<HTMLElement[]>([]);
+  const selectionAutoscrollPointerRef = useRef<{
+    x: number;
+    y: number;
+  } | null>(null);
+  const selectionAutoscrollFrameRef = useRef<number | null>(null);
+  const diffHorizontalScrollbarTrackRef = useRef<HTMLDivElement | null>(null);
+  const diffHorizontalScrollTargetsRef = useRef<HTMLElement[]>([]);
+  const diffHorizontalActiveTargetRef = useRef<HTMLElement | null>(null);
+  const [selectionContextMenu, setSelectionContextMenu] =
+    useState<DiffSelectionContextMenuState | null>(null);
+  const [diffHorizontalScrollbar, setDiffHorizontalScrollbar] =
+    useState<DiffHorizontalScrollbarState>({
+      visible: false,
+      thumbWidth: 0,
+      thumbLeft: 0,
+      maxScrollLeft: 0,
+      scrollLeft: 0,
+    });
   const patchChunks = useMemo(
     () => buildPatchChunks(diff?.patch ?? "", title),
     [diff?.patch, title],
   );
   const showLoadingState = loading && !error && !diff;
   const showDiffStat = showStat && Boolean(diff?.stat);
+  const closeSelectionContextMenu = useCallback(() => {
+    setSelectionContextMenu(null);
+  }, []);
+
+  const updateDiffHorizontalScrollbar = useCallback(() => {
+    const root = rootRef.current;
+    const trackWidth =
+      diffHorizontalScrollbarTrackRef.current?.clientWidth ??
+      scrollViewportRef.current?.clientWidth ??
+      root?.clientWidth ??
+      0;
+    const target = chooseDiffHorizontalScrollTarget(
+      diffHorizontalScrollTargetsRef.current,
+      diffHorizontalActiveTargetRef.current,
+    );
+
+    if (!target || trackWidth <= 0) {
+      diffHorizontalActiveTargetRef.current = null;
+      setDiffHorizontalScrollbar((current) =>
+        current.visible
+          ? { visible: false, thumbWidth: 0, thumbLeft: 0, maxScrollLeft: 0, scrollLeft: 0 }
+          : current,
+      );
+      return;
+    }
+
+    diffHorizontalActiveTargetRef.current = target;
+    const maxScrollLeft = getDiffHorizontalScrollOverflow(target);
+    if (maxScrollLeft <= 0 || target.scrollWidth <= 0) {
+      setDiffHorizontalScrollbar((current) =>
+        current.visible
+          ? { visible: false, thumbWidth: 0, thumbLeft: 0, maxScrollLeft: 0, scrollLeft: 0 }
+          : current,
+      );
+      return;
+    }
+
+    const thumbWidth = Math.max(
+      DIFF_HORIZONTAL_SCROLLBAR_MIN_THUMB_PX,
+      Math.min(trackWidth, (target.clientWidth / target.scrollWidth) * trackWidth),
+    );
+    const travelWidth = Math.max(1, trackWidth - thumbWidth);
+    const thumbLeft = (target.scrollLeft / maxScrollLeft) * travelWidth;
+    setDiffHorizontalScrollbar((current) => {
+      if (
+        current.visible &&
+        Math.abs(current.thumbWidth - thumbWidth) < 0.5 &&
+        Math.abs(current.thumbLeft - thumbLeft) < 0.5 &&
+        Math.abs(current.maxScrollLeft - maxScrollLeft) < 0.5 &&
+        Math.abs(current.scrollLeft - target.scrollLeft) < 0.5
+      ) {
+        return current;
+      }
+      return {
+        visible: true,
+        thumbWidth,
+        thumbLeft,
+        maxScrollLeft,
+        scrollLeft: target.scrollLeft,
+      };
+    });
+  }, []);
+
+  const setDiffHorizontalScrollRatio = useCallback(
+    (ratio: number) => {
+      const nextRatio = Math.min(1, Math.max(0, ratio));
+      for (const target of diffHorizontalScrollTargetsRef.current) {
+        const maxScrollLeft = getDiffHorizontalScrollOverflow(target);
+        if (maxScrollLeft <= 0) continue;
+        target.scrollLeft = Math.min(maxScrollLeft, Math.max(0, nextRatio * maxScrollLeft));
+      }
+      updateDiffHorizontalScrollbar();
+    },
+    [updateDiffHorizontalScrollbar],
+  );
+
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+
+    let animationFrame: number | null = null;
+    let targets: HTMLElement[] = [];
+    const scheduleUpdate = () => {
+      if (animationFrame !== null) return;
+      animationFrame = window.requestAnimationFrame(() => {
+        animationFrame = null;
+        updateDiffHorizontalScrollbar();
+      });
+    };
+    const handleTargetScroll = (event: Event) => {
+      if (event.currentTarget instanceof HTMLElement) {
+        diffHorizontalActiveTargetRef.current = event.currentTarget;
+      }
+      scheduleUpdate();
+    };
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => {
+            scheduleUpdate();
+          });
+
+    const detachTargets = () => {
+      for (const target of targets) {
+        target.removeEventListener("scroll", handleTargetScroll);
+        resizeObserver?.unobserve(target);
+      }
+    };
+    const attachTargets = (nextTargets: HTMLElement[]) => {
+      for (const target of nextTargets) {
+        target.addEventListener("scroll", handleTargetScroll, { passive: true });
+        resizeObserver?.observe(target);
+      }
+    };
+    const refreshTargets = () => {
+      detachTargets();
+      targets = resolveDiffHorizontalScrollTargets(root, scrollViewportRef.current);
+      diffHorizontalScrollTargetsRef.current = targets;
+      diffHorizontalActiveTargetRef.current = chooseDiffHorizontalScrollTarget(
+        targets,
+        diffHorizontalActiveTargetRef.current,
+      );
+      attachTargets(targets);
+      scheduleUpdate();
+    };
+
+    resizeObserver?.observe(root);
+    if (scrollViewportRef.current) {
+      resizeObserver?.observe(scrollViewportRef.current);
+    }
+    const mutationObserver =
+      typeof MutationObserver === "undefined"
+        ? null
+        : new MutationObserver(() => {
+            refreshTargets();
+          });
+    mutationObserver?.observe(root, { childList: true, subtree: true });
+    window.addEventListener("resize", refreshTargets);
+    refreshTargets();
+
+    return () => {
+      if (animationFrame !== null) {
+        window.cancelAnimationFrame(animationFrame);
+      }
+      window.removeEventListener("resize", refreshTargets);
+      mutationObserver?.disconnect();
+      detachTargets();
+      resizeObserver?.disconnect();
+      diffHorizontalScrollTargetsRef.current = [];
+      diffHorizontalActiveTargetRef.current = null;
+    };
+  }, [diff?.patch, error, loading, patchChunks.length, updateDiffHorizontalScrollbar]);
+
+  const handleDiffHorizontalScrollbarPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0 || !diffHorizontalScrollbar.visible) return;
+      const track = diffHorizontalScrollbarTrackRef.current;
+      if (!track) return;
+      const target = chooseDiffHorizontalScrollTarget(
+        diffHorizontalScrollTargetsRef.current,
+        diffHorizontalActiveTargetRef.current,
+      );
+      if (!target) return;
+
+      const maxScrollLeft = getDiffHorizontalScrollOverflow(target);
+      if (maxScrollLeft <= 0) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      diffHorizontalActiveTargetRef.current = target;
+
+      const rect = track.getBoundingClientRect();
+      const thumbWidth = Math.max(
+        DIFF_HORIZONTAL_SCROLLBAR_MIN_THUMB_PX,
+        Math.min(rect.width, (target.clientWidth / target.scrollWidth) * rect.width),
+      );
+      const travelWidth = Math.max(1, rect.width - thumbWidth);
+      const clickedThumb =
+        event.target instanceof HTMLElement &&
+        event.target.closest(".git-review-diff-horizontal-scrollbar-thumb") !== null;
+      const pointerStartX = event.clientX;
+      const scrollStart = clickedThumb
+        ? target.scrollLeft
+        : Math.min(
+            maxScrollLeft,
+            Math.max(
+              0,
+              ((event.clientX - rect.left - thumbWidth / 2) / travelWidth) * maxScrollLeft,
+            ),
+          );
+      setDiffHorizontalScrollRatio(scrollStart / maxScrollLeft);
+
+      let cleanup = () => {};
+      const handleMove = (moveEvent: PointerEvent) => {
+        if ((moveEvent.buttons & 1) === 0) {
+          cleanup();
+          return;
+        }
+        const nextScrollLeft = Math.min(
+          maxScrollLeft,
+          Math.max(
+            0,
+            scrollStart + ((moveEvent.clientX - pointerStartX) / travelWidth) * maxScrollLeft,
+          ),
+        );
+        setDiffHorizontalScrollRatio(nextScrollLeft / maxScrollLeft);
+      };
+      cleanup = () => {
+        window.removeEventListener("pointermove", handleMove, true);
+        window.removeEventListener("pointerup", cleanup, true);
+        window.removeEventListener("pointercancel", cleanup, true);
+        window.removeEventListener("blur", cleanup);
+      };
+
+      window.addEventListener("pointermove", handleMove, true);
+      window.addEventListener("pointerup", cleanup, true);
+      window.addEventListener("pointercancel", cleanup, true);
+      window.addEventListener("blur", cleanup);
+    },
+    [diffHorizontalScrollbar.visible, setDiffHorizontalScrollRatio],
+  );
+
+  const runSelectionAutoscroll = useCallback(() => {
+    selectionAutoscrollFrameRef.current = null;
+    const viewports = selectionAutoscrollViewportsRef.current;
+    const pointer = selectionAutoscrollPointerRef.current;
+    if (viewports.length === 0 || !pointer) return;
+
+    let verticalScrolled = false;
+    let horizontalScrolled = false;
+    for (const viewport of viewports) {
+      if (!viewport.isConnected) continue;
+      if (
+        !verticalScrolled &&
+        scrollDiffSelectionViewportForPointer(viewport, pointer.x, pointer.y, "vertical")
+      ) {
+        verticalScrolled = true;
+        syncGitReviewAutoscrollScrollbar(viewport);
+      }
+      if (
+        !horizontalScrolled &&
+        scrollDiffSelectionViewportForPointer(viewport, pointer.x, pointer.y, "horizontal")
+      ) {
+        horizontalScrolled = true;
+        syncGitReviewAutoscrollScrollbar(viewport);
+      }
+      if (verticalScrolled && horizontalScrolled) break;
+    }
+
+    selectionAutoscrollFrameRef.current = window.requestAnimationFrame(runSelectionAutoscroll);
+  }, []);
+
+  const requestSelectionAutoscroll = useCallback(() => {
+    if (selectionAutoscrollFrameRef.current !== null) return;
+    selectionAutoscrollFrameRef.current = window.requestAnimationFrame(runSelectionAutoscroll);
+  }, [runSelectionAutoscroll]);
+
+  const stopSelectionAutoscroll = useCallback(() => {
+    if (selectionAutoscrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(selectionAutoscrollFrameRef.current);
+      selectionAutoscrollFrameRef.current = null;
+    }
+    selectionAutoscrollViewportsRef.current = [];
+    selectionAutoscrollPointerRef.current = null;
+  }, []);
+
+  useEffect(() => stopSelectionAutoscroll, [stopSelectionAutoscroll]);
+
+  useEffect(() => {
+    closeSelectionContextMenu();
+  }, [closeSelectionContextMenu, diff?.patch, error, loading]);
+
+  useEffect(() => {
+    if (!selectionContextMenu) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        closeSelectionContextMenu();
+        return;
+      }
+      if (contextMenuRef.current?.contains(target)) {
+        return;
+      }
+      closeSelectionContextMenu();
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeSelectionContextMenu();
+      }
+    };
+
+    const handleSelectionChange = () => {
+      if (!resolveContainedSelectionText(rootRef.current)) {
+        closeSelectionContextMenu();
+      }
+    };
+
+    const handleViewportChange = () => {
+      closeSelectionContextMenu();
+    };
+
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("keydown", handleKeyDown, true);
+    window.addEventListener("scroll", handleViewportChange, true);
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("blur", handleViewportChange);
+    document.addEventListener("selectionchange", handleSelectionChange);
+
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("keydown", handleKeyDown, true);
+      window.removeEventListener("scroll", handleViewportChange, true);
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("blur", handleViewportChange);
+      document.removeEventListener("selectionchange", handleSelectionChange);
+    };
+  }, [closeSelectionContextMenu, selectionContextMenu]);
+
+  const handleContextMenu = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      if (!isDiffSelectableContentTarget(rootRef.current, event.target)) {
+        closeSelectionContextMenu();
+        return;
+      }
+      const selectedText = resolveContainedSelectionText(rootRef.current);
+      if (!selectedText) {
+        closeSelectionContextMenu();
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setSelectionContextMenu({
+        x: event.clientX,
+        y: event.clientY,
+        selectedText,
+      });
+    },
+    [closeSelectionContextMenu],
+  );
+
+  const handleSelectionPointerDownCapture = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
+      if (!isDiffSelectableContentTarget(rootRef.current, event.target)) return;
+
+      const target = event.target instanceof Element ? event.target : null;
+      const viewports = resolveDiffSelectionScrollViewports(
+        target,
+        rootRef.current,
+        scrollViewportRef.current,
+      );
+      if (viewports.length === 0) return;
+
+      closeSelectionContextMenu();
+      selectionAutoscrollViewportsRef.current = viewports;
+      selectionAutoscrollPointerRef.current = { x: event.clientX, y: event.clientY };
+      requestSelectionAutoscroll();
+
+      let cleanup = () => {};
+      const handleMove = (moveEvent: PointerEvent) => {
+        if ((moveEvent.buttons & 1) === 0) {
+          cleanup();
+          return;
+        }
+        selectionAutoscrollPointerRef.current = {
+          x: moveEvent.clientX,
+          y: moveEvent.clientY,
+        };
+      };
+      cleanup = () => {
+        stopSelectionAutoscroll();
+        window.removeEventListener("pointermove", handleMove, true);
+        window.removeEventListener("pointerup", cleanup, true);
+        window.removeEventListener("pointercancel", cleanup, true);
+        window.removeEventListener("blur", cleanup);
+      };
+
+      window.addEventListener("pointermove", handleMove, true);
+      window.addEventListener("pointerup", cleanup, true);
+      window.addEventListener("pointercancel", cleanup, true);
+      window.addEventListener("blur", cleanup);
+    },
+    [closeSelectionContextMenu, requestSelectionAutoscroll, stopSelectionAutoscroll],
+  );
+
+  const selectionContextMenuPosition = selectionContextMenu
+    ? clampDiffSelectionContextMenuPosition(selectionContextMenu.x, selectionContextMenu.y)
+    : null;
+  const copySelectedTextLabel =
+    locale === "en-US" ? "Copy selected text" : "复制选中文本";
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <div
+      ref={rootRef}
+      role="group"
+      aria-label={title}
+      className="git-review-diff-selectable flex min-h-0 flex-1 select-none flex-col overflow-hidden"
+      onContextMenu={handleContextMenu}
+      onPointerDownCapture={handleSelectionPointerDownCapture}
+    >
       {error ? <div className="shrink-0 px-3 py-3 text-xs text-destructive">{error}</div> : null}
       {!error && showDiffStat ? <DiffStatView stat={diff?.stat ?? ""} /> : null}
       {showLoadingState ? (
@@ -1186,7 +1774,13 @@ function DiffContent(props: {
       ) : null}
       {!error && !showLoadingState && patchChunks.length > 0 ? (
         <div
-          className={cn(GIT_REVIEW_TRANSIENT_SCROLLBAR_CLASS, "min-h-0 flex-1 overflow-auto")}
+          ref={(node) => {
+            scrollViewportRef.current = node;
+          }}
+          className={cn(
+            GIT_REVIEW_TRANSIENT_SCROLLBAR_CLASS,
+            "git-review-diff-selectable-content min-h-0 flex-1 select-text overflow-auto",
+          )}
           onScroll={handleGitReviewTransientScroll}
         >
           {patchChunks.map((item) => (
@@ -1196,9 +1790,12 @@ function DiffContent(props: {
       ) : null}
       {!error && !showLoadingState && diff?.patch.trim() && patchChunks.length === 0 ? (
         <pre
+          ref={(node) => {
+            scrollViewportRef.current = node;
+          }}
           className={cn(
             GIT_REVIEW_TRANSIENT_SCROLLBAR_CLASS,
-            "min-h-0 flex-1 overflow-auto px-3 py-3 text-[11px] leading-relaxed text-muted-foreground",
+            "git-review-diff-selectable-content min-h-0 flex-1 select-text overflow-auto px-3 py-3 text-[11px] leading-relaxed text-muted-foreground",
           )}
           onScroll={handleGitReviewTransientScroll}
         >
@@ -1215,6 +1812,60 @@ function DiffContent(props: {
           {t("projectTools.gitReview.diffOutputTruncated")}
         </div>
       ) : null}
+      {diffHorizontalScrollbar.visible ? (
+        <div className="shrink-0 border-t border-border/70 bg-background/80 px-2 py-0.5">
+          <div
+            ref={diffHorizontalScrollbarTrackRef}
+            role="scrollbar"
+            aria-label={locale === "en-US" ? "Horizontal diff scrollbar" : "diff 横向滚动条"}
+            aria-orientation="horizontal"
+            aria-valuemin={0}
+            aria-valuemax={Math.round(diffHorizontalScrollbar.maxScrollLeft)}
+            aria-valuenow={Math.round(diffHorizontalScrollbar.scrollLeft)}
+            className="relative h-1.5 overflow-hidden rounded-full bg-muted/35"
+            onPointerDown={handleDiffHorizontalScrollbarPointerDown}
+          >
+            <div
+              className="git-review-diff-horizontal-scrollbar-thumb absolute left-0 top-0 h-full rounded-full bg-muted-foreground/35 shadow-sm transition-colors hover:bg-muted-foreground/55"
+              style={{
+                width: `${diffHorizontalScrollbar.thumbWidth}px`,
+                transform: `translateX(${diffHorizontalScrollbar.thumbLeft}px)`,
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
+      {selectionContextMenu && selectionContextMenuPosition
+        ? createPortal(
+            <div
+              ref={contextMenuRef}
+              role="menu"
+              className="fixed z-[120] w-max min-w-[9.5rem] max-w-[calc(100vw-1.5rem)] select-none overflow-hidden rounded-lg border border-border/70 bg-popover p-1.5 text-popover-foreground shadow-[0_20px_60px_-20px_rgba(15,23,42,0.35)]"
+              style={{
+                left: selectionContextMenuPosition.left,
+                top: selectionContextMenuPosition.top,
+              }}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] text-foreground/90 transition-colors hover:bg-accent hover:text-accent-foreground"
+                onClick={() => {
+                  writeTextToClipboard(selectionContextMenu.selectedText);
+                  closeSelectionContextMenu();
+                }}
+              >
+                <Copy className="h-3.5 w-3.5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate">{copySelectedTextLabel}</span>
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
@@ -1443,8 +2094,8 @@ function revealTargetForEntry(entry: GitStatusEntry) {
 }
 
 function writeTextToClipboard(text: string) {
-  const value = text.trim();
-  if (!value) return;
+  if (!text.trim()) return;
+  const value = text;
   if (navigator.clipboard?.writeText) {
     void navigator.clipboard.writeText(value).catch(() => {
       fallbackWriteTextToClipboard(value);
@@ -1465,6 +2116,63 @@ function fallbackWriteTextToClipboard(text: string) {
   textarea.select();
   document.execCommand("copy");
   document.body.removeChild(textarea);
+}
+
+function elementForSelectionNode(node: Node) {
+  return node instanceof Element ? node : node.parentElement;
+}
+
+function isDiffSelectableContentNode(root: HTMLElement | null, node: Node) {
+  const element = elementForSelectionNode(node);
+  const selectable = element?.closest(".git-review-diff-selectable-content");
+  return Boolean(root && selectable && root.contains(selectable));
+}
+
+function isDiffSelectableContentTarget(root: HTMLElement | null, target: EventTarget | null) {
+  if (!(target instanceof Node)) return false;
+  return isDiffSelectableContentNode(root, target);
+}
+
+function resolveContainedSelectionText(root: HTMLElement | null) {
+  if (!root) return "";
+
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+    return "";
+  }
+
+  const selectedText = selection.toString();
+  if (!selectedText.trim()) return "";
+
+  const range = selection.getRangeAt(0);
+  if (
+    !isDiffSelectableContentNode(root, range.startContainer) ||
+    !isDiffSelectableContentNode(root, range.endContainer)
+  ) {
+    return "";
+  }
+
+  return selectedText;
+}
+
+function clampDiffSelectionContextMenuPosition(x: number, y: number) {
+  const maxLeft = Math.max(
+    DIFF_SELECTION_CONTEXT_MENU_MARGIN,
+    window.innerWidth -
+      DIFF_SELECTION_CONTEXT_MENU_WIDTH -
+      DIFF_SELECTION_CONTEXT_MENU_MARGIN,
+  );
+  const maxTop = Math.max(
+    DIFF_SELECTION_CONTEXT_MENU_MARGIN,
+    window.innerHeight -
+      DIFF_SELECTION_CONTEXT_MENU_HEIGHT -
+      DIFF_SELECTION_CONTEXT_MENU_MARGIN,
+  );
+
+  return {
+    left: Math.min(Math.max(DIFF_SELECTION_CONTEXT_MENU_MARGIN, x), maxLeft),
+    top: Math.min(Math.max(DIFF_SELECTION_CONTEXT_MENU_MARGIN, y), maxTop),
+  };
 }
 
 function gitRepositoryStateSignature(state: GitRepositoryState) {

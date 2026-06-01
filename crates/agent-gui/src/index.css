@@ -311,12 +311,12 @@
     background-color: hsl(var(--muted-foreground) / 0.52);
   }
   .git-review-floating-scrollbar-vertical {
-    width: 4px;
-    min-height: 28px;
+    width: 3px;
+    min-height: 24px;
   }
   .git-review-floating-scrollbar-horizontal {
-    height: 4px;
-    min-width: 28px;
+    height: 3px;
+    min-width: 24px;
   }
 
   .git-review-history-row {
@@ -1973,3 +1973,20 @@ body > div:not(#root) [data-streamdown="mermaid"] svg {
  * keep the moved row in a skipped paint state and render only the white row
  * background, making the conversation title look blank.
  */
+/* Git review diff views live under app chrome that disables selection by default. */
+.git-review-diff-selectable-content,
+.git-review-diff-selectable-content pre,
+.git-review-diff-selectable-content .diff-tailwindcss-wrapper,
+.git-review-diff-selectable-content .diff-line-content,
+.git-review-diff-selectable-content .diff-line-content-item,
+.git-review-diff-selectable-content .diff-line-content-raw,
+.git-review-diff-selectable-content .diff-line-syntax-raw,
+.git-review-diff-selectable-content .diff-line-content-raw *,
+.git-review-diff-selectable-content .diff-line-syntax-raw * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+.git-review-diff-selectable-content .select-none {
+  -webkit-user-select: none;
+  user-select: none;
+}

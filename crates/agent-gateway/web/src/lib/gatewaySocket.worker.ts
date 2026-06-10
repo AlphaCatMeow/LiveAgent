@@ -64,6 +64,10 @@ type WorkerClientRequest =
       stream_id: string;
     }
   | {
+      type: "wakeup";
+      connection_id: string;
+    }
+  | {
       type: "dispose";
       connection_id: string;
     };
@@ -94,6 +98,7 @@ type SharedWorkerScope = {
 const clients = new Map<string, ManagedClient>();
 const portStates = new Map<MessagePort, PortState>();
 const TERMINAL_DETACH_GRACE_MS = 250;
+const MANAGED_CLIENT_WARM_WINDOW_MS = 10 * 60_000;
 
 function asErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message.trim()) {
@@ -244,7 +249,7 @@ function scheduleManagedClientCleanup(client: ManagedClient) {
     client.terminalDetachTimers.clear();
     client.client.dispose();
     clients.delete(client.token);
-  }, 60_000);
+  }, MANAGED_CLIENT_WARM_WINDOW_MS);
 }
 
 function clearManagedClientCleanup(client: ManagedClient) {
@@ -364,6 +369,9 @@ async function resolveRequest(client: GatewayWebSocketClient, method: string, pa
   switch (method) {
     case "status.get":
       return client.getStatus();
+    case "chat.prepare":
+      client.noteForegroundWakeup();
+      return client.prepareChatRuntime("shared-worker");
     case "fs.roots":
       return client.listFsRoots();
     case "fs.list_dirs":
@@ -937,6 +945,9 @@ function handlePortMessage(port: MessagePort, raw: unknown) {
       return;
     case "chat.detach":
       handleChatDetach(state, message);
+      return;
+    case "wakeup":
+      state.client.client.noteForegroundWakeup();
       return;
   }
 }

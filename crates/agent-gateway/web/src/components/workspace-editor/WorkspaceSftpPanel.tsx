@@ -637,6 +637,15 @@ function isLeavingCurrentTarget(event: React.DragEvent) {
   return !related || !(related instanceof Node) || !event.currentTarget.contains(related);
 }
 
+const MOBILE_SFTP_MEDIA_QUERY = "(max-width: 820px)";
+
+function isMobileSftpLayout() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  return window.matchMedia(MOBILE_SFTP_MEDIA_QUERY).matches;
+}
+
 export function WorkspaceSftpPanel(props: WorkspaceSftpPanelProps) {
   const { session, client, isActive, onError } = props;
   const { t } = useLocale();
@@ -670,6 +679,23 @@ export function WorkspaceSftpPanel(props: WorkspaceSftpPanelProps) {
   const [renamingEntry, setRenamingEntry] = useState(false);
   const [copyPathDialog, setCopyPathDialog] = useState<string | null>(null);
   const [copyToastVisible, setCopyToastVisible] = useState(false);
+  const [isMobileLayout, setIsMobileLayout] = useState(isMobileSftpLayout);
+  const [mobilePane, setMobilePane] = useState<SftpSide>("remote");
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const mediaQueryList = window.matchMedia(MOBILE_SFTP_MEDIA_QUERY);
+    const handleChange = (event: MediaQueryListEvent) => {
+      setIsMobileLayout(event.matches);
+    };
+    setIsMobileLayout(mediaQueryList.matches);
+    mediaQueryList.addEventListener("change", handleChange);
+    return () => {
+      mediaQueryList.removeEventListener("change", handleChange);
+    };
+  }, []);
 
   const workdir = session.cwd;
   const projectPathKey = session.projectPathKey || session.cwd;
@@ -1323,9 +1349,38 @@ export function WorkspaceSftpPanel(props: WorkspaceSftpPanelProps) {
 
   return (
     <div ref={panelRef} className="relative flex h-full min-h-0 flex-col bg-background">
-      <div className="flex min-h-0 flex-1 overflow-x-auto overflow-y-hidden">
-        <div className="grid h-full min-h-0 min-w-[860px] flex-1 grid-cols-2 divide-x divide-border">
-          {panes.map(({ side, label, root, pane }) => {
+      {isMobileLayout ? (
+        <div className="flex shrink-0 items-center gap-1 border-b border-border bg-muted/30 p-1">
+          {panes.map(({ side, label }) => (
+            <button
+              key={side}
+              type="button"
+              className={cn(
+                "flex-1 rounded-md px-2 py-1.5 text-xs font-medium transition-colors",
+                mobilePane === side
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => setMobilePane(side)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      <div
+        className={cn(
+          "flex min-h-0 flex-1 overflow-y-hidden",
+          isMobileLayout ? "overflow-x-hidden" : "overflow-x-auto",
+        )}
+      >
+        <div
+          className={cn(
+            "grid h-full min-h-0 flex-1 divide-x divide-border",
+            isMobileLayout ? "grid-cols-1" : "min-w-[860px] grid-cols-2",
+          )}
+        >
+          {(isMobileLayout ? panes.filter((entry) => entry.side === mobilePane) : panes).map(({ side, label, root, pane }) => {
             const dropMode =
               activeDragSource?.side === "local" && side === "remote"
                 ? "upload"
@@ -1464,7 +1519,8 @@ export function WorkspaceSftpPanel(props: WorkspaceSftpPanelProps) {
                         data-sftp-drop-path={entry.kind === "directory" ? entry.path : undefined}
                         aria-selected={isSelected}
                         className={cn(
-                          "grid w-full touch-none cursor-default grid-cols-[minmax(0,1fr)_5.5rem] items-center gap-3 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted",
+                          "grid w-full cursor-default grid-cols-[minmax(0,1fr)_5.5rem] items-center gap-3 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted",
+                          !isMobileLayout && "touch-none",
                           isSelected && "bg-emerald-500/10 text-foreground ring-1 ring-emerald-500/20",
                           activeDragSource?.side === side &&
                             dragItems(activeDragSource).some((item) => item.path === entry.path) &&
@@ -1519,6 +1575,9 @@ export function WorkspaceSftpPanel(props: WorkspaceSftpPanelProps) {
                             }, 250);
                             return;
                           }
+                          // On mobile, leave the pointer to the browser so the list scrolls
+                          // natively; transfers happen through the long-press context menu.
+                          if (isMobileLayout) return;
                           try {
                             event.currentTarget.setPointerCapture(event.pointerId);
                           } catch {

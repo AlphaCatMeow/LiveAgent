@@ -27,7 +27,7 @@ function createToolCall(args) {
   return {
     type: "toolCall",
     id: "call-ssh",
-    name: "SshManager",
+    name: "SSHManager",
     arguments: args,
   };
 }
@@ -38,7 +38,7 @@ function createSshSession(overrides = {}) {
     projectPathKey: "/workspace",
     cwd: "/workspace",
     shell: "ssh",
-    title: "SshManager: Prod",
+    title: "SSHManager: Prod",
     kind: "ssh",
     ssh: {
       hostId: "host-1",
@@ -79,18 +79,18 @@ async function buildRegistry(params = {}) {
   });
 }
 
-test("SshManager is auto-registered by project hosts, runtime, and remote switch", async () => {
+test("SSHManager is auto-registered by project hosts, runtime, and remote switch", async () => {
   const registry = await buildRegistry();
-  assert.equal(registry.hasTool("SshManager"), true);
-  assert.equal(registry.metadataByName.get("SshManager").kind, "ssh_manager");
-  assert.equal(registry.metadataByName.get("SshManager").displayCategory, "terminal");
+  assert.equal(registry.hasTool("SSHManager"), true);
+  assert.equal(registry.metadataByName.get("SSHManager").kind, "ssh_manager");
+  assert.equal(registry.metadataByName.get("SSHManager").displayCategory, "terminal");
 
   assert.equal(
     (
       await buildRegistry({
         associatedSshHostIds: [],
       })
-    ).hasTool("SshManager"),
+    ).hasTool("SSHManager"),
     false,
   );
 
@@ -99,7 +99,7 @@ test("SshManager is auto-registered by project hosts, runtime, and remote switch
       await buildRegistry({
         runtimeScope: "cron_auto_prompt",
       })
-    ).hasTool("SshManager"),
+    ).hasTool("SSHManager"),
     false,
   );
 
@@ -108,15 +108,15 @@ test("SshManager is auto-registered by project hosts, runtime, and remote switch
       await buildRegistry({
         sshManagerRemoteAllowed: false,
       })
-    ).hasTool("SshManager"),
+    ).hasTool("SSHManager"),
     false,
   );
 });
 
-test("SshManager list_hosts redacts configured secrets", async () => {
+test("SSHManager list_hosts redacts configured secrets", async () => {
   const loader = createTsModuleLoader();
-  const { createSshManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
-  const bundle = createSshManagerTools({
+  const { createSSHManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
+  const bundle = createSSHManagerTools({
     enabled: true,
     runtimeScope: "chat",
     workdir: "/workspace",
@@ -136,13 +136,17 @@ test("SshManager list_hosts redacts configured secrets", async () => {
       host: "ssh.example.test",
       port: 22,
       authType: "privateKey",
+      credentialConfigured: true,
+      credentialStatus: "saved",
     },
   ]);
   assert.doesNotMatch(result.content[0].text, /secret|privateKeyPath|passphrase/i);
+  assert.match(result.content[0].text, /credential=saved/);
+  assert.match(result.content[0].text, /do not ask the user/i);
   assert.equal(JSON.stringify(result.details).includes("secret"), false);
 });
 
-test("SshManager create_session defaults SFTP on and refuses SSH prompts", async () => {
+test("SSHManager create_session defaults SFTP on and refuses SSH prompts", async () => {
   const invocations = [];
   const loader = createTsModuleLoader({
     mocks: {
@@ -157,8 +161,8 @@ test("SshManager create_session defaults SFTP on and refuses SSH prompts", async
       },
     },
   });
-  const { createSshManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
-  const bundle = createSshManagerTools({
+  const { createSSHManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
+  const bundle = createSSHManagerTools({
     enabled: true,
     runtimeScope: "chat",
     workdir: "/workspace",
@@ -188,7 +192,7 @@ test("SshManager create_session defaults SFTP on and refuses SSH prompts", async
   ]);
 });
 
-test("SshManager exec auto-creates a visible session before running command", async () => {
+test("SSHManager exec auto-creates a visible session before running command", async () => {
   const invocations = [];
   const loader = createTsModuleLoader({
     mocks: {
@@ -217,8 +221,8 @@ test("SshManager exec auto-creates a visible session before running command", as
       },
     },
   });
-  const { createSshManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
-  const bundle = createSshManagerTools({
+  const { createSSHManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
+  const bundle = createSSHManagerTools({
     enabled: true,
     runtimeScope: "chat",
     workdir: "/workspace",
@@ -249,7 +253,7 @@ test("SshManager exec auto-creates a visible session before running command", as
   assert.equal(result.details.session_created, true);
 });
 
-test("SshManager exec reuses an existing running SSH session for the same host", async () => {
+test("SSHManager exec reuses an existing running SSH session for the same host", async () => {
   const invocations = [];
   const loader = createTsModuleLoader({
     mocks: {
@@ -292,8 +296,8 @@ test("SshManager exec reuses an existing running SSH session for the same host",
       },
     },
   });
-  const { createSshManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
-  const bundle = createSshManagerTools({
+  const { createSSHManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
+  const bundle = createSSHManagerTools({
     enabled: true,
     runtimeScope: "chat",
     workdir: "/workspace",
@@ -321,7 +325,7 @@ test("SshManager exec reuses an existing running SSH session for the same host",
   assert.equal(result.details.session_created, false);
 });
 
-test("SshManager exec can intentionally create an additional SSH session", async () => {
+test("SSHManager exec can intentionally create an additional SSH session", async () => {
   const invocations = [];
   const loader = createTsModuleLoader({
     mocks: {
@@ -353,8 +357,8 @@ test("SshManager exec can intentionally create an additional SSH session", async
       },
     },
   });
-  const { createSshManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
-  const bundle = createSshManagerTools({
+  const { createSSHManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
+  const bundle = createSSHManagerTools({
     enabled: true,
     runtimeScope: "chat",
     workdir: "/workspace",
@@ -384,7 +388,7 @@ test("SshManager exec can intentionally create an additional SSH session", async
   assert.equal(result.details.session_created, true);
 });
 
-test("SshManager can require an existing session without implicitly creating one", async () => {
+test("SSHManager can require an existing session without implicitly creating one", async () => {
   const invocations = [];
   const loader = createTsModuleLoader({
     mocks: {
@@ -399,8 +403,8 @@ test("SshManager can require an existing session without implicitly creating one
       },
     },
   });
-  const { createSshManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
-  const bundle = createSshManagerTools({
+  const { createSSHManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
+  const bundle = createSSHManagerTools({
     enabled: true,
     runtimeScope: "chat",
     workdir: "/workspace",
@@ -427,7 +431,7 @@ test("SshManager can require an existing session without implicitly creating one
   ]);
 });
 
-test("SshManager rejects conflicting session_id and new session strategy", async () => {
+test("SSHManager rejects conflicting session_id and new session strategy", async () => {
   const invocations = [];
   const loader = createTsModuleLoader({
     mocks: {
@@ -439,8 +443,8 @@ test("SshManager rejects conflicting session_id and new session strategy", async
       },
     },
   });
-  const { createSshManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
-  const bundle = createSshManagerTools({
+  const { createSSHManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
+  const bundle = createSSHManagerTools({
     enabled: true,
     runtimeScope: "chat",
     workdir: "/workspace",
@@ -462,7 +466,7 @@ test("SshManager rejects conflicting session_id and new session strategy", async
   assert.deepEqual(invocations, []);
 });
 
-test("SshManager validates current project sessions before SFTP actions", async () => {
+test("SSHManager validates current project sessions before SFTP actions", async () => {
   const invocations = [];
   const loader = createTsModuleLoader({
     mocks: {
@@ -480,8 +484,8 @@ test("SshManager validates current project sessions before SFTP actions", async 
       },
     },
   });
-  const { createSshManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
-  const bundle = createSshManagerTools({
+  const { createSSHManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
+  const bundle = createSSHManagerTools({
     enabled: true,
     runtimeScope: "chat",
     workdir: "/workspace",
@@ -516,7 +520,7 @@ test("SshManager validates current project sessions before SFTP actions", async 
   ]);
 });
 
-test("SshManager SFTP actions reuse SFTP-enabled host sessions", async () => {
+test("SSHManager SFTP actions reuse SFTP-enabled host sessions", async () => {
   const invocations = [];
   const loader = createTsModuleLoader({
     mocks: {
@@ -545,8 +549,8 @@ test("SshManager SFTP actions reuse SFTP-enabled host sessions", async () => {
       },
     },
   });
-  const { createSshManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
-  const bundle = createSshManagerTools({
+  const { createSSHManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
+  const bundle = createSSHManagerTools({
     enabled: true,
     runtimeScope: "chat",
     workdir: "/workspace",
@@ -572,7 +576,7 @@ test("SshManager SFTP actions reuse SFTP-enabled host sessions", async () => {
   assert.equal(result.details.session_created, false);
 });
 
-test("SshManager SFTP actions create a new session when no SFTP-enabled session exists", async () => {
+test("SSHManager SFTP actions create a new session when no SFTP-enabled session exists", async () => {
   const invocations = [];
   const loader = createTsModuleLoader({
     mocks: {
@@ -604,8 +608,8 @@ test("SshManager SFTP actions create a new session when no SFTP-enabled session 
       },
     },
   });
-  const { createSshManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
-  const bundle = createSshManagerTools({
+  const { createSSHManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
+  const bundle = createSSHManagerTools({
     enabled: true,
     runtimeScope: "chat",
     workdir: "/workspace",
@@ -632,7 +636,7 @@ test("SshManager SFTP actions create a new session when no SFTP-enabled session 
   assert.equal(result.details.session_created, true);
 });
 
-test("SshManager SFTP actions can intentionally create an additional SFTP-enabled session", async () => {
+test("SSHManager SFTP actions can intentionally create an additional SFTP-enabled session", async () => {
   const invocations = [];
   const loader = createTsModuleLoader({
     mocks: {
@@ -657,8 +661,8 @@ test("SshManager SFTP actions can intentionally create an additional SFTP-enable
       },
     },
   });
-  const { createSshManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
-  const bundle = createSshManagerTools({
+  const { createSSHManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
+  const bundle = createSSHManagerTools({
     enabled: true,
     runtimeScope: "chat",
     workdir: "/workspace",
@@ -689,7 +693,7 @@ test("SshManager SFTP actions can intentionally create an additional SFTP-enable
   assert.equal(result.details.session_created, true);
 });
 
-test("SshManager rejects unauthorized hosts and cross-project sessions before invoking actions", async () => {
+test("SSHManager rejects unauthorized hosts and cross-project sessions before invoking actions", async () => {
   const invocations = [];
   const loader = createTsModuleLoader({
     mocks: {
@@ -711,8 +715,8 @@ test("SshManager rejects unauthorized hosts and cross-project sessions before in
       },
     },
   });
-  const { createSshManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
-  const bundle = createSshManagerTools({
+  const { createSSHManagerTools } = loader.loadModule("src/lib/tools/sshManagerTools.ts");
+  const bundle = createSSHManagerTools({
     enabled: true,
     runtimeScope: "chat",
     workdir: "/workspace",

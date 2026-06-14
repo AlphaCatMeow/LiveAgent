@@ -17,6 +17,7 @@ import {
   Loader2,
   Plug,
   Search,
+  Server,
   Sparkles,
   Terminal,
   Trash2,
@@ -473,6 +474,9 @@ function getToolMeta(name: string): { Icon: IconComponent; accent: string; categ
       return { Icon: Brain, accent: "var(--tool-list-accent)", category: "system" };
     case "McpManager":
       return { Icon: Plug, accent: "var(--tool-list-accent)", category: "mcp" };
+    case "SSHManager":
+    case "SshManager":
+      return { Icon: Server, accent: "var(--tool-bash-accent)", category: "terminal" };
     case "Agent":
       return { Icon: Bot, accent: "var(--tool-list-accent)", category: "system" };
     case "SendMessage":
@@ -654,6 +658,7 @@ function isAgentToolName(name: string) {
 }
 
 function getToolDisplayName(name: string) {
+  if (name === "SshManager") return "SSHManager";
   return name;
 }
 

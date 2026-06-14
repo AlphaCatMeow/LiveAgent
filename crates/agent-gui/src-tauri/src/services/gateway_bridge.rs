@@ -920,6 +920,7 @@ fn is_builtin_share_tool_name(name: &str) -> bool {
             | "MemoryManager"
             | "Read"
             | "SkillsManager"
+            | "SSHManager"
             | "SshManager"
             | "Write"
     )

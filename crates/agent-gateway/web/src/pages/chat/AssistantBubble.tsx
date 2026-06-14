@@ -13,6 +13,7 @@ import {
   Loader2,
   Plug,
   Search,
+  Server,
   Sparkles,
   Terminal,
   Trash2,
@@ -488,6 +489,8 @@ function getToolMeta(name: string): { Icon: IconComponent; accent: string; categ
     case "SkillsManager": return { Icon: Eye,  accent: "var(--tool-file-accent)",   category: "file" };
     case "MemoryManager": return { Icon: Brain, accent: "var(--tool-list-accent)",   category: "system" };
     case "McpManager": return { Icon: Plug,     accent: "var(--tool-list-accent)",   category: "mcp" };
+    case "SSHManager":
+    case "SshManager": return { Icon: Server,   accent: "var(--tool-bash-accent)",   category: "terminal" };
     case "Agent":  return { Icon: Bot,         accent: "var(--tool-list-accent)",   category: "system" };
     case "SendMessage": return { Icon: Bot,     accent: "var(--tool-list-accent)",   category: "system" };
     case "Write":  return { Icon: FileText,    accent: "var(--tool-file-accent)",   category: "file" };
@@ -659,6 +662,7 @@ function isAgentToolName(name: string) {
 }
 
 function getToolDisplayName(name: string) {
+  if (name === "SshManager") return "SSHManager";
   return name;
 }
 
@@ -2344,6 +2348,8 @@ function isBuiltinShareToolName(name: string) {
     "MemoryManager",
     "Read",
     "SkillsManager",
+    "SSHManager",
+    "SshManager",
     "Write",
   ].includes(trimmed);
 }

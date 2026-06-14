@@ -31,7 +31,7 @@ import { createMcpManagerTools } from "./mcpManagerTools";
 import { createMcpTools } from "./mcpTools";
 import { createMemoryTools } from "./memoryTools";
 import { createShellTools } from "./shellTools";
-import { createSshManagerTools } from "./sshManagerTools";
+import { createSSHManagerTools } from "./sshManagerTools";
 import type { SystemToolId, SystemToolRuntimeScope } from "./systemToolOptions";
 import type { SkillAccessPolicy } from "./skillAccessPolicy";
 import { createSkillTools } from "./skillTools";
@@ -249,7 +249,7 @@ async function buildBaseBuiltinToolBundles(params: BuildBuiltinBaseToolRegistryP
       projectPathKey: params.tunnelProjectPathKey,
       onTunnelsChanged: params.onTunnelsChanged,
     }),
-    createSshManagerTools({
+    createSSHManagerTools({
       enabled:
         params.runtimeScope === "chat" &&
         params.sshManagerRemoteAllowed !== false &&

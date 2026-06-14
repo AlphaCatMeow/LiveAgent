@@ -5,7 +5,7 @@ import { Type } from "typebox";
 import type { SshHostConfig } from "../settings";
 import { type BuiltinToolBundle, createBuiltinMetadataMap } from "./builtinTypes";
 
-type SshManagerAction =
+type SSHManagerAction =
   | "list_hosts"
   | "list_sessions"
   | "create_session"
@@ -94,9 +94,9 @@ type ResolvedSshSession = {
 };
 
 const SSH_MANAGER_TOOL: Tool = {
-  name: "SshManager",
+  name: "SSHManager",
   description:
-    "Manage SSH sessions and remote SFTP files for SSH hosts explicitly associated with the current project. Use host_id from list_hosts. Default session strategy is reuse_or_create: exec and SFTP reuse the same running session for that host before LiveAgent creates a visible session. To intentionally run multiple SSH sessions, call create_session or set session_strategy=\"new\", then use the returned session_id for follow-up operations. Use session_strategy=\"require_existing\" when you want to fail instead of implicitly creating a session. Do not combine session_id with session_strategy=\"new\". Authentication prompts, unknown host keys, changed host keys, and MFA must be completed by the user in the SSH Tunnel tab before retrying.",
+    'Manage SSH sessions and remote SFTP files for SSH hosts explicitly associated with the current project. Use host_id from list_hosts. If list_hosts reports credential=saved, LiveAgent already has the configured password/private key/passphrase; do not ask the user to paste credentials into chat, and call create_session, exec, or SFTP actions directly. If list_hosts reports credential=missing, ask the user to configure credentials in Settings > SSH instead of requesting secrets in chat. Default session strategy is reuse_or_create: exec and SFTP reuse the same running session for that host before LiveAgent creates a visible session. To intentionally run multiple SSH sessions, call create_session or set session_strategy="new", then use the returned session_id for follow-up operations. Use session_strategy="require_existing" when you want to fail instead of implicitly creating a session. Do not combine session_id with session_strategy="new". Authentication prompts, unknown host keys, changed host keys, and MFA must be completed by the user in the SSH Tunnel tab before retrying.',
   parameters: Type.Object({
     action: Type.Union(
       [
@@ -135,11 +135,7 @@ const SSH_MANAGER_TOOL: Tool = {
     ),
     session_strategy: Type.Optional(
       Type.Union(
-        [
-          Type.Literal("reuse_or_create"),
-          Type.Literal("new"),
-          Type.Literal("require_existing"),
-        ],
+        [Type.Literal("reuse_or_create"), Type.Literal("new"), Type.Literal("require_existing")],
         {
           description:
             'Session resolution strategy for exec and SFTP actions when session_id is omitted. Defaults to "reuse_or_create". Use "new" only when an additional SSH session is intentional; use "require_existing" to avoid implicit creation.',
@@ -155,12 +151,12 @@ const SSH_MANAGER_TOOL: Tool = {
       }),
     ),
     data: Type.Optional(
-      Type.String({ description: "Raw PTY input for send_input, including newlines/control chars." }),
+      Type.String({
+        description: "Raw PTY input for send_input, including newlines/control chars.",
+      }),
     ),
     command: Type.Optional(Type.String({ description: "Remote command for exec." })),
-    cwd: Type.Optional(
-      Type.String({ description: "Optional remote working directory for exec." }),
-    ),
+    cwd: Type.Optional(Type.String({ description: "Optional remote working directory for exec." })),
     timeout_ms: Type.Optional(Type.Number({ description: "Exec timeout in milliseconds." })),
     max_bytes: Type.Optional(Type.Number({ description: "Maximum captured bytes for output." })),
     path: Type.Optional(Type.String({ description: "Remote SFTP path." })),
@@ -191,9 +187,9 @@ function asErrorMessage(err: unknown) {
   return err instanceof Error ? err.message : String(err);
 }
 
-function normalizeAction(value: unknown): SshManagerAction {
+function normalizeAction(value: unknown): SSHManagerAction {
   const action = typeof value === "string" ? value.trim() : "";
-  const actions = new Set<SshManagerAction>([
+  const actions = new Set<SSHManagerAction>([
     "list_hosts",
     "list_sessions",
     "create_session",
@@ -214,10 +210,10 @@ function normalizeAction(value: unknown): SshManagerAction {
     "sftp_transfer_status",
     "sftp_cancel_transfer",
   ]);
-  if (actions.has(action as SshManagerAction)) {
-    return action as SshManagerAction;
+  if (actions.has(action as SSHManagerAction)) {
+    return action as SSHManagerAction;
   }
-  throw new Error("SshManager.action is invalid.");
+  throw new Error("SSHManager.action is invalid.");
 }
 
 function normalizeOptionalString(value: unknown) {
@@ -227,7 +223,7 @@ function normalizeOptionalString(value: unknown) {
 function requireString(args: Record<string, unknown>, key: string) {
   const value = normalizeOptionalString(args[key]);
   if (!value) {
-    throw new Error(`SshManager.${key} is required.`);
+    throw new Error(`SSHManager.${key} is required.`);
   }
   return value;
 }
@@ -252,14 +248,10 @@ function normalizeBool(value: unknown, fallback: boolean) {
 function normalizeSessionStrategy(value: unknown): SshSessionStrategy {
   const strategy = typeof value === "string" ? value.trim() : "";
   if (!strategy) return "reuse_or_create";
-  if (
-    strategy === "reuse_or_create" ||
-    strategy === "new" ||
-    strategy === "require_existing"
-  ) {
+  if (strategy === "reuse_or_create" || strategy === "new" || strategy === "require_existing") {
     return strategy;
   }
-  throw new Error("SshManager.session_strategy is invalid.");
+  throw new Error("SSHManager.session_strategy is invalid.");
 }
 
 function normalizeSession(input: RawTerminalSession): SshSessionSummary | null {
@@ -279,7 +271,19 @@ function normalizeSession(input: RawTerminalSession): SshSessionSummary | null {
   };
 }
 
+function hostCredentialConfigured(host: SshHostConfig) {
+  if (host.authType === "privateKey") {
+    return (
+      host.privateKey.trim().length > 0 ||
+      host.privateKeyPath.trim().length > 0 ||
+      host.privateKeyConfigured === true
+    );
+  }
+  return host.password.trim().length > 0 || host.passwordConfigured === true;
+}
+
 function hostSummary(host: SshHostConfig) {
+  const credentialConfigured = hostCredentialConfigured(host);
   return {
     host_id: host.id,
     name: host.name,
@@ -288,11 +292,13 @@ function hostSummary(host: SshHostConfig) {
     host: host.host,
     port: host.port || 22,
     authType: host.authType,
+    credentialConfigured,
+    credentialStatus: credentialConfigured ? "saved" : "missing",
   };
 }
 
 function formatHostLine(host: ReturnType<typeof hostSummary>) {
-  return `- ${host.host_id} · ${host.name || host.endpoint} · ${host.endpoint} · auth=${host.authType}`;
+  return `- ${host.host_id} · ${host.name || host.endpoint} · ${host.endpoint} · auth=${host.authType} · credential=${host.credentialStatus}`;
 }
 
 function formatSessionLine(session: SshSessionSummary) {
@@ -305,7 +311,7 @@ function promptErrorMessage() {
 
 function okResult(params: {
   toolCall: ToolCall;
-  action: SshManagerAction;
+  action: SSHManagerAction;
   text: string;
   details?: Record<string, unknown>;
 }): ToolResultMessage {
@@ -326,14 +332,14 @@ function okResult(params: {
 
 function errorResult(
   toolCall: ToolCall,
-  action: SshManagerAction,
+  action: SSHManagerAction,
   message: string,
 ): ToolResultMessage {
   return {
     role: "toolResult",
     toolCallId: toolCall.id,
     toolName: toolCall.name,
-    content: [{ type: "text", text: `SshManager failed: ${message}` }],
+    content: [{ type: "text", text: `SSHManager failed: ${message}` }],
     details: {
       kind: "ssh_manager",
       action,
@@ -356,9 +362,7 @@ async function listProjectSessions(projectPathKey: string) {
 function createAllowedHostMap(hosts: SshHostConfig[], associatedHostIds: readonly string[]) {
   const allowedIds = new Set(associatedHostIds.map((id) => id.trim()).filter(Boolean));
   return new Map(
-    hosts
-      .filter((host) => allowedIds.has(host.id))
-      .map((host) => [host.id, host] as const),
+    hosts.filter((host) => allowedIds.has(host.id)).map((host) => [host.id, host] as const),
   );
 }
 
@@ -450,7 +454,7 @@ async function resolveSession(params: {
   const strategy = normalizeSessionStrategy(params.args.session_strategy);
   if (sessionId) {
     if (strategy === "new") {
-      throw new Error("SshManager.session_strategy=new cannot be combined with session_id.");
+      throw new Error("SSHManager.session_strategy=new cannot be combined with session_id.");
     }
     const session = await validateSession({
       sessionId,
@@ -484,13 +488,13 @@ async function resolveSession(params: {
     projectPathKey: params.projectPathKey,
     title:
       normalizeOptionalString(params.args.title) ||
-      `SshManager: ${host.name || host.host || host.id}`,
+      `SSHManager: ${host.name || host.host || host.id}`,
     sftpEnabled: true,
   });
   return { session, reused: false, created: true, strategy };
 }
 
-async function executeSshManager(
+async function executeSSHManager(
   toolCall: ToolCall,
   params: {
     workdir: string;
@@ -501,7 +505,7 @@ async function executeSshManager(
   signal?: AbortSignal,
 ): Promise<ToolResultMessage> {
   const args = asArgs(toolCall.arguments);
-  let action: SshManagerAction = "list_hosts";
+  let action: SSHManagerAction = "list_hosts";
   try {
     if (signal?.aborted) {
       return errorResult(toolCall, action, "Cancelled");
@@ -521,7 +525,13 @@ async function executeSshManager(
       return okResult({
         toolCall,
         action,
-        text: hosts.length ? ["Authorized SSH hosts:", ...hosts.map(formatHostLine)].join("\n") : "No authorized SSH hosts.",
+        text: hosts.length
+          ? [
+              "Authorized SSH hosts:",
+              "credential=saved means LiveAgent already has the configured SSH credential; use create_session directly and do not ask the user for that password/key.",
+              ...hosts.map(formatHostLine),
+            ].join("\n")
+          : "No authorized SSH hosts.",
         details: { hosts },
       });
     }
@@ -608,7 +618,7 @@ async function executeSshManager(
       });
       const data = typeof args.data === "string" ? args.data : "";
       if (data.length === 0) {
-        throw new Error("SshManager.data is required.");
+        throw new Error("SSHManager.data is required.");
       }
       await invoke("terminal_input", { session_id: session.session_id, data });
       return okResult({
@@ -850,7 +860,11 @@ async function executeSshManager(
         project_path_key: params.projectPathKey,
         path: requireString(args, "path"),
         offset: normalizeOptionalPositiveInt(args.offset, 0, Number.MAX_SAFE_INTEGER),
-        max_bytes: normalizeOptionalPositiveInt(args.limit ?? args.max_bytes, 4 * 1024, 1024 * 1024),
+        max_bytes: normalizeOptionalPositiveInt(
+          args.limit ?? args.max_bytes,
+          4 * 1024,
+          1024 * 1024,
+        ),
       });
       return okResult({
         toolCall,
@@ -889,13 +903,13 @@ async function executeSshManager(
       });
     }
 
-    throw new Error("Unsupported SshManager action.");
+    throw new Error("Unsupported SSHManager action.");
   } catch (err) {
     return errorResult(toolCall, action, asErrorMessage(err));
   }
 }
 
-export function createSshManagerTools(params: {
+export function createSSHManagerTools(params: {
   enabled: boolean;
   runtimeScope: "chat" | "cron_auto_prompt";
   workdir: string;
@@ -918,7 +932,7 @@ export function createSshManagerTools(params: {
     groupId: "system",
     tools,
     executeToolCall: (toolCall, signal) =>
-      executeSshManager(
+      executeSSHManager(
         toolCall,
         {
           workdir: params.workdir,

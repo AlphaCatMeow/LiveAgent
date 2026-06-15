@@ -4,7 +4,7 @@ import { createTsModuleLoader } from "../helpers/load-ts-module.mjs";
 
 const loader = createTsModuleLoader();
 const settings = loader.loadModule("src/lib/settings/index.ts");
-const modelSelection = loader.loadModule("src/pages/chat/modelSelection.ts");
+const modelSelection = loader.loadModule("src/pages/chat/runtime/modelSelection.ts");
 
 function provider(overrides = {}) {
   const id = overrides.id ?? "provider-1";

@@ -4,16 +4,15 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
-  Suspense,
   lazy,
   type SetStateAction,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { MacOsTitleBarSpacer, MacOsTitleBarToggle } from "../components/MacOsTitleBarSpacer";
 import { ChatHistorySidebar } from "../components/chat/ChatHistorySidebar";
 import { HistoryShareModal } from "../components/chat/HistoryShareModal";
 import type {
@@ -26,19 +25,20 @@ import type {
 import { type NotifyItem, NotifyToast } from "../components/chat/NotifyToast";
 import { SharedHistoryManagerModal } from "../components/chat/SharedHistoryManagerModal";
 import { Ban, PanelRightClose, PanelRightOpen, Terminal, Upload } from "../components/icons";
-import { ProjectToolsPanel } from "../components/project-tools/ProjectToolsPanel";
+import { MacOsTitleBarSpacer, MacOsTitleBarToggle } from "../components/MacOsTitleBarSpacer";
 import type {
   LocalTunnelClient,
   TunnelCreateInput,
   TunnelSummary,
   TunnelUpdateInput,
 } from "../components/project-tools/LocalTunnelPanel";
-import type { WorkspaceCodeEditorOpenRequest } from "../components/workspace-editor/WorkspaceCodeEditorOverlay";
-import type { WorkspaceSshTerminalOpenRequest } from "../components/workspace-editor/WorkspaceSshTerminalOverlay";
-import type { WorkspaceImagePreviewOpenRequest } from "../components/workspace-editor/WorkspaceImagePreviewOverlay";
-import { isWorkspaceImagePath } from "../components/workspace-editor/workspaceImagePreview";
+import { ProjectToolsPanel } from "../components/project-tools/ProjectToolsPanel";
 import { Button } from "../components/ui/button";
 import { useConfirmDialog } from "../components/ui/confirm-dialog";
+import type { WorkspaceCodeEditorOpenRequest } from "../components/workspace-editor/WorkspaceCodeEditorOverlay";
+import type { WorkspaceImagePreviewOpenRequest } from "../components/workspace-editor/WorkspaceImagePreviewOverlay";
+import type { WorkspaceSshTerminalOpenRequest } from "../components/workspace-editor/WorkspaceSshTerminalOverlay";
+import { isWorkspaceImagePath } from "../components/workspace-editor/workspaceImagePreview";
 import { useLocale } from "../i18n";
 import {
   type CompactionStatus,
@@ -79,7 +79,6 @@ import {
 import { clearSilentMemoryDecisions } from "../lib/chat/memory/memoryDecisionLog";
 import { clearMemoryExtractorState } from "../lib/chat/memory/memoryExtractor";
 import { buildMemoryOverviewSection } from "../lib/chat/memory/memoryPrompt";
-import { memoryDeleteProject } from "../lib/memory/api";
 import {
   createUserMessageWithUploads,
   mergePendingUploadedFiles,
@@ -99,9 +98,9 @@ import {
 } from "../lib/chat/page/chatPageHelpers";
 import { createSubagentRuntimeManager } from "../lib/chat/subagent/subagentRuntimeManager";
 import { createStreamDebugLogger } from "../lib/debug/agentDebug";
-import { createConversationHookDispatcher } from "../lib/hooks/conversationHooks";
 import { tauriGitClient } from "../lib/git/tauriGitClient";
-import { tauriSftpClient } from "../lib/sftp/tauriSftpClient";
+import { createConversationHookDispatcher } from "../lib/hooks/conversationHooks";
+import { memoryDeleteProject } from "../lib/memory/api";
 import {
   lockMonacoNlsLocale,
   preparePreferredMonacoNlsLocale,
@@ -111,6 +110,7 @@ import { createModelFromConfig, toModelValue } from "../lib/providers/llm";
 import {
   type AppSettings,
   type ChatRuntimeControls,
+  DEFAULT_WORKSPACE_PROJECT_ID,
   type ExecutionMode,
   findProviderModelConfig,
   getChatRuntimeReasoningLevelsForProvider,
@@ -125,27 +125,32 @@ import {
   isProjectToolsSshTunnelOpen,
   isProjectToolsTunnelOpen,
   normalizeChatRuntimeControlsForProvider,
+  removeProjectToolsProjectState,
+  resolveWorkspaceProjects,
   type SelectedModel,
   type SystemToolId,
-  type WorkspaceProject,
-  removeProjectToolsProjectState,
-  DEFAULT_WORKSPACE_PROJECT_ID,
-  resolveWorkspaceProjects,
-  workspaceProjectPathKey,
-  updateCustomSettings,
-  updateProjectToolsFileTreeProjectState,
-  updateProjectToolsFileTreeOpen,
-  updateProjectToolsGitReviewOpen,
-  updateProjectToolsSshTunnelOpen,
-  updateProjectToolsTunnelOpen,
-  updateProjectToolsPanelActiveTab,
-  updateProjectToolsPanelTabOrder,
-  updateSshProjectHostIds,
   updateChatRuntimeControlsForProvider,
+  updateCustomSettings,
   updateMcp,
   updateMemorySettings,
+  updateProjectToolsFileTreeOpen,
+  updateProjectToolsFileTreeProjectState,
+  updateProjectToolsGitReviewOpen,
+  updateProjectToolsPanelActiveTab,
+  updateProjectToolsPanelTabOrder,
+  updateProjectToolsSshTunnelOpen,
+  updateProjectToolsTunnelOpen,
   updateSkills,
+  updateSshProjectHostIds,
+  type WorkspaceProject,
+  workspaceProjectPathKey,
 } from "../lib/settings";
+import { tauriSftpClient } from "../lib/sftp/tauriSftpClient";
+import {
+  buildSkillsSystemPrompt,
+  mergeAlwaysEnabledSkillNames,
+  resolveExplicitSkillMentions,
+} from "../lib/skills";
 import {
   applyTerminalEventToSessions,
   sortTerminalSessions,
@@ -153,6 +158,7 @@ import {
 } from "../lib/terminal/sessionStore";
 import { tauriTerminalClient } from "../lib/terminal/tauriTerminalClient";
 import type { TerminalSession } from "../lib/terminal/types";
+import type { SkillAccessPolicy } from "../lib/tools/skillAccessPolicy";
 import {
   applyWorkspaceProjectConversationActivityMap,
   buildWorkspaceProjectActivityUpdatedAts,
@@ -163,49 +169,38 @@ import {
   workspaceProjectActivityUpdatedAtsEqual,
 } from "../lib/workspaceProjects";
 import {
-  buildSkillsSystemPrompt,
-  mergeAlwaysEnabledSkillNames,
-  resolveExplicitSkillMentions,
-} from "../lib/skills";
-import type { SkillAccessPolicy } from "../lib/tools/skillAccessPolicy";
-import { ChatComposerBar } from "./chat/ChatComposerBar";
-import { ChatHeader } from "./chat/ChatHeader";
-import { ChatTranscript } from "./chat/ChatTranscript";
-import {
-  buildErrorAssistantMessage,
-  createConversationRuntimeEntry,
-  formatHookWarningMessage,
-  pruneIdleConversationRuntimeCaches,
-  setConversationRuntimeCacheEntry,
-} from "./chat/chatPageRuntime";
-import { buildPreCompactionStatus } from "./chat/compactionStatusText";
-import {
+  type ActiveGatewayBridgeRequest,
   buildCompactionContext,
+  buildErrorAssistantMessage,
+  buildPreCompactionStatus,
   buildPreparedContext as buildPreparedConversationContext,
   buildResumeContext as buildResumeConversationContext,
-} from "./chat/conversationContextBuilders";
-import { startConversationTitleJob } from "./chat/conversationTitleJob";
-import {
-  type ActiveGatewayBridgeRequest,
-  type EnsureGatewayBridgeConversationReadyOptions,
-  type SendChatAction,
-} from "./chat/gatewayBridgeTypes";
-import {
+  ChatComposerBar,
+  ChatHeader,
+  ChatTranscript,
+  clearSilentMemoryExtractionState,
+  createConversationRuntimeEntry,
   type EffectiveChatModelSelection,
+  type EnsureGatewayBridgeConversationReadyOptions,
+  formatHookWarningMessage,
+  MAX_UPLOAD_FILES,
+  pruneIdleConversationRuntimeCaches,
   resolveEffectiveChatModelSelection,
-} from "./chat/modelSelection";
-import { runAgentConversationTurn } from "./chat/runAgentConversationTurn";
-import { runTextConversationTurn } from "./chat/runTextConversationTurn";
-import { clearSilentMemoryExtractionState } from "./chat/silentMemoryExtraction";
-import { useChatHistoryList } from "./chat/useChatHistoryList";
-import { useChatPageRuntimeStore } from "./chat/useChatPageRuntimeStore";
-import { useChatSkills } from "./chat/useChatSkills";
-import { useConversationHistoryActions } from "./chat/useConversationHistoryActions";
-import { useEditResend } from "./chat/useEditResend";
-import { useGatewayBridgeBatcher } from "./chat/useGatewayBridgeBatcher";
-import { useGatewayBridgeListeners } from "./chat/useGatewayBridgeListeners";
-import { useLiveTranscriptController } from "./chat/useLiveTranscriptController";
-import { MAX_UPLOAD_FILES, usePendingUploads } from "./chat/usePendingUploads";
+  runAgentConversationTurn,
+  runTextConversationTurn,
+  type SendChatAction,
+  setConversationRuntimeCacheEntry,
+  startConversationTitleJob,
+  useChatHistoryList,
+  useChatPageRuntimeStore,
+  useChatSkills,
+  useConversationHistoryActions,
+  useEditResend,
+  useGatewayBridgeBatcher,
+  useGatewayBridgeListeners,
+  useLiveTranscriptController,
+  usePendingUploads,
+} from "./chat";
 import { McpHubPage } from "./mcp-hub/McpHubPage";
 import type { SectionId } from "./settings/types";
 import { SkillsHubPage } from "./skills-hub/SkillsHubPage";
@@ -1062,20 +1057,24 @@ export function ChatPage(props: ChatPageProps) {
     [activateWorkspaceProject, checkWorkspaceProjectDirectory, setSettings],
   );
 
-  const openTunnelToolPanel = useCallback((projectPathKey?: string) => {
-    const targetProjectPathKey =
-      workspaceProjectPathKey(projectPathKey) || workspaceProjectPathKey(activeWorkspaceProjectPath);
-    if (!targetProjectPathKey) return;
-    setActiveView("chat");
-    setProjectToolsPanelOpen(true);
-    setSettings((prev) =>
-      updateProjectToolsTunnelOpen(
-        updateProjectToolsPanelActiveTab(prev, targetProjectPathKey, "tunnel"),
-        targetProjectPathKey,
-        true,
-      ),
-    );
-  }, [activeWorkspaceProjectPath, setSettings]);
+  const openTunnelToolPanel = useCallback(
+    (projectPathKey?: string) => {
+      const targetProjectPathKey =
+        workspaceProjectPathKey(projectPathKey) ||
+        workspaceProjectPathKey(activeWorkspaceProjectPath);
+      if (!targetProjectPathKey) return;
+      setActiveView("chat");
+      setProjectToolsPanelOpen(true);
+      setSettings((prev) =>
+        updateProjectToolsTunnelOpen(
+          updateProjectToolsPanelActiveTab(prev, targetProjectPathKey, "tunnel"),
+          targetProjectPathKey,
+          true,
+        ),
+      );
+    },
+    [activeWorkspaceProjectPath, setSettings],
+  );
 
   const handleBrowseWorkspaceProjectInSystemFileManager = useCallback(
     async (project: WorkspaceProject) => {
@@ -2674,7 +2673,10 @@ export function ChatPage(props: ChatPageProps) {
       gatewayBridgeRequest?.selectedSystemToolIdsOverride ??
       settings.system.selectedSystemTools;
     const effectiveProjectPathKey = workspaceProjectPathKey(effectiveWorkdir);
-    const effectiveAssociatedSshHostIds = getSshProjectHostIds(settings.ssh, effectiveProjectPathKey);
+    const effectiveAssociatedSshHostIds = getSshProjectHostIds(
+      settings.ssh,
+      effectiveProjectPathKey,
+    );
     const effectiveIsAgentDevExecutionMode = isAgentDevMode(effectiveExecutionMode);
     const effectiveSkillsEnabled = settings.skills.enabled && effectiveIsAgentMode;
     const hasRemoteGatewayTarget =
@@ -4713,10 +4715,7 @@ export function ChatPage(props: ChatPageProps) {
         width={settings.customSettings.projectToolsPanel.width}
         theme={settings.theme}
         disabledMessage={terminalDisabledMessage}
-        activeTab={getProjectToolsPanelActiveTab(
-          settings.customSettings,
-          terminalProjectPathKey,
-        )}
+        activeTab={getProjectToolsPanelActiveTab(settings.customSettings, terminalProjectPathKey)}
         tabOrder={getProjectToolsPanelTabOrder(settings.customSettings, terminalProjectPathKey)}
         fileTreeOpen={projectToolsFileTreeOpen}
         fileTreeState={getProjectToolsFileTreeProjectState(
@@ -4770,9 +4769,7 @@ export function ChatPage(props: ChatPageProps) {
           setSettings((prev) => updateProjectToolsTunnelOpen(prev, terminalProjectPathKey, open))
         }
         onSshTunnelOpenChange={(open) =>
-          setSettings((prev) =>
-            updateProjectToolsSshTunnelOpen(prev, terminalProjectPathKey, open),
-          )
+          setSettings((prev) => updateProjectToolsSshTunnelOpen(prev, terminalProjectPathKey, open))
         }
         onSshProjectHostIdsChange={(hostIds) =>
           setSettings((prev) => updateSshProjectHostIds(prev, terminalProjectPathKey, hostIds))

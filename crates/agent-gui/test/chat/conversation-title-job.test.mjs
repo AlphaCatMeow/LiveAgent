@@ -18,12 +18,12 @@ test("conversation title job disables thinking, caching, and native web search",
   };
   const loader = createTsModuleLoader({
     mocks: {
-      "../../lib/providers/llm": llmMock,
+      "../../../lib/providers/llm": llmMock,
       [llmModulePath]: llmMock,
     },
   });
   const { buildConversationTitleRuntime, startConversationTitleJob } = loader.loadModule(
-    "src/pages/chat/conversationTitleJob.ts",
+    "src/pages/chat/runtime/conversationTitleJob.ts",
   );
   const runtime = {
     baseUrl: "https://example.test",

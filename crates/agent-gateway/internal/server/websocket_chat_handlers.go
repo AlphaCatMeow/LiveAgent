@@ -40,10 +40,6 @@ func (c *websocketConnection) handleChatStart(req websocketRequest) {
 		_ = c.writeError(req.ID, "agent offline")
 		return
 	}
-	if !status.ChatRuntimeReady {
-		_ = c.writeError(req.ID, "Desktop chat runtime is not ready. Please retry.")
-		return
-	}
 
 	snapshot, created, err := c.sm.StartPendingChatRunWithClientRequest(
 		req.ID,

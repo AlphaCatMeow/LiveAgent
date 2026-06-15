@@ -7,6 +7,7 @@ export type SectionId =
   | "system"
   | "providers"
   | "agents"
+  | "ssh"
   | "memory"
   | "hooks"
   | "cron"

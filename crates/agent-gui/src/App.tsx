@@ -64,16 +64,44 @@ function hasSettingsSyncChanged(prev: AppSettings, next: AppSettings) {
   );
 }
 
-function hasProviderApiKeyUpdatesPayload(payload: unknown) {
-  const updates =
+function hasSensitiveSettingsUpdates(settings: AppSettings) {
+  return (
+    settings.customProviders.some((provider) => provider.apiKey.trim().length > 0) ||
+    settings.ssh.hosts.some(
+      (host) => host.password.trim().length > 0 || host.privateKey.trim().length > 0,
+    )
+  );
+}
+
+function hasSensitiveSettingsUpdatesPayload(payload: unknown) {
+  const source =
     payload && typeof payload === "object" && !Array.isArray(payload)
-      ? (payload as { providerApiKeyUpdates?: unknown }).providerApiKeyUpdates
-      : undefined;
-  if (!updates || typeof updates !== "object" || Array.isArray(updates)) {
-    return false;
+      ? (payload as { providerApiKeyUpdates?: unknown; sshSecretUpdates?: unknown })
+      : {};
+  const providerUpdates = source.providerApiKeyUpdates;
+  if (
+    providerUpdates &&
+    typeof providerUpdates === "object" &&
+    !Array.isArray(providerUpdates) &&
+    Object.values(providerUpdates).some(
+      (value) => typeof value === "string" && value.trim().length > 0,
+    )
+  ) {
+    return true;
   }
-  return Object.values(updates).some(
-    (value) => typeof value === "string" && value.trim().length > 0,
+  const sshUpdates = source.sshSecretUpdates;
+  return Boolean(
+    sshUpdates &&
+      typeof sshUpdates === "object" &&
+      !Array.isArray(sshUpdates) &&
+      Object.values(sshUpdates).some((value) => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+        const update = value as { password?: unknown; privateKey?: unknown };
+        return (
+          (typeof update.password === "string" && update.password.trim().length > 0) ||
+          (typeof update.privateKey === "string" && update.privateKey.trim().length > 0)
+        );
+      }),
   );
 }
 
@@ -190,7 +218,12 @@ export default function App() {
           normalizeSettings(updater(prev)),
           defaultWorkdirRef.current,
         );
-        queueSettingsSave(prev, next, "保存设置失败。", hasSettingsSyncChanged(prev, next));
+        queueSettingsSave(
+          prev,
+          next,
+          "保存设置失败。",
+          hasSettingsSyncChanged(prev, next) || hasSensitiveSettingsUpdates(next),
+        );
         return next;
       });
     },
@@ -270,7 +303,7 @@ export default function App() {
             defaultWorkdirRef.current,
           );
           const publicChanged = hasSettingsSyncChanged(prev, next);
-          if (!publicChanged && !hasProviderApiKeyUpdatesPayload(event.payload)) {
+          if (!publicChanged && !hasSensitiveSettingsUpdatesPayload(event.payload)) {
             return prev;
           }
           queueSettingsSave(prev, next, "同步 WebUI 设置失败。", publicChanged);

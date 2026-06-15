@@ -453,7 +453,7 @@ export function GitBranchSelector(props: {
         <DropdownMenuTrigger
           disabled={disabled || !gitClient || !workdir.trim()}
           className={cn(
-            "composer-reasoning-trigger inline-flex h-8 max-w-[13rem] shrink-0 items-center gap-1 rounded-full border px-2 text-xs font-medium outline-hidden transition-colors",
+            "composer-reasoning-trigger inline-flex h-8 min-w-0 max-w-[13rem] items-center gap-1 rounded-full border px-2 text-xs font-medium outline-hidden transition-colors",
             noRepo
               ? "border-transparent bg-foreground/[0.04] text-muted-foreground"
               : "border-emerald-300/25 bg-emerald-50/65 text-foreground hover:bg-emerald-50 dark:border-emerald-300/15 dark:bg-emerald-400/[0.08]",
@@ -462,9 +462,9 @@ export function GitBranchSelector(props: {
           title={visibleError || (!canWrite ? disabledMessage : "") || label}
         >
           {loading || mutating || initializing ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
           ) : (
-            <GitBranch className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-300" />
+            <GitBranch className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-300" />
           )}
           <span className="min-w-0 truncate">{label}</span>
         </DropdownMenuTrigger>

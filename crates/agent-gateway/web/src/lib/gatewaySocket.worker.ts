@@ -1,4 +1,7 @@
-import type { GatewaySettingsSyncPayload } from "@/lib/settings/sync";
+import type {
+  GatewaySettingsSyncPayload,
+  GatewaySettingsSyncUpdatePayload,
+} from "@/lib/settings/sync";
 import type { HistoryMessageRef } from "@/lib/chat/conversationState";
 import type { PendingUploadedFile } from "@/lib/chat/uploadedFiles";
 import type { TerminalEvent, TerminalSession, TerminalSnapshot } from "@/lib/terminal/types";
@@ -80,6 +83,7 @@ type ManagedClient = {
   statusError: string | null;
   idleTimer: ReturnType<typeof setTimeout> | null;
   terminalDetachTimers: Map<string, ReturnType<typeof setTimeout>>;
+  terminalSessions: Map<string, TerminalSession>;
 };
 
 type PortState = {
@@ -146,6 +150,49 @@ function shouldPostTerminalEventToPort(state: PortState, event: TerminalEvent) {
     (sessionID !== "" && state.terminalSessionIds.has(sessionID)) ||
     (projectPathKey !== "" && state.terminalProjectKeys.has(projectPathKey))
   );
+}
+
+function applyTerminalSessionEvent(
+  sessions: Map<string, TerminalSession>,
+  event: TerminalEvent,
+) {
+  if (event.kind === "output") return;
+  const sessionId = (event.sessionId || event.session?.id || "").trim();
+  if (event.kind === "closed") {
+    if (sessionId) {
+      sessions.delete(sessionId);
+    }
+    return;
+  }
+  const session = event.session;
+  if (session?.id) {
+    sessions.set(session.id, session);
+  }
+}
+
+function replayTerminalSessionsToPort(port: MessagePort, state: PortState) {
+  const sessions = [...state.client.terminalSessions.values()].sort((a, b) => {
+    const leftProject = (a.projectPathKey || a.cwd || "").trim();
+    const rightProject = (b.projectPathKey || b.cwd || "").trim();
+    return leftProject.localeCompare(rightProject) || a.createdAt - b.createdAt;
+  });
+  for (const session of sessions) {
+    const event: TerminalEvent = {
+      kind: "created",
+      sessionId: session.id,
+      projectPathKey: session.projectPathKey,
+      session,
+    };
+    if (!shouldPostTerminalEventToPort(state, event)) {
+      continue;
+    }
+    postToPort(port, {
+      type: "event",
+      event_type: "terminal",
+      payload: event,
+      connection_id: state.connectionID,
+    });
+  }
 }
 
 function terminalDetachKey(sessionID: string, projectPathKey: string) {
@@ -275,11 +322,15 @@ function getManagedClient(token: string) {
     statusError: null,
     idleTimer: null,
     terminalDetachTimers: new Map(),
+    terminalSessions: new Map(),
   };
 
   managed.client.subscribeStatus((status, error) => {
     managed.status = status;
     managed.statusError = error;
+    if (status?.online === false) {
+      managed.terminalSessions.clear();
+    }
     broadcast(managed, {
       type: "event",
       event_type: "status",
@@ -308,7 +359,15 @@ function getManagedClient(token: string) {
     });
   });
   managed.client.subscribeTerminal((event) => {
+    applyTerminalSessionEvent(managed.terminalSessions, event);
     broadcastTerminal(managed, event);
+  });
+  managed.client.subscribeSftpTransfers((event) => {
+    broadcast(managed, {
+      type: "event",
+      event_type: "sftp",
+      payload: event,
+    });
   });
 
   clients.set(normalizedToken, managed);
@@ -322,14 +381,15 @@ function connectPort(
   const client = getManagedClient(message.token);
   clearManagedClientCleanup(client);
   client.ports.add(port);
-  portStates.set(port, {
+  const state: PortState = {
     connectionID: message.connection_id,
     client,
     streams: new Map(),
     terminalAllProjects: false,
     terminalProjectKeys: new Set(),
     terminalSessionIds: new Set(),
-  });
+  };
+  portStates.set(port, state);
   postToPort(port, {
     type: "ready",
     connection_id: message.connection_id,
@@ -338,6 +398,7 @@ function connectPort(
       error: client.statusError,
     },
   });
+  replayTerminalSessionsToPort(port, state);
 }
 
 function disconnectPort(port: MessagePort) {
@@ -465,8 +526,18 @@ async function resolveRequest(client: GatewayWebSocketClient, method: string, pa
     case "settings.get":
       return client.getSettings();
     case "settings.update":
-      await client.updateSettings(payload as GatewaySettingsSyncPayload);
+      await client.updateSettings(payload as GatewaySettingsSyncUpdatePayload);
       return undefined;
+    case "settings.ssh_known_host.reset": {
+      const body = (payload && typeof payload === "object" ? payload : {}) as Record<
+        string,
+        unknown
+      >;
+      return client.resetSshKnownHost({
+        host: String(body.host ?? ""),
+        port: typeof body.port === "number" ? body.port : Number(body.port ?? 0),
+      });
+    }
     case "skills.list":
       return client.listSkillFiles();
     case "skills.manage":
@@ -536,6 +607,30 @@ async function resolveRequest(client: GatewayWebSocketClient, method: string, pa
         cols: typeof body.cols === "number" ? body.cols : undefined,
         rows: typeof body.rows === "number" ? body.rows : undefined,
       });
+    case "terminal.create_ssh":
+      return client.createSshTerminal({
+        cwd: String(body.cwd ?? ""),
+        projectPathKey: String(body.project_path_key ?? ""),
+        hostId: String(body.ssh_host_id ?? ""),
+        title: typeof body.title === "string" ? body.title : undefined,
+        cols: typeof body.cols === "number" ? body.cols : undefined,
+        rows: typeof body.rows === "number" ? body.rows : undefined,
+        sftpEnabled: body.sftp_enabled === true,
+      });
+    case "terminal.answer_ssh_prompt":
+      return client.answerSshTerminalPrompt({
+        promptId: String(body.prompt_id ?? ""),
+        answer: typeof body.prompt_answer === "string" ? body.prompt_answer : undefined,
+        trustHostKey: body.trust_host_key === true,
+      });
+    case "terminal.cancel_ssh_prompt":
+      await client.cancelSshTerminalPrompt(String(body.prompt_id ?? ""));
+      return { action: "cancel_ssh_prompt" };
+    case "terminal.ssh_latency":
+      return client.sshTerminalLatency(
+        String(body.session_id ?? ""),
+        String(body.project_path_key ?? ""),
+      );
     case "terminal.attach":
       return client.snapshotTerminal(
         String(body.session_id ?? ""),
@@ -581,6 +676,73 @@ async function resolveRequest(client: GatewayWebSocketClient, method: string, pa
         String(body.session_id ?? ""),
         String(body.project_path_key ?? ""),
       );
+      return undefined;
+    case "sftp.list":
+      return client.sftpList({
+        sessionId: String(body.session_id ?? ""),
+        projectPathKey: String(body.project_path_key ?? ""),
+        workdir: String(body.workdir ?? ""),
+        side: body.side === "local" ? "local" : "remote",
+        path: String(
+          body.side === "local" ? (body.local_path ?? "") : (body.remote_path ?? ""),
+        ),
+      });
+    case "sftp.stat":
+      return client.sftpStat({
+        sessionId: String(body.session_id ?? ""),
+        projectPathKey: String(body.project_path_key ?? ""),
+        workdir: String(body.workdir ?? ""),
+        side: body.side === "local" ? "local" : "remote",
+        path: String(
+          body.side === "local" ? (body.local_path ?? "") : (body.remote_path ?? ""),
+        ),
+      });
+    case "sftp.mkdir":
+      return client.sftpMkdir({
+        sessionId: String(body.session_id ?? ""),
+        projectPathKey: String(body.project_path_key ?? ""),
+        workdir: String(body.workdir ?? ""),
+        side: body.side === "local" ? "local" : "remote",
+        path: String(
+          body.side === "local" ? (body.local_path ?? "") : (body.remote_path ?? ""),
+        ),
+      });
+    case "sftp.rename":
+      return client.sftpRename({
+        sessionId: String(body.session_id ?? ""),
+        projectPathKey: String(body.project_path_key ?? ""),
+        workdir: String(body.workdir ?? ""),
+        side: body.side === "local" ? "local" : "remote",
+        fromPath: String(body.from_path ?? ""),
+        toPath: String(body.to_path ?? ""),
+      });
+    case "sftp.delete":
+      return client.sftpDelete({
+        sessionId: String(body.session_id ?? ""),
+        projectPathKey: String(body.project_path_key ?? ""),
+        workdir: String(body.workdir ?? ""),
+        side: body.side === "local" ? "local" : "remote",
+        path: String(
+          body.side === "local" ? (body.local_path ?? "") : (body.remote_path ?? ""),
+        ),
+        recursive: body.recursive === true,
+      });
+    case "sftp.transfer":
+      return client.sftpTransfer({
+        sessionId: String(body.session_id ?? ""),
+        projectPathKey: String(body.project_path_key ?? ""),
+        workdir: String(body.workdir ?? ""),
+        direction: body.direction === "download" ? "download" : "upload",
+        sourcePath: String(body.from_path ?? ""),
+        targetPath: String(body.target_path ?? ""),
+        recursive: body.recursive === true,
+        overwrite: body.overwrite === true,
+      });
+    case "sftp.cancel":
+      await client.sftpCancelTransfer({
+        sessionId: String(body.session_id ?? ""),
+        transferId: String(body.from_path ?? ""),
+      });
       return undefined;
     case "tunnel.list":
       return {

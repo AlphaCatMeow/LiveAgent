@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createTsModuleLoader } from "../helpers/load-ts-module.mjs";
 
 const rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
-const modulePath = path.join(rootDir, "src/pages/chat/chatScrollViewport.ts");
+const modulePath = path.join(rootDir, "src/pages/chat/utils/chatScrollViewport.ts");
 const {
   CHAT_SCROLL_VIEWPORT_SELECTOR,
   resolveNearestScrollViewport,

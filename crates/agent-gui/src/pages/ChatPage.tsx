@@ -4,16 +4,15 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
-  Suspense,
   lazy,
   type SetStateAction,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { MacOsTitleBarSpacer, MacOsTitleBarToggle } from "../components/MacOsTitleBarSpacer";
 import { ChatHistorySidebar } from "../components/chat/ChatHistorySidebar";
 import { HistoryShareModal } from "../components/chat/HistoryShareModal";
 import type {
@@ -26,18 +25,20 @@ import type {
 import { type NotifyItem, NotifyToast } from "../components/chat/NotifyToast";
 import { SharedHistoryManagerModal } from "../components/chat/SharedHistoryManagerModal";
 import { Ban, PanelRightClose, PanelRightOpen, Terminal, Upload } from "../components/icons";
-import { ProjectToolsPanel } from "../components/project-tools/ProjectToolsPanel";
+import { MacOsTitleBarSpacer, MacOsTitleBarToggle } from "../components/MacOsTitleBarSpacer";
 import type {
   LocalTunnelClient,
   TunnelCreateInput,
   TunnelSummary,
   TunnelUpdateInput,
 } from "../components/project-tools/LocalTunnelPanel";
-import type { WorkspaceCodeEditorOpenRequest } from "../components/workspace-editor/WorkspaceCodeEditorOverlay";
-import type { WorkspaceImagePreviewOpenRequest } from "../components/workspace-editor/WorkspaceImagePreviewOverlay";
-import { isWorkspaceImagePath } from "../components/workspace-editor/workspaceImagePreview";
+import { ProjectToolsPanel } from "../components/project-tools/ProjectToolsPanel";
 import { Button } from "../components/ui/button";
 import { useConfirmDialog } from "../components/ui/confirm-dialog";
+import type { WorkspaceCodeEditorOpenRequest } from "../components/workspace-editor/WorkspaceCodeEditorOverlay";
+import type { WorkspaceImagePreviewOpenRequest } from "../components/workspace-editor/WorkspaceImagePreviewOverlay";
+import type { WorkspaceSshTerminalOpenRequest } from "../components/workspace-editor/WorkspaceSshTerminalOverlay";
+import { isWorkspaceImagePath } from "../components/workspace-editor/workspaceImagePreview";
 import { useLocale } from "../i18n";
 import {
   type CompactionStatus,
@@ -78,7 +79,6 @@ import {
 import { clearSilentMemoryDecisions } from "../lib/chat/memory/memoryDecisionLog";
 import { clearMemoryExtractorState } from "../lib/chat/memory/memoryExtractor";
 import { buildMemoryOverviewSection } from "../lib/chat/memory/memoryPrompt";
-import { memoryDeleteProject } from "../lib/memory/api";
 import {
   createUserMessageWithUploads,
   mergePendingUploadedFiles,
@@ -98,8 +98,9 @@ import {
 } from "../lib/chat/page/chatPageHelpers";
 import { createSubagentRuntimeManager } from "../lib/chat/subagent/subagentRuntimeManager";
 import { createStreamDebugLogger } from "../lib/debug/agentDebug";
-import { createConversationHookDispatcher } from "../lib/hooks/conversationHooks";
 import { tauriGitClient } from "../lib/git/tauriGitClient";
+import { createConversationHookDispatcher } from "../lib/hooks/conversationHooks";
+import { memoryDeleteProject } from "../lib/memory/api";
 import {
   lockMonacoNlsLocale,
   preparePreferredMonacoNlsLocale,
@@ -109,37 +110,47 @@ import { createModelFromConfig, toModelValue } from "../lib/providers/llm";
 import {
   type AppSettings,
   type ChatRuntimeControls,
+  DEFAULT_WORKSPACE_PROJECT_ID,
   type ExecutionMode,
   findProviderModelConfig,
   getChatRuntimeReasoningLevelsForProvider,
   getProjectToolsFileTreeProjectState,
   getProjectToolsPanelActiveTab,
   getProjectToolsPanelTabOrder,
+  getSshProjectHostIds,
   isAgentDevMode,
   isAgentExecutionMode,
   isProjectToolsFileTreeOpen,
   isProjectToolsGitReviewOpen,
+  isProjectToolsSshTunnelOpen,
   isProjectToolsTunnelOpen,
   normalizeChatRuntimeControlsForProvider,
+  removeProjectToolsProjectState,
+  resolveWorkspaceProjects,
   type SelectedModel,
   type SystemToolId,
-  type WorkspaceProject,
-  removeProjectToolsProjectState,
-  DEFAULT_WORKSPACE_PROJECT_ID,
-  resolveWorkspaceProjects,
-  workspaceProjectPathKey,
-  updateCustomSettings,
-  updateProjectToolsFileTreeProjectState,
-  updateProjectToolsFileTreeOpen,
-  updateProjectToolsGitReviewOpen,
-  updateProjectToolsTunnelOpen,
-  updateProjectToolsPanelActiveTab,
-  updateProjectToolsPanelTabOrder,
   updateChatRuntimeControlsForProvider,
+  updateCustomSettings,
   updateMcp,
   updateMemorySettings,
+  updateProjectToolsFileTreeOpen,
+  updateProjectToolsFileTreeProjectState,
+  updateProjectToolsGitReviewOpen,
+  updateProjectToolsPanelActiveTab,
+  updateProjectToolsPanelTabOrder,
+  updateProjectToolsSshTunnelOpen,
+  updateProjectToolsTunnelOpen,
   updateSkills,
+  updateSshProjectHostIds,
+  type WorkspaceProject,
+  workspaceProjectPathKey,
 } from "../lib/settings";
+import { tauriSftpClient } from "../lib/sftp/tauriSftpClient";
+import {
+  buildSkillsSystemPrompt,
+  mergeAlwaysEnabledSkillNames,
+  resolveExplicitSkillMentions,
+} from "../lib/skills";
 import {
   applyTerminalEventToSessions,
   sortTerminalSessions,
@@ -147,6 +158,7 @@ import {
 } from "../lib/terminal/sessionStore";
 import { tauriTerminalClient } from "../lib/terminal/tauriTerminalClient";
 import type { TerminalSession } from "../lib/terminal/types";
+import type { SkillAccessPolicy } from "../lib/tools/skillAccessPolicy";
 import {
   applyWorkspaceProjectConversationActivityMap,
   buildWorkspaceProjectActivityUpdatedAts,
@@ -157,49 +169,38 @@ import {
   workspaceProjectActivityUpdatedAtsEqual,
 } from "../lib/workspaceProjects";
 import {
-  buildSkillsSystemPrompt,
-  mergeAlwaysEnabledSkillNames,
-  resolveExplicitSkillMentions,
-} from "../lib/skills";
-import type { SkillAccessPolicy } from "../lib/tools/skillAccessPolicy";
-import { ChatComposerBar } from "./chat/ChatComposerBar";
-import { ChatHeader } from "./chat/ChatHeader";
-import { ChatTranscript } from "./chat/ChatTranscript";
-import {
-  buildErrorAssistantMessage,
-  createConversationRuntimeEntry,
-  formatHookWarningMessage,
-  pruneIdleConversationRuntimeCaches,
-  setConversationRuntimeCacheEntry,
-} from "./chat/chatPageRuntime";
-import { buildPreCompactionStatus } from "./chat/compactionStatusText";
-import {
+  type ActiveGatewayBridgeRequest,
   buildCompactionContext,
+  buildErrorAssistantMessage,
+  buildPreCompactionStatus,
   buildPreparedContext as buildPreparedConversationContext,
   buildResumeContext as buildResumeConversationContext,
-} from "./chat/conversationContextBuilders";
-import { startConversationTitleJob } from "./chat/conversationTitleJob";
-import {
-  type ActiveGatewayBridgeRequest,
-  type EnsureGatewayBridgeConversationReadyOptions,
-  type SendChatAction,
-} from "./chat/gatewayBridgeTypes";
-import {
+  ChatComposerBar,
+  ChatHeader,
+  ChatTranscript,
+  clearSilentMemoryExtractionState,
+  createConversationRuntimeEntry,
   type EffectiveChatModelSelection,
+  type EnsureGatewayBridgeConversationReadyOptions,
+  formatHookWarningMessage,
+  MAX_UPLOAD_FILES,
+  pruneIdleConversationRuntimeCaches,
   resolveEffectiveChatModelSelection,
-} from "./chat/modelSelection";
-import { runAgentConversationTurn } from "./chat/runAgentConversationTurn";
-import { runTextConversationTurn } from "./chat/runTextConversationTurn";
-import { clearSilentMemoryExtractionState } from "./chat/silentMemoryExtraction";
-import { useChatHistoryList } from "./chat/useChatHistoryList";
-import { useChatPageRuntimeStore } from "./chat/useChatPageRuntimeStore";
-import { useChatSkills } from "./chat/useChatSkills";
-import { useConversationHistoryActions } from "./chat/useConversationHistoryActions";
-import { useEditResend } from "./chat/useEditResend";
-import { useGatewayBridgeBatcher } from "./chat/useGatewayBridgeBatcher";
-import { useGatewayBridgeListeners } from "./chat/useGatewayBridgeListeners";
-import { useLiveTranscriptController } from "./chat/useLiveTranscriptController";
-import { MAX_UPLOAD_FILES, usePendingUploads } from "./chat/usePendingUploads";
+  runAgentConversationTurn,
+  runTextConversationTurn,
+  type SendChatAction,
+  setConversationRuntimeCacheEntry,
+  startConversationTitleJob,
+  useChatHistoryList,
+  useChatPageRuntimeStore,
+  useChatSkills,
+  useConversationHistoryActions,
+  useEditResend,
+  useGatewayBridgeBatcher,
+  useGatewayBridgeListeners,
+  useLiveTranscriptController,
+  usePendingUploads,
+} from "./chat";
 import { McpHubPage } from "./mcp-hub/McpHubPage";
 import type { SectionId } from "./settings/types";
 import { SkillsHubPage } from "./skills-hub/SkillsHubPage";
@@ -217,6 +218,13 @@ const WorkspaceImagePreviewOverlay = lazy(async () => {
   const module = await import("../components/workspace-editor/WorkspaceImagePreviewOverlay");
   return {
     default: module.WorkspaceImagePreviewOverlay,
+  };
+});
+
+const WorkspaceSshTerminalOverlay = lazy(async () => {
+  const module = await import("../components/workspace-editor/WorkspaceSshTerminalOverlay");
+  return {
+    default: module.WorkspaceSshTerminalOverlay,
   };
 });
 
@@ -663,7 +671,12 @@ export function ChatPage(props: ChatPageProps) {
   const [workspaceImagePreviewOpenRequest, setWorkspaceImagePreviewOpenRequest] =
     useState<WorkspaceImagePreviewOpenRequest | null>(null);
   const workspaceImagePreviewRequestIdRef = useRef(0);
-  const [projectTerminalSessions, setProjectTerminalSessions] = useState<TerminalSession[]>([]);
+  const [workspaceSshTerminalMounted, setWorkspaceSshTerminalMounted] = useState(false);
+  const [workspaceSshTerminalOpen, setWorkspaceSshTerminalOpen] = useState(false);
+  const [workspaceSshTerminalOpenRequest, setWorkspaceSshTerminalOpenRequest] =
+    useState<WorkspaceSshTerminalOpenRequest | null>(null);
+  const workspaceSshTerminalRequestIdRef = useRef(0);
+  const [terminalSessions, setTerminalSessions] = useState<TerminalSession[]>([]);
   const [remoteRuntimeStatus, setRemoteRuntimeStatus] = useState<GatewayRuntimeStatus>(() =>
     buildFallbackGatewayStatus(settings.remote),
   );
@@ -1044,20 +1057,24 @@ export function ChatPage(props: ChatPageProps) {
     [activateWorkspaceProject, checkWorkspaceProjectDirectory, setSettings],
   );
 
-  const openTunnelToolPanel = useCallback((projectPathKey?: string) => {
-    const targetProjectPathKey =
-      workspaceProjectPathKey(projectPathKey) || workspaceProjectPathKey(activeWorkspaceProjectPath);
-    if (!targetProjectPathKey) return;
-    setActiveView("chat");
-    setProjectToolsPanelOpen(true);
-    setSettings((prev) =>
-      updateProjectToolsTunnelOpen(
-        updateProjectToolsPanelActiveTab(prev, targetProjectPathKey, "tunnel"),
-        targetProjectPathKey,
-        true,
-      ),
-    );
-  }, [activeWorkspaceProjectPath, setSettings]);
+  const openTunnelToolPanel = useCallback(
+    (projectPathKey?: string) => {
+      const targetProjectPathKey =
+        workspaceProjectPathKey(projectPathKey) ||
+        workspaceProjectPathKey(activeWorkspaceProjectPath);
+      if (!targetProjectPathKey) return;
+      setActiveView("chat");
+      setProjectToolsPanelOpen(true);
+      setSettings((prev) =>
+        updateProjectToolsTunnelOpen(
+          updateProjectToolsPanelActiveTab(prev, targetProjectPathKey, "tunnel"),
+          targetProjectPathKey,
+          true,
+        ),
+      );
+    },
+    [activeWorkspaceProjectPath, setSettings],
+  );
 
   const handleBrowseWorkspaceProjectInSystemFileManager = useCallback(
     async (project: WorkspaceProject) => {
@@ -1344,6 +1361,7 @@ export function ChatPage(props: ChatPageProps) {
   const previousHistoryScopeKeyRef = useRef(historyScopeKey);
   const currentConversationHistoryUpdatedAtRef = useRef<number | null>(null);
   const locallySyncedHistoryUpdatedAtRef = useRef(new Map<string, number>());
+  const gatewayBridgeHistorySummaryRef = useRef(new Map<string, ChatHistorySummary>());
   const startNewConversationActionRef = useRef<(options?: { workdir?: string }) => void>(
     () => undefined,
   );
@@ -1445,6 +1463,15 @@ export function ChatPage(props: ChatPageProps) {
   const terminalProjectPathKey = terminalProjectPath
     ? workspaceProjectPathKey(terminalProjectPath)
     : "";
+  const projectTerminalSessions = useMemo(
+    () =>
+      terminalProjectPathKey
+        ? terminalSessions.filter((session) =>
+            terminalSessionBelongsToProject(session, terminalProjectPathKey),
+          )
+        : [],
+    [terminalProjectPathKey, terminalSessions],
+  );
   const projectToolsFileTreeOpen = isProjectToolsFileTreeOpen(
     settings.customSettings,
     terminalProjectPathKey,
@@ -1453,6 +1480,11 @@ export function ChatPage(props: ChatPageProps) {
     settings.customSettings,
     terminalProjectPathKey,
   );
+  const projectToolsSshTunnelOpen = isProjectToolsSshTunnelOpen(
+    settings.customSettings,
+    terminalProjectPathKey,
+  );
+  const associatedSshHostIds = getSshProjectHostIds(settings.ssh, terminalProjectPathKey);
   const terminalDisabledMessage = !isAgentMode
     ? "Project tools require Agent project mode."
     : !terminalProjectPath
@@ -1464,6 +1496,22 @@ export function ChatPage(props: ChatPageProps) {
     : !remoteRuntimeStatus.online
       ? t("projectTools.tunnelRemoteOffline")
       : undefined;
+  const hideWorkspaceSshTerminalOverlay = useCallback(() => {
+    setWorkspaceSshTerminalOpen(false);
+  }, []);
+  const openWorkspaceSshTerminalRequest = useCallback(
+    (request: WorkspaceSshTerminalOpenRequest) => {
+      setWorkspaceImagePreviewOpen(false);
+      setWorkspaceEditorOpen(false);
+      setWorkspaceSshTerminalMounted(true);
+      setWorkspaceSshTerminalOpen(true);
+      setWorkspaceSshTerminalOpenRequest(request);
+    },
+    [],
+  );
+  const requestWorkspaceEditorClose = useCallback(() => {
+    setWorkspaceEditorCloseRequestId((current) => current + 1);
+  }, []);
   const handleOpenWorkspaceFile = useCallback(
     (path: string) => {
       if (!terminalProjectPath || !terminalProjectPathKey) return;
@@ -1479,6 +1527,7 @@ export function ChatPage(props: ChatPageProps) {
         });
         return;
       }
+      hideWorkspaceSshTerminalOverlay();
       setWorkspaceImagePreviewOpen(false);
       workspaceEditorRequestIdRef.current += 1;
       setWorkspaceEditorCleanupPending(false);
@@ -1491,11 +1540,21 @@ export function ChatPage(props: ChatPageProps) {
         path,
       });
     },
-    [terminalProjectPath, terminalProjectPathKey],
+    [hideWorkspaceSshTerminalOverlay, terminalProjectPath, terminalProjectPathKey],
   );
-  const requestWorkspaceEditorClose = useCallback(() => {
-    setWorkspaceEditorCloseRequestId((current) => current + 1);
-  }, []);
+  const handleOpenSshTerminal = useCallback(
+    (session: TerminalSession, kind: WorkspaceSshTerminalOpenRequest["kind"] = "bash") => {
+      if (session.kind !== "ssh") return;
+      workspaceSshTerminalRequestIdRef.current += 1;
+      const openRequest = {
+        id: workspaceSshTerminalRequestIdRef.current,
+        sessionId: session.id,
+        kind,
+      };
+      openWorkspaceSshTerminalRequest(openRequest);
+    },
+    [openWorkspaceSshTerminalRequest],
+  );
   const requestWorkspaceImagePreviewClose = useCallback(() => {
     setWorkspaceImagePreviewOpen(false);
   }, []);
@@ -1528,20 +1587,20 @@ export function ChatPage(props: ChatPageProps) {
   ]);
   useEffect(() => {
     if (!terminalProjectPathKey) {
-      setProjectTerminalSessions([]);
+      setTerminalSessions([]);
       return;
     }
     let cancelled = false;
     void tauriTerminalClient
-      .list(terminalProjectPathKey)
+      .list()
       .then((sessions) => {
         if (!cancelled) {
-          setProjectTerminalSessions(sortTerminalSessions(sessions));
+          setTerminalSessions(sortTerminalSessions(sessions));
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setProjectTerminalSessions([]);
+          setTerminalSessions([]);
         }
       });
     return () => {
@@ -1551,9 +1610,8 @@ export function ChatPage(props: ChatPageProps) {
   useEffect(() => {
     if (!terminalProjectPathKey) return;
     return tauriTerminalClient.subscribe((event) => {
-      if (!terminalSessionBelongsToProject(event.session, terminalProjectPathKey)) return;
       if (event.kind === "output") return;
-      setProjectTerminalSessions((current) => applyTerminalEventToSessions(current, event));
+      setTerminalSessions((current) => applyTerminalEventToSessions(current, event));
     });
   }, [terminalProjectPathKey]);
   useEffect(() => {
@@ -1714,6 +1772,7 @@ export function ChatPage(props: ChatPageProps) {
       composerDraftCacheRef.current.delete(key);
       locallySyncedHistoryUpdatedAtRef.current.delete(key);
       appliedGatewayHistoryTruncationsRef.current.delete(key);
+      gatewayBridgeHistorySummaryRef.current.delete(key);
       pendingUploadsByConversationRef.current.delete(key);
       clearMemoryExtractorState(key);
       clearSilentMemoryExtractionState(key);
@@ -2108,13 +2167,15 @@ export function ChatPage(props: ChatPageProps) {
           }
           if (terminalSessions.length > 0) {
             await tauriTerminalClient.closeProject(pathKey);
-            setProjectTerminalSessions((current) =>
+            setTerminalSessions((current) =>
               current.filter((session) => !terminalSessionBelongsToProject(session, pathKey)),
             );
           }
           if (pathKey && terminalProjectPathKey === pathKey) {
             setProjectToolsPanelOpen(false);
-            setProjectTerminalSessions([]);
+            setTerminalSessions((current) =>
+              current.filter((session) => !terminalSessionBelongsToProject(session, pathKey)),
+            );
           }
 
           const visibleConversationId = currentConversationIdRef.current;
@@ -2285,10 +2346,8 @@ export function ChatPage(props: ChatPageProps) {
     const knownConversation =
       requestedConversationId === currentConversationIdRef.current ||
       conversationRuntimeCacheRef.current.has(requestedConversationId) ||
-      historyItemsRef.current.some((item) => item.id === requestedConversationId);
-    if (!knownConversation) {
-      throw new Error(`Conversation not found: ${requestedConversationId}`);
-    }
+      historyItemsRef.current.some((item) => item.id === requestedConversationId) ||
+      gatewayBridgeHistorySummaryRef.current.has(requestedConversationId);
     if (isConversationRunning(requestedConversationId)) {
       throw new Error(`Conversation is already running: ${requestedConversationId}`);
     }
@@ -2313,6 +2372,7 @@ export function ChatPage(props: ChatPageProps) {
       (item) => item.id === requestedConversationId && item.isPending,
     );
     const shouldHydrateFromHistory =
+      !knownConversation ||
       forceHydrate ||
       hydratingConversationIdRef.current === requestedConversationId ||
       hydrationFailedConversationIdRef.current === requestedConversationId ||
@@ -2334,8 +2394,23 @@ export function ChatPage(props: ChatPageProps) {
       isSending: cached?.isSending,
       workdir: record.cwd,
     });
+    const historySummary: ChatHistorySummary = {
+      id: record.id,
+      title: record.title,
+      providerId: record.providerId,
+      model: record.model,
+      sessionId: record.sessionId,
+      cwd: record.cwd,
+      messageCount: record.state.meta.totalMessageCount,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+      isPinned: record.isPinned,
+      pinnedAt: record.pinnedAt,
+    };
     setConversationRuntimeCacheEntry(conversationRuntimeCacheRef.current, record.id, nextEntry);
     persistedConversationStateRef.current.set(record.id, record.state);
+    gatewayBridgeHistorySummaryRef.current.set(record.id, historySummary);
+    setHistoryItems((prev) => mergeHistoryItem(prev, historySummary));
     if (currentConversationIdRef.current === record.id) {
       syncVisibleConversationRuntime(record.id, nextEntry);
     }
@@ -2597,6 +2672,11 @@ export function ChatPage(props: ChatPageProps) {
       overrides?.selectedSystemToolIdsOverride ??
       gatewayBridgeRequest?.selectedSystemToolIdsOverride ??
       settings.system.selectedSystemTools;
+    const effectiveProjectPathKey = workspaceProjectPathKey(effectiveWorkdir);
+    const effectiveAssociatedSshHostIds = getSshProjectHostIds(
+      settings.ssh,
+      effectiveProjectPathKey,
+    );
     const effectiveIsAgentDevExecutionMode = isAgentDevMode(effectiveExecutionMode);
     const effectiveSkillsEnabled = settings.skills.enabled && effectiveIsAgentMode;
     const hasRemoteGatewayTarget =
@@ -2807,7 +2887,9 @@ export function ChatPage(props: ChatPageProps) {
     });
     const baseConversationState = runtimeEntry.state;
     const isFirstTurn = baseConversationState.meta.totalMessageCount === 0;
-    const existingHistoryItem = historyItemsRef.current.find((item) => item.id === conversationId);
+    const existingHistoryItem =
+      historyItemsRef.current.find((item) => item.id === conversationId) ??
+      gatewayBridgeHistorySummaryRef.current.get(conversationId);
     const shouldCreatePendingHistoryItem = isFirstTurn && !existingHistoryItem;
     const fallbackTitle =
       existingHistoryItem &&
@@ -3565,6 +3647,10 @@ export function ChatPage(props: ChatPageProps) {
           selectableMcpServers,
           remoteWebTunnelsEnabled: settings.remote.enableWebTunnels,
           remoteGatewayOnline: canShareHistory,
+          sshHosts: settings.ssh.hosts,
+          associatedSshHostIds: effectiveAssociatedSshHostIds,
+          sshManagerRemoteAllowed:
+            !gatewayBridgeRequest || settings.remote.enableWebSshTerminal === true,
           onTunnelsChanged: (change) => {
             setTunnelRefreshToken((current) => current + 1);
             if (change.action === "create") {
@@ -4597,20 +4683,39 @@ export function ChatPage(props: ChatPageProps) {
             />
           </Suspense>
         ) : null}
+        {workspaceSshTerminalMounted ? (
+          <Suspense
+            fallback={
+              <div className="absolute inset-0 z-50 flex min-h-0 flex-col border-r border-border bg-background text-sm text-muted-foreground shadow-2xl">
+                <MacOsTitleBarSpacer className="bg-muted/45" />
+                <div className="flex min-h-0 flex-1 items-center justify-center">
+                  {t("workspaceSshTerminal.loading")}
+                </div>
+              </div>
+            }
+          >
+            <WorkspaceSshTerminalOverlay
+              openRequest={workspaceSshTerminalOpenRequest}
+              sessions={terminalSessions}
+              client={tauriTerminalClient}
+              sftpClient={tauriSftpClient}
+              theme={settings.theme}
+              isOpen={workspaceSshTerminalOpen}
+              onHide={() => setWorkspaceSshTerminalOpen(false)}
+            />
+          </Suspense>
+        ) : null}
       </div>
       <ProjectToolsPanel
         isOpen={activeView === "chat" && projectToolsPanelOpen}
         collapseImmediately={activeView !== "chat"}
         projectPathKey={terminalProjectPathKey}
         cwd={terminalProjectPath}
-        sessions={projectTerminalSessions}
+        sessions={terminalSessions}
         width={settings.customSettings.projectToolsPanel.width}
         theme={settings.theme}
         disabledMessage={terminalDisabledMessage}
-        activeTab={getProjectToolsPanelActiveTab(
-          settings.customSettings,
-          terminalProjectPathKey,
-        )}
+        activeTab={getProjectToolsPanelActiveTab(settings.customSettings, terminalProjectPathKey)}
         tabOrder={getProjectToolsPanelTabOrder(settings.customSettings, terminalProjectPathKey)}
         fileTreeOpen={projectToolsFileTreeOpen}
         fileTreeState={getProjectToolsFileTreeProjectState(
@@ -4619,6 +4724,9 @@ export function ChatPage(props: ChatPageProps) {
         )}
         gitReviewOpen={isProjectToolsGitReviewOpen(settings.customSettings, terminalProjectPathKey)}
         tunnelOpen={projectToolsTunnelOpen}
+        sshTunnelOpen={projectToolsSshTunnelOpen}
+        sshHosts={settings.ssh.hosts}
+        associatedSshHostIds={associatedSshHostIds}
         client={tauriTerminalClient}
         gitClient={tauriGitClient}
         gitWriteEnabled
@@ -4660,7 +4768,14 @@ export function ChatPage(props: ChatPageProps) {
         onTunnelOpenChange={(open) =>
           setSettings((prev) => updateProjectToolsTunnelOpen(prev, terminalProjectPathKey, open))
         }
-        onSessionsChange={setProjectTerminalSessions}
+        onSshTunnelOpenChange={(open) =>
+          setSettings((prev) => updateProjectToolsSshTunnelOpen(prev, terminalProjectPathKey, open))
+        }
+        onSshProjectHostIdsChange={(hostIds) =>
+          setSettings((prev) => updateSshProjectHostIds(prev, terminalProjectPathKey, hostIds))
+        }
+        onOpenSshSession={handleOpenSshTerminal}
+        onSessionsChange={(sessions) => setTerminalSessions(sortTerminalSessions(sessions))}
         onInsertFileMention={(path, kind) => {
           composerRef.current?.insertFileMention(path, kind);
           composerRef.current?.focus();

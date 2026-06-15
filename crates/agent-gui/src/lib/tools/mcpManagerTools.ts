@@ -13,7 +13,7 @@ import {
   createBuiltinMetadataMap,
   type McpManagerResultDetails,
 } from "./builtinTypes";
-import type { SystemToolRuntimeScope } from "./customSystemTools";
+import type { SystemToolRuntimeScope } from "./systemToolOptions";
 
 type McpManagerAction =
   | "list"

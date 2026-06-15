@@ -3,12 +3,22 @@ import {
   normalizeChatRuntimeControls,
   normalizeProjectToolsFileTreeSettings,
   normalizeProjectToolsGitReviewSettings,
+  normalizeProjectToolsSshTunnelSettings,
   normalizeProjectToolsTunnelSettings,
   normalizeSettings,
   workspaceProjectPathKey,
 } from "./index";
 
 export type GatewayProviderApiKeyUpdates = Record<string, string>;
+export type GatewaySshSecretUpdates = Record<
+  string,
+  {
+    password?: string;
+    privateKey?: string;
+    privateKeyPassphrase?: string;
+    proxyPassword?: string;
+  }
+>;
 export type GatewaySettingsSyncProvider = Omit<AppSettings["customProviders"][number], "apiKey"> & {
   apiKeyConfigured?: boolean;
 };
@@ -22,9 +32,13 @@ export type GatewaySettingsSyncPayload = {
   customProviders: GatewaySettingsSyncProvider[];
   mcp: AppSettings["mcp"];
   agents: AppSettings["agents"];
+  ssh: AppSettings["ssh"];
   hooks: AppSettings["hooks"];
   cron: AppSettings["cron"];
-  remote?: Pick<AppSettings["remote"], "enableWebTerminal" | "enableWebGit" | "enableWebTunnels">;
+  remote?: Pick<
+    AppSettings["remote"],
+    "enableWebTerminal" | "enableWebSshTerminal" | "enableWebGit" | "enableWebTunnels"
+  >;
   memory: AppSettings["memory"];
   customSettings: GatewaySettingsSyncCustomSettings;
   skills: AppSettings["skills"];
@@ -33,7 +47,27 @@ export type GatewaySettingsSyncPayload = {
   theme: AppSettings["theme"];
   locale: AppSettings["locale"];
   providerApiKeyUpdates?: GatewayProviderApiKeyUpdates;
+  sshSecretUpdates?: GatewaySshSecretUpdates;
 };
+export type GatewaySettingsSyncUpdatePayload = Partial<GatewaySettingsSyncPayload>;
+
+const GATEWAY_SETTINGS_SYNC_FIELDS = [
+  "system",
+  "customProviders",
+  "mcp",
+  "agents",
+  "ssh",
+  "hooks",
+  "cron",
+  "remote",
+  "memory",
+  "customSettings",
+  "skills",
+  "chatRuntimeControls",
+  "selectedModel",
+  "theme",
+  "locale",
+] as const satisfies readonly (keyof GatewaySettingsSyncPayload)[];
 
 function asObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -71,7 +105,34 @@ export function redactSettingsForWebStorage(settings: AppSettings): AppSettings 
   return normalizeSettings({
     ...settings,
     customProviders: redactCustomProvidersForWebStorage(settings.customProviders),
+    ssh: redactSshSettingsForWebStorage(settings.ssh),
   });
+}
+
+function redactSshSettingsForWebStorage(ssh: AppSettings["ssh"]): AppSettings["ssh"] {
+  return {
+    projectHostAssociations: ssh.projectHostAssociations,
+    hosts: ssh.hosts.map((host) => ({
+      ...host,
+      password: "",
+      passwordConfigured: host.password.trim().length > 0 || host.passwordConfigured === true,
+      privateKey: "",
+      privateKeyConfigured:
+        host.privateKey.trim().length > 0 ||
+        host.privateKeyPath.trim().length > 0 ||
+        host.privateKeyConfigured === true,
+      privateKeyPassphrase: "",
+      privateKeyPassphraseConfigured:
+        host.privateKeyPassphrase.trim().length > 0 ||
+        host.privateKeyPassphraseConfigured === true,
+      proxy: {
+        ...host.proxy,
+        password: "",
+        passwordConfigured:
+          host.proxy.password.trim().length > 0 || host.proxy.passwordConfigured === true,
+      },
+    })),
+  };
 }
 
 function collectProviderApiKeyUpdates(
@@ -85,6 +146,31 @@ function collectProviderApiKeyUpdates(
     }
   }
   return Object.keys(updates).length > 0 ? updates : undefined;
+}
+
+function collectSshSecretUpdates(ssh: AppSettings["ssh"]): GatewaySshSecretUpdates | undefined {
+  const updates: GatewaySshSecretUpdates = {};
+  for (const host of ssh.hosts) {
+    const id = host.id.trim();
+    if (!id) continue;
+    const password = host.password.trim();
+    const privateKey = host.privateKey.trim();
+    const privateKeyPassphrase = host.privateKeyPassphrase.trim();
+    const proxyPassword = host.proxy.password.trim();
+    const update: GatewaySshSecretUpdates[string] = {};
+    if (password) update.password = password;
+    if (privateKey) update.privateKey = privateKey;
+    if (privateKeyPassphrase) update.privateKeyPassphrase = privateKeyPassphrase;
+    if (proxyPassword) update.proxyPassword = proxyPassword;
+    if (Object.keys(update).length > 0) {
+      updates[id] = update;
+    }
+  }
+  return Object.keys(updates).length > 0 ? updates : undefined;
+}
+
+function redactSshSettingsForGateway(ssh: AppSettings["ssh"]): AppSettings["ssh"] {
+  return redactSshSettingsForWebStorage(ssh);
 }
 
 function syncableCustomSettings(
@@ -215,6 +301,34 @@ function normalizeProviderApiKeyUpdates(value: unknown): GatewayProviderApiKeyUp
   return updates;
 }
 
+function normalizeSshSecretUpdates(value: unknown): GatewaySshSecretUpdates {
+  const source = asObject(value);
+  const updates: GatewaySshSecretUpdates = {};
+  for (const [id, rawUpdate] of Object.entries(source)) {
+    const normalizedId = id.trim();
+    if (!normalizedId) continue;
+    const updateSource = asObject(rawUpdate);
+    const password = typeof updateSource.password === "string" ? updateSource.password.trim() : "";
+    const privateKey =
+      typeof updateSource.privateKey === "string" ? updateSource.privateKey.trim() : "";
+    const privateKeyPassphrase =
+      typeof updateSource.privateKeyPassphrase === "string"
+        ? updateSource.privateKeyPassphrase.trim()
+        : "";
+    const proxyPassword =
+      typeof updateSource.proxyPassword === "string" ? updateSource.proxyPassword.trim() : "";
+    const update: GatewaySshSecretUpdates[string] = {};
+    if (password) update.password = password;
+    if (privateKey) update.privateKey = privateKey;
+    if (privateKeyPassphrase) update.privateKeyPassphrase = privateKeyPassphrase;
+    if (proxyPassword) update.proxyPassword = proxyPassword;
+    if (Object.keys(update).length > 0) {
+      updates[normalizedId] = update;
+    }
+  }
+  return updates;
+}
+
 function mergeSyncedCustomProviders(
   current: AppSettings["customProviders"],
   incoming: unknown,
@@ -252,6 +366,7 @@ function mergeSyncedRemoteSettings(
   const source = asObject(incoming);
   if (
     !Object.hasOwn(source, "enableWebTerminal") &&
+    !Object.hasOwn(source, "enableWebSshTerminal") &&
     !Object.hasOwn(source, "enableWebGit") &&
     !Object.hasOwn(source, "enableWebTunnels")
   ) {
@@ -262,12 +377,76 @@ function mergeSyncedRemoteSettings(
     enableWebTerminal: Object.hasOwn(source, "enableWebTerminal")
       ? source.enableWebTerminal === true
       : current.enableWebTerminal,
+    enableWebSshTerminal: Object.hasOwn(source, "enableWebSshTerminal")
+      ? source.enableWebSshTerminal === true
+      : current.enableWebSshTerminal,
     enableWebGit: Object.hasOwn(source, "enableWebGit")
       ? source.enableWebGit === true
       : current.enableWebGit,
     enableWebTunnels: Object.hasOwn(source, "enableWebTunnels")
       ? source.enableWebTunnels === true
       : current.enableWebTunnels,
+  };
+}
+
+function mergeSyncedSshSettings(
+  current: AppSettings["ssh"],
+  incoming: unknown,
+  secretUpdates: GatewaySshSecretUpdates,
+): AppSettings["ssh"] {
+  const source = asObject(incoming);
+  const normalized = normalizeSettings({ ssh: incoming as AppSettings["ssh"] }).ssh;
+  const currentById = new Map(current.hosts.map((host) => [host.id, host]));
+  const projectHostAssociations = Object.hasOwn(source, "projectHostAssociations")
+    ? normalized.projectHostAssociations
+    : normalizeSettings({
+        ssh: {
+          hosts: normalized.hosts,
+          projectHostAssociations: current.projectHostAssociations,
+        },
+      }).ssh.projectHostAssociations;
+  return {
+    projectHostAssociations,
+    hosts: normalized.hosts.map((host) => {
+      const currentHost = currentById.get(host.id);
+      const update = secretUpdates[host.id];
+      const password = (update?.password ?? host.password.trim()) || currentHost?.password || "";
+      const privateKey =
+        (update?.privateKey ?? host.privateKey.trim()) || currentHost?.privateKey || "";
+      const privateKeyPassphrase =
+        (update?.privateKeyPassphrase ?? host.privateKeyPassphrase.trim()) ||
+        currentHost?.privateKeyPassphrase ||
+        "";
+      const proxyPassword =
+        (update?.proxyPassword ?? host.proxy.password.trim()) || currentHost?.proxy.password || "";
+      return {
+        ...host,
+        password,
+        passwordConfigured:
+          password.length > 0 ||
+          host.passwordConfigured === true ||
+          currentHost?.passwordConfigured === true,
+        privateKey,
+        privateKeyConfigured:
+          privateKey.length > 0 ||
+          host.privateKeyPath.trim().length > 0 ||
+          host.privateKeyConfigured === true ||
+          currentHost?.privateKeyConfigured === true,
+        privateKeyPassphrase,
+        privateKeyPassphraseConfigured:
+          privateKeyPassphrase.length > 0 ||
+          host.privateKeyPassphraseConfigured === true ||
+          currentHost?.privateKeyPassphraseConfigured === true,
+        proxy: {
+          ...host.proxy,
+          password: proxyPassword,
+          passwordConfigured:
+            proxyPassword.length > 0 ||
+            host.proxy.passwordConfigured === true ||
+            currentHost?.proxy.passwordConfigured === true,
+        },
+      };
+    }),
   };
 }
 
@@ -343,6 +522,21 @@ function mergeSyncedProjectToolsTunnelSettings(
   };
 }
 
+function mergeSyncedProjectToolsSshTunnelSettings(
+  current: AppSettings["customSettings"]["projectToolsSshTunnel"],
+  incoming: unknown,
+): AppSettings["customSettings"]["projectToolsSshTunnel"] {
+  const currentState = normalizeProjectToolsSshTunnelSettings(current);
+  const incomingState = normalizeProjectToolsSshTunnelSettings(incoming);
+  const openFromIncoming = incomingState.openVersion >= currentState.openVersion;
+  return {
+    openProjectPathKeys: openFromIncoming
+      ? incomingState.openProjectPathKeys
+      : currentState.openProjectPathKeys,
+    openVersion: Math.max(currentState.openVersion, incomingState.openVersion),
+  };
+}
+
 export function buildGatewaySettingsSyncPayload(
   settings: AppSettings,
   options: { includeProviderApiKeyUpdates?: boolean } = {},
@@ -352,10 +546,12 @@ export function buildGatewaySettingsSyncPayload(
     customProviders: redactCustomProvidersForGateway(settings.customProviders),
     mcp: settings.mcp,
     agents: settings.agents,
+    ssh: redactSshSettingsForGateway(settings.ssh),
     hooks: settings.hooks,
     cron: settings.cron,
     remote: {
       enableWebTerminal: settings.remote.enableWebTerminal,
+      enableWebSshTerminal: settings.remote.enableWebSshTerminal,
       enableWebGit: settings.remote.enableWebGit,
       enableWebTunnels: settings.remote.enableWebTunnels,
     },
@@ -373,7 +569,40 @@ export function buildGatewaySettingsSyncPayload(
   if (providerApiKeyUpdates) {
     payload.providerApiKeyUpdates = providerApiKeyUpdates;
   }
+  const sshSecretUpdates = options.includeProviderApiKeyUpdates
+    ? collectSshSecretUpdates(settings.ssh)
+    : undefined;
+  if (sshSecretUpdates) {
+    payload.sshSecretUpdates = sshSecretUpdates;
+  }
   return payload;
+}
+
+export function buildGatewaySettingsSyncUpdatePayload(
+  prev: AppSettings,
+  next: AppSettings,
+  options: { includeProviderApiKeyUpdates?: boolean } = {},
+): GatewaySettingsSyncUpdatePayload {
+  const previousPayload = buildGatewaySettingsSyncPayload(prev);
+  const nextPayload = buildGatewaySettingsSyncPayload(next, options);
+  const update: GatewaySettingsSyncUpdatePayload = {};
+
+  for (const field of GATEWAY_SETTINGS_SYNC_FIELDS) {
+    if (JSON.stringify(previousPayload[field]) !== JSON.stringify(nextPayload[field])) {
+      (update as Record<string, unknown>)[field] = nextPayload[field];
+    }
+  }
+
+  if (nextPayload.providerApiKeyUpdates) {
+    update.customProviders ??= nextPayload.customProviders;
+    update.providerApiKeyUpdates = nextPayload.providerApiKeyUpdates;
+  }
+  if (nextPayload.sshSecretUpdates) {
+    update.ssh ??= nextPayload.ssh;
+    update.sshSecretUpdates = nextPayload.sshSecretUpdates;
+  }
+
+  return update;
 }
 
 export function applyGatewaySettingsSyncPayload(
@@ -382,6 +611,7 @@ export function applyGatewaySettingsSyncPayload(
 ): AppSettings {
   const source = asObject(payload);
   const providerApiKeyUpdates = normalizeProviderApiKeyUpdates(source.providerApiKeyUpdates);
+  const sshSecretUpdates = normalizeSshSecretUpdates(source.sshSecretUpdates);
   const selectedModel =
     source.selectedModel === null
       ? undefined
@@ -407,6 +637,9 @@ export function applyGatewaySettingsSyncPayload(
     ),
     mcp: (source.mcp as AppSettings["mcp"] | undefined) ?? current.mcp,
     agents: (source.agents as AppSettings["agents"] | undefined) ?? current.agents,
+    ssh: Object.hasOwn(source, "ssh")
+      ? mergeSyncedSshSettings(current.ssh, source.ssh, sshSecretUpdates)
+      : current.ssh,
     hooks: (source.hooks as AppSettings["hooks"] | undefined) ?? current.hooks,
     cron: (source.cron as AppSettings["cron"] | undefined) ?? current.cron,
     memory: memory as AppSettings["memory"],
@@ -430,6 +663,12 @@ export function applyGatewaySettingsSyncPayload(
             incomingCustomSettings.projectToolsTunnel,
           )
         : current.customSettings.projectToolsTunnel,
+      projectToolsSshTunnel: Object.hasOwn(incomingCustomSettings, "projectToolsSshTunnel")
+        ? mergeSyncedProjectToolsSshTunnelSettings(
+            current.customSettings.projectToolsSshTunnel,
+            incomingCustomSettings.projectToolsSshTunnel,
+          )
+        : current.customSettings.projectToolsSshTunnel,
       chatSidebar: current.customSettings.chatSidebar,
       projectToolsPanel: current.customSettings.projectToolsPanel,
     },

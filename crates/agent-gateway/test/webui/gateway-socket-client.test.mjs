@@ -331,6 +331,89 @@ test("SharedWorker gateway client accepts terminal list sessions from worker pay
   resetGatewayWebSocketClient();
 });
 
+test("SharedWorker gateway client keeps SSH create snapshots from worker payload", async () => {
+  installBrowser();
+  FakeSharedWorker.instances = [];
+  globalThis.SharedWorker = FakeSharedWorker;
+  const loader = createWebModuleLoader();
+  const { getGatewayWebSocketClient, resetGatewayWebSocketClient } = loader.loadModule("src/lib/gatewaySocket.ts");
+  resetGatewayWebSocketClient();
+
+  const client = getGatewayWebSocketClient(" token ");
+  const port = FakeSharedWorker.instances[0].port;
+  const connect = port.messages.find((message) => message.type === "connect");
+  port.emit({
+    type: "ready",
+    connection_id: connect.connection_id,
+    payload: { status: { online: true }, error: null },
+  });
+
+  const createPromise = client.createSshTerminal({
+    cwd: "/workspace/project",
+    projectPathKey: "project-key",
+    hostId: "host-1",
+  });
+  await waitFor(
+    () => port.messages.some((message) => message.type === "request" && message.method === "terminal.create_ssh"),
+    "terminal.create_ssh worker request",
+  );
+  const request = port.messages.find((message) => message.type === "request" && message.method === "terminal.create_ssh");
+  assert.ok(request);
+  assert.deepEqual(request.payload, {
+    cwd: "/workspace/project",
+    project_path_key: "project-key",
+    ssh_host_id: "host-1",
+    title: undefined,
+    cols: undefined,
+    rows: undefined,
+    sftp_enabled: false,
+  });
+  port.emit({
+    type: "response",
+    connection_id: connect.connection_id,
+    request_id: request.request_id,
+    payload: {
+      snapshot: {
+        session: {
+          id: "ssh-1",
+          projectPathKey: "project-key",
+          cwd: "/workspace/project",
+          shell: "ssh",
+          title: "Claw-SG",
+          kind: "ssh",
+          ssh: {
+            hostId: "host-1",
+            hostName: "Claw-SG",
+            username: "root",
+            host: "8.219.204.112",
+            port: 22,
+            authType: "privateKey",
+            status: "connected",
+            reconnectAttempt: 0,
+            reconnectMaxAttempts: 3,
+          },
+          pid: null,
+          cols: 80,
+          rows: 24,
+          createdAt: 10,
+          updatedAt: 10,
+          running: true,
+        },
+        output: "root@s878169:~# ",
+        truncated: false,
+        outputStartOffset: 0,
+        outputEndOffset: 18,
+      },
+    },
+  });
+
+  const result = await createPromise;
+  assert.equal(result.snapshot?.session.id, "ssh-1");
+  assert.equal(result.snapshot?.session.ssh?.hostId, "host-1");
+  assert.equal(result.snapshot?.output, "root@s878169:~# ");
+  resetGatewayWebSocketClient();
+});
+
 test("SharedWorker gateway client forwards chat runtime controls to the worker", async () => {
   installBrowser();
   FakeSharedWorker.instances = [];
@@ -444,6 +527,7 @@ test("Gateway SharedWorker broadcasts events with each port connection id", asyn
     historyListeners = [];
     conversationListeners = [];
     settingsListeners = [];
+    sftpTransferListeners = [];
 
     constructor(token) {
       this.token = token;
@@ -471,6 +555,11 @@ test("Gateway SharedWorker broadcasts events with each port connection id", asyn
     }
 
     subscribeTerminal() {
+      return () => {};
+    }
+
+    subscribeSftpTransfers(listener) {
+      this.sftpTransferListeners.push(listener);
       return () => {};
     }
 
@@ -526,6 +615,31 @@ test("Gateway SharedWorker broadcasts events with each port connection id", asyn
     payload: historyEvent,
   });
 
+  const sftpEvent = {
+    kind: "progress",
+    transfer: {
+      id: "transfer-1",
+      sessionId: "ssh-1",
+      status: "running",
+      bytesTransferred: 12,
+      totalBytes: 24,
+    },
+  };
+  clientInstances[0].sftpTransferListeners[0](sftpEvent);
+
+  assert.deepEqual(firstPort.messages.at(-1), {
+    type: "event",
+    event_type: "sftp",
+    connection_id: "connection-1",
+    payload: sftpEvent,
+  });
+  assert.deepEqual(secondPort.messages.at(-1), {
+    type: "event",
+    event_type: "sftp",
+    connection_id: "connection-2",
+    payload: sftpEvent,
+  });
+
   globalThis.onconnect = previousOnConnect;
 });
 
@@ -560,6 +674,10 @@ test("Gateway SharedWorker applies foreground wakeups to the managed socket clie
     }
 
     subscribeTerminal() {
+      return () => {};
+    }
+
+    subscribeSftpTransfers() {
       return () => {};
     }
 
@@ -625,6 +743,10 @@ test("Gateway SharedWorker terminal metadata reaches every page while output sta
 
     subscribeTerminal(listener) {
       this.terminalListeners.push(listener);
+      return () => {};
+    }
+
+    subscribeSftpTransfers() {
       return () => {};
     }
 
@@ -772,6 +894,10 @@ test("Gateway SharedWorker forwards terminal output while attach request is pend
       return () => {};
     }
 
+    subscribeSftpTransfers() {
+      return () => {};
+    }
+
     snapshotTerminal(sessionId, maxBytes, projectPathKey) {
       this.calls.push(["snapshotTerminal", sessionId, maxBytes, projectPathKey]);
       return new Promise((resolve) => {
@@ -888,6 +1014,10 @@ test("Gateway SharedWorker keeps upstream terminal attached until every port det
 
     subscribeTerminal(listener) {
       this.terminalListeners.push(listener);
+      return () => {};
+    }
+
+    subscribeSftpTransfers() {
       return () => {};
     }
 
@@ -1060,6 +1190,10 @@ test("Gateway SharedWorker forwards chat metadata and uploaded files", async () 
     }
 
     subscribeTerminal() {
+      return () => {};
+    }
+
+    subscribeSftpTransfers() {
       return () => {};
     }
 
@@ -1635,6 +1769,10 @@ test("Gateway SharedWorker forwards history share requests", async () => {
       return () => {};
     }
 
+    subscribeSftpTransfers() {
+      return () => {};
+    }
+
     getHistoryShare(conversationID) {
       this.calls.push(["getHistoryShare", conversationID]);
       return {
@@ -1773,6 +1911,10 @@ test("Gateway SharedWorker forwards tunnel requests", async () => {
     }
 
     subscribeTerminal() {
+      return () => {};
+    }
+
+    subscribeSftpTransfers() {
       return () => {};
     }
 
@@ -1986,6 +2128,10 @@ test("Gateway SharedWorker forwards chat.attach streams to the requesting port",
       return () => {};
     }
 
+    subscribeSftpTransfers() {
+      return () => {};
+    }
+
     async *attachChat(conversationID, options) {
       this.calls.push(["attachChat", conversationID, options.afterSeq]);
       yield {
@@ -2079,6 +2225,10 @@ test("Gateway SharedWorker forwards conversation cancel without a stream id", as
     }
 
     subscribeTerminal() {
+      return () => {};
+    }
+
+    subscribeSftpTransfers() {
       return () => {};
     }
 

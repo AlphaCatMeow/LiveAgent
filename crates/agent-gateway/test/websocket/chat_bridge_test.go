@@ -318,7 +318,7 @@ func TestWebSocketChatStartForwardsNormalizedRequestAndStreamsEvents(t *testing.
 	}
 }
 
-func TestWebSocketChatStartRequiresRuntimeReady(t *testing.T) {
+func TestWebSocketChatStartWakesRuntimeWhenHeartbeatIsStale(t *testing.T) {
 	t.Parallel()
 
 	sm := session.NewManager()
@@ -339,19 +339,29 @@ func TestWebSocketChatStartRequiresRuntimeReady(t *testing.T) {
 		"message":         "hello gateway",
 	})
 
-	env := receiveEnvelope(t, conn)
-	if env.ID != "chat-not-ready" ||
-		env.Type != "error" ||
-		!strings.Contains(env.Error, "Desktop chat runtime is not ready") {
-		t.Fatalf("not-ready response = %#v, want chat runtime readiness error", env)
+	outbound := readOutboundEnvelope(t, agentSession)
+	if outbound.GetRequestId() != "chat-not-ready" {
+		t.Fatalf("outbound request id = %q, want chat-not-ready", outbound.GetRequestId())
 	}
-	select {
-	case outbound := <-agentSession.Outbound():
-		t.Fatalf("unexpected outbound request while runtime not ready: %#v", outbound)
-	case <-time.After(100 * time.Millisecond):
+	request := outbound.GetChatRequest()
+	if request == nil || request.GetMessage() != "hello gateway" {
+		t.Fatalf("outbound chat request = %#v", request)
 	}
-	if got := sm.ActiveChatRunConversationIDs(); len(got) != 0 {
-		t.Fatalf("active chat runs after not-ready request = %#v, want empty", got)
+
+	sm.DispatchFromAgent(&gatewayv1.AgentEnvelope{
+		RequestId: "chat-not-ready",
+		Timestamp: time.Now().Unix(),
+		Payload: &gatewayv1.AgentEnvelope_ChatEvent{
+			ChatEvent: &gatewayv1.ChatEvent{
+				Type:           gatewayv1.ChatEvent_DONE,
+				ConversationId: "conversation-not-ready",
+				Data:           `{"type":"done"}`,
+			},
+		},
+	})
+	done := receiveEnvelopeWithID(t, conn, "chat-not-ready")
+	if done.Type != "chat.event" {
+		t.Fatalf("done envelope = %#v, want chat.event", done)
 	}
 }
 

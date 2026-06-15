@@ -14,7 +14,7 @@ import {
   type Theme,
   updateSystem,
 } from "../../lib/settings";
-import { CUSTOM_SYSTEM_TOOL_OPTIONS } from "../../lib/tools/customSystemTools";
+import { SYSTEM_TOOL_OPTIONS } from "../../lib/tools/systemToolOptions";
 import type { SettingsSectionProps } from "./types";
 
 export function SystemSettingsForm(props: SettingsSectionProps) {
@@ -266,7 +266,7 @@ export function SystemSettingsForm(props: SettingsSectionProps) {
         </p>
 
         <div className="space-y-2">
-          {CUSTOM_SYSTEM_TOOL_OPTIONS.map((tool) => {
+          {SYSTEM_TOOL_OPTIONS.map((tool) => {
             const checked = selectedSystemTools.includes(tool.id);
             return (
               <label
@@ -303,7 +303,7 @@ export function SystemSettingsForm(props: SettingsSectionProps) {
           })}
         </div>
 
-        {CUSTOM_SYSTEM_TOOL_OPTIONS.length === 0 ? (
+        {SYSTEM_TOOL_OPTIONS.length === 0 ? (
           <div className="rounded-xl border border-dashed bg-muted/20 px-4 py-6 text-center">
             <Wrench className="mx-auto mb-2 h-6 w-6 text-muted-foreground/40" />
             <p className="text-xs text-muted-foreground">{t("settings.noSystemTools")}</p>

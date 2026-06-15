@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ArrowLeft, BookOpen, Brain, Clock3, Cloud, Cpu, Settings2, Zap } from "../components/icons";
+import {
+  ArrowLeft,
+  BookOpen,
+  Brain,
+  Clock3,
+  Cloud,
+  Cpu,
+  Key,
+  Settings2,
+  Zap,
+} from "../components/icons";
 
 import { useLocale } from "../i18n";
 import { AgentsSection } from "./settings/AgentsSection";
@@ -8,6 +18,7 @@ import { HooksSection } from "./settings/HooksSection";
 import { MemoryPanel } from "./settings/MemoryPanel";
 import { ProvidersSection } from "./settings/ProvidersSection";
 import { RemoteSection } from "./settings/RemoteSection";
+import { SshSection } from "./settings/SshSection";
 import { SystemSettingsForm } from "./settings/SystemSettingsForm";
 import type { SectionId, SettingsPageProps } from "./settings/types";
 
@@ -101,6 +112,10 @@ const NAV_ITEMS_STATIC: Array<{ id: SectionId; icon: ReactNode }> = [
     icon: <Clock3 className="h-4 w-4" />,
   },
   {
+    id: "ssh",
+    icon: <Key className="h-4 w-4" />,
+  },
+  {
     id: "remote",
     icon: <Cloud className="h-4 w-4" />,
   },
@@ -122,6 +137,7 @@ export function SettingsPage(props: SettingsPageProps) {
     system: t("settings.navSystem"),
     providers: t("settings.navProviders"),
     agents: t("settings.navAgents"),
+    ssh: t("settings.navSsh"),
     memory: t("settings.navMemory"),
     hooks: t("settings.navHooks"),
     cron: t("settings.navCron"),
@@ -162,6 +178,8 @@ export function SettingsPage(props: SettingsPageProps) {
         return <CronSection settings={settings} setSettings={setSettings} />;
       case "agents":
         return <AgentsSection settings={settings} setSettings={setSettings} />;
+      case "ssh":
+        return <SshSection settings={settings} setSettings={setSettings} />;
       case "remote":
         return <RemoteSection settings={settings} setSettings={setSettings} />;
       case "memory":

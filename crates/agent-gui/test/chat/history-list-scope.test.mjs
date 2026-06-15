@@ -4,7 +4,7 @@ import test from "node:test";
 import { createTsModuleLoader } from "../helpers/load-ts-module.mjs";
 
 const loader = createTsModuleLoader();
-const historyListScope = loader.loadModule("src/pages/chat/historyListScope.ts");
+const historyListScope = loader.loadModule("src/pages/chat/history/historyListScope.ts");
 
 function summary(id, cwd, updatedAt = 1) {
   return {

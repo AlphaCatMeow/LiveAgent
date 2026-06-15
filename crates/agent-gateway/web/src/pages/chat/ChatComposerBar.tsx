@@ -259,7 +259,7 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
           </div>
 
           <div className="relative flex items-center justify-between gap-2 px-3 pb-2 pt-1">
-            <div className="flex min-w-0 items-center gap-1">
+            <div className="flex min-w-0 flex-1 items-center gap-1">
               <RuntimeControlTooltip label={uploadTooltip}>
                 <button
                   type="button"

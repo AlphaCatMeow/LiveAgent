@@ -21,7 +21,7 @@ const loader = createTsModuleLoader({
 const {
   pruneIdleConversationRuntimeCaches,
   setConversationRuntimeCacheEntry,
-} = loader.loadModule("src/pages/chat/chatPageRuntime.ts");
+} = loader.loadModule("src/pages/chat/runtime/chatPageRuntime.ts");
 
 function createEntry(id, options = {}) {
   return {

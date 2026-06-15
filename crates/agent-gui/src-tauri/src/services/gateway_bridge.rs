@@ -6,8 +6,8 @@ use serde_json::{json, Value};
 use crate::commands::{
     chat_history,
     fs::{
-        fs_create_dir_sync, fs_delete_sync, fs_list_sync, fs_mention_list_sync,
-        fs_read_editable_text_sync, fs_read_workspace_image_sync, fs_rename_sync,
+        fs_create_dir_sync, fs_delete_sync, fs_list_dirs_sync, fs_list_sync, fs_mention_list_sync,
+        fs_read_editable_text_sync, fs_read_workspace_image_sync, fs_rename_sync, fs_roots_sync,
         fs_write_text_sync,
     },
     git::git_gateway_action_sync,
@@ -29,8 +29,6 @@ use crate::services::memory::{
 };
 use crate::services::skills::system_manage_skill_sync;
 
-const DEFAULT_FS_LIST_DIRS_MAX_RESULTS: usize = 2000;
-const HARD_FS_LIST_DIRS_MAX_RESULTS: usize = 10000;
 const DEFAULT_HISTORY_LIST_PAGE: i32 = 1;
 const DEFAULT_HISTORY_LIST_PAGE_SIZE: i32 = 80;
 
@@ -340,142 +338,47 @@ pub async fn handle_file_mention_list(
     })
 }
 
-fn list_fs_roots_sync() -> Result<Vec<proto::FsRoot>, String> {
-    let mut roots: Vec<proto::FsRoot> = Vec::new();
-
-    #[cfg(not(windows))]
-    {
-        roots.push(proto::FsRoot {
-            id: "/".to_string(),
-            path: "/".to_string(),
-            kind: "root".to_string(),
-            label: "/".to_string(),
-        });
-    }
-
-    if let Some(home) = dirs::home_dir() {
-        let home_str = home.to_string_lossy().trim().to_string();
-        if !home_str.is_empty() && home_str != "/" {
-            roots.push(proto::FsRoot {
-                id: home_str.clone(),
-                path: home_str,
-                kind: "home".to_string(),
-                label: "~".to_string(),
-            });
-        }
-    }
-
-    #[cfg(windows)]
-    {
-        #[link(name = "kernel32")]
-        extern "system" {
-            fn GetLogicalDrives() -> u32;
-        }
-
-        let mask = unsafe { GetLogicalDrives() };
-        if mask == 0 {
-            // Keep the picker usable if we at least have home.
-            if !roots.is_empty() {
-                return Ok(roots);
-            }
-            return Err(std::io::Error::last_os_error().to_string());
-        }
-
-        for i in 0..26u32 {
-            if mask & (1u32 << i) == 0 {
-                continue;
-            }
-            let drive = (b'A' + u8::try_from(i).unwrap_or(0)) as char;
-            let path = format!("{drive}:\\");
-            roots.push(proto::FsRoot {
-                id: path.clone(),
-                path,
-                kind: "drive".to_string(),
-                label: format!("{drive}:"),
-            });
-        }
-    }
-
-    Ok(roots)
-}
-
-fn fs_list_dirs_sync(path: String, max_results: u32) -> Result<proto::FsListDirsResponse, String> {
-    let dir = path.trim().to_string();
-    if dir.is_empty() {
-        return Err("path is required".to_string());
-    }
-
-    let mut limit = if max_results == 0 {
-        DEFAULT_FS_LIST_DIRS_MAX_RESULTS
-    } else {
-        usize::try_from(max_results).unwrap_or(HARD_FS_LIST_DIRS_MAX_RESULTS)
-    };
-    if limit > HARD_FS_LIST_DIRS_MAX_RESULTS {
-        limit = HARD_FS_LIST_DIRS_MAX_RESULTS;
-    }
-
-    let entries = std::fs::read_dir(&dir).map_err(|e| e.to_string())?;
-    let mut dirs: Vec<proto::FsDirEntry> = Vec::new();
-
-    for entry in entries {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let file_type = entry.file_type().map_err(|e| e.to_string())?;
-
-        let mut is_dir = file_type.is_dir();
-        if !is_dir && file_type.is_symlink() {
-            if let Ok(metadata) = entry.metadata() {
-                is_dir = metadata.is_dir();
-            }
-        }
-        if !is_dir {
-            continue;
-        }
-
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let child_path = entry.path().to_string_lossy().into_owned();
-        dirs.push(proto::FsDirEntry {
-            path: child_path,
-            name,
-        });
-    }
-
-    dirs.sort_by(|a, b| {
-        let left = a.name.to_lowercase();
-        let right = b.name.to_lowercase();
-        if left == right {
-            a.name.cmp(&b.name)
-        } else {
-            left.cmp(&right)
-        }
-    });
-
-    let truncated = dirs.len() > limit;
-    if truncated {
-        dirs.truncate(limit);
-    }
-
-    Ok(proto::FsListDirsResponse {
-        path: dir,
-        entries: dirs,
-        truncated,
-    })
-}
-
 pub async fn handle_fs_roots() -> Result<proto::FsRootsResponse, String> {
-    tauri::async_runtime::spawn_blocking(list_fs_roots_sync)
+    tauri::async_runtime::spawn_blocking(fs_roots_sync)
         .await
         .map_err(|e| format!("gateway fs roots join failed: {e}"))?
-        .map(|roots| proto::FsRootsResponse { roots })
+        .map(|response| proto::FsRootsResponse {
+            roots: response
+                .roots
+                .into_iter()
+                .map(|root| proto::FsRoot {
+                    id: root.id,
+                    path: root.path,
+                    kind: root.kind,
+                    label: root.label,
+                })
+                .collect(),
+        })
 }
 
 pub async fn handle_fs_list_dirs(
     request: proto::FsListDirsRequest,
 ) -> Result<proto::FsListDirsResponse, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        fs_list_dirs_sync(request.path, request.max_results)
+        let max_results = usize::try_from(request.max_results)
+            .ok()
+            .filter(|value| *value > 0);
+        fs_list_dirs_sync(request.path, max_results)
     })
     .await
     .map_err(|e| format!("gateway fs list dirs join failed: {e}"))?
+    .map(|response| proto::FsListDirsResponse {
+        path: response.path,
+        entries: response
+            .entries
+            .into_iter()
+            .map(|entry| proto::FsDirEntry {
+                path: entry.path,
+                name: entry.name,
+            })
+            .collect(),
+        truncated: response.truncated,
+    })
 }
 
 pub async fn handle_fs_create_project_folder(
@@ -1017,6 +920,8 @@ fn is_builtin_share_tool_name(name: &str) -> bool {
             | "MemoryManager"
             | "Read"
             | "SkillsManager"
+            | "SSHManager"
+            | "SshManager"
             | "Write"
     )
 }

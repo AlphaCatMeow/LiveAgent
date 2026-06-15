@@ -21,7 +21,7 @@ import {
 import { buildBuiltinToolRegistry } from "../../lib/tools/builtinRegistry";
 import { createFileToolState } from "../../lib/tools/fileToolState";
 import type { SkillAccessPolicy } from "../../lib/tools/skillAccessPolicy";
-import { appendSystemPrompt } from "../../pages/chat/chatPageRuntime";
+import { appendSystemPrompt } from "../../pages/chat";
 
 type CronPromptRunnerProps = {
   settings: AppSettings;

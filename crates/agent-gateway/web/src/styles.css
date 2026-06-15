@@ -1649,6 +1649,182 @@ html[data-liveagent-webui="gateway"] .external-link-modal-overlay[data-state="cl
   }
 }
 
+/* ── Settings sync loading ── */
+
+.sync-loading {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 38px 46px 32px;
+  border-radius: 24px;
+  border: 1px solid hsl(0 0% 100% / 0.7);
+  background: hsl(0 0% 100% / 0.55);
+  -webkit-backdrop-filter: blur(40px) saturate(1.6);
+  backdrop-filter: blur(40px) saturate(1.6);
+  box-shadow:
+    0 0 0 1px hsl(0 0% 0% / 0.03),
+    0 1px 3px hsl(0 0% 0% / 0.03),
+    0 8px 30px hsl(0 0% 0% / 0.05),
+    0 30px 80px hsl(0 0% 0% / 0.04);
+  overflow: hidden;
+}
+
+.dark .sync-loading {
+  border-color: hsl(0 0% 100% / 0.08);
+  background: hsl(224 20% 12% / 0.6);
+  box-shadow:
+    0 0 0 1px hsl(0 0% 100% / 0.04),
+    0 1px 3px hsl(0 0% 0% / 0.15),
+    0 8px 30px hsl(0 0% 0% / 0.3),
+    0 30px 80px hsl(0 0% 0% / 0.25);
+}
+
+.sync-loading-orb {
+  position: absolute;
+  pointer-events: none;
+  z-index: -1;
+  border-radius: 50%;
+  filter: blur(60px);
+  opacity: 0.55;
+  will-change: transform;
+}
+
+.sync-loading-orb--1 {
+  width: 200px;
+  height: 200px;
+  top: -80px;
+  left: -64px;
+  background: hsl(210 100% 86% / 0.55);
+  animation: loginOrbFloat 18s ease-in-out infinite;
+}
+
+.sync-loading-orb--2 {
+  width: 170px;
+  height: 170px;
+  bottom: -72px;
+  right: -54px;
+  background: hsl(250 70% 86% / 0.45);
+  animation: loginOrbFloat 22s ease-in-out infinite reverse;
+}
+
+.dark .sync-loading-orb--1 {
+  background: hsl(210 80% 32% / 0.25);
+}
+
+.dark .sync-loading-orb--2 {
+  background: hsl(250 60% 32% / 0.2);
+}
+
+/* Icon + soft emanating pulses (no rotation) */
+.sync-loading-stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  margin-top: 2px;
+}
+
+.sync-loading-pulse {
+  position: absolute;
+  inset: 0;
+  border-radius: 18px;
+  border: 1.5px solid hsl(var(--primary) / 0.4);
+  opacity: 0;
+  will-change: transform, opacity;
+  animation: syncPulse 2.8s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+.sync-loading-pulse--2 {
+  animation-delay: 1.4s;
+}
+
+.sync-loading-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  will-change: transform;
+  animation: syncIconBreathe 2.8s ease-in-out infinite;
+}
+
+.sync-loading-logo {
+  display: block;
+  width: 60px;
+  height: 60px;
+  border-radius: 16px;
+  filter: drop-shadow(0 6px 14px hsl(206 45% 28% / 0.18));
+  user-select: none;
+}
+
+.sync-loading-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: hsl(var(--foreground));
+}
+
+/* Three bouncing dots */
+.sync-loading-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 8px;
+}
+
+.sync-loading-dots i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: hsl(var(--primary));
+  will-change: transform, opacity;
+  animation: syncDotBounce 1.2s ease-in-out infinite;
+}
+
+.sync-loading-dots i:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.sync-loading-dots i:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+.sync-loading-entrance {
+  animation: loginSlideUp 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes syncIconBreathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+@keyframes syncPulse {
+  0% { transform: scale(0.9); opacity: 0; }
+  35% { opacity: 0.45; }
+  100% { transform: scale(1.85); opacity: 0; }
+}
+
+@keyframes syncDotBounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
+  40% { transform: translateY(-7px); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sync-loading-entrance,
+  .sync-loading-icon,
+  .sync-loading-orb,
+  .sync-loading-pulse,
+  .sync-loading-dots i {
+    animation: none;
+  }
+}
+
 @media (hover: none), (pointer: coarse) {
   .login-feat:hover {
     background: hsl(0 0% 100% / 0.5);
@@ -1685,6 +1861,91 @@ html[data-liveagent-webui="gateway"] .external-link-modal-overlay[data-state="cl
   .login-input {
     font-size: 16px;
   }
+}
+
+html[data-liveagent-webui="gateway"] .project-terminal-viewport {
+  --project-terminal-padding-x: 0.75rem;
+  --project-terminal-padding-y: 0.625rem;
+  --project-terminal-scrollbar-size: 8px;
+  --project-terminal-background: hsl(var(--background));
+  background: var(--project-terminal-background);
+}
+
+html[data-liveagent-webui="gateway"]
+  .workspace-ssh-terminal-overlay
+  .project-terminal-viewport {
+  --project-terminal-padding-x: 1rem;
+}
+
+html[data-liveagent-webui="gateway"] .project-terminal-viewport,
+html[data-liveagent-webui="gateway"] .project-terminal-viewport .xterm,
+html[data-liveagent-webui="gateway"] .project-terminal-viewport .xterm-screen,
+html[data-liveagent-webui="gateway"] .project-terminal-viewport .xterm-scrollable-element {
+  overscroll-behavior: contain;
+  touch-action: none;
+}
+
+html[data-liveagent-webui="gateway"] .project-terminal-viewport .xterm {
+  background: var(--project-terminal-background);
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding:
+    var(--project-terminal-padding-y)
+    var(--project-terminal-padding-x)
+    var(--project-terminal-padding-y)
+    var(--project-terminal-padding-x);
+}
+
+html[data-liveagent-webui="gateway"] .project-terminal-viewport .xterm-viewport,
+html[data-liveagent-webui="gateway"] .project-terminal-viewport .xterm-screen,
+html[data-liveagent-webui="gateway"] .project-terminal-viewport .xterm-scrollable-element {
+  background: var(--project-terminal-background) !important;
+}
+
+html[data-liveagent-webui="gateway"] .project-terminal-viewport .xterm-scrollable-element {
+  -webkit-overflow-scrolling: touch;
+}
+
+html[data-liveagent-webui="gateway"]
+  .project-terminal-viewport
+  .xterm-scrollable-element
+  > .scrollbar.vertical
+  > .slider {
+  border-radius: 999px;
+}
+
+html[data-liveagent-webui="gateway"] .project-terminal-viewport .xterm-viewport {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.2s ease;
+}
+
+html[data-liveagent-webui="gateway"] .project-terminal-viewport:hover .xterm-viewport {
+  scrollbar-color: hsl(var(--muted-foreground) / 0.32) transparent;
+}
+
+html[data-liveagent-webui="gateway"] .project-terminal-viewport .xterm-viewport::-webkit-scrollbar {
+  width: var(--project-terminal-scrollbar-size);
+  height: var(--project-terminal-scrollbar-size);
+}
+
+html[data-liveagent-webui="gateway"] .project-terminal-viewport .xterm-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+html[data-liveagent-webui="gateway"] .project-terminal-viewport .xterm-viewport::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: transparent;
+  transition: background 0.2s ease;
+}
+
+html[data-liveagent-webui="gateway"] .project-terminal-viewport:hover .xterm-viewport::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.28);
+}
+
+html[data-liveagent-webui="gateway"] .project-terminal-viewport .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.45);
 }
 
 /* ─── Responsive ─────────────────────────────────────────────────── */
@@ -1798,17 +2059,34 @@ html[data-liveagent-webui="gateway"] .external-link-modal-overlay[data-state="cl
     width: min(86vw, 272px) !important;
     max-width: min(86vw, 272px);
     box-shadow: 18px 0 48px hsl(220 22% 10% / 0.16);
-    opacity: 0;
+    /* The drawer is ~86vw wide — almost the full screen on mobile. Fading the
+       opaque panel in from opacity:0 lets the chat content show through it for
+       the duration of the transition, then it snaps solid, which reads as the
+       whole page flashing. Slide only; hide the closed panel (and its shadow)
+       with `visibility` so there is no translucent blend frame. */
+    opacity: 1;
+    visibility: hidden;
     transform: translate3d(-100%, 0, 0);
     transition:
       transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
-      opacity 140ms ease !important;
-    will-change: transform, opacity;
+      visibility 0s linear 180ms !important;
+    will-change: transform;
+    /* As a fixed, layer-promoted drawer, `contain: paint` (inherited from the
+       base rule) makes the compositor intermittently re-raster the covered
+       region during the slide — a one-frame whole-screen flash. Drop paint
+       containment here and pin a stable backing layer so the transform plays
+       on its own compositor layer without re-painting the page behind it. */
+    contain: layout style;
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
   }
 
   .gateway-editor-host > .chat-history-sidebar[data-state="open"] {
-    opacity: 1;
+    visibility: visible;
     transform: translate3d(0, 0, 0);
+    transition:
+      transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+      visibility 0s linear 0s !important;
   }
 
   .gateway-editor-host > .chat-history-sidebar[data-state="closed"] {
@@ -1819,6 +2097,8 @@ html[data-liveagent-webui="gateway"] .external-link-modal-overlay[data-state="cl
     width: 100%;
     min-width: 0;
     transform: translateZ(0);
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
   }
 
   .gateway-footer-strip {
@@ -1834,30 +2114,51 @@ html[data-liveagent-webui="gateway"] .external-link-modal-overlay[data-state="cl
     max-height: none;
     border: 0;
     border-radius: 0;
-    background: hsl(var(--background) / 0.97);
+    /* This panel is a full-screen (inset:0) mobile surface. A translucent
+       background plus `backdrop-filter: blur()` means the whole viewport behind
+       it is re-sampled and blurred every frame - and because the React open
+       animation also fades opacity 0->1 and moves the panel, the panel is
+       see-through *and* blurring mid-transition, before its content paints.
+       That translucent, blurred, content-less frame is the flash. An opaque
+       surface with no backdrop blur covers everything it covers anyway, so
+       keep the mobile transition to the same simple fade used by settings. */
+    background: hsl(var(--background));
     box-shadow: none;
-    backdrop-filter: blur(18px);
+    opacity: 0 !important;
+    visibility: hidden;
+    transition:
+      opacity 220ms ease,
+      visibility 0s linear 220ms !important;
+    will-change: opacity;
+    contain: layout style;
+    translate: 0 0 !important;
+    transform: none !important;
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+  }
+
+  html[data-liveagent-webui="gateway"] .project-tools-panel[data-state="open"] {
+    opacity: 1 !important;
+    visibility: visible;
+    transition:
+      opacity 220ms ease,
+      visibility 0s linear 0s !important;
   }
 
   html[data-liveagent-webui="gateway"] .workspace-code-editor-overlay,
-  html[data-liveagent-webui="gateway"] .workspace-image-preview-overlay {
+  html[data-liveagent-webui="gateway"] .workspace-image-preview-overlay,
+  html[data-liveagent-webui="gateway"] .workspace-ssh-terminal-overlay {
     z-index: 60;
   }
 
   html[data-liveagent-webui="gateway"] .project-tools-panel-inner {
     min-width: 0;
-  }
-
-  html[data-liveagent-webui="gateway"] .project-terminal-viewport,
-  html[data-liveagent-webui="gateway"] .project-terminal-viewport .xterm,
-  html[data-liveagent-webui="gateway"] .project-terminal-viewport .xterm-screen,
-  html[data-liveagent-webui="gateway"] .project-terminal-viewport .xterm-scrollable-element {
-    overscroll-behavior: contain;
-    touch-action: none;
-  }
-
-  html[data-liveagent-webui="gateway"] .project-terminal-viewport .xterm-scrollable-element {
-    -webkit-overflow-scrolling: touch;
+    opacity: 1 !important;
+    translate: 0 0 !important;
+    transform: translate3d(0, 0, 0) !important;
+    transition: none !important;
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
   }
 
   html[data-liveagent-webui="gateway"] .project-tools-panel-handle {
@@ -2402,9 +2703,15 @@ html[data-liveagent-webui="gateway"] .external-link-modal-overlay[data-state="cl
   }
 
   .login-shell {
-    padding: 16px;
-    align-content: start;
+    /* Center the card vertically on phones so it isn't pinned to the very top
+       with a large empty gap below. `safe center` falls back to top-alignment
+       only if the card ever grows taller than the viewport, avoiding clipping. */
+    padding: 24px 16px;
+    align-content: safe center;
     padding-top: max(env(safe-area-inset-top, 0px), 24px);
+    padding-bottom: max(env(safe-area-inset-bottom, 0px), 24px);
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .login-container {

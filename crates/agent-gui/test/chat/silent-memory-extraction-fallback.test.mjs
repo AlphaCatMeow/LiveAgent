@@ -41,7 +41,7 @@ test("silent memory extraction fallback clears failed configured model and retri
   const calls = [];
   const loader = createTsModuleLoader({
     mocks: {
-      [rootPath("src/pages/chat/silentMemoryExtraction.ts")]: {
+      [rootPath("src/pages/chat/memory/silentMemoryExtraction.ts")]: {
         async runSilentMemoryExtraction(params) {
           calls.push(params.model);
           if (params.model === "configured-model") {
@@ -56,7 +56,7 @@ test("silent memory extraction fallback clears failed configured model and retri
     },
   });
   const { runSilentMemoryExtractionWithFallback } = loader.loadModule(
-    "src/pages/chat/silentMemoryExtractionFallback.ts",
+    "src/pages/chat/memory/silentMemoryExtractionFallback.ts",
   );
   const failedModels = [];
 
@@ -81,7 +81,7 @@ test("silent memory extraction fallback does not retry or clear on abort", async
   const calls = [];
   const loader = createTsModuleLoader({
     mocks: {
-      [rootPath("src/pages/chat/silentMemoryExtraction.ts")]: {
+      [rootPath("src/pages/chat/memory/silentMemoryExtraction.ts")]: {
         async runSilentMemoryExtraction(params) {
           calls.push(params.model);
           return { ok: false, emittedMessages: [], aborted: true };
@@ -90,7 +90,7 @@ test("silent memory extraction fallback does not retry or clear on abort", async
     },
   });
   const { runSilentMemoryExtractionWithFallback } = loader.loadModule(
-    "src/pages/chat/silentMemoryExtractionFallback.ts",
+    "src/pages/chat/memory/silentMemoryExtractionFallback.ts",
   );
   const failedModels = [];
 

@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ProjectToolsPanel } from "@/components/project-tools/ProjectToolsPanel";
 import type { WorkspaceCodeEditorOpenRequest } from "@/components/workspace-editor/WorkspaceCodeEditorOverlay";
+import type { WorkspaceSshTerminalOpenRequest } from "@/components/workspace-editor/WorkspaceSshTerminalOverlay";
 import type { WorkspaceImagePreviewOpenRequest } from "@/components/workspace-editor/WorkspaceImagePreviewOverlay";
 import { isWorkspaceImagePath } from "@/components/workspace-editor/workspaceImagePreview";
 import { LocaleContext, t as translate } from "@/i18n";
@@ -67,9 +68,11 @@ import {
   getProjectToolsFileTreeProjectState,
   getProjectToolsPanelActiveTab,
   getProjectToolsPanelTabOrder,
+  getSshProjectHostIds,
   isAgentDevMode,
   isProjectToolsFileTreeOpen,
   isProjectToolsGitReviewOpen,
+  isProjectToolsSshTunnelOpen,
   isProjectToolsTunnelOpen,
   normalizeChatRuntimeControlsForProvider,
   normalizeSettings,
@@ -81,9 +84,11 @@ import {
   updateProjectToolsFileTreeProjectState,
   updateProjectToolsFileTreeOpen,
   updateProjectToolsGitReviewOpen,
+  updateProjectToolsSshTunnelOpen,
   updateProjectToolsTunnelOpen,
   updateProjectToolsPanelActiveTab,
   updateProjectToolsPanelTabOrder,
+  updateSshProjectHostIds,
   type AppSettings,
   type ChatRuntimeControls,
   type CustomProvider,
@@ -94,6 +99,7 @@ import {
 import {
   applyGatewaySettingsSyncPayload,
   buildGatewaySettingsSyncPayload,
+  buildGatewaySettingsSyncUpdatePayload,
   redactSettingsForWebStorage,
   type GatewaySettingsSyncPayload,
 } from "@/lib/settings/sync";
@@ -101,6 +107,7 @@ import { toModelValue } from "@/lib/providers/llm";
 
 import { getGatewayWebSocketClient, resetGatewayWebSocketClient } from "./lib/gatewaySocket";
 import { createGatewayGitClient } from "./lib/git/gatewayGitClient";
+import { createGatewaySftpClient } from "./lib/sftp/gatewaySftpClient";
 import { createGatewayTerminalClient } from "./lib/terminal/gatewayTerminalClient";
 import {
   applyTerminalEventToSessions,
@@ -176,6 +183,7 @@ import { GatewayTranscript } from "./components/GatewayTranscript";
 import { HistoryShareModal } from "./components/chat/HistoryShareModal";
 import { useGatewayScrollAffordance } from "./components/useGatewayScrollAffordance";
 import { LoginPage } from "./pages/LoginPage";
+import { SettingsSyncLoading } from "./pages/SettingsSyncLoading";
 import { SharedHistoryPage } from "./pages/SharedHistoryPage";
 import { WorkdirPickerModal } from "./pages/settings/WorkdirPickerModal";
 import {
@@ -229,6 +237,13 @@ const WorkspaceImagePreviewOverlay = lazy(async () => {
   const module = await import("@/components/workspace-editor/WorkspaceImagePreviewOverlay");
   return {
     default: module.WorkspaceImagePreviewOverlay,
+  };
+});
+
+const WorkspaceSshTerminalOverlay = lazy(async () => {
+  const module = await import("@/components/workspace-editor/WorkspaceSshTerminalOverlay");
+  return {
+    default: module.WorkspaceSshTerminalOverlay,
   };
 });
 
@@ -386,6 +401,10 @@ const LIVE_STREAM_HISTORY_REFRESH_SUPPRESS_MS = 30_000;
 const PAGE_RESTORE_HISTORY_REFRESH_THROTTLE_MS = 900;
 const CHAT_RUNTIME_PREPARE_TIMEOUT_MS = 2_500;
 const CHAT_RUNTIME_FOREGROUND_PREPARE_TIMEOUT_MS = 1_500;
+const CHAT_RUNTIME_KEEP_WARM_INTERVAL_MS = 10_000;
+const CHAT_RUNTIME_STARTING_STATUS_DELAY_MS = 1_200;
+const CHAT_RUNTIME_READY_STATUS_TTL_MS = 20_000;
+const CHAT_RUNTIME_STARTING_STATUS = "Starting desktop runtime...";
 const DEFAULT_BROWSER_TITLE = "LiveAgent Gateway";
 const NEW_CONVERSATION_BROWSER_TITLE = "LiveAgent";
 const SHARED_HISTORY_BROWSER_TITLE = "分享会话";
@@ -442,6 +461,33 @@ function normalizeGatewayTimestampMs(value: number | null | undefined) {
     return 0;
   }
   return value < SECONDS_TIMESTAMP_MAX ? value * 1000 : value;
+}
+
+function isChatRuntimeReadyStatus(
+  status: AgentStatus | null | undefined,
+  now = Date.now(),
+) {
+  if (status?.online !== true) {
+    return false;
+  }
+
+  const runtimeState = normalizeOptionalStatus(status.runtime_state)?.toLowerCase() ?? "";
+  if (runtimeState === "suspended") {
+    return false;
+  }
+
+  const hasReadyState =
+    runtimeState === "ready" || runtimeState === "draining" || runtimeState === "busy";
+  if (status.chat_runtime_ready !== true && !hasReadyState) {
+    return false;
+  }
+
+  const runtimeHeartbeatAt = normalizeGatewayTimestampMs(status.runtime_last_heartbeat);
+  if (runtimeHeartbeatAt <= 0) {
+    return status.chat_runtime_ready === true;
+  }
+
+  return now - runtimeHeartbeatAt <= CHAT_RUNTIME_READY_STATUS_TTL_MS;
 }
 
 function isAbortError(error: unknown) {
@@ -596,10 +642,6 @@ function hasSettingsSyncChanged(prev: AppSettings, next: AppSettings) {
     JSON.stringify(buildGatewaySettingsSyncPayload(prev)) !==
     JSON.stringify(buildGatewaySettingsSyncPayload(next))
   );
-}
-
-function hasProviderApiKeyUpdates(settings: AppSettings) {
-  return settings.customProviders.some((provider) => provider.apiKey.trim().length > 0);
 }
 
 function resolveAppWorkspaceProjects(settings: AppSettings): AppSettings {
@@ -782,6 +824,7 @@ export default function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const api = useMemo(() => (token ? getGatewayWebSocketClient(token) : null), [token]);
   const terminalClient = useMemo(() => (api ? createGatewayTerminalClient(api) : null), [api]);
+  const sftpClient = useMemo(() => (api ? createGatewaySftpClient(api) : null), [api]);
   const gitClient = useMemo(() => (api ? createGatewayGitClient(api) : null), [api]);
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
@@ -910,6 +953,11 @@ export default function App() {
   const [workspaceImagePreviewOpenRequest, setWorkspaceImagePreviewOpenRequest] =
     useState<WorkspaceImagePreviewOpenRequest | null>(null);
   const workspaceImagePreviewRequestIdRef = useRef(0);
+  const [workspaceSshTerminalMounted, setWorkspaceSshTerminalMounted] = useState(false);
+  const [workspaceSshTerminalOpen, setWorkspaceSshTerminalOpen] = useState(false);
+  const [workspaceSshTerminalOpenRequest, setWorkspaceSshTerminalOpenRequest] =
+    useState<WorkspaceSshTerminalOpenRequest | null>(null);
+  const workspaceSshTerminalRequestIdRef = useRef(0);
   const [terminalSessions, setTerminalSessions] = useState<TerminalSession[]>([]);
   const { confirm: requestConfirmDialog, dialog: confirmDialog } = useConfirmDialog();
   const terminalSessionsVersionRef = useRef(0);
@@ -2107,10 +2155,16 @@ export default function App() {
   }, [token]);
 
   const queueSettingsSave = useCallback(
-    (next: AppSettings, fallback: string, syncGateway: boolean) => {
+    (prev: AppSettings, next: AppSettings, fallback: string, syncGateway: boolean) => {
       const saveSequence = ++settingsSaveSequenceRef.current;
       setSettingsSaveState({ status: "saving" });
       const redactedNext = redactSettingsForWebStorage(next);
+      const gatewayUpdate =
+        syncGateway && api
+          ? buildGatewaySettingsSyncUpdatePayload(prev, next, {
+              includeProviderApiKeyUpdates: true,
+            })
+          : null;
 
       settingsSaveChainRef.current = settingsSaveChainRef.current
         .catch(() => undefined)
@@ -2118,12 +2172,8 @@ export default function App() {
           persistWebSettings(redactedNext);
         })
         .then(async () => {
-          if (syncGateway && api) {
-            await api.updateSettings(
-              buildGatewaySettingsSyncPayload(next, {
-                includeProviderApiKeyUpdates: true,
-              }),
-            );
+          if (gatewayUpdate && Object.keys(gatewayUpdate).length > 0) {
+            await api?.updateSettings(gatewayUpdate);
           }
         })
         .then(() => {
@@ -2151,7 +2201,7 @@ export default function App() {
         if (!hasSettingsSyncChanged(prev, next)) {
           return prev;
         }
-        queueSettingsSave(next, "同步桌面端设置失败。", false);
+        queueSettingsSave(prev, next, "同步桌面端设置失败。", false);
         return next;
       });
     },
@@ -2164,9 +2214,10 @@ export default function App() {
         const rawNext = resolveAppWorkspaceProjects(normalizeSettings(updater(prev)));
         const next = redactSettingsForWebStorage(rawNext);
         queueSettingsSave(
+          prev,
           rawNext,
           "保存 WebUI 设置失败。",
-          hasSettingsSyncChanged(prev, next) || hasProviderApiKeyUpdates(rawNext),
+          true,
         );
         return next;
       });
@@ -2584,6 +2635,7 @@ export default function App() {
     }
 
     const unsubscribe = api.subscribeStatus((nextStatus, error) => {
+      statusRef.current = nextStatus;
       setStatus(nextStatus);
       setStatusError(error);
     });
@@ -4234,6 +4286,32 @@ export default function App() {
     };
   }, [api, historyShareToken, prepareChatRuntime, status?.online]);
 
+  useEffect(() => {
+    if (!api || historyShareToken || status?.online !== true) {
+      return;
+    }
+
+    const keepWarm = () => {
+      if (
+        typeof document !== "undefined" &&
+        document.visibilityState === "hidden"
+      ) {
+        return;
+      }
+      void prepareChatRuntime(
+        "keep-warm",
+        api,
+        CHAT_RUNTIME_FOREGROUND_PREPARE_TIMEOUT_MS,
+      ).catch(() => undefined);
+    };
+
+    keepWarm();
+    const intervalId = window.setInterval(keepWarm, CHAT_RUNTIME_KEEP_WARM_INTERVAL_MS);
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [api, historyShareToken, prepareChatRuntime, status?.online]);
+
   async function sendChat(message: string, options?: SendChatOptions) {
     if (!api || chatBusyRef.current) {
       return;
@@ -4310,7 +4388,7 @@ export default function App() {
     updateConversationRuntimeEntry(activeConversationId, (current) => ({
       ...current,
       error: null,
-      toolStatus: "Starting desktop runtime...",
+      toolStatus: null,
       toolStatusIsCompaction: false,
       isSending: true,
       workdir: effectiveWorkdir || undefined,
@@ -4346,12 +4424,63 @@ export default function App() {
 
     let terminalEventSeen = false;
     let runStarted = false;
+    let runtimeStartingStatusTimer: number | null = null;
+    const clearRuntimeStartingStatusTimer = () => {
+      if (runtimeStartingStatusTimer === null) {
+        return;
+      }
+      window.clearTimeout(runtimeStartingStatusTimer);
+      runtimeStartingStatusTimer = null;
+    };
+    const clearRuntimeStartingStatus = () => {
+      updateConversationRuntimeEntry(activeConversationId, (current) => {
+        if (current.toolStatus !== CHAT_RUNTIME_STARTING_STATUS) {
+          return current;
+        }
+        return {
+          ...current,
+          toolStatus: null,
+          toolStatusIsCompaction: false,
+        };
+      });
+    };
+    const shouldShowRuntimeStartingStatus = () =>
+      !isChatRuntimeReadyStatus(statusRef.current);
+    const scheduleRuntimeStartingStatusTimer = () => {
+      clearRuntimeStartingStatusTimer();
+      if (!shouldShowRuntimeStartingStatus()) {
+        return;
+      }
+      runtimeStartingStatusTimer = window.setTimeout(() => {
+        runtimeStartingStatusTimer = null;
+        if (
+          runStarted ||
+          terminalEventSeen ||
+          controller.signal.aborted ||
+          !shouldShowRuntimeStartingStatus()
+        ) {
+          return;
+        }
+        updateConversationRuntimeEntry(activeConversationId, (current) => {
+          if (!current.isSending || current.toolStatus) {
+            return current;
+          }
+          return {
+            ...current,
+            toolStatus: CHAT_RUNTIME_STARTING_STATUS,
+            toolStatusIsCompaction: false,
+          };
+        });
+      }, CHAT_RUNTIME_STARTING_STATUS_DELAY_MS);
+    };
     const markRunStarted = () => {
       if (runStarted) {
         return;
       }
       runStarted = true;
+      clearRuntimeStartingStatusTimer();
       setConversationRunningState(activeConversationId, true);
+      clearRuntimeStartingStatus();
     };
     const runtimeControls = normalizeChatRuntimeControlsForProvider(
       options?.runtimeControls ?? settings.chatRuntimeControls,
@@ -4362,10 +4491,19 @@ export default function App() {
     );
     try {
       chatStartInFlightRef.current = true;
-      const preparedStatus = await prepareChatRuntime("send", api, CHAT_RUNTIME_PREPARE_TIMEOUT_MS);
-      if (preparedStatus.chat_runtime_ready !== true) {
-        throw new Error("Desktop chat runtime is not ready. Please retry.");
-      }
+      scheduleRuntimeStartingStatusTimer();
+      // chat.start is itself the reliable wake-up signal for a suspended desktop
+      // WebView. Keep the status refresh in the background so a stale runtime
+      // heartbeat cannot block the request that would wake it.
+      void prepareChatRuntime("send", api, CHAT_RUNTIME_PREPARE_TIMEOUT_MS)
+        .then((nextStatus) => {
+          statusRef.current = nextStatus;
+          if (isChatRuntimeReadyStatus(nextStatus)) {
+            clearRuntimeStartingStatusTimer();
+            clearRuntimeStartingStatus();
+          }
+        })
+        .catch(() => undefined);
       for await (const event of api.chat(
         message,
         isLocalDraftConversationId(activeConversationId) ? undefined : activeConversationId,
@@ -4428,6 +4566,7 @@ export default function App() {
             }));
           } else if (isTerminalChatControlEvent(event)) {
             terminalEventSeen = true;
+            clearRuntimeStartingStatusTimer();
             clearConversationStreamingState(activeConversationId);
             if (event.type === "failed" || event.state === "failed") {
               updateConversationRuntimeEntry(activeConversationId, (current) => ({
@@ -4494,6 +4633,7 @@ export default function App() {
         }
       }
     } finally {
+      clearRuntimeStartingStatusTimer();
       chatStartInFlightRef.current = false;
       clearConversationStreamingState(activeConversationId);
       if (status?.online && !terminalEventSeen) {
@@ -4746,7 +4886,11 @@ export default function App() {
               current.filter((session) => !terminalSessionBelongsToProject(session, pathKey)),
             );
           };
-          if (terminalClient && settings.remote.enableWebTerminal && pathKey) {
+          if (
+            terminalClient &&
+            (settings.remote.enableWebTerminal || settings.remote.enableWebSshTerminal) &&
+            pathKey
+          ) {
             terminalSessionsToClose = await terminalClient.list(pathKey);
             const runningTerminalCount = terminalSessionsToClose.filter(
               (session) => session.running,
@@ -4875,6 +5019,7 @@ export default function App() {
       refreshHistoryWorkdirs,
       removeWorkspaceProjectFromSettings,
       requestConfirmDialog,
+      settings.remote.enableWebSshTerminal,
       settings.remote.enableWebTerminal,
       settings.locale,
       settings.system,
@@ -5875,6 +6020,11 @@ export default function App() {
     settings.customSettings,
     terminalProjectPathKey,
   );
+  const projectToolsSshTunnelOpen = isProjectToolsSshTunnelOpen(
+    settings.customSettings,
+    terminalProjectPathKey,
+  );
+  const associatedSshHostIds = getSshProjectHostIds(settings.ssh, terminalProjectPathKey);
   const projectToolsDisabledMessage = !settingsSyncReady
     ? "Syncing desktop settings..."
     : !isAgentMode
@@ -5887,6 +6037,8 @@ export default function App() {
     (!settings.remote.enableWebTerminal
       ? "Enable WebUI Terminal in desktop Remote settings."
       : undefined);
+  const webTerminalSessionsEnabled =
+    settings.remote.enableWebTerminal || settings.remote.enableWebSshTerminal;
   const gitDisabledMessage = !settings.remote.enableWebGit
     ? "WebUI Git is disabled in desktop Remote settings."
     : undefined;
@@ -5899,6 +6051,22 @@ export default function App() {
       : status?.online !== true
         ? translate("projectTools.tunnelRemoteOffline", settings.locale)
         : undefined;
+  const hideWorkspaceSshTerminalOverlay = useCallback(() => {
+    setWorkspaceSshTerminalOpen(false);
+  }, []);
+  const openWorkspaceSshTerminalRequest = useCallback(
+    (request: WorkspaceSshTerminalOpenRequest) => {
+      setWorkspaceImagePreviewOpen(false);
+      setWorkspaceEditorOpen(false);
+      setWorkspaceSshTerminalMounted(true);
+      setWorkspaceSshTerminalOpen(true);
+      setWorkspaceSshTerminalOpenRequest(request);
+    },
+    [],
+  );
+  const requestWorkspaceEditorClose = useCallback(() => {
+    setWorkspaceEditorCloseRequestId((current) => current + 1);
+  }, []);
   const handleOpenWorkspaceFile = useCallback(
     (path: string) => {
       if (!terminalProjectPath || !terminalProjectPathKey) return;
@@ -5914,6 +6082,7 @@ export default function App() {
         });
         return;
       }
+      hideWorkspaceSshTerminalOverlay();
       setWorkspaceImagePreviewOpen(false);
       workspaceEditorRequestIdRef.current += 1;
       setWorkspaceEditorCleanupPending(false);
@@ -5926,12 +6095,21 @@ export default function App() {
         path,
       });
     },
-    [terminalProjectPath, terminalProjectPathKey],
+    [hideWorkspaceSshTerminalOverlay, terminalProjectPath, terminalProjectPathKey],
   );
-
-  const requestWorkspaceEditorClose = useCallback(() => {
-    setWorkspaceEditorCloseRequestId((current) => current + 1);
-  }, []);
+  const handleOpenSshTerminal = useCallback(
+    (session: TerminalSession, kind: WorkspaceSshTerminalOpenRequest["kind"] = "bash") => {
+      if (session.kind !== "ssh") return;
+      workspaceSshTerminalRequestIdRef.current += 1;
+      const openRequest = {
+        id: workspaceSshTerminalRequestIdRef.current,
+        sessionId: session.id,
+        kind,
+      };
+      openWorkspaceSshTerminalRequest(openRequest);
+    },
+    [openWorkspaceSshTerminalRequest],
+  );
   const requestWorkspaceImagePreviewClose = useCallback(() => {
     setWorkspaceImagePreviewOpen(false);
   }, []);
@@ -5974,11 +6152,9 @@ export default function App() {
   const handleProjectTerminalSessionsChange = useCallback(
     (sessions: TerminalSession[]) => {
       terminalSessionsVersionRef.current += 1;
-      setTerminalSessions((current) =>
-        replaceTerminalSessionsForProject(current, terminalProjectPathKey, sessions),
-      );
+      setTerminalSessions(sortTerminalSessions(sessions));
     },
-    [terminalProjectPathKey],
+    [],
   );
 
   useEffect(() => {
@@ -5990,7 +6166,7 @@ export default function App() {
     if (!settingsSyncReady) {
       return;
     }
-    if (!isAgentMode || !settings.remote.enableWebTerminal || status?.online === false) {
+    if (!isAgentMode || !webTerminalSessionsEnabled || status?.online === false) {
       terminalSessionsVersionRef.current += 1;
       setTerminalSessions([]);
       return;
@@ -6022,11 +6198,11 @@ export default function App() {
     };
   }, [
     isAgentMode,
-    settings.remote.enableWebTerminal,
     settingsSyncReady,
     status?.online,
     status?.session_id,
     terminalClient,
+    webTerminalSessionsEnabled,
   ]);
 
   useEffect(() => {
@@ -6037,6 +6213,44 @@ export default function App() {
       setTerminalSessions((current) => applyTerminalEventToSessions(current, event));
     });
   }, [terminalClient]);
+
+  useEffect(() => {
+    if (!terminalClient) return;
+    if (!settingsSyncReady) return;
+    if (!isAgentMode || !webTerminalSessionsEnabled || status?.online !== true) return;
+    if (!projectToolsSshTunnelOpen || !terminalProjectPathKey) return;
+
+    let cancelled = false;
+    let refreshSeq = 0;
+    const refreshProjectTerminalSessions = () => {
+      const seq = ++refreshSeq;
+      void terminalClient
+        .list(terminalProjectPathKey)
+        .then((sessions) => {
+          if (cancelled || seq !== refreshSeq) return;
+          terminalSessionsVersionRef.current += 1;
+          setTerminalSessions((current) =>
+            replaceTerminalSessionsForProject(current, terminalProjectPathKey, sessions),
+          );
+        })
+        .catch(() => undefined);
+    };
+
+    refreshProjectTerminalSessions();
+    const timer = window.setInterval(refreshProjectTerminalSessions, 5_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [
+    isAgentMode,
+    projectToolsSshTunnelOpen,
+    settingsSyncReady,
+    status?.online,
+    terminalClient,
+    terminalProjectPathKey,
+    webTerminalSessionsEnabled,
+  ]);
 
   useEffect(() => {
     if (activeView !== "chat") {
@@ -6407,7 +6621,7 @@ export default function App() {
           <main className="gateway-main-shell">
             <div className="gateway-main-backdrop" />
             <div className="gateway-chat-frame flex items-center justify-center">
-              <div className="text-sm text-muted-foreground">正在同步桌面端设置...</div>
+              <SettingsSyncLoading locale={settings.locale} />
             </div>
           </main>
         </div>
@@ -7018,6 +7232,25 @@ export default function App() {
               />
             </Suspense>
           ) : null}
+          {workspaceSshTerminalMounted && terminalClient && sftpClient ? (
+            <Suspense
+              fallback={
+                <div className="workspace-ssh-terminal-overlay absolute inset-0 z-40 flex items-center justify-center border-r border-border bg-background text-sm text-muted-foreground shadow-2xl">
+                  {translate("workspaceSshTerminal.loading", settings.locale)}
+                </div>
+              }
+            >
+              <WorkspaceSshTerminalOverlay
+                openRequest={workspaceSshTerminalOpenRequest}
+                sessions={terminalSessions}
+                client={terminalClient}
+                sftpClient={sftpClient}
+                theme={settings.theme}
+                isOpen={workspaceSshTerminalOpen}
+                onHide={() => setWorkspaceSshTerminalOpen(false)}
+              />
+            </Suspense>
+          ) : null}
         </div>
 
         {terminalClient ? (
@@ -7026,7 +7259,7 @@ export default function App() {
             collapseImmediately={activeView !== "chat"}
             projectPathKey={terminalProjectPathKey}
             cwd={terminalProjectPath}
-            sessions={projectTerminalSessions}
+            sessions={terminalSessions}
             width={settings.customSettings.projectToolsPanel.width}
             theme={settings.theme}
             disabledMessage={projectToolsDisabledMessage}
@@ -7046,6 +7279,9 @@ export default function App() {
               terminalProjectPathKey,
             )}
             tunnelOpen={projectToolsTunnelOpen}
+            sshTunnelOpen={projectToolsSshTunnelOpen}
+            sshHosts={settings.ssh.hosts}
+            associatedSshHostIds={associatedSshHostIds}
             client={terminalClient}
             gitClient={gitClient}
             gitWriteEnabled={settings.remote.enableWebGit}
@@ -7092,6 +7328,15 @@ export default function App() {
             onTunnelOpenChange={(open) =>
               setSettings((prev) => updateProjectToolsTunnelOpen(prev, terminalProjectPathKey, open))
             }
+            onSshTunnelOpenChange={(open) =>
+              setSettings((prev) =>
+                updateProjectToolsSshTunnelOpen(prev, terminalProjectPathKey, open),
+              )
+            }
+            onSshProjectHostIdsChange={(hostIds) =>
+              setSettings((prev) => updateSshProjectHostIds(prev, terminalProjectPathKey, hostIds))
+            }
+            onOpenSshSession={handleOpenSshTerminal}
             onSessionsChange={handleProjectTerminalSessionsChange}
             onInsertFileMention={(path, kind) => {
               composerRef.current?.insertFileMention(path, kind);

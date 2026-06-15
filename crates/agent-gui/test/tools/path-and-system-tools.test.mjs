@@ -5,6 +5,7 @@ import { createTsModuleLoader } from "../helpers/load-ts-module.mjs";
 const loader = createTsModuleLoader();
 const pathUtils = loader.loadModule("src/lib/tools/pathUtils.ts");
 const systemTools = loader.loadModule("src/lib/tools/customSystemTools.ts");
+const systemToolOptions = loader.loadModule("src/lib/tools/systemToolOptions.ts");
 const skillBuiltinHelpers = loader.loadModule("src/lib/skills/builtin.ts");
 
 test("required tool paths must be relative workspace paths", () => {
@@ -1725,6 +1726,18 @@ test("custom system tool options remain in sync with selectable definitions", ()
       id: "http_get_test",
       label: "本地 HTTP Test",
       description: "Call the network test endpoint and return the response body.",
+    },
+  ]);
+});
+
+test("system tool options include user-selectable tools", () => {
+  assert.deepEqual(systemToolOptions.SYSTEM_TOOL_OPTIONS, [
+    {
+      id: "http_get_test",
+      label: "本地 HTTP Test",
+      description: "Call the network test endpoint and return the response body.",
+      kind: "custom",
+      runtimeScopes: ["chat", "cron_auto_prompt"],
     },
   ]);
 });

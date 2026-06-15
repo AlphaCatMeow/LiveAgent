@@ -14,6 +14,7 @@ import type {
   ProviderId,
   ProviderModelConfig,
   ReasoningLevel,
+  SshHostConfig,
 } from "../settings";
 import type {
   BuiltinToolBundle,
@@ -21,7 +22,6 @@ import type {
   BuiltinToolMetadata,
 } from "./builtinTypes";
 import { createCronTools } from "./cronTools";
-import type { SystemToolId, SystemToolRuntimeScope } from "./customSystemTools";
 import { createCustomSystemTools } from "./customSystemTools";
 import { createSubagentMessageTools } from "./delegate/messageTools";
 import { createDelegateTools } from "./delegateTools";
@@ -31,6 +31,8 @@ import { createMcpManagerTools } from "./mcpManagerTools";
 import { createMcpTools } from "./mcpTools";
 import { createMemoryTools } from "./memoryTools";
 import { createShellTools } from "./shellTools";
+import { createSSHManagerTools } from "./sshManagerTools";
+import type { SystemToolId, SystemToolRuntimeScope } from "./systemToolOptions";
 import type { SkillAccessPolicy } from "./skillAccessPolicy";
 import { createSkillTools } from "./skillTools";
 import { createTerminalTools } from "./terminalTools";
@@ -170,6 +172,9 @@ type BuildBuiltinBaseToolRegistryParams = {
   remoteWebTunnelsEnabled?: boolean;
   remoteGatewayOnline?: boolean;
   tunnelProjectPathKey?: string;
+  sshHosts?: SshHostConfig[];
+  associatedSshHostIds?: string[];
+  sshManagerRemoteAllowed?: boolean;
   onTunnelsChanged?: (change: {
     action: "create" | "close";
     tunnel: {
@@ -243,6 +248,17 @@ async function buildBaseBuiltinToolBundles(params: BuildBuiltinBaseToolRegistryP
       runtimeScope: params.runtimeScope,
       projectPathKey: params.tunnelProjectPathKey,
       onTunnelsChanged: params.onTunnelsChanged,
+    }),
+    createSSHManagerTools({
+      enabled:
+        params.runtimeScope === "chat" &&
+        params.sshManagerRemoteAllowed !== false &&
+        (params.associatedSshHostIds?.length ?? 0) > 0,
+      runtimeScope: params.runtimeScope,
+      workdir: params.workdir,
+      projectPathKey: params.tunnelProjectPathKey,
+      hosts: params.sshHosts,
+      associatedHostIds: params.associatedSshHostIds,
     }),
     ...(params.runtimeScope === "chat"
       ? [

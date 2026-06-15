@@ -8,6 +8,7 @@ import {
   normalizeChatRuntimeControls,
   normalizeProjectToolsFileTreeSettings,
   normalizeProjectToolsGitReviewSettings,
+  normalizeProjectToolsSshTunnelSettings,
   normalizeProjectToolsTunnelSettings,
   normalizeProjectToolsPanelActiveTab,
   normalizeProjectToolsPanelActiveTabs,
@@ -31,6 +32,7 @@ type PersistedSettingsResponse = {
   system?: unknown | null;
   mcp?: unknown | null;
   agents?: unknown | null;
+  ssh?: unknown | null;
   hooks?: unknown | null;
   cron?: unknown | null;
   remote?: unknown | null;
@@ -62,6 +64,7 @@ function toPersistedLocalCustomSettings(
     projectToolsFileTree: normalizeProjectToolsFileTreeSettings({}),
     projectToolsGitReview: normalizeProjectToolsGitReviewSettings({}),
     projectToolsTunnel: normalizeProjectToolsTunnelSettings({}),
+    projectToolsSshTunnel: normalizeProjectToolsSshTunnelSettings({}),
   };
 }
 
@@ -81,9 +84,6 @@ function readLocalUiSettings(): {
     const chatSidebar = (
       obj.chatSidebar && typeof obj.chatSidebar === "object" ? obj.chatSidebar : {}
     ) as Record<string, unknown>;
-    const legacyTerminalPanel = (
-      obj.terminalPanel && typeof obj.terminalPanel === "object" ? obj.terminalPanel : {}
-    ) as Record<string, unknown>;
     const projectToolsPanel = (
       obj.projectToolsPanel && typeof obj.projectToolsPanel === "object"
         ? obj.projectToolsPanel
@@ -92,10 +92,7 @@ function readLocalUiSettings(): {
     const projectToolsPanelWidth =
       typeof projectToolsPanel.width === "number" || typeof projectToolsPanel.width === "string"
         ? Number(projectToolsPanel.width)
-        : typeof legacyTerminalPanel.width === "number" ||
-            typeof legacyTerminalPanel.width === "string"
-          ? Number(legacyTerminalPanel.width)
-          : 420;
+        : 420;
     const projectToolsPanelActiveTab = normalizeProjectToolsPanelActiveTab(
       projectToolsPanel.activeTab,
     );
@@ -116,6 +113,7 @@ function readLocalUiSettings(): {
       projectToolsFileTree: normalizeProjectToolsFileTreeSettings({}),
       projectToolsGitReview: normalizeProjectToolsGitReviewSettings({}),
       projectToolsTunnel: normalizeProjectToolsTunnelSettings({}),
+      projectToolsSshTunnel: normalizeProjectToolsSshTunnelSettings({}),
     });
   }
 
@@ -229,6 +227,7 @@ export async function loadPersistedSettingsWithDefaults(): Promise<PersistedSett
       defaults.customProviders) as AppSettings["customProviders"],
     mcp: (persisted?.mcp ?? defaults.mcp) as AppSettings["mcp"],
     agents: (persisted?.agents ?? defaults.agents) as AppSettings["agents"],
+    ssh: (persisted?.ssh ?? defaults.ssh) as AppSettings["ssh"],
     hooks: (persisted?.hooks ?? defaults.hooks) as AppSettings["hooks"],
     cron: (persisted?.cron ?? defaults.cron) as AppSettings["cron"],
     remote: (persisted?.remote ?? defaults.remote) as AppSettings["remote"],
@@ -288,6 +287,14 @@ export async function persistSettings(prev: AppSettings, next: AppSettings): Pro
     tasks.push(
       invoke("settings_save_agents", {
         payload: next.agents,
+      } as any),
+    );
+  }
+
+  if (hasChanged(prev.ssh, next.ssh)) {
+    tasks.push(
+      invoke("settings_save_ssh", {
+        payload: next.ssh,
       } as any),
     );
   }

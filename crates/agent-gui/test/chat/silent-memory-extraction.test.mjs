@@ -148,7 +148,7 @@ test("silent memory extraction builds a hidden MemoryManager-only request", asyn
     },
   });
   const { runSilentMemoryExtraction } = loader.loadModule(
-    "src/pages/chat/silentMemoryExtraction.ts",
+    "src/pages/chat/memory/silentMemoryExtraction.ts",
   );
   const visibleMessages = [
     createUser("请记住：以后默认用陕西腔跟我交流。"),
@@ -267,7 +267,7 @@ test("silent memory extraction does not skip short confirmations for unreviewed 
     },
   });
   const { runSilentMemoryExtraction } = loader.loadModule(
-    "src/pages/chat/silentMemoryExtraction.ts",
+    "src/pages/chat/memory/silentMemoryExtraction.ts",
   );
 
   const result = await runSilentMemoryExtraction({
@@ -347,7 +347,7 @@ test("silent memory extraction applies a validated block-3 plan with extractor w
     },
   });
   const { runSilentMemoryExtraction } = loader.loadModule(
-    "src/pages/chat/silentMemoryExtraction.ts",
+    "src/pages/chat/memory/silentMemoryExtraction.ts",
   );
 
   const result = await runSilentMemoryExtraction({
@@ -451,7 +451,7 @@ test("silent memory extraction applies accept plans for confirmed unreviewed mem
     },
   });
   const { runSilentMemoryExtraction } = loader.loadModule(
-    "src/pages/chat/silentMemoryExtraction.ts",
+    "src/pages/chat/memory/silentMemoryExtraction.ts",
   );
 
   const result = await runSilentMemoryExtraction({
@@ -544,7 +544,7 @@ test("silent memory extraction forwards model reply and MemoryManager traces as 
     },
   });
   const { runSilentMemoryExtraction } = loader.loadModule(
-    "src/pages/chat/silentMemoryExtraction.ts",
+    "src/pages/chat/memory/silentMemoryExtraction.ts",
   );
 
   await runSilentMemoryExtraction({
@@ -656,7 +656,7 @@ test("silent memory extraction does not expose four-block protocol text through 
     },
   });
   const { runSilentMemoryExtraction } = loader.loadModule(
-    "src/pages/chat/silentMemoryExtraction.ts",
+    "src/pages/chat/memory/silentMemoryExtraction.ts",
   );
 
   const result = await runSilentMemoryExtraction({
@@ -787,7 +787,7 @@ test("agent mode runs silent extraction hidden in background without delaying do
           return {};
         },
       },
-      [rootPath("src/pages/chat/silentMemoryExtraction.ts")]: {
+      [rootPath("src/pages/chat/memory/silentMemoryExtraction.ts")]: {
         recordSilentMemoryTurnBoundary() {},
         async runSilentMemoryExtraction(params) {
           capturedVisibleEvents = params.visibleEvents;
@@ -809,7 +809,7 @@ test("agent mode runs silent extraction hidden in background without delaying do
     "src/lib/chat/conversation/conversationState.ts",
   );
   const { runAgentConversationTurn } = loader.loadModule(
-    "src/pages/chat/runAgentConversationTurn.ts",
+    "src/pages/chat/turns/runAgentConversationTurn.ts",
   );
 
   let state = createConversationStateFromContext({
@@ -1049,7 +1049,7 @@ test("agent dev mode shows silent extraction and delays done until extraction fi
           return {};
         },
       },
-      [rootPath("src/pages/chat/silentMemoryExtraction.ts")]: {
+      [rootPath("src/pages/chat/memory/silentMemoryExtraction.ts")]: {
         recordSilentMemoryTurnBoundary() {},
         async runSilentMemoryExtraction(params) {
           capturedVisibleEvents = params.visibleEvents;
@@ -1090,7 +1090,7 @@ test("agent dev mode shows silent extraction and delays done until extraction fi
     "src/lib/chat/conversation/conversationState.ts",
   );
   const { runAgentConversationTurn } = loader.loadModule(
-    "src/pages/chat/runAgentConversationTurn.ts",
+    "src/pages/chat/turns/runAgentConversationTurn.ts",
   );
 
   let state = createConversationStateFromContext({
@@ -1306,7 +1306,7 @@ test("text mode runs silent extraction hidden in background without delaying don
           return { shouldCompact: false, reason: "within-budget" };
         },
       },
-      [rootPath("src/pages/chat/silentMemoryExtraction.ts")]: {
+      [rootPath("src/pages/chat/memory/silentMemoryExtraction.ts")]: {
         recordSilentMemoryTurnBoundary() {},
         async runSilentMemoryExtraction(params) {
           capturedVisibleEvents = params.visibleEvents;
@@ -1328,7 +1328,7 @@ test("text mode runs silent extraction hidden in background without delaying don
     "src/lib/chat/conversation/conversationState.ts",
   );
   const { runTextConversationTurn } = loader.loadModule(
-    "src/pages/chat/runTextConversationTurn.ts",
+    "src/pages/chat/turns/runTextConversationTurn.ts",
   );
 
   let state = createConversationStateFromContext({

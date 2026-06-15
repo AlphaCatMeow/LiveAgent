@@ -206,6 +206,27 @@
     user-select: text;
   }
 
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
+  textarea:focus,
+  select:focus,
+  [contenteditable="true"]:focus,
+  [contenteditable="plaintext-only"]:focus,
+  [role="textbox"]:focus {
+    outline: none;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus-visible,
+  textarea:focus-visible,
+  select:focus-visible,
+  [contenteditable="true"]:focus-visible,
+  [contenteditable="plaintext-only"]:focus-visible,
+  [role="textbox"]:focus-visible {
+    --tw-ring-offset-shadow: 0 0 #0000;
+    --tw-ring-shadow: 0 0 #0000;
+    border-color: hsl(var(--input));
+    box-shadow: var(--tw-shadow, 0 0 #0000);
+  }
+
   /* Custom scrollbar */
   ::-webkit-scrollbar {
     width: 6px;
@@ -276,6 +297,60 @@
   }
   .tool-text-scroll:hover::-webkit-scrollbar-thumb:hover {
     background: hsl(var(--muted-foreground) / 0.38);
+  }
+
+  /* SSH/Bash terminal viewport - keep padding on .xterm so fit() measures rows correctly. */
+  .project-terminal-viewport {
+    --project-terminal-padding-x: 0.75rem;
+    --project-terminal-padding-y: 0.625rem;
+    --project-terminal-scrollbar-size: 8px;
+    --project-terminal-background: hsl(var(--background));
+    background: var(--project-terminal-background);
+  }
+  .project-terminal-viewport .xterm {
+    background: var(--project-terminal-background);
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    padding:
+      var(--project-terminal-padding-y)
+      var(--project-terminal-padding-x)
+      var(--project-terminal-padding-y)
+      var(--project-terminal-padding-x);
+  }
+  .project-terminal-viewport .xterm-viewport,
+  .project-terminal-viewport .xterm-screen,
+  .project-terminal-viewport .xterm-scrollable-element {
+    background: var(--project-terminal-background) !important;
+  }
+  .project-terminal-viewport .xterm-scrollable-element > .scrollbar.vertical > .slider {
+    border-radius: 999px;
+  }
+  .project-terminal-viewport .xterm-viewport {
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+    transition: scrollbar-color 0.2s ease;
+  }
+  .project-terminal-viewport:hover .xterm-viewport {
+    scrollbar-color: hsl(var(--muted-foreground) / 0.32) transparent;
+  }
+  .project-terminal-viewport .xterm-viewport::-webkit-scrollbar {
+    width: var(--project-terminal-scrollbar-size);
+    height: var(--project-terminal-scrollbar-size);
+  }
+  .project-terminal-viewport .xterm-viewport::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .project-terminal-viewport .xterm-viewport::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: transparent;
+    transition: background 0.2s ease;
+  }
+  .project-terminal-viewport:hover .xterm-viewport::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.28);
+  }
+  .project-terminal-viewport .xterm-viewport::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.45);
   }
 
   .git-review-transient-scrollbar {
@@ -652,6 +727,65 @@
     z-index: -1;
   }
 
+  .ssh-auth-panel {
+    overflow: hidden;
+    transition:
+      max-height 300ms cubic-bezier(0.16, 1, 0.3, 1),
+      opacity 220ms ease,
+      transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: max-height, opacity, transform;
+  }
+
+  .ssh-collapsible {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 280ms cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: grid-template-rows;
+  }
+
+  .ssh-collapsible[data-open="true"] {
+    grid-template-rows: 1fr;
+  }
+
+  .ssh-collapsible-inner {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* Settings modal open/close motion (mirrors the gateway web styles.css). */
+  .settings-modal-overlay {
+    opacity: 0;
+    transition: opacity 180ms ease;
+    will-change: opacity;
+  }
+
+  .settings-modal-overlay[data-state="open"] {
+    opacity: 1;
+  }
+
+  .settings-modal-overlay[data-state="closed"] {
+    pointer-events: none;
+  }
+
+  .settings-modal-panel {
+    opacity: 0;
+    transform: translateY(12px) scale(0.985);
+    transition:
+      opacity 180ms ease,
+      transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: opacity, transform;
+  }
+
+  .settings-modal-overlay[data-state="open"] .settings-modal-panel {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  .settings-modal-overlay[data-state="closed"] .settings-modal-panel {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+
   @keyframes settingsSectionIn {
     from {
       opacity: 0;
@@ -678,6 +812,13 @@
     .settings-section-enter,
     .settings-section-title-enter {
       animation: none;
+    }
+
+    .ssh-auth-panel,
+    .ssh-collapsible,
+    .settings-modal-overlay,
+    .settings-modal-panel {
+      transition-duration: 1ms;
     }
 
     .settings-section-shell::before {
@@ -1858,6 +1999,37 @@
     .file-drop-overlay-zone {
       animation: none !important;
     }
+  }
+}
+
+/*
+ * SSH settings — responsive helpers. Unlayered so these win over the
+ * Tailwind flex/align/gap/padding utilities on the same elements
+ * (utilities layer > components layer in Tailwind v4 cascade).
+ */
+@media (max-width: 640px) {
+  .settings-section-heading-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .settings-section-title-group {
+    min-width: 0;
+  }
+
+  .settings-section-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .settings-hover-actions {
+    opacity: 1 !important;
+  }
+
+  .settings-card-row {
+    padding: 12px;
   }
 }
 

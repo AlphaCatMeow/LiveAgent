@@ -3,6 +3,7 @@ import { Type } from "typebox";
 import { invoke } from "@tauri-apps/api/core";
 
 import { type BuiltinToolBundle, createBuiltinMetadataMap } from "./builtinTypes";
+import type { SystemToolRuntimeScope } from "./systemToolOptions";
 
 type SystemHttpGetResponse = {
   url: string;
@@ -11,8 +12,6 @@ type SystemHttpGetResponse = {
   body: string;
   content_type?: string | null;
 };
-
-export type SystemToolRuntimeScope = "chat" | "cron_auto_prompt";
 
 type SystemToolDefinition = {
   id: string;
@@ -82,10 +81,10 @@ const SELECTABLE_SYSTEM_TOOL_DEFINITIONS = [
   },
 ] as const satisfies readonly SystemToolDefinition[];
 
-export type SystemToolId = (typeof SELECTABLE_SYSTEM_TOOL_DEFINITIONS)[number]["id"];
+export type CustomSystemToolId = (typeof SELECTABLE_SYSTEM_TOOL_DEFINITIONS)[number]["id"];
 
 export const CUSTOM_SYSTEM_TOOL_OPTIONS: Array<{
-  id: SystemToolId;
+  id: CustomSystemToolId;
   label: string;
   description: string;
 }> = SELECTABLE_SYSTEM_TOOL_DEFINITIONS.map(({ id, label, description }) => ({
@@ -102,14 +101,14 @@ function supportsRuntimeScope(
 }
 
 export function createCustomSystemTools(params: {
-  selectedToolIds: SystemToolId[];
+  selectedToolIds: readonly string[];
   runtimeScope: SystemToolRuntimeScope;
   currentChatModel?: {
     customProviderId: string;
     model: string;
   };
 }): BuiltinToolBundle {
-  const selected = new Set<SystemToolId>(params.selectedToolIds);
+  const selected = new Set(params.selectedToolIds);
   const activeDefinitions = SELECTABLE_SYSTEM_TOOL_DEFINITIONS.filter(
     (definition) =>
       selected.has(definition.id) && supportsRuntimeScope(definition, params.runtimeScope),

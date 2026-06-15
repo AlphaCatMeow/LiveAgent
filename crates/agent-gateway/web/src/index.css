@@ -210,6 +210,27 @@
     user-select: text;
   }
 
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
+  textarea:focus,
+  select:focus,
+  [contenteditable="true"]:focus,
+  [contenteditable="plaintext-only"]:focus,
+  [role="textbox"]:focus {
+    outline: none;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus-visible,
+  textarea:focus-visible,
+  select:focus-visible,
+  [contenteditable="true"]:focus-visible,
+  [contenteditable="plaintext-only"]:focus-visible,
+  [role="textbox"]:focus-visible {
+    --tw-ring-offset-shadow: 0 0 #0000;
+    --tw-ring-shadow: 0 0 #0000;
+    border-color: hsl(var(--input));
+    box-shadow: var(--tw-shadow, 0 0 #0000);
+  }
+
   /* Custom scrollbar */
   ::-webkit-scrollbar {
     width: 6px;
@@ -628,6 +649,31 @@
     z-index: -1;
   }
 
+  .ssh-auth-panel {
+    overflow: hidden;
+    transition:
+      max-height 300ms cubic-bezier(0.16, 1, 0.3, 1),
+      opacity 220ms ease,
+      transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: max-height, opacity, transform;
+  }
+
+  .ssh-collapsible {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 280ms cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: grid-template-rows;
+  }
+
+  .ssh-collapsible[data-open="true"] {
+    grid-template-rows: 1fr;
+  }
+
+  .ssh-collapsible-inner {
+    min-height: 0;
+    overflow: hidden;
+  }
+
   @keyframes settingsSectionIn {
     from {
       opacity: 0;
@@ -654,6 +700,11 @@
     .settings-section-enter,
     .settings-section-title-enter {
       animation: none;
+    }
+
+    .ssh-auth-panel,
+    .ssh-collapsible {
+      transition-duration: 1ms;
     }
 
     .settings-section-shell::before {

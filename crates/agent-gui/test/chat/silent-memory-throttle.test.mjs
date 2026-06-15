@@ -4,7 +4,7 @@ import { createTsModuleLoader } from "../helpers/load-ts-module.mjs";
 
 const loader = createTsModuleLoader();
 const { silentMemorySkipReason, recordSilentMemoryTurnBoundary } = loader.loadModule(
-  "src/pages/chat/silentMemoryExtraction.ts",
+  "src/pages/chat/memory/silentMemoryExtraction.ts",
 );
 
 test("empty user text is skipped with empty-user-message reason", () => {

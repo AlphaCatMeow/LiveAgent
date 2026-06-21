@@ -4,17 +4,17 @@ import type { TerminalSession } from "../../lib/terminal/types";
 import {
   createRightDockSingletonTab,
   FILE_TREE_TAB_ID,
+  GIT_REVIEW_TAB_ID,
   getCurrentRightDockActiveTab,
   getRightDockVisibleTabs,
-  GIT_REVIEW_TAB_ID,
   orderRightDockVisibleTabs,
+  type RightDockSingletonTabKind,
   removeRightDockTabFromState,
   rightDockSingletonTabId,
-  sameRightDockOrder,
   SSH_TUNNEL_TAB_ID,
-  tabOrderIdsEqual,
+  sameRightDockOrder,
   TUNNEL_TAB_ID,
-  type RightDockSingletonTabKind,
+  tabOrderIdsEqual,
 } from "./rightDockModel";
 
 type UseRightDockProjectTabsOptions = {
@@ -28,13 +28,8 @@ type UseRightDockProjectTabsOptions = {
 };
 
 export function useRightDockProjectTabs(options: UseRightDockProjectTabsOptions) {
-  const {
-    localSessions,
-    onProjectStateChange,
-    projectPathKey,
-    projectState,
-    tunnelAvailable,
-  } = options;
+  const { localSessions, onProjectStateChange, projectPathKey, projectState, tunnelAvailable } =
+    options;
   const [draftTabOrder, setDraftTabOrder] = useState<string[] | null>(null);
   const fileTreeInitialized = Boolean(projectPathKey && projectState.tabs[FILE_TREE_TAB_ID]);
   const gitReviewInitialized = Boolean(projectPathKey && projectState.tabs[GIT_REVIEW_TAB_ID]);

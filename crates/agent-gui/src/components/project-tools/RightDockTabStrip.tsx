@@ -1,17 +1,11 @@
 import type { ReactNode } from "react";
 import { useLocale } from "../../i18n";
-import { cn } from "../../lib/shared/utils";
 import type { RightDockTabKind } from "../../lib/settings";
+import { cn } from "../../lib/shared/utils";
 import type { TerminalSession } from "../../lib/terminal/types";
 import { Check, Terminal, X } from "../icons";
-import {
-  getRightDockToolDefinition,
-  type RightDockSingletonTabKind,
-} from "./rightDockRegistry";
-import {
-  formatTerminalSessionTitle,
-  type RightDockVisibleTab,
-} from "./rightDockModel";
+import { formatTerminalSessionTitle, type RightDockVisibleTab } from "./rightDockModel";
+import { getRightDockToolDefinition, type RightDockSingletonTabKind } from "./rightDockRegistry";
 
 type RightDockTabStripProps = {
   tabs: RightDockVisibleTab[];

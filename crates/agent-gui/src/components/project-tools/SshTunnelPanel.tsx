@@ -839,10 +839,9 @@ export function SshTunnelPanel(props: SshTunnelPanelProps) {
             ) : null}
           </div>
 
-          <div
-            role="group"
+          <fieldset
             aria-label={t("projectTools.sshTunnelScopeGroup")}
-            className="relative mt-3 grid grid-cols-2 gap-0.5 rounded-lg bg-muted/70 p-0.5"
+            className="relative m-0 mt-3 grid min-w-0 grid-cols-2 gap-0.5 rounded-lg border-0 bg-muted/70 p-0.5"
           >
             <div
               aria-hidden="true"
@@ -876,7 +875,7 @@ export function SshTunnelPanel(props: SshTunnelPanelProps) {
                 </button>
               );
             })}
-          </div>
+          </fieldset>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
@@ -1105,7 +1104,6 @@ export function SshTunnelPanel(props: SshTunnelPanelProps) {
                 onChange={(event) => setPromptAnswer(event.currentTarget.value)}
                 className="mt-3 h-10 w-full rounded-lg border border-border/70 bg-background/80 px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus-visible:border-emerald-500/50 focus-visible:ring-1 focus-visible:ring-emerald-500/20"
                 type={prompt.answerEcho ? "text" : "password"}
-                autoFocus
               />
             ) : null}
             <div className="mt-4 flex justify-end gap-2">

@@ -11,10 +11,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
-import {
-  RIGHT_DOCK_TOOL_DEFINITIONS,
-  type RightDockSingletonTabKind,
-} from "./rightDockRegistry";
+import { RIGHT_DOCK_TOOL_DEFINITIONS, type RightDockSingletonTabKind } from "./rightDockRegistry";
 
 type RightDockLauncherActions = {
   onCreateTerminal: (shell?: string) => void;
@@ -190,9 +187,7 @@ export function RightDockChooser(props: RightDockChooserProps) {
         ))}
       </div>
       {loading ? (
-        <div className="text-center text-xs text-muted-foreground">
-          {t("projectTools.loading")}
-        </div>
+        <div className="text-center text-xs text-muted-foreground">{t("projectTools.loading")}</div>
       ) : null}
       {error ? <div className="text-center text-xs text-destructive">{error}</div> : null}
     </div>

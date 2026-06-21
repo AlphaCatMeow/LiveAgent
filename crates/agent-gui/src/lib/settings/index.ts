@@ -1819,9 +1819,8 @@ export function normalizeRightDockProjectState(
   for (const id of Object.keys(tabs)) {
     if (!tabOrder.includes(id)) tabOrder.push(id);
   }
-  const activeTabId = typeof obj.activeTabId === "string" && tabs[obj.activeTabId]
-    ? obj.activeTabId
-    : tabOrder[0];
+  const activeTabId =
+    typeof obj.activeTabId === "string" && tabs[obj.activeTabId] ? obj.activeTabId : tabOrder[0];
   return {
     ...(activeTabId ? { activeTabId } : {}),
     tabOrder,
@@ -2213,7 +2212,9 @@ export function openRightDockSingletonTab(
   return updateRightDockProjectState(prev, normalizedPathKey, (current) => {
     const tab = current.tabs[tabId] ?? createRightDockSingletonTab(normalizedPathKey, kind);
     const tabs = { ...current.tabs, [tabId]: tab };
-    const tabOrder = current.tabOrder.includes(tabId) ? current.tabOrder : [...current.tabOrder, tabId];
+    const tabOrder = current.tabOrder.includes(tabId)
+      ? current.tabOrder
+      : [...current.tabOrder, tabId];
     return {
       ...current,
       activeTabId: tabId,
@@ -2240,8 +2241,14 @@ export function removeRightDockProjectState(
 ): AppSettings {
   const normalizedPathKey = workspaceProjectPathKey(projectPathKey);
   if (!normalizedPathKey) return prev;
-  const hasRightDockProject = Object.hasOwn(prev.customSettings.rightDock.projects, normalizedPathKey);
-  const hasSshProjectAssociation = Object.hasOwn(prev.ssh.projectHostAssociations, normalizedPathKey);
+  const hasRightDockProject = Object.hasOwn(
+    prev.customSettings.rightDock.projects,
+    normalizedPathKey,
+  );
+  const hasSshProjectAssociation = Object.hasOwn(
+    prev.ssh.projectHostAssociations,
+    normalizedPathKey,
+  );
   if (!hasRightDockProject && !hasSshProjectAssociation) return prev;
   const currentRightDockProject = getRightDockProjectState(prev.customSettings, normalizedPathKey);
   const hasRightDockTabs = Object.keys(currentRightDockProject.tabs).length > 0;
@@ -2323,7 +2330,8 @@ export function updateRightDockFileTreeState(
   if (rightDockFileTreeStateEqual(current, next)) return prev;
   return updateRightDockProjectState(prev, normalizedPathKey, (projectState) => {
     const tabId = RIGHT_DOCK_SINGLETON_TAB_IDS.fileTree;
-    const tab = projectState.tabs[tabId] ?? createRightDockSingletonTab(normalizedPathKey, "fileTree");
+    const tab =
+      projectState.tabs[tabId] ?? createRightDockSingletonTab(normalizedPathKey, "fileTree");
     return {
       ...projectState,
       tabs: {

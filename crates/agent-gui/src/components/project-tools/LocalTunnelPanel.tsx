@@ -506,10 +506,9 @@ export function LocalTunnelPanel({
             </div>
           </div>
         </div>
-        <div
-          role="group"
+        <fieldset
           aria-label={t("projectTools.tunnelScopeGroup")}
-          className="relative mt-3 grid grid-cols-2 gap-0.5 rounded-lg bg-muted/70 p-0.5"
+          className="relative m-0 mt-3 grid min-w-0 grid-cols-2 gap-0.5 rounded-lg border-0 bg-muted/70 p-0.5"
         >
           <div
             aria-hidden
@@ -543,7 +542,7 @@ export function LocalTunnelPanel({
               </button>
             );
           })}
-        </div>
+        </fieldset>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">

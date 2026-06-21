@@ -363,11 +363,8 @@
     box-sizing: border-box;
     width: 100%;
     height: 100%;
-    padding:
-      var(--project-terminal-padding-y)
-      var(--project-terminal-padding-x)
-      var(--project-terminal-padding-y)
-      var(--project-terminal-padding-x);
+    padding: var(--project-terminal-padding-y) var(--project-terminal-padding-x)
+      var(--project-terminal-padding-y) var(--project-terminal-padding-x);
   }
   .project-terminal-viewport .xterm-viewport,
   .project-terminal-viewport .xterm-screen,
@@ -2245,11 +2242,7 @@ body > div:not(#root) [data-streamdown="mermaid"] svg {
       hsl(38 92% 50% / 0.08) 10.5rem 12.25rem,
       transparent 12.25rem
     ),
-    repeating-linear-gradient(
-      to bottom,
-      transparent 0 27px,
-      hsl(var(--border) / 0.42) 27px 28px
-    ),
+    repeating-linear-gradient(to bottom, transparent 0 27px, hsl(var(--border) / 0.42) 27px 28px),
     hsl(var(--background));
   box-shadow:
     inset 0 1px 0 hsl(var(--foreground) / 0.04),

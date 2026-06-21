@@ -172,13 +172,12 @@ export function WindowsTitleBar() {
   const maximizeLabel = isMaximized ? t("window.restore") : t("window.maximize");
 
   return (
-    <div
+    <header
       className={cn(
         "relative z-50 flex h-8 shrink-0 select-none items-center border-b border-black/[0.06] bg-white/65 text-foreground/90 backdrop-blur-2xl backdrop-saturate-150 supports-[backdrop-filter]:bg-white/55 dark:border-white/[0.06] dark:bg-neutral-900/70 dark:supports-[backdrop-filter]:bg-neutral-900/55",
         "shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_1px_0_rgba(0,0,0,0.04)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_1px_0_rgba(0,0,0,0.4)]",
         !isFocused && "text-foreground/55",
       )}
-      role="banner"
     >
       <div
         className="flex h-full min-w-0 flex-1 items-center gap-1.5 pl-2.5 pr-3"
@@ -196,7 +195,10 @@ export function WindowsTitleBar() {
         </span>
       </div>
 
-      <div className="flex h-full shrink-0 items-stretch" aria-label={t("window.controls")}>
+      <fieldset
+        className="m-0 flex h-full shrink-0 items-stretch border-0 p-0"
+        aria-label={t("window.controls")}
+      >
         <button
           type="button"
           className="group flex h-full w-[38px] items-center justify-center text-foreground/55 transition-colors duration-150 hover:bg-black/[0.05] hover:text-foreground/90 focus-visible:outline-hidden focus-visible:bg-black/[0.05] focus-visible:text-foreground/90 dark:hover:bg-white/[0.07] dark:focus-visible:bg-white/[0.07]"
@@ -228,7 +230,7 @@ export function WindowsTitleBar() {
         >
           <X className="h-[13px] w-[13px]" strokeWidth={1.5} />
         </button>
-      </div>
-    </div>
+      </fieldset>
+    </header>
   );
 }

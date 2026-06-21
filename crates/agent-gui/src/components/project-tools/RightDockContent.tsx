@@ -1,26 +1,22 @@
 import type { RefObject } from "react";
 import { useLocale } from "../../i18n";
+import type { GitClient } from "../../lib/git/types";
 import type {
   RightDockFileTreeState,
   RightDockFileTreeStatePatch,
   RightDockTabKind,
   SshHostConfig,
 } from "../../lib/settings";
-import type { GitClient } from "../../lib/git/types";
 import { cn } from "../../lib/shared/utils";
-import type {
-  TerminalClient,
-  TerminalSession,
-  TerminalSnapshot,
-} from "../../lib/terminal/types";
+import type { TerminalClient, TerminalSession, TerminalSnapshot } from "../../lib/terminal/types";
 import { Terminal } from "../icons";
 import { Button } from "../ui/button";
 import {
-  GitReviewPanel,
   type GitCommitContextPayload,
   type GitFileContextPayload,
+  GitReviewPanel,
 } from "./GitReviewPanel";
-import { LocalTunnelPanel, type LocalTunnelClient } from "./LocalTunnelPanel";
+import { type LocalTunnelClient, LocalTunnelPanel } from "./LocalTunnelPanel";
 import { ProjectFileTreePanel } from "./ProjectFileTreePanel";
 import { SshTunnelPanel } from "./SshTunnelPanel";
 import { XTermViewport } from "./XTermViewport";
@@ -122,12 +118,7 @@ export function RightDockContent(props: RightDockContentProps) {
   return (
     <>
       {fileTreeInitialized ? (
-        <div
-          className={cn(
-            "min-h-0 flex-1",
-            currentActiveTab === "fileTree" ? "block" : "hidden",
-          )}
-        >
+        <div className={cn("min-h-0 flex-1", currentActiveTab === "fileTree" ? "block" : "hidden")}>
           <ProjectFileTreePanel
             key={projectPathKey}
             projectPathKey={projectPathKey}
@@ -221,10 +212,7 @@ export function RightDockContent(props: RightDockContentProps) {
                 <div
                   key={session.id}
                   aria-hidden={!isActiveTerminal}
-                  className={cn(
-                    "absolute inset-0 min-h-0",
-                    isActiveTerminal ? "block" : "hidden",
-                  )}
+                  className={cn("absolute inset-0 min-h-0", isActiveTerminal ? "block" : "hidden")}
                 >
                   <XTermViewport
                     client={client}

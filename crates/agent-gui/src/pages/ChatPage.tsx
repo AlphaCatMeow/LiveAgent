@@ -2311,10 +2311,7 @@ export function ChatPage(props: ChatPageProps) {
     }
   }
 
-  function applyGatewayBridgeRebase(
-    conversationId: string,
-    baseMessageRef: HistoryMessageRef,
-  ) {
+  function applyGatewayBridgeRebase(conversationId: string, baseMessageRef: HistoryMessageRef) {
     const targetConversationId = conversationId.trim();
     if (!targetConversationId) {
       throw new Error("Remote edit_resend requires conversation_id.");
@@ -3060,7 +3057,9 @@ export function ChatPage(props: ChatPageProps) {
       const initialPersistConfirmation = initialPersist
         .then(async (persisted) => {
           if (!persisted) {
-            console.warn("initial conversation history persist did not complete before chat runtime");
+            console.warn(
+              "initial conversation history persist did not complete before chat runtime",
+            );
             return false;
           }
           if (overrides?.afterInitialHistoryPersist) {
@@ -4762,10 +4761,7 @@ export function ChatPage(props: ChatPageProps) {
         theme={settings.theme}
         disabledMessage={terminalDisabledMessage}
         projectState={rightDockProjectState}
-        fileTreeState={getRightDockFileTreeState(
-          settings.customSettings,
-          terminalProjectPathKey,
-        )}
+        fileTreeState={getRightDockFileTreeState(settings.customSettings, terminalProjectPathKey)}
         sshHosts={settings.ssh.hosts}
         associatedSshHostIds={associatedSshHostIds}
         client={tauriTerminalClient}
@@ -4775,16 +4771,12 @@ export function ChatPage(props: ChatPageProps) {
         tunnelEnabled={tunnelEnabled}
         tunnelDisabledMessage={tunnelDisabledMessage}
         tunnelRefreshToken={tunnelRefreshToken}
-        onWidthChange={(nextWidth) =>
-          setSettings((prev) => updateRightDockWidth(prev, nextWidth))
-        }
+        onWidthChange={(nextWidth) => setSettings((prev) => updateRightDockWidth(prev, nextWidth))}
         onProjectStateChange={(updater) =>
           setSettings((prev) => updateRightDockProjectState(prev, terminalProjectPathKey, updater))
         }
         onFileTreeStateChange={(patch) =>
-          setSettings((prev) =>
-            updateRightDockFileTreeState(prev, terminalProjectPathKey, patch),
-          )
+          setSettings((prev) => updateRightDockFileTreeState(prev, terminalProjectPathKey, patch))
         }
         onSshProjectHostIdsChange={(hostIds) =>
           setSettings((prev) => updateSshProjectHostIds(prev, terminalProjectPathKey, hostIds))

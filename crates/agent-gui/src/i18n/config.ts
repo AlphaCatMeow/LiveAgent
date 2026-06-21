@@ -1753,8 +1753,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     "projectTools.sshTunnelConnecting": "Connecting",
     "projectTools.sshTunnelTabTitle": "Tab title",
     "projectTools.sshTunnelTabTitlePlaceholder": "Defaults to the host name",
-    "projectTools.sshTunnelProxyUnsupported":
-      "This host is configured to connect through a proxy.",
+    "projectTools.sshTunnelProxyUnsupported": "This host is configured to connect through a proxy.",
     "projectTools.sshTunnelMissingSecret": "This host is missing saved authentication material.",
     "projectTools.sshTunnelRunningCount": "{count} SSH connections running",
     "projectTools.sshTunnelConnectionCount": "{count} SSH connections, {connected} connected",

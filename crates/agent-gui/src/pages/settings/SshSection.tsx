@@ -25,10 +25,10 @@ import { Label } from "../../components/ui/label";
 import { Textarea } from "../../components/ui/textarea";
 import { useLocale } from "../../i18n";
 import {
+  removeSshHostFromProjectAssociations,
   type SshAuthType,
   type SshHostConfig,
   type SshProxyType,
-  removeSshHostFromProjectAssociations,
   updateSsh,
 } from "../../lib/settings";
 import { useModalMotion } from "../../lib/shared/modalMotion";

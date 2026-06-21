@@ -63,8 +63,7 @@ export function areSessionsEqual(left: TerminalSession[], right: TerminalSession
       (session.ssh?.authType ?? "") === (other.ssh?.authType ?? "") &&
       (session.ssh?.status ?? "") === (other.ssh?.status ?? "") &&
       (session.ssh?.reconnectAttempt ?? 0) === (other.ssh?.reconnectAttempt ?? 0) &&
-      (session.ssh?.reconnectMaxAttempts ?? 0) ===
-        (other.ssh?.reconnectMaxAttempts ?? 0) &&
+      (session.ssh?.reconnectMaxAttempts ?? 0) === (other.ssh?.reconnectMaxAttempts ?? 0) &&
       session.pid === other.pid &&
       session.cols === other.cols &&
       session.rows === other.rows &&
@@ -286,9 +285,11 @@ export function removeRightDockTabFromState(
   delete tabs[tabId];
   const tabOrder = state.tabOrder.filter((id) => id !== tabId && tabs[id]);
   const activeTabId =
-    state.activeTabId === tabId ? tabOrder[0] : state.activeTabId && tabs[state.activeTabId]
-      ? state.activeTabId
-      : tabOrder[0];
+    state.activeTabId === tabId
+      ? tabOrder[0]
+      : state.activeTabId && tabs[state.activeTabId]
+        ? state.activeTabId
+        : tabOrder[0];
   return {
     openVersion: state.openVersion,
     ...(activeTabId ? { activeTabId } : {}),

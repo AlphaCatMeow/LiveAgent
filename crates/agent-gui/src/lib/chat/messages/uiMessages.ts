@@ -6,12 +6,12 @@ import type {
   Usage,
 } from "@earendil-works/pi-ai";
 import { assistantMessageToText } from "../../providers/llm";
+import { isProviderNativeWebSearchToolName } from "../../providers/nativeWebSearch";
 import { GLOBAL_BASH_MAX_TIMEOUT_MS, MIN_BASH_TIMEOUT_MS } from "../../tools/bashTimeoutPolicy";
 import type {
   DelegateAgentCardResultDetails,
   DelegateAgentResultDetails,
 } from "../../tools/builtinTypes";
-import { isProviderNativeWebSearchToolName } from "../../providers/nativeWebSearch";
 import {
   enrichHostedSearchContentWithText,
   type HostedSearchBlock,
@@ -832,10 +832,13 @@ function parsePlaceholderSpecAttributes(value: string) {
   const attrs: Record<string, unknown> = {};
   const pattern = /([a-zA-Z_][\w-]*)=("[^"]*"|'[^']*'|[^\s]+)/g;
   let match: RegExpExecArray | null = null;
-  while ((match = pattern.exec(value)) !== null) {
+  match = pattern.exec(value);
+  while (match !== null) {
     const key = normalizePlaceholderSpecKey(match[1] ?? "");
-    if (!key) continue;
-    attrs[key] = parsePlaceholderSpecScalar(match[2] ?? "");
+    if (key) {
+      attrs[key] = parsePlaceholderSpecScalar(match[2] ?? "");
+    }
+    match = pattern.exec(value);
   }
   return attrs;
 }
@@ -1184,9 +1187,7 @@ function upsertToolBlock(
   );
   if (!shouldDisplayToolBlock(toolCall, toolResult, blocks, options)) {
     return existingIdx >= 0
-      ? blocks.filter(
-          (block) => !(block.kind === "tool" && block.item.toolCall.id === toolCall.id),
-        )
+      ? blocks.filter((block) => !(block.kind === "tool" && block.item.toolCall.id === toolCall.id))
       : blocks;
   }
   if (existingIdx >= 0) {

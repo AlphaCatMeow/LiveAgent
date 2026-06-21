@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  type RightDockProjectState,
-  type RightDockTabInstance,
-} from "../../lib/settings";
+import type { RightDockProjectState, RightDockTabInstance } from "../../lib/settings";
 import type {
   TerminalClient,
   TerminalSession,
@@ -109,7 +106,11 @@ export function useRightDockSessions(options: UseRightDockSessionsOptions) {
         const tabOrder = current.tabOrder.includes(session.id)
           ? current.tabOrder
           : [...current.tabOrder, session.id];
-        if (current.activeTabId === session.id && tabs === current.tabs && tabOrder === current.tabOrder) {
+        if (
+          current.activeTabId === session.id &&
+          tabs === current.tabs &&
+          tabOrder === current.tabOrder
+        ) {
           return current;
         }
         return {

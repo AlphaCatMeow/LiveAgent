@@ -58,6 +58,37 @@ function loadProvidersWithCapturedAnthropicStream() {
   };
 }
 
+test("llm facade preserves provider runtime exports", () => {
+  const expectedFunctionExports = [
+    "assistantMessageToText",
+    "attachAnthropicAutomaticCaching",
+    "attachCodexResponsesStorage",
+    "attachPayloadDebugLogging",
+    "attachProviderNativeWebSearch",
+    "buildDualAuthHeaders",
+    "buildGeminiAuthHeaders",
+    "buildProviderAuthHeaders",
+    "buildProviderRequestMetadata",
+    "completeAssistantMessage",
+    "composePayloadMiddlewares",
+    "createModelFromConfig",
+    "createStreamingTextReconciler",
+    "finalizeProviderStreamOptions",
+    "normalizeErrorMessage",
+    "parseModelValue",
+    "providerSupportsNativeWebSearch",
+    "resolveProviderCacheRetention",
+    "streamAssistantMessage",
+    "streamSimpleByApi",
+    "toModelValue",
+    "toSimpleStreamReasoning",
+  ];
+
+  for (const exportName of expectedFunctionExports) {
+    assert.equal(typeof providers[exportName], "function", `${exportName} should be exported`);
+  }
+});
+
 test("proxy base URL builder validates upstream URLs and carries origin separately", () => {
   assert.deepEqual(
     proxy.buildProxyBaseUrl("codex", "https://api.openai.com/v1/responses", "http://127.0.0.1:18080/"),
@@ -605,6 +636,52 @@ test("gemini model list normalization uses models array metadata", () => {
       maxOutputToken: 65_536,
     },
   ]);
+});
+
+test("payload middleware composer preserves previous-hook-first order", async () => {
+  const makeTraceMiddleware = (name) => (options) => {
+    const previousOnPayload = options.onPayload;
+    return {
+      ...options,
+      onPayload: async (payload, model) => {
+        let nextPayload = payload;
+        if (previousOnPayload) {
+          const overridden = await previousOnPayload(nextPayload, model);
+          if (overridden !== undefined) {
+            nextPayload = overridden;
+          }
+        }
+        return {
+          ...nextPayload,
+          trace: [...(nextPayload.trace ?? []), name],
+        };
+      },
+    };
+  };
+  const composed = providers.composePayloadMiddlewares([
+    makeTraceMiddleware("first"),
+    makeTraceMiddleware("second"),
+  ]);
+
+  const options = composed(
+    {
+      onPayload: async (payload) => ({
+        ...payload,
+        trace: [...(payload.trace ?? []), "base"],
+      }),
+    },
+    {
+      providerId: "codex",
+      baseUrl: "https://api.openai.com/v1",
+      options: {},
+    },
+  );
+  const payload = await options.onPayload(
+    { input: "hello" },
+    { api: "openai-responses", provider: "openai", id: "gpt-5" },
+  );
+
+  assert.deepEqual(payload.trace, ["base", "first", "second"]);
 });
 
 test("codex responses payloads always opt into upstream storage after previous payload hooks", async () => {

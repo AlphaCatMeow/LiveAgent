@@ -3000,18 +3000,12 @@ fn spawn_ssh_reconnect_runner(
     runtime: Arc<SshSessionRuntime>,
     connection_id: usize,
 ) {
-    thread::spawn(move || {
-        let Ok(rt) = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        else {
-            return;
-        };
-        rt.block_on(async move {
-            registry
-                .handle_ssh_unexpected_disconnect(session_id, runtime, connection_id)
-                .await;
-        });
+    // russh drives each session on the current Tokio runtime, so reconnects must
+    // live on Tauri's long-running runtime rather than a short-lived thread runtime.
+    tauri::async_runtime::spawn(async move {
+        registry
+            .handle_ssh_unexpected_disconnect(session_id, runtime, connection_id)
+            .await;
     });
 }
 

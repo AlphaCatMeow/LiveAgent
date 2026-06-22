@@ -233,7 +233,7 @@ export function SkillsSettingsForm(props: SettingsSectionProps) {
                 value={filter}
                 onChange={(e) => setFilter(e.currentTarget.value)}
                 placeholder={t("settings.skillsSearch")}
-                className="h-9 w-full rounded-lg border bg-background pl-9 pr-3 text-sm outline-hidden transition-colors placeholder:text-muted-foreground/60 focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                className="h-9 w-full rounded-lg border bg-background pl-9 pr-3 text-xs outline-hidden transition-colors placeholder:text-muted-foreground/60 focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
               />
             </div>
           ) : null}

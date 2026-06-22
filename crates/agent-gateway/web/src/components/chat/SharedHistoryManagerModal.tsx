@@ -337,7 +337,7 @@ export function SharedHistoryManagerModal({
                 value={query}
                 onChange={(event) => setQuery(event.currentTarget.value)}
                 placeholder={t("sharedHistory.searchPlaceholder")}
-                className="h-9 w-full rounded-xl border border-border/70 bg-background px-9 text-sm outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-sky-500/45 focus:ring-2 focus:ring-sky-500/15"
+                className="h-9 w-full rounded-xl border border-border/70 bg-background px-9 text-xs outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-sky-500/45 focus:ring-2 focus:ring-sky-500/15"
               />
             </div>
             <Button

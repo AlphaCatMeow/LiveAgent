@@ -2316,7 +2316,7 @@ export function MemoryPanel(props: {
               <textarea
                 value={draft.body}
                 onChange={(event) => setDraft((prev) => ({ ...prev, body: event.target.value }))}
-                className="mt-3 min-h-28 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="mt-3 min-h-28 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-xs"
                 placeholder={t("settings.memoryBodyPlaceholder")}
               />
               <div className="mt-3 flex justify-end gap-2">
@@ -2384,7 +2384,7 @@ export function MemoryPanel(props: {
                       onChange={(event) =>
                         setEditDraft((prev) => ({ ...prev, appendBody: event.target.value }))
                       }
-                      className="min-h-24 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm"
+                      className="min-h-24 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-xs"
                       placeholder={t("settings.memoryAppendBlockPlaceholder")}
                     />
                     <div className="rounded-lg border border-border/50 bg-muted/20 p-3">

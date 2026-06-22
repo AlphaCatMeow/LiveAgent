@@ -761,7 +761,7 @@ function GitRemoteSetupModal(props: {
               id={remoteUrlId}
               value={remoteUrl}
               onChange={(event) => onRemoteUrlChange(event.target.value)}
-              className="h-9 text-sm"
+              className="h-9 text-[11px] placeholder:text-[11px]"
               placeholder={t("projectTools.gitReview.remoteUrlPlaceholder")}
               autoFocus
               disabled={loading}
@@ -917,7 +917,7 @@ function GitBranchFromCommitModal(props: {
               id={branchNameId}
               value={branchName}
               onChange={(event) => onBranchNameChange(event.target.value)}
-              className="h-9 text-sm"
+              className="h-9 text-[11px] placeholder:text-[11px]"
               placeholder={t("projectTools.gitReview.branchNamePlaceholder")}
               autoFocus
               disabled={loading}
@@ -4636,7 +4636,7 @@ export const GitReviewPanel = memo(function GitReviewPanel(props: GitReviewPanel
               onChange={(event) => setCommitMessage(event.target.value)}
               placeholder={t("projectTools.gitReview.commitMessagePlaceholder")}
               disabled={writeDisabled || operationBusy}
-              className="h-8 text-xs placeholder:text-[11px] focus-visible:ring-1 focus-visible:ring-border/40"
+              className="h-8 text-[11px] placeholder:text-[11px] focus-visible:ring-1 focus-visible:ring-border/40"
             />
             <Button
               size="sm"

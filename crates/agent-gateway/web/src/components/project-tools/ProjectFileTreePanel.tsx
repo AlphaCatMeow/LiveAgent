@@ -875,7 +875,7 @@ export function ProjectFileTreePanel(props: {
             value={query}
             onChange={(event) => setQuery(event.currentTarget.value)}
             placeholder={t("projectTools.fileTree.searchPlaceholder")}
-            className="h-8 pl-7 text-xs"
+            className="h-8 pl-7 text-[11px] placeholder:text-[11px]"
           />
         </div>
         <Button
@@ -911,7 +911,7 @@ export function ProjectFileTreePanel(props: {
               }
             }}
             placeholder={actionPlaceholder}
-            className="h-8 text-xs"
+            className="h-8 text-[11px] placeholder:text-[11px]"
           />
           <Button
             size="icon"

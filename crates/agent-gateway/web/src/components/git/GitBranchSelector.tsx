@@ -146,7 +146,7 @@ function GitInitModal(props: {
               id={branchId}
               value={branch}
               onChange={(event) => onBranchChange(event.target.value)}
-              className="h-9 text-sm"
+              className="h-9 text-xs"
               placeholder="main"
               autoFocus
               disabled={loading}
@@ -164,7 +164,7 @@ function GitInitModal(props: {
                 id={userNameId}
                 value={userName}
                 onChange={(event) => onUserNameChange(event.target.value)}
-                className="h-9 text-sm"
+                className="h-9 text-xs"
                 disabled={loading}
               />
             </div>
@@ -179,7 +179,7 @@ function GitInitModal(props: {
                 id={userEmailId}
                 value={userEmail}
                 onChange={(event) => onUserEmailChange(event.target.value)}
-                className="h-9 text-sm"
+                className="h-9 text-xs"
                 disabled={loading}
               />
             </div>

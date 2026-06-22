@@ -96,7 +96,7 @@ const TTL_OPTIONS: Array<{ value: TunnelTtlSeconds; labelKey: string }> = [
 ];
 
 const TUNNEL_INPUT_CLASS =
-  "h-8 min-w-0 rounded-lg border-border/60 bg-background/80 text-xs transition-[border-color,box-shadow,background-color] focus-visible:border-muted-foreground/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-muted-foreground/15 focus-visible:ring-offset-0";
+  "h-8 min-w-0 rounded-lg border-border/60 bg-background/80 text-[11px] placeholder:text-[11px] transition-[border-color,box-shadow,background-color] focus-visible:border-muted-foreground/30 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-muted-foreground/15 focus-visible:ring-offset-0";
 
 function TtlSegmented({
   value,

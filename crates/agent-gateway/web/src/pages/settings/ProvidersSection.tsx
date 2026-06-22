@@ -486,7 +486,7 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
                 <Input
                   autoFocus
                   value={newModelName}
-                  className="h-8 text-sm"
+                  className="h-8 text-xs"
                   onChange={(e) => setNewModelName(e.currentTarget.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") handleAddModel();

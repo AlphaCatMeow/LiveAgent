@@ -7,7 +7,10 @@ import type {
 } from "@/lib/settings";
 import { cn } from "@/lib/shared/utils";
 import { getFileTypeIcon } from "../chat/fileTypeIcons";
-import { isWorkspacePreviewPath } from "../workspace-editor/workspaceImagePreview";
+import {
+  isWorkspaceImagePath,
+  isWorkspacePreviewPath,
+} from "../workspace-editor/workspaceImagePreview";
 import {
   Check,
   ChevronRight,
@@ -152,7 +155,7 @@ export function ProjectFileTreePanel(props: {
   onInitializedChange: (initialized: boolean) => void;
   onSyncStateChange: (patch: RightDockFileTreeStatePatch) => void;
   onInsertFileMention?: (path: string, kind: FileTreeKind) => void;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, imagePaths?: string[]) => void;
 }) {
   const {
     projectPathKey,
@@ -728,6 +731,21 @@ export function ProjectFileTreePanel(props: {
     [onInsertFileMention, selectedPath, state.nodes],
   );
 
+  const getSiblingImagePaths = useCallback(
+    (targetPath: string) => {
+      if (!isWorkspaceImagePath(targetPath)) return [];
+      const parentPath = dirname(targetPath);
+      const parentNode = state.nodes[parentPath];
+      const siblingPaths =
+        parentNode?.children.filter((childPath) => {
+          const child = state.nodes[childPath];
+          return child?.kind === "file" && isWorkspaceImagePath(childPath);
+        }) ?? [];
+      return siblingPaths.includes(targetPath) ? siblingPaths : [targetPath];
+    },
+    [state.nodes],
+  );
+
   const renderNode = useCallback(
     (path: string, depth: number): React.ReactNode => {
       const node = state.nodes[path];
@@ -780,7 +798,7 @@ export function ProjectFileTreePanel(props: {
                   toggleDirectory(path, expanded);
                   return;
                 }
-                onOpenFile?.(path);
+                onOpenFile?.(path, getSiblingImagePaths(path));
               }}
             >
               <TypeIcon className="h-3.5 w-3.5 shrink-0" />
@@ -798,6 +816,7 @@ export function ProjectFileTreePanel(props: {
     },
     [
       cwd,
+      getSiblingImagePaths,
       onOpenFile,
       openContextMenu,
       setProjectState,
@@ -991,7 +1010,7 @@ export function ProjectFileTreePanel(props: {
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-45"
                 disabled={!onOpenFile}
                 onClick={() => {
-                  onOpenFile?.(contextPath);
+                  onOpenFile?.(contextPath, getSiblingImagePaths(contextPath));
                   setContextMenu(null);
                 }}
               >

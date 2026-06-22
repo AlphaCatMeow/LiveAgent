@@ -1533,12 +1533,13 @@ export function ChatPage(props: ChatPageProps) {
     [hideWorkspaceSshTerminalOverlay],
   );
   const handleOpenWorkspaceFile = useCallback(
-    (path: string) => {
+    (path: string, imagePaths?: string[]) => {
       if (!terminalProjectPath || !terminalProjectPathKey) return;
       const request = {
         projectPathKey: terminalProjectPathKey,
         workdir: terminalProjectPath,
         path,
+        imagePaths,
       };
       if (isWorkspacePreviewPath(path)) {
         openWorkspaceFilePreview(request);

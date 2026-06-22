@@ -1,6 +1,6 @@
 import { generateDiffFile } from "@git-diff-view/file";
 import { DiffModeEnum, DiffView } from "@git-diff-view/react";
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ImageContent, ToolResultMessage, Usage } from "../../lib/agentTypes";
 import {
   Bot,
@@ -214,6 +214,149 @@ function AnimatedStatusText(props: { text: string; className?: string }) {
   );
 }
 
+const THINKING_SCROLL_BOTTOM_THRESHOLD_PX = 2;
+const THINKING_USER_SCROLL_INTENT_WINDOW_MS = 500;
+
+function getThinkingScrollBottomGap(viewport: HTMLElement) {
+  return Math.max(0, viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight);
+}
+
+function isThinkingScrollAtBottom(viewport: HTMLElement) {
+  return getThinkingScrollBottomGap(viewport) <= THINKING_SCROLL_BOTTOM_THRESHOLD_PX;
+}
+
+function hasThinkingScrollOverflow(viewport: HTMLElement) {
+  return viewport.scrollHeight - viewport.clientHeight > THINKING_SCROLL_BOTTOM_THRESHOLD_PX;
+}
+
+function useStickyBottomScroll(
+  viewportRef: { current: HTMLPreElement | null },
+  options: { enabled: boolean; contentKey: string },
+) {
+  const { enabled, contentKey } = options;
+  const shouldStickRef = useRef(true);
+  const scrollFrameRef = useRef<number | null>(null);
+  const userScrollIntentUntilRef = useRef(0);
+  const touchYRef = useRef<number | null>(null);
+  const previousContentKeyRef = useRef(contentKey);
+
+  const cancelScheduledScroll = useCallback(() => {
+    if (scrollFrameRef.current === null || typeof window === "undefined") {
+      scrollFrameRef.current = null;
+      return;
+    }
+    window.cancelAnimationFrame(scrollFrameRef.current);
+    scrollFrameRef.current = null;
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    viewport.scrollTop = viewport.scrollHeight;
+    shouldStickRef.current = true;
+  }, [viewportRef]);
+
+  const scheduleScrollToBottom = useCallback(() => {
+    if (scrollFrameRef.current !== null || typeof window === "undefined") {
+      return;
+    }
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      if (!shouldStickRef.current) return;
+      scrollToBottom();
+    });
+  }, [scrollToBottom]);
+
+  useEffect(() => {
+    if (!enabled) {
+      shouldStickRef.current = true;
+      cancelScheduledScroll();
+      return;
+    }
+
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    shouldStickRef.current = true;
+    scheduleScrollToBottom();
+
+    const markUserScrollIntent = () => {
+      userScrollIntentUntilRef.current = Date.now() + THINKING_USER_SCROLL_INTENT_WINDOW_MS;
+    };
+
+    const hasRecentUserScrollIntent = () => Date.now() <= userScrollIntentUntilRef.current;
+
+    const syncStickyState = () => {
+      if (isThinkingScrollAtBottom(viewport)) {
+        shouldStickRef.current = true;
+      } else if (hasRecentUserScrollIntent()) {
+        shouldStickRef.current = false;
+      }
+    };
+
+    const handleScroll = () => {
+      syncStickyState();
+    };
+
+    const handleWheel = (event: WheelEvent) => {
+      markUserScrollIntent();
+      if (event.deltaY < 0 && hasThinkingScrollOverflow(viewport)) {
+        shouldStickRef.current = false;
+      }
+    };
+
+    const handleTouchStart = (event: TouchEvent) => {
+      touchYRef.current = event.touches[0]?.clientY ?? null;
+      markUserScrollIntent();
+    };
+
+    const handleTouchMove = (event: TouchEvent) => {
+      const nextY = event.touches[0]?.clientY ?? null;
+      const previousY = touchYRef.current;
+      markUserScrollIntent();
+      if (
+        hasThinkingScrollOverflow(viewport) &&
+        (previousY === null ||
+          nextY === null ||
+          nextY > previousY + 1 ||
+          !isThinkingScrollAtBottom(viewport))
+      ) {
+        shouldStickRef.current = false;
+      }
+      touchYRef.current = nextY;
+    };
+
+    const handlePointerDown = () => {
+      markUserScrollIntent();
+    };
+
+    viewport.addEventListener("scroll", handleScroll, { passive: true });
+    viewport.addEventListener("wheel", handleWheel, { passive: true });
+    viewport.addEventListener("touchstart", handleTouchStart, { passive: true });
+    viewport.addEventListener("touchmove", handleTouchMove, { passive: true });
+    viewport.addEventListener("pointerdown", handlePointerDown, { passive: true });
+
+    return () => {
+      viewport.removeEventListener("scroll", handleScroll);
+      viewport.removeEventListener("wheel", handleWheel);
+      viewport.removeEventListener("touchstart", handleTouchStart);
+      viewport.removeEventListener("touchmove", handleTouchMove);
+      viewport.removeEventListener("pointerdown", handlePointerDown);
+      cancelScheduledScroll();
+      touchYRef.current = null;
+    };
+  }, [cancelScheduledScroll, enabled, scheduleScrollToBottom, viewportRef]);
+
+  useEffect(() => {
+    const contentChanged = previousContentKeyRef.current !== contentKey;
+    previousContentKeyRef.current = contentKey;
+    if (!contentChanged || !enabled || !shouldStickRef.current) return;
+    scheduleScrollToBottom();
+  });
+
+  useEffect(() => () => cancelScheduledScroll(), [cancelScheduledScroll]);
+}
+
 function ThinkingBlock({
   text,
   open,
@@ -221,16 +364,21 @@ function ThinkingBlock({
   text: string;
   open?: boolean;
 }) {
-  if (!/\S/.test(text || "")) return null;
+  const hasText = /\S/.test(text || "");
   const { t } = useLocale();
   const [isOpen, setIsOpen] = useState(typeof open === "boolean" ? open : false);
   const userInteractedRef = useRef(false);
+  const thinkingPreRef = useRef<HTMLPreElement | null>(null);
+
+  useStickyBottomScroll(thinkingPreRef, { enabled: isOpen && hasText, contentKey: text });
 
   useEffect(() => {
     if (!userInteractedRef.current && typeof open === "boolean") {
       setIsOpen(open);
     }
   }, [open]);
+
+  if (!hasText) return null;
 
   return (
     <div className="group/think rounded-lg border border-border/40 bg-muted/30">
@@ -251,7 +399,10 @@ function ThinkingBlock({
       </button>
       {isOpen ? (
         <div className="border-t border-border/30 px-3 pb-3 pt-2">
-          <pre className="thinking-block-pre max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-muted/40 p-3 text-[12.5px] leading-relaxed text-muted-foreground">
+          <pre
+            ref={thinkingPreRef}
+            className="thinking-block-pre max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-muted/40 p-3 text-[12.5px] leading-relaxed text-muted-foreground"
+          >
             {text}
           </pre>
         </div>

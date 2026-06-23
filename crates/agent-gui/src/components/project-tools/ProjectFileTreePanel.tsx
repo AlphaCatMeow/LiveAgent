@@ -26,6 +26,7 @@ import { useConfirmDialog } from "../ui/confirm-dialog";
 import { Input } from "../ui/input";
 import {
   isWorkspaceEditablePreviewPath,
+  isWorkspaceImagePath,
   isWorkspacePreviewPath,
 } from "../workspace-editor/workspaceImagePreview";
 
@@ -153,7 +154,7 @@ export function ProjectFileTreePanel(props: {
   onInitializedChange: (initialized: boolean) => void;
   onSyncStateChange: (patch: RightDockFileTreeStatePatch) => void;
   onInsertFileMention?: (path: string, kind: FileTreeKind) => void;
-  onOpenFile?: (path: string) => void;
+  onOpenFile?: (path: string, imagePaths?: string[]) => void;
 }) {
   const {
     projectPathKey,
@@ -765,13 +766,28 @@ export function ProjectFileTreePanel(props: {
     [onInsertFileMention, selectedPath, state.nodes],
   );
 
+  const getSiblingImagePaths = useCallback(
+    (targetPath: string) => {
+      if (!isWorkspaceImagePath(targetPath)) return [];
+      const parentPath = dirname(targetPath);
+      const parentNode = state.nodes[parentPath];
+      const siblingPaths =
+        parentNode?.children.filter((childPath) => {
+          const child = state.nodes[childPath];
+          return child?.kind === "file" && isWorkspaceImagePath(childPath);
+        }) ?? [];
+      return siblingPaths.includes(targetPath) ? siblingPaths : [targetPath];
+    },
+    [state.nodes],
+  );
+
   const renderNode = useCallback(
     (path: string, depth: number): React.ReactNode => {
       const node = state.nodes[path];
       if (!node) return null;
       const expanded = state.expanded.includes(path);
       const selected = state.selectedPath === path;
-      const TypeIcon = node.kind === "file" ? getFileTypeIcon(path, node.kind) : null;
+      const TypeIcon = getFileTypeIcon(path, node.kind, { expanded });
       return (
         <div key={path || "__root__"}>
           <div
@@ -817,18 +833,10 @@ export function ProjectFileTreePanel(props: {
                   toggleDirectory(path, expanded);
                   return;
                 }
-                onOpenFile?.(path);
+                onOpenFile?.(path, getSiblingImagePaths(path));
               }}
             >
-              {node.kind === "dir" ? (
-                expanded ? (
-                  <FolderOpen className="h-3.5 w-3.5 shrink-0 text-amber-500" />
-                ) : (
-                  <Folder className="h-3.5 w-3.5 shrink-0 text-amber-500" />
-                )
-              ) : TypeIcon ? (
-                <TypeIcon className="h-3.5 w-3.5 shrink-0" />
-              ) : null}
+              <TypeIcon className="h-3.5 w-3.5 shrink-0" />
               <span className="min-w-0 truncate">{node.name}</span>
             </button>
           </div>
@@ -843,6 +851,7 @@ export function ProjectFileTreePanel(props: {
     },
     [
       cwd,
+      getSiblingImagePaths,
       onOpenFile,
       openContextMenu,
       setProjectState,
@@ -901,7 +910,7 @@ export function ProjectFileTreePanel(props: {
             value={query}
             onChange={(event) => setQuery(event.currentTarget.value)}
             placeholder={t("projectTools.fileTree.searchPlaceholder")}
-            className="h-8 pl-7 text-xs"
+            className="h-8 pl-7 text-[11px] placeholder:text-[11px]"
           />
         </div>
         <Button
@@ -937,7 +946,7 @@ export function ProjectFileTreePanel(props: {
               }
             }}
             placeholder={actionPlaceholder}
-            className="h-8 text-xs"
+            className="h-8 text-[11px] placeholder:text-[11px]"
           />
           <Button
             size="icon"
@@ -987,8 +996,7 @@ export function ProjectFileTreePanel(props: {
             </div>
           ) : (
             searchResults.map((entry) => {
-              const TypeIcon =
-                entry.kind === "file" ? getFileTypeIcon(entry.path, entry.kind) : null;
+              const TypeIcon = getFileTypeIcon(entry.path, entry.kind);
               return (
                 <button
                   key={`${entry.kind}:${entry.path}`}
@@ -997,11 +1005,7 @@ export function ProjectFileTreePanel(props: {
                   title={entry.path}
                   onClick={() => void revealPath(entry.path, entry.kind)}
                 >
-                  {entry.kind === "dir" ? (
-                    <Folder className="h-3.5 w-3.5 shrink-0 text-amber-500" />
-                  ) : TypeIcon ? (
-                    <TypeIcon className="h-3.5 w-3.5 shrink-0" />
-                  ) : null}
+                  <TypeIcon className="h-3.5 w-3.5 shrink-0" />
                   <span className="min-w-0 truncate">{entry.path}</span>
                 </button>
               );
@@ -1041,7 +1045,7 @@ export function ProjectFileTreePanel(props: {
                 className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-45"
                 disabled={!onOpenFile}
                 onClick={() => {
-                  onOpenFile?.(contextPath);
+                  onOpenFile?.(contextPath, getSiblingImagePaths(contextPath));
                   setContextMenu(null);
                 }}
               >

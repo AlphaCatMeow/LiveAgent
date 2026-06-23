@@ -52,6 +52,7 @@ type WorkspaceOverlayHostProps = {
   workspaceSshTerminalMounted: boolean;
   workspaceSshTerminalOpenRequest: WorkspaceSshTerminalOpenRequest | null;
   workspaceSshTerminalOpen: boolean;
+  terminalProjectPathKey: string;
   terminalClient: TerminalClient | null;
   sftpClient: SftpClient | null;
   terminalSessions: TerminalSession[];
@@ -79,6 +80,7 @@ export function WorkspaceOverlayHost(props: WorkspaceOverlayHostProps) {
     workspaceSshTerminalMounted,
     workspaceSshTerminalOpenRequest,
     workspaceSshTerminalOpen,
+    terminalProjectPathKey,
     terminalClient,
     sftpClient,
     terminalSessions,
@@ -134,6 +136,7 @@ export function WorkspaceOverlayHost(props: WorkspaceOverlayHostProps) {
         >
           <WorkspaceSshTerminalOverlay
             openRequest={workspaceSshTerminalOpenRequest}
+            projectPathKey={terminalProjectPathKey}
             sessions={terminalSessions}
             client={terminalClient}
             sftpClient={sftpClient}

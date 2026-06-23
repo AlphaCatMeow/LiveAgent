@@ -1,4 +1,4 @@
-import type { ComponentType, SVGProps } from "react";
+import { type ComponentType, type SVGProps, useId } from "react";
 import McpLogoSource from "~icons/gravity-ui/logo-mcp";
 import ClaudeSource from "~icons/logos/claude-icon";
 import OpenAISource from "~icons/logos/openai-icon";
@@ -28,11 +28,9 @@ import ExternalLinkSource from "~icons/lucide/external-link";
 import EyeSource from "~icons/lucide/eye";
 import EyeOffSource from "~icons/lucide/eye-off";
 import FileSource from "~icons/lucide/file";
-import fileIconSvgSource from "~icons/lucide/file?raw";
 import FilePenLineSource from "~icons/lucide/file-pen-line";
 import FileTextSource from "~icons/lucide/file-text";
 import FolderSource from "~icons/lucide/folder";
-import folderIconSvgSource from "~icons/lucide/folder?raw";
 import FolderOpenSource from "~icons/lucide/folder-open";
 import FolderTreeSource from "~icons/lucide/folder-tree";
 import GitBranchSource from "~icons/lucide/git-branch";
@@ -74,6 +72,7 @@ import RadioSource from "~icons/lucide/radio";
 import Redo2Source from "~icons/lucide/redo-2";
 import RefreshCwSource from "~icons/lucide/refresh-cw";
 import ReplaceSource from "~icons/lucide/replace";
+import RotateCwSquareSource from "~icons/lucide/rotate-cw-square";
 import SaveSource from "~icons/lucide/save";
 import ScanTextSource from "~icons/lucide/scan-text";
 import ScissorsSource from "~icons/lucide/scissors";
@@ -101,89 +100,10 @@ import WifiOffSource from "~icons/lucide/wifi-off";
 import WrenchSource from "~icons/lucide/wrench";
 import XSource from "~icons/lucide/x";
 import ZapSource from "~icons/lucide/zap";
-import DefaultFileSource from "~icons/vscode-icons/default-file";
-import FileTypeApacheSource from "~icons/vscode-icons/file-type-apache";
-import FileTypeAudioSource from "~icons/vscode-icons/file-type-audio";
-import FileTypeBinarySource from "~icons/vscode-icons/file-type-binary";
-import FileTypeBunSource from "~icons/vscode-icons/file-type-bun";
-import FileTypeCSource from "~icons/vscode-icons/file-type-c";
-import FileTypeCargoSource from "~icons/vscode-icons/file-type-cargo";
-import FileTypeCertSource from "~icons/vscode-icons/file-type-cert";
-import FileTypeCmakeSource from "~icons/vscode-icons/file-type-cmake";
-import FileTypeConfigSource from "~icons/vscode-icons/file-type-config";
-import FileTypeCppSource from "~icons/vscode-icons/file-type-cpp";
-import FileTypeCsharpSource from "~icons/vscode-icons/file-type-csharp";
-import FileTypeCssSource from "~icons/vscode-icons/file-type-css";
-import FileTypeDartSource from "~icons/vscode-icons/file-type-dartlang";
-import FileTypeDbSource from "~icons/vscode-icons/file-type-db";
-import FileTypeDockerSource from "~icons/vscode-icons/file-type-docker";
-import FileTypeDotenvSource from "~icons/vscode-icons/file-type-dotenv";
-import FileTypeEslintSource from "~icons/vscode-icons/file-type-eslint";
-import FileTypeExcelSource from "~icons/vscode-icons/file-type-excel";
-import FileTypeFontSource from "~icons/vscode-icons/file-type-font";
-import FileTypeGeminiSource from "~icons/vscode-icons/file-type-gemini";
-import FileTypeGitSource from "~icons/vscode-icons/file-type-git";
-import FileTypeGoSource from "~icons/vscode-icons/file-type-go";
-import FileTypeGoWorkSource from "~icons/vscode-icons/file-type-go-work";
-import FileTypeGradleSource from "~icons/vscode-icons/file-type-gradle";
-import FileTypeGraphqlSource from "~icons/vscode-icons/file-type-graphql";
-import FileTypeHtmlSource from "~icons/vscode-icons/file-type-html";
-import FileTypeImageSource from "~icons/vscode-icons/file-type-image";
-import FileTypeIniSource from "~icons/vscode-icons/file-type-ini";
-import FileTypeJavaSource from "~icons/vscode-icons/file-type-java";
-import FileTypeJsSource from "~icons/vscode-icons/file-type-js";
-import FileTypeJsConfigSource from "~icons/vscode-icons/file-type-jsconfig";
-import FileTypeJsonSource from "~icons/vscode-icons/file-type-json";
-import FileTypeKeySource from "~icons/vscode-icons/file-type-key";
-import FileTypeKotlinSource from "~icons/vscode-icons/file-type-kotlin";
-import FileTypeLicenseSource from "~icons/vscode-icons/file-type-license";
-import FileTypeLogSource from "~icons/vscode-icons/file-type-log";
-import FileTypeMarkdownSource from "~icons/vscode-icons/file-type-markdown";
-import FileTypeMavenSource from "~icons/vscode-icons/file-type-maven";
-import FileTypeNginxSource from "~icons/vscode-icons/file-type-nginx";
-import FileTypeNodeSource from "~icons/vscode-icons/file-type-node";
-import FileTypeNpmSource from "~icons/vscode-icons/file-type-npm";
-import FileTypePackageSource from "~icons/vscode-icons/file-type-package";
-import FileTypePdfSource from "~icons/vscode-icons/file-type-pdf2";
-import FileTypePhpSource from "~icons/vscode-icons/file-type-php";
-import FileTypePnpmSource from "~icons/vscode-icons/file-type-pnpm";
-import FileTypePowerpointSource from "~icons/vscode-icons/file-type-powerpoint";
-import FileTypePowershellSource from "~icons/vscode-icons/file-type-powershell";
-import FileTypePrettierSource from "~icons/vscode-icons/file-type-prettier";
-import FileTypePrismaSource from "~icons/vscode-icons/file-type-prisma";
-import FileTypePythonSource from "~icons/vscode-icons/file-type-python";
-import FileTypeReactJsSource from "~icons/vscode-icons/file-type-reactjs";
-import FileTypeReactTsSource from "~icons/vscode-icons/file-type-reactts";
-import FileTypeRubySource from "~icons/vscode-icons/file-type-ruby";
-import FileTypeRustSource from "~icons/vscode-icons/file-type-rust";
-import FileTypeScssSource from "~icons/vscode-icons/file-type-scss";
-import FileTypeShellSource from "~icons/vscode-icons/file-type-shell";
-import FileTypeSqlSource from "~icons/vscode-icons/file-type-sql";
-import FileTypeSqliteSource from "~icons/vscode-icons/file-type-sqlite";
-import FileTypeSvelteSource from "~icons/vscode-icons/file-type-svelte";
-import FileTypeSwiftSource from "~icons/vscode-icons/file-type-swift";
-import FileTypeSystemdSource from "~icons/vscode-icons/file-type-systemd";
-import FileTypeTerraformSource from "~icons/vscode-icons/file-type-terraform";
-import FileTypeTextSource from "~icons/vscode-icons/file-type-text";
-import FileTypeTomlSource from "~icons/vscode-icons/file-type-toml";
-import FileTypeTsConfigSource from "~icons/vscode-icons/file-type-tsconfig";
-import FileTypeTsSource from "~icons/vscode-icons/file-type-typescript";
-import FileTypeTsDefSource from "~icons/vscode-icons/file-type-typescriptdef";
-import FileTypeVideoSource from "~icons/vscode-icons/file-type-video";
-import FileTypeViteSource from "~icons/vscode-icons/file-type-vite";
-import FileTypeVitestSource from "~icons/vscode-icons/file-type-vitest";
-import FileTypeVueSource from "~icons/vscode-icons/file-type-vue";
-import FileTypeWebpackSource from "~icons/vscode-icons/file-type-webpack";
-import FileTypeWordSource from "~icons/vscode-icons/file-type-word";
-import FileTypeXmlSource from "~icons/vscode-icons/file-type-xml";
-import FileTypeYamlSource from "~icons/vscode-icons/file-type-yaml";
-import FileTypeYarnSource from "~icons/vscode-icons/file-type-yarn";
-import FileTypeZipSource from "~icons/vscode-icons/file-type-zip";
 
 type IconSource = ComponentType<SVGProps<SVGSVGElement> & { title?: string }>;
 
 type IconProps = SVGProps<SVGSVGElement> & {
-  absoluteStrokeWidth?: boolean;
   size?: number | string;
   title?: string;
 };
@@ -191,13 +111,7 @@ type IconProps = SVGProps<SVGSVGElement> & {
 export type IconComponent = ComponentType<IconProps>;
 
 function createIcon(Source: IconSource): IconComponent {
-  return function Icon({
-    absoluteStrokeWidth: _absoluteStrokeWidth,
-    height,
-    size,
-    width,
-    ...props
-  }) {
+  return function Icon({ height, size, width, ...props }) {
     const nextProps: IconProps = { ...props };
     if (size !== undefined) {
       nextProps.width = width ?? size;
@@ -283,9 +197,236 @@ function SkillIconSource({ title, ...props }: SVGProps<SVGSVGElement> & { title?
   );
 }
 
+function GeminiIconSource({ title, ...props }: SVGProps<SVGSVGElement> & { title?: string }) {
+  const idPrefix = `gemini-${useId().replaceAll(":", "")}`;
+  const shapeId = `${idPrefix}-shape`;
+  const maskId = `${idPrefix}-mask`;
+  const filterYellowId = `${idPrefix}-yellow`;
+  const filterRedGlowId = `${idPrefix}-red-glow`;
+  const filterGreenId = `${idPrefix}-green`;
+  const filterBlueId = `${idPrefix}-blue`;
+  const filterGoldId = `${idPrefix}-gold`;
+  const filterBlueAccentId = `${idPrefix}-blue-accent`;
+  const filterSkyId = `${idPrefix}-sky`;
+  const filterRedId = `${idPrefix}-red`;
+  const filterYellowAccentId = `${idPrefix}-yellow-accent`;
+
+  return (
+    <svg
+      width="1em"
+      height="1em"
+      viewBox="0 0 32 32"
+      {...props}
+      xmlns="http://www.w3.org/2000/svg"
+      aria-hidden={title ? undefined : true}
+    >
+      <title>{title ?? "Gemini"}</title>
+      <path d="M0 0h32v32H0z" fill="none" />
+      <defs>
+        <path
+          id={shapeId}
+          fill="#fff"
+          d="M57.067 28.61q-7.396-3.184-12.945-8.732q-5.547-5.546-8.732-12.944a38.4 38.4 0 0 1-1.97-5.824A1.464 1.464 0 0 0 32 .001c-.671 0-1.255.458-1.419 1.11a38.4 38.4 0 0 1-1.971 5.823q-3.186 7.397-8.732 12.944q-5.548 5.548-12.945 8.732a38.4 38.4 0 0 1-5.824 1.972A1.464 1.464 0 0 0 0 32c0 .67.458 1.255 1.11 1.418a38.4 38.4 0 0 1 5.823 1.972q7.396 3.184 12.945 8.732q5.55 5.546 8.732 12.944a38.4 38.4 0 0 1 1.971 5.824c.164.65.749 1.11 1.419 1.11s1.255-.458 1.419-1.11a38.4 38.4 0 0 1 1.971-5.823q3.185-7.395 8.732-12.944q5.548-5.548 12.945-8.732a38.4 38.4 0 0 1 5.824-1.972A1.464 1.464 0 0 0 64 32.001c0-.672-.458-1.255-1.11-1.42a38.4 38.4 0 0 1-5.823-1.97"
+        />
+      </defs>
+      <g fill="none">
+        <g mask={`url(#${maskId})`} transform="translate(2 2)scale(.4375)">
+          <use href={`#${shapeId}`} />
+          <g filter={`url(#${filterYellowId})`}>
+            <ellipse
+              cx="14.208"
+              cy="16.716"
+              fill="#ffe432"
+              rx="14.208"
+              ry="16.716"
+              transform="rotate(19.552 -43.96 -16.268)"
+            />
+          </g>
+          <g filter={`url(#${filterRedGlowId})`}>
+            <ellipse cx="27.054" cy="2.551" fill="#fc413d" rx="18.394" ry="18.799" />
+          </g>
+          <g filter={`url(#${filterGreenId})`}>
+            <ellipse
+              cx="19.224"
+              cy="24.904"
+              fill="#00b95c"
+              rx="19.224"
+              ry="24.904"
+              transform="rotate(-2.799 667.58 51.694)"
+            />
+          </g>
+          <g filter={`url(#${filterGreenId})`}>
+            <ellipse
+              cx="18.843"
+              cy="20.744"
+              fill="#00b95c"
+              rx="18.843"
+              ry="20.744"
+              transform="rotate(-31.317 81.174 36.482)"
+            />
+          </g>
+          <g filter={`url(#${filterBlueId})`}>
+            <ellipse cx="66.462" cy="24.977" fill="#3186ff" rx="18.093" ry="17.423" />
+          </g>
+          <g filter={`url(#${filterGoldId})`}>
+            <ellipse
+              cx="20.929"
+              cy="22.075"
+              fill="#fbbc04"
+              rx="20.929"
+              ry="22.075"
+              transform="rotate(37.251 9.618 -7.898)"
+            />
+          </g>
+          <g filter={`url(#${filterBlueAccentId})`}>
+            <ellipse
+              cx="24.131"
+              cy="22.292"
+              fill="#3186ff"
+              rx="24.131"
+              ry="22.292"
+              transform="rotate(34.51 19.317 63.957)"
+            />
+          </g>
+          <g filter={`url(#${filterSkyId})`}>
+            <path
+              fill="#749bff"
+              d="M54.226-2.304c2.794 3.799-.797 11.184-8.02 16.497c-7.222 5.312-15.342 6.539-18.136 2.74S28.866 5.75 36.09.436c7.223-5.312 15.343-6.539 18.136-2.74"
+            />
+          </g>
+          <g filter={`url(#${filterRedId})`}>
+            <ellipse
+              cx="27.585"
+              cy="17.148"
+              fill="#fc413d"
+              rx="27.585"
+              ry="17.148"
+              transform="rotate(-42.847 5.973 20.37)"
+            />
+          </g>
+          <g filter={`url(#${filterYellowAccentId})`}>
+            <ellipse
+              cx="14.782"
+              cy="8.596"
+              fill="#ffee48"
+              rx="14.782"
+              ry="8.596"
+              transform="rotate(35.592 -44.338 25.191)"
+            />
+          </g>
+        </g>
+        <defs>
+          <filter
+            id={filterYellowId}
+            width="38.868"
+            height="42.756"
+            x="-19.618"
+            y="12.903"
+            colorInterpolationFilters="sRGB"
+            filterUnits="userSpaceOnUse"
+          >
+            <feGaussianBlur stdDeviation="2.46" />
+          </filter>
+          <filter
+            id={filterRedGlowId}
+            width="84.353"
+            height="85.162"
+            x="-15.122"
+            y="-40.03"
+            colorInterpolationFilters="sRGB"
+            filterUnits="userSpaceOnUse"
+          >
+            <feGaussianBlur stdDeviation="11.891" />
+          </filter>
+          <filter
+            id={filterGreenId}
+            width="78.916"
+            height="90.22"
+            x="-20.768"
+            y="11.483"
+            colorInterpolationFilters="sRGB"
+            filterUnits="userSpaceOnUse"
+          >
+            <feGaussianBlur stdDeviation="10.109" />
+          </filter>
+          <filter
+            id={filterBlueId}
+            width="74.611"
+            height="73.27"
+            x="29.156"
+            y="-11.658"
+            colorInterpolationFilters="sRGB"
+            filterUnits="userSpaceOnUse"
+          >
+            <feGaussianBlur stdDeviation="9.606" />
+          </filter>
+          <filter
+            id={filterGoldId}
+            width="77.538"
+            height="78.151"
+            x="-38.291"
+            y="-16.269"
+            colorInterpolationFilters="sRGB"
+            filterUnits="userSpaceOnUse"
+          >
+            <feGaussianBlur stdDeviation="8.706" />
+          </filter>
+          <filter
+            id={filterBlueAccentId}
+            width="78.218"
+            height="76.898"
+            x="7.78"
+            y="-6.098"
+            colorInterpolationFilters="sRGB"
+            filterUnits="userSpaceOnUse"
+          >
+            <feGaussianBlur stdDeviation="7.775" />
+          </filter>
+          <filter
+            id={filterSkyId}
+            width="55.879"
+            height="51.479"
+            x="13.208"
+            y="-18.425"
+            colorInterpolationFilters="sRGB"
+            filterUnits="userSpaceOnUse"
+          >
+            <feGaussianBlur stdDeviation="6.957" />
+          </filter>
+          <filter
+            id={filterRedId}
+            width="70.203"
+            height="68.674"
+            x="-15.474"
+            y="-31.027"
+            colorInterpolationFilters="sRGB"
+            filterUnits="userSpaceOnUse"
+          >
+            <feGaussianBlur stdDeviation="5.876" />
+          </filter>
+          <filter
+            id={filterYellowAccentId}
+            width="55.137"
+            height="51.261"
+            x="-14.173"
+            y="20.474"
+            colorInterpolationFilters="sRGB"
+            filterUnits="userSpaceOnUse"
+          >
+            <feGaussianBlur stdDeviation="7.273" />
+          </filter>
+          <mask id={maskId} width="64" height="64" x="0" y="0" maskUnits="userSpaceOnUse">
+            <use href={`#${shapeId}`} />
+          </mask>
+        </defs>
+      </g>
+    </svg>
+  );
+}
+
 export const AlertTriangle = createIcon(AlertTriangleSource);
 export const ClaudeIcon = createIcon(ClaudeSource);
-export const FileTypeGeminiIcon = createIcon(FileTypeGeminiSource);
+export const GeminiIcon = createIcon(GeminiIconSource);
 export const ArrowLeft = createIcon(ArrowLeftSource);
 export const Ban = createIcon(BanSource);
 export const BookOpen = createIcon(BookOpenSource);
@@ -356,6 +497,7 @@ export const Radio = createIcon(RadioSource);
 export const Redo2 = createIcon(Redo2Source);
 export const RefreshCw = createIcon(RefreshCwSource);
 export const Replace = createIcon(ReplaceSource);
+export const RotateCwSquare = createIcon(RotateCwSquareSource);
 export const Save = createIcon(SaveSource);
 export const ScanText = createIcon(ScanTextSource);
 export const ScrollText = createIcon(ScrollTextSource);
@@ -385,84 +527,3 @@ export const Wrench = createIcon(WrenchSource);
 export const X = createIcon(XSource);
 export const XCircle = createIcon(XCircleSource);
 export const Zap = createIcon(ZapSource);
-export const DefaultFile = createIcon(DefaultFileSource);
-export const FileTypeApache = createIcon(FileTypeApacheSource);
-export const FileTypeAudio = createIcon(FileTypeAudioSource);
-export const FileTypeBinary = createIcon(FileTypeBinarySource);
-export const FileTypeBun = createIcon(FileTypeBunSource);
-export const FileTypeC = createIcon(FileTypeCSource);
-export const FileTypeCargo = createIcon(FileTypeCargoSource);
-export const FileTypeCert = createIcon(FileTypeCertSource);
-export const FileTypeCmake = createIcon(FileTypeCmakeSource);
-export const FileTypeConfig = createIcon(FileTypeConfigSource);
-export const FileTypeCpp = createIcon(FileTypeCppSource);
-export const FileTypeCsharp = createIcon(FileTypeCsharpSource);
-export const FileTypeCss = createIcon(FileTypeCssSource);
-export const FileTypeDart = createIcon(FileTypeDartSource);
-export const FileTypeDb = createIcon(FileTypeDbSource);
-export const FileTypeDocker = createIcon(FileTypeDockerSource);
-export const FileTypeDotenv = createIcon(FileTypeDotenvSource);
-export const FileTypeEslint = createIcon(FileTypeEslintSource);
-export const FileTypeExcel = createIcon(FileTypeExcelSource);
-export const FileTypeFont = createIcon(FileTypeFontSource);
-export const FileTypeGit = createIcon(FileTypeGitSource);
-export const FileTypeGo = createIcon(FileTypeGoSource);
-export const FileTypeGoWork = createIcon(FileTypeGoWorkSource);
-export const FileTypeGradle = createIcon(FileTypeGradleSource);
-export const FileTypeGraphql = createIcon(FileTypeGraphqlSource);
-export const FileTypeHtml = createIcon(FileTypeHtmlSource);
-export const FileTypeImage = createIcon(FileTypeImageSource);
-export const FileTypeIni = createIcon(FileTypeIniSource);
-export const FileTypeJava = createIcon(FileTypeJavaSource);
-export const FileTypeJs = createIcon(FileTypeJsSource);
-export const FileTypeJsConfig = createIcon(FileTypeJsConfigSource);
-export const FileTypeJson = createIcon(FileTypeJsonSource);
-export const FileTypeKey = createIcon(FileTypeKeySource);
-export const FileTypeKotlin = createIcon(FileTypeKotlinSource);
-export const FileTypeLicense = createIcon(FileTypeLicenseSource);
-export const FileTypeLog = createIcon(FileTypeLogSource);
-export const FileTypeMarkdown = createIcon(FileTypeMarkdownSource);
-export const FileTypeMaven = createIcon(FileTypeMavenSource);
-export const FileTypeNginx = createIcon(FileTypeNginxSource);
-export const FileTypeNode = createIcon(FileTypeNodeSource);
-export const FileTypeNpm = createIcon(FileTypeNpmSource);
-export const FileTypePackage = createIcon(FileTypePackageSource);
-export const FileTypePdf = createIcon(FileTypePdfSource);
-export const FileTypePhp = createIcon(FileTypePhpSource);
-export const FileTypePnpm = createIcon(FileTypePnpmSource);
-export const FileTypePowerpoint = createIcon(FileTypePowerpointSource);
-export const FileTypePowershell = createIcon(FileTypePowershellSource);
-export const FileTypePrettier = createIcon(FileTypePrettierSource);
-export const FileTypePrisma = createIcon(FileTypePrismaSource);
-export const FileTypePython = createIcon(FileTypePythonSource);
-export const FileTypeReactJs = createIcon(FileTypeReactJsSource);
-export const FileTypeReactTs = createIcon(FileTypeReactTsSource);
-export const FileTypeRuby = createIcon(FileTypeRubySource);
-export const FileTypeRust = createIcon(FileTypeRustSource);
-export const FileTypeScss = createIcon(FileTypeScssSource);
-export const FileTypeShell = createIcon(FileTypeShellSource);
-export const FileTypeSql = createIcon(FileTypeSqlSource);
-export const FileTypeSqlite = createIcon(FileTypeSqliteSource);
-export const FileTypeSvelte = createIcon(FileTypeSvelteSource);
-export const FileTypeSwift = createIcon(FileTypeSwiftSource);
-export const FileTypeSystemd = createIcon(FileTypeSystemdSource);
-export const FileTypeTerraform = createIcon(FileTypeTerraformSource);
-export const FileTypeText = createIcon(FileTypeTextSource);
-export const FileTypeToml = createIcon(FileTypeTomlSource);
-export const FileTypeTs = createIcon(FileTypeTsSource);
-export const FileTypeTsConfig = createIcon(FileTypeTsConfigSource);
-export const FileTypeTsDef = createIcon(FileTypeTsDefSource);
-export const FileTypeVideo = createIcon(FileTypeVideoSource);
-export const FileTypeVite = createIcon(FileTypeViteSource);
-export const FileTypeVitest = createIcon(FileTypeVitestSource);
-export const FileTypeVue = createIcon(FileTypeVueSource);
-export const FileTypeWebpack = createIcon(FileTypeWebpackSource);
-export const FileTypeWord = createIcon(FileTypeWordSource);
-export const FileTypeXml = createIcon(FileTypeXmlSource);
-export const FileTypeYaml = createIcon(FileTypeYamlSource);
-export const FileTypeYarn = createIcon(FileTypeYarnSource);
-export const FileTypeZip = createIcon(FileTypeZipSource);
-const fileIconSvg = fileIconSvgSource as unknown as string;
-const folderIconSvg = folderIconSvgSource as unknown as string;
-
-export { fileIconSvg, folderIconSvg };

@@ -29,6 +29,9 @@ func (c *websocketConnection) terminalEventAllowed(event *gatewayv1.TerminalEven
 	if event == nil {
 		return false
 	}
+	if strings.TrimSpace(event.GetKind()) == "ssh_tabs_updated" {
+		return c.sm.WebSshTerminalEnabled()
+	}
 	if session := event.GetSession(); session != nil {
 		return c.terminalSessionAllowed(session)
 	}
@@ -68,9 +71,6 @@ func (c *websocketConnection) handleTerminalRequest(req websocketRequest) {
 		return
 	}
 	projectPathKey := strings.TrimSpace(body.ProjectPathKey)
-	if action == "attach" || action == "snapshot" {
-		c.rememberTerminalSession(body.SessionID, projectPathKey)
-	}
 
 	response, err := c.awaitAgentResponse(req.ID, &gatewayv1.GatewayEnvelope{
 		RequestId: req.ID,
@@ -92,6 +92,8 @@ func (c *websocketConnection) handleTerminalRequest(req websocketRequest) {
 				PromptAnswer:   body.PromptAnswer,
 				TrustHostKey:   body.TrustHostKey,
 				SftpEnabled:    body.SftpEnabled,
+				TabId:          strings.TrimSpace(body.TabID),
+				TabKind:        strings.TrimSpace(body.TabKind),
 			},
 		},
 	})
@@ -195,20 +197,19 @@ func (c *websocketConnection) rememberTerminalInterest(action string, body webso
 	switch action {
 	case "list", "create", "create_ssh", "answer_ssh_prompt", "close_project":
 		c.rememberTerminalProject(projectPathKey)
-	case "attach", "snapshot":
-		c.rememberTerminalSession(sessionID, projectPathKey)
 	}
 }
 
 func (c *websocketConnection) terminalRequestAllowed(action string, body websocketTerminalRequestPayload) bool {
 	switch action {
-	case "create_ssh", "answer_ssh_prompt", "cancel_ssh_prompt", "ssh_latency":
+	case "create_ssh", "answer_ssh_prompt", "cancel_ssh_prompt", "ssh_latency",
+		"ssh_tabs_list", "ssh_tab_open", "ssh_tab_close":
 		return c.sm.WebSshTerminalEnabled()
 	case "list":
 		return c.sm.WebTerminalEnabled() || c.sm.WebSshTerminalEnabled()
 	case "close_project":
 		return c.sm.WebTerminalEnabled() || c.sm.WebSshTerminalEnabled()
-	case "attach", "snapshot", "input", "resize", "rename", "close", "detach":
+	case "rename", "close":
 		if c.sm.TerminalSessionKind(body.SessionID) == "ssh" {
 			return c.sm.WebSshTerminalEnabled()
 		}
@@ -220,23 +221,10 @@ func (c *websocketConnection) terminalRequestAllowed(action string, body websock
 
 func terminalPermissionError(action string) string {
 	switch action {
-	case "create_ssh", "answer_ssh_prompt", "cancel_ssh_prompt", "ssh_latency":
+	case "create_ssh", "answer_ssh_prompt", "cancel_ssh_prompt", "ssh_latency",
+		"ssh_tabs_list", "ssh_tab_open", "ssh_tab_close":
 		return "web SSH terminal is disabled in desktop Remote settings"
 	default:
 		return "web terminal is disabled in desktop Remote settings"
 	}
-}
-
-func (c *websocketConnection) handleTerminalDetach(req websocketRequest) {
-	var body websocketTerminalRequestPayload
-	if err := decodeWebSocketPayload(req.Payload, &body); err != nil {
-		_ = c.writeError(req.ID, "invalid terminal.detach payload")
-		return
-	}
-	if !c.terminalRequestAllowed("detach", body) {
-		_ = c.writeError(req.ID, terminalPermissionError("detach"))
-		return
-	}
-	c.forgetTerminalInterest(body.SessionID, body.ProjectPathKey)
-	_ = c.writeResponse(req.ID, map[string]any{"action": "detach"})
 }

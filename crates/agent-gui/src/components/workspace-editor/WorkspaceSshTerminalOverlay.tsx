@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocale } from "../../i18n";
 import type { SftpClient } from "../../lib/sftp/types";
 import { cn } from "../../lib/shared/utils";
-import type { TerminalClient, TerminalSession } from "../../lib/terminal/types";
+import type {
+  SshTerminalTab,
+  SshTerminalTabKind,
+  SshTerminalTabsSnapshot,
+  TerminalClient,
+  TerminalSession,
+} from "../../lib/terminal/types";
 import { AlertTriangle, FolderTree, Terminal, X } from "../icons";
 import { MacOsTitleBarSpacer } from "../MacOsTitleBarSpacer";
 import { XTermViewport } from "../project-tools/XTermViewport";
@@ -11,19 +17,12 @@ import { WorkspaceSftpPanel } from "./WorkspaceSftpPanel";
 export type WorkspaceSshTerminalOpenRequest = {
   id: number;
   sessionId: string;
-  kind?: WorkspaceSshTerminalTabKind;
-};
-
-type WorkspaceSshTerminalTabKind = "bash" | "sftp";
-
-type WorkspaceSshTerminalTab = {
-  id: string;
-  sessionId: string;
-  kind: WorkspaceSshTerminalTabKind;
+  kind?: SshTerminalTabKind;
 };
 
 type WorkspaceSshTerminalOverlayProps = {
   openRequest: WorkspaceSshTerminalOpenRequest | null;
+  projectPathKey: string;
   sessions: TerminalSession[];
   client: TerminalClient;
   sftpClient: SftpClient;
@@ -58,15 +57,19 @@ function statusDotClassName(session: TerminalSession) {
   return "bg-destructive";
 }
 
-function tabIdFor(sessionId: string, kind: WorkspaceSshTerminalTabKind) {
-  return `${kind}:${sessionId}`;
+function tabIdFor(sessionId: string, kind: SshTerminalTabKind) {
+  return `${kind}:${sessionId.trim()}`;
 }
 
 export function WorkspaceSshTerminalOverlay(props: WorkspaceSshTerminalOverlayProps) {
-  const { openRequest, sessions, client, sftpClient, theme, isOpen, onHide } = props;
+  const { openRequest, projectPathKey, sessions, client, sftpClient, theme, isOpen, onHide } = props;
   const { t } = useLocale();
   const [isVisible, setIsVisible] = useState(isOpen);
-  const [openTabs, setOpenTabs] = useState<WorkspaceSshTerminalTab[]>([]);
+  const [tabsSnapshot, setTabsSnapshot] = useState<SshTerminalTabsSnapshot>({
+    projectPathKey,
+    tabs: [],
+    revision: 0,
+  });
   const [activeTabId, setActiveTabId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const openRequestIdRef = useRef<number | null>(null);
@@ -82,16 +85,32 @@ export function WorkspaceSshTerminalOverlay(props: WorkspaceSshTerminalOverlayPr
   );
   const openTabRecords = useMemo(
     () =>
-      openTabs
+      tabsSnapshot.tabs
         .map((tab) => ({ tab, session: sessionsById.get(tab.sessionId) }))
-        .filter((record): record is { tab: WorkspaceSshTerminalTab; session: TerminalSession } =>
+        .filter((record): record is { tab: SshTerminalTab; session: TerminalSession } =>
           Boolean(record.session),
         ),
-    [openTabs, sessionsById],
+    [tabsSnapshot.tabs, sessionsById],
   );
   const activeRecord =
     openTabRecords.find((record) => record.tab.id === activeTabId) ?? openTabRecords[0] ?? null;
+  const effectiveActiveTabId = activeRecord?.tab.id ?? "";
   const activeSession = activeRecord?.session ?? null;
+  const shouldRenderPanes = isVisible && isOpen;
+
+  const applyTabsSnapshot = useCallback(
+    (snapshot: SshTerminalTabsSnapshot) => {
+      if (
+        projectPathKey &&
+        snapshot.projectPathKey &&
+        snapshot.projectPathKey !== projectPathKey
+      ) {
+        return;
+      }
+      setTabsSnapshot(snapshot);
+    },
+    [projectPathKey],
+  );
 
   const cancelPendingHide = useCallback(() => {
     if (hideTimerRef.current === null) return;
@@ -108,36 +127,72 @@ export function WorkspaceSshTerminalOverlay(props: WorkspaceSshTerminalOverlayPr
     }, SSH_TERMINAL_OVERLAY_ANIMATION_MS);
   }, [cancelPendingHide, onHide]);
 
-  const closeTab = useCallback((tabId: string) => {
-    setOpenTabs((current) => {
-      const index = current.findIndex((tab) => tab.id === tabId);
-      if (index < 0) return current;
-      const next = current.filter((tab) => tab.id !== tabId);
-      setActiveTabId((currentActive) => {
-        if (currentActive !== tabId) return currentActive;
-        return next[Math.min(index, next.length - 1)]?.id ?? "";
-      });
-      return next;
-    });
+  const closeTab = useCallback(
+    (tabId: string) => {
+      void client
+        .closeSshTerminalTab(tabId)
+        .then(applyTabsSnapshot)
+        .catch((error: unknown) => {
+          setError(error instanceof Error ? error.message : String(error));
+        });
+    },
+    [applyTabsSnapshot, client],
+  );
+
+  const activateTab = useCallback((tabId: string) => {
+    setActiveTabId(tabId);
   }, []);
 
   useEffect(() => {
+    setTabsSnapshot({ projectPathKey, tabs: [], revision: 0 });
+    setActiveTabId("");
+  }, [projectPathKey]);
+
+  useEffect(() => {
     if (!openRequest || openRequestIdRef.current === openRequest.id) return;
-    const session = sessionsById.get(openRequest.sessionId);
-    if (!session) return;
     const kind = openRequest.kind ?? "bash";
-    const tabId = tabIdFor(session.id, kind);
     openRequestIdRef.current = openRequest.id;
     cancelPendingHide();
     setIsVisible(true);
     setError(null);
-    setOpenTabs((current) =>
-      current.some((tab) => tab.id === tabId)
-        ? current
-        : [...current, { id: tabId, sessionId: session.id, kind }],
-    );
-    setActiveTabId(tabId);
-  }, [cancelPendingHide, openRequest, sessionsById]);
+    const requestedTabId = tabIdFor(openRequest.sessionId, kind);
+    void client
+      .openSshTerminalTab({ sessionId: openRequest.sessionId, kind })
+      .then((snapshot) => {
+        applyTabsSnapshot(snapshot);
+        setActiveTabId(requestedTabId);
+      })
+      .catch((error: unknown) => {
+        setError(error instanceof Error ? error.message : String(error));
+      });
+  }, [applyTabsSnapshot, cancelPendingHide, client, openRequest]);
+
+  useEffect(() => {
+    if (!projectPathKey || !isOpen) return;
+    let cancelled = false;
+    void client
+      .listSshTerminalTabs(projectPathKey)
+      .then((snapshot) => {
+        if (!cancelled) {
+          applyTabsSnapshot(snapshot);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setError(error instanceof Error ? error.message : String(error));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [applyTabsSnapshot, client, isOpen, projectPathKey]);
+
+  useEffect(() => {
+    return client.subscribe((event) => {
+      if (event.kind !== "ssh_tabs_updated" || !event.sshTabs) return;
+      applyTabsSnapshot(event.sshTabs);
+    });
+  }, [applyTabsSnapshot, client]);
 
   useEffect(() => {
     if (isOpen) {
@@ -147,14 +202,6 @@ export function WorkspaceSshTerminalOverlay(props: WorkspaceSshTerminalOverlayPr
     }
     setIsVisible(false);
   }, [cancelPendingHide, isOpen]);
-
-  useEffect(() => {
-    const liveIds = new Set(sshSessions.map((session) => session.id));
-    setOpenTabs((current) => {
-      const next = current.filter((tab) => liveIds.has(tab.sessionId));
-      return next.length === current.length ? current : next;
-    });
-  }, [sshSessions]);
 
   useEffect(() => {
     if (activeTabId && openTabRecords.some((record) => record.tab.id === activeTabId)) return;
@@ -205,7 +252,7 @@ export function WorkspaceSshTerminalOverlay(props: WorkspaceSshTerminalOverlayPr
             key={tab.id}
             className={cn(
               "group flex h-8 max-w-[14rem] shrink-0 items-center gap-1.5 rounded-t-md border border-b-0 px-2 text-xs transition-colors",
-              tab.id === activeTabId
+              tab.id === effectiveActiveTabId
                 ? "border-border bg-muted text-foreground"
                 : "border-transparent text-muted-foreground hover:bg-muted/60 hover:text-foreground",
             )}
@@ -214,7 +261,7 @@ export function WorkspaceSshTerminalOverlay(props: WorkspaceSshTerminalOverlayPr
             <button
               type="button"
               className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
-              onClick={() => setActiveTabId(tab.id)}
+              onClick={() => activateTab(tab.id)}
             >
               <span
                 className={cn("h-1.5 w-1.5 shrink-0 rounded-full", statusDotClassName(session))}
@@ -254,9 +301,9 @@ export function WorkspaceSshTerminalOverlay(props: WorkspaceSshTerminalOverlayPr
       ) : null}
 
       <div className="relative min-h-0 flex-1 bg-background">
-        {openTabRecords.length > 0 ? (
+        {shouldRenderPanes && openTabRecords.length > 0 ? (
           openTabRecords.map(({ tab, session }) => {
-            const isActiveTerminal = isVisible && isOpen && activeTabId === tab.id;
+            const isActiveTerminal = effectiveActiveTabId === tab.id;
             return (
               <div
                 key={tab.id}
@@ -282,14 +329,14 @@ export function WorkspaceSshTerminalOverlay(props: WorkspaceSshTerminalOverlayPr
               </div>
             );
           })
-        ) : (
+        ) : openTabRecords.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center text-sm text-muted-foreground">
             <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted/70">
               <Terminal className="h-5 w-5" />
             </div>
             <div>{t("workspaceSshTerminal.empty")}</div>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

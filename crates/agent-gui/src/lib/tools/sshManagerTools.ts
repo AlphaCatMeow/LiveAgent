@@ -4,6 +4,7 @@ import { Type } from "typebox";
 
 import type { SshHostConfig } from "../settings";
 import { type BuiltinToolBundle, createBuiltinMetadataMap } from "./builtinTypes";
+import { ToolPathResolver } from "./pathUtils";
 
 type SSHManagerAction =
   | "list_hosts"
@@ -63,6 +64,7 @@ type RawTerminalListResponse = {
 
 type RawTerminalSnapshotResponse = {
   session?: RawTerminalSession;
+  bytes?: unknown;
   output?: string;
   truncated?: boolean;
   outputStartOffset?: number;
@@ -72,6 +74,21 @@ type RawTerminalSnapshotResponse = {
   sshPrompt?: unknown;
   ssh_prompt?: unknown;
 };
+
+function normalizeTerminalBytes(value: unknown): Uint8Array {
+  if (value instanceof Uint8Array) return value;
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+  }
+  if (Array.isArray(value)) {
+    return Uint8Array.from(value.map((item) => Number(item) & 0xff));
+  }
+  if (typeof value === "string" && value.length > 0) {
+    return new TextEncoder().encode(value);
+  }
+  return new Uint8Array();
+}
 
 export type SshManagerSessionSummary = {
   session_id: string;
@@ -176,7 +193,10 @@ const SSH_MANAGER_TOOL: Tool = {
     ),
     recursive: Type.Optional(Type.Boolean({ description: "Recursive directory transfer/delete." })),
     local_path: Type.Optional(
-      Type.String({ description: "Workspace-relative local path for upload/download." }),
+      Type.String({
+        description:
+          "Local workspace path for upload/download. Accepts workspace-relative paths, absolute paths inside the workspace, ~/..., file://, or workspace:pathRef values.",
+      }),
     ),
     remote_path: Type.Optional(Type.String({ description: "Remote path for upload/download." })),
     transfer_id: Type.Optional(Type.String({ description: "SFTP transfer id." })),
@@ -517,6 +537,23 @@ async function executeSSHManager(
   const args = asArgs(toolCall.arguments);
   let action: SSHManagerAction = "list_hosts";
   try {
+    const resolveLocalTransferPath = async (
+      input: unknown,
+      intent: "read" | "write",
+      label: string,
+    ) => {
+      const pathResolver = new ToolPathResolver({ workdir: params.workdir });
+      const resolved = await pathResolver.resolvePath(input, {
+        label,
+        intent,
+        required: true,
+      });
+      if (resolved.scope !== "workspace") {
+        throw new Error(`${label} must resolve inside the current workspace.`);
+      }
+      return resolved.relativePath ?? "";
+    };
+
     if (signal?.aborted) {
       return errorResult(toolCall, action, "Cancelled");
     }
@@ -606,10 +643,14 @@ async function executeSSHManager(
         projectPathKey: params.projectPathKey,
         allowedHostIds,
       });
-      const response = await invoke<RawTerminalSnapshotResponse>("terminal_snapshot", {
+      const response = await invoke<RawTerminalSnapshotResponse>("terminal_stream_attach", {
         session_id: session.session_id,
         max_bytes: normalizePositiveInt(args.max_bytes, 32 * 1024, 4 * 1024, 128 * 1024),
       });
+      const output =
+        typeof response.output === "string"
+          ? response.output
+          : new TextDecoder().decode(normalizeTerminalBytes(response.bytes));
       return okResult({
         toolCall,
         action,
@@ -618,11 +659,11 @@ async function executeSSHManager(
           `host_id: ${session.host_id}`,
           `truncated: ${response.truncated === true ? "true" : "false"}`,
           "",
-          response.output || "(empty output)",
+          output || "(empty output)",
         ].join("\n"),
         details: {
           session,
-          output: response.output ?? "",
+          output,
           truncated: response.truncated === true,
         },
       });
@@ -638,7 +679,10 @@ async function executeSSHManager(
       if (data.length === 0) {
         throw new Error("SSHManager.data is required.");
       }
-      await invoke("terminal_input", { session_id: session.session_id, data });
+      await invoke("terminal_stream_input", {
+        session_id: session.session_id,
+        bytes: Array.from(new TextEncoder().encode(data)),
+      });
       return okResult({
         toolCall,
         action,
@@ -655,7 +699,7 @@ async function executeSSHManager(
       });
       const cols = normalizePositiveInt(args.cols, 80, 20, 400);
       const rows = normalizePositiveInt(args.rows, 24, 6, 200);
-      await invoke("terminal_resize", { session_id: session.session_id, cols, rows });
+      await invoke("terminal_stream_resize", { session_id: session.session_id, cols, rows });
       return okResult({
         toolCall,
         action,
@@ -852,19 +896,18 @@ async function executeSSHManager(
 
     if (action === "sftp_upload" || action === "sftp_download") {
       const direction = action === "sftp_upload" ? "upload" : "download";
+      const localPath =
+        direction === "upload"
+          ? await resolveLocalTransferPath(args.local_path, "read", "SSHManager.local_path")
+          : await resolveLocalTransferPath(args.local_path, "write", "SSHManager.local_path");
+      const remotePath = requireString(args, "remote_path");
       const result = await invoke("sftp_transfer", {
         session_id: session.session_id,
         project_path_key: params.projectPathKey,
         workdir: params.workdir,
         direction,
-        source_path:
-          direction === "upload"
-            ? requireString(args, "local_path")
-            : requireString(args, "remote_path"),
-        target_path:
-          direction === "upload"
-            ? requireString(args, "remote_path")
-            : requireString(args, "local_path"),
+        source_path: direction === "upload" ? localPath : remotePath,
+        target_path: direction === "upload" ? remotePath : localPath,
         recursive: normalizeBool(args.recursive, false),
         overwrite: normalizeBool(args.overwrite, false),
       });

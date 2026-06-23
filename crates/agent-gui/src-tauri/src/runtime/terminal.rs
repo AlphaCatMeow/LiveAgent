@@ -13,9 +13,8 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv6Addr};
 use std::path::{Path, PathBuf};
-use std::str;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
@@ -46,10 +45,13 @@ const SSH_RECONNECT_DELAYS: [Duration; 3] = [
     Duration::from_secs(10),
 ];
 const SSH_RECONNECT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(20);
+const SSH_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
+const SSH_KEEPALIVE_MAX_MISSES: usize = 3;
 const SSH_STATUS_CONNECTED: &str = "connected";
 const SSH_STATUS_RECONNECTING: &str = "reconnecting";
 const SSH_STATUS_DISCONNECTED: &str = "disconnected";
 pub const TERMINAL_EVENT_NAME: &str = "terminal:event";
+pub const TERMINAL_STREAM_EVENT_NAME: &str = "terminal:stream";
 const SSH_EXEC_DEFAULT_MAX_BYTES: usize = 64 * 1024;
 const SSH_EXEC_MAX_BYTES: usize = 256 * 1024;
 const SSH_EXEC_DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -117,6 +119,7 @@ pub struct TerminalListResponse {
 pub struct TerminalSnapshotResponse {
     pub session: TerminalSessionRecord,
     pub output: String,
+    pub output_bytes: Vec<u8>,
     pub truncated: bool,
     pub output_start_offset: u64,
     pub output_end_offset: u64,
@@ -128,6 +131,7 @@ pub struct TerminalSshCreateResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<TerminalSessionRecord>,
     pub output: String,
+    pub output_bytes: Vec<u8>,
     pub truncated: bool,
     pub output_start_offset: u64,
     pub output_end_offset: u64,
@@ -140,6 +144,25 @@ pub struct TerminalSshCreateResponse {
 pub struct TerminalSshLatencyResponse {
     pub session_id: String,
     pub latency_ms: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshTerminalTabRecord {
+    pub id: String,
+    pub session_id: String,
+    pub project_path_key: String,
+    pub kind: String,
+    pub created_at: u128,
+    pub updated_at: u128,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshTerminalTabsSnapshot {
+    pub project_path_key: String,
+    pub tabs: Vec<SshTerminalTabRecord>,
+    pub revision: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -191,18 +214,47 @@ pub struct TerminalEventPayload {
     pub kind: String,
     pub session_id: String,
     pub project_path_key: String,
-    pub session: TerminalSessionRecord,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub data: Option<String>,
+    pub session: Option<TerminalSessionRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<Vec<u8>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_start_offset: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub output_end_offset: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ssh_tabs: Option<SshTerminalTabsSnapshot>,
 }
 
 #[derive(Debug, Clone)]
 pub struct TerminalEvent {
     pub payload: TerminalEventPayload,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalStreamEventPayload {
+    pub kind: String,
+    pub session_id: String,
+    pub project_path_key: String,
+    pub start_offset: u64,
+    pub end_offset: u64,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TerminalStreamEvent {
+    pub payload: TerminalStreamEventPayload,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalStreamSnapshotResponse {
+    pub session: TerminalSessionRecord,
+    pub bytes: Vec<u8>,
+    pub truncated: bool,
+    pub output_start_offset: u64,
+    pub output_end_offset: u64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -220,7 +272,7 @@ struct TerminalSessionEntry {
 enum TerminalSessionBackend {
     Local {
         master: Mutex<Box<dyn MasterPty + Send>>,
-        writer: Mutex<Box<dyn Write + Send>>,
+        input_tx: mpsc::SyncSender<Vec<u8>>,
         child: Mutex<Box<dyn Child + Send + Sync>>,
     },
     Ssh {
@@ -378,7 +430,7 @@ struct CapturedHostKey {
 #[derive(Debug, Clone)]
 struct TerminalOutputChunk {
     start_offset: u64,
-    data: String,
+    data: Vec<u8>,
 }
 
 #[derive(Debug, Default)]
@@ -388,7 +440,7 @@ struct TerminalOutputBuffer {
 }
 
 impl TerminalOutputBuffer {
-    fn append(&mut self, data: String) -> (u64, u64) {
+    fn append(&mut self, data: Vec<u8>) -> (u64, u64) {
         let start_offset = self.next_offset;
         self.next_offset = self.next_offset.saturating_add(data.len() as u64);
         self.chunks
@@ -400,20 +452,258 @@ impl TerminalOutputBuffer {
     }
 }
 
+impl TerminalEchoDispatchState {
+    fn dispatch(&mut self, payload: TerminalStreamEventPayload) -> TerminalOutputDispatch {
+        let mut dispatch = TerminalOutputDispatch::default();
+        for (index, byte) in payload.bytes.iter().copied().enumerate() {
+            let offset = payload.start_offset.saturating_add(index as u64);
+            if let Some(origin) = self.consume_echo_byte(byte) {
+                match origin {
+                    TerminalInputOrigin::Local => {
+                        self.push_local_or_defer_remote(&mut dispatch, &payload, byte, offset);
+                        if terminal_line_end(byte) {
+                            self.flush_remote(&mut dispatch);
+                        }
+                    }
+                    TerminalInputOrigin::Remote => {
+                        self.push_remote_or_defer_local(&mut dispatch, &payload, byte, offset);
+                        if terminal_line_end(byte) {
+                            self.flush_local(&mut dispatch);
+                        }
+                    }
+                }
+            } else {
+                self.push_visible_to_both(&mut dispatch, &payload, byte, offset);
+            }
+        }
+        dispatch
+    }
+
+    fn consume_echo_byte(&mut self, byte: u8) -> Option<TerminalInputOrigin> {
+        let front = self.pending.front().copied()?;
+        if front.byte == byte || (byte == b'\n' && front.byte == b'\r') {
+            self.pending.pop_front();
+            return Some(front.origin);
+        }
+        if terminal_line_end(byte) {
+            if let Some(index) = self
+                .pending
+                .iter()
+                .position(|pending| terminal_line_end(pending.byte))
+            {
+                let origin = self
+                    .pending
+                    .get(index)
+                    .map(|pending| pending.origin)
+                    .unwrap_or(front.origin);
+                for _ in 0..=index {
+                    self.pending.pop_front();
+                }
+                return Some(origin);
+            }
+        }
+        None
+    }
+
+    fn push_local_or_defer_remote(
+        &mut self,
+        dispatch: &mut TerminalOutputDispatch,
+        template: &TerminalStreamEventPayload,
+        byte: u8,
+        offset: u64,
+    ) {
+        self.push_local(dispatch, template, byte, offset);
+        push_payload_byte(&mut self.deferred_remote, template, byte, offset);
+    }
+
+    fn push_remote_or_defer_local(
+        &mut self,
+        dispatch: &mut TerminalOutputDispatch,
+        template: &TerminalStreamEventPayload,
+        byte: u8,
+        offset: u64,
+    ) {
+        self.push_remote(dispatch, template, byte, offset);
+        push_payload_byte(&mut self.deferred_local, template, byte, offset);
+    }
+
+    fn push_visible_to_both(
+        &mut self,
+        dispatch: &mut TerminalOutputDispatch,
+        template: &TerminalStreamEventPayload,
+        byte: u8,
+        offset: u64,
+    ) {
+        self.push_local(dispatch, template, byte, offset);
+        self.push_remote(dispatch, template, byte, offset);
+    }
+
+    fn push_local(
+        &mut self,
+        dispatch: &mut TerminalOutputDispatch,
+        template: &TerminalStreamEventPayload,
+        byte: u8,
+        offset: u64,
+    ) {
+        if self.deferred_local.is_empty() {
+            push_payload_byte(&mut dispatch.local, template, byte, offset);
+        } else {
+            push_payload_byte(&mut self.deferred_local, template, byte, offset);
+        }
+    }
+
+    fn push_remote(
+        &mut self,
+        dispatch: &mut TerminalOutputDispatch,
+        template: &TerminalStreamEventPayload,
+        byte: u8,
+        offset: u64,
+    ) {
+        if self.deferred_remote.is_empty() {
+            push_payload_byte(&mut dispatch.remote, template, byte, offset);
+        } else {
+            push_payload_byte(&mut self.deferred_remote, template, byte, offset);
+        }
+    }
+
+    fn flush_local(&mut self, dispatch: &mut TerminalOutputDispatch) {
+        dispatch.local.append(&mut self.deferred_local);
+    }
+
+    fn flush_remote(&mut self, dispatch: &mut TerminalOutputDispatch) {
+        dispatch.remote.append(&mut self.deferred_remote);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.pending.is_empty()
+            && self.deferred_local.is_empty()
+            && self.deferred_remote.is_empty()
+    }
+}
+
+fn push_payload_byte(
+    payloads: &mut Vec<TerminalStreamEventPayload>,
+    template: &TerminalStreamEventPayload,
+    byte: u8,
+    offset: u64,
+) {
+    let end_offset = offset.saturating_add(1);
+    if let Some(last) = payloads.last_mut() {
+        if last.end_offset == offset
+            && last.session_id == template.session_id
+            && last.project_path_key == template.project_path_key
+        {
+            last.bytes.push(byte);
+            last.end_offset = end_offset;
+            return;
+        }
+    }
+    payloads.push(TerminalStreamEventPayload {
+        kind: template.kind.clone(),
+        session_id: template.session_id.clone(),
+        project_path_key: template.project_path_key.clone(),
+        start_offset: offset,
+        end_offset,
+        bytes: vec![byte],
+    });
+}
+
+fn terminal_input_echo_candidates(
+    data: &[u8],
+    origin: TerminalInputOrigin,
+) -> Vec<PendingEchoByte> {
+    let mut bytes = Vec::new();
+    let mut escape = TerminalEscapeParseState::None;
+    for byte in data.iter().copied() {
+        match escape {
+            TerminalEscapeParseState::None => {
+                if byte == 0x1b {
+                    escape = TerminalEscapeParseState::Esc;
+                } else if terminal_input_echo_candidate(byte) {
+                    bytes.push(PendingEchoByte { byte, origin });
+                }
+            }
+            TerminalEscapeParseState::Esc => {
+                escape = if byte == b'[' {
+                    TerminalEscapeParseState::Csi
+                } else {
+                    TerminalEscapeParseState::None
+                };
+            }
+            TerminalEscapeParseState::Csi => {
+                if (0x40..=0x7e).contains(&byte) {
+                    escape = TerminalEscapeParseState::None;
+                }
+            }
+        }
+    }
+    bytes
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TerminalEscapeParseState {
+    None,
+    Esc,
+    Csi,
+}
+
+fn terminal_input_echo_candidate(byte: u8) -> bool {
+    byte == b'\r' || byte == b'\n' || byte == b'\t' || (byte >= 0x20 && byte != 0x7f)
+}
+
+fn terminal_line_end(byte: u8) -> bool {
+    byte == b'\r' || byte == b'\n'
+}
+
 #[derive(Debug, Clone)]
 struct TerminalOutputTail {
-    output: String,
+    output: Vec<u8>,
     truncated: bool,
     output_start_offset: u64,
     output_end_offset: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TerminalInputOrigin {
+    Local,
+    Remote,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PendingEchoByte {
+    byte: u8,
+    origin: TerminalInputOrigin,
+}
+
+#[derive(Debug, Default)]
+struct TerminalEchoDispatchState {
+    pending: VecDeque<PendingEchoByte>,
+    deferred_local: Vec<TerminalStreamEventPayload>,
+    deferred_remote: Vec<TerminalStreamEventPayload>,
+}
+
+#[derive(Debug, Default)]
+struct TerminalOutputDispatch {
+    local: Vec<TerminalStreamEventPayload>,
+    remote: Vec<TerminalStreamEventPayload>,
+}
+
+#[derive(Debug, Default)]
+struct SshTerminalTabsState {
+    tabs: Vec<SshTerminalTabRecord>,
+    revision: u64,
 }
 
 #[derive(Default)]
 pub struct TerminalSessionRegistry {
     sessions: Mutex<HashMap<String, Arc<TerminalSessionEntry>>>,
     pending_ssh_prompts: Mutex<HashMap<String, PendingSshPrompt>>,
+    ssh_terminal_tabs_tx: Mutex<()>,
+    ssh_terminal_tabs: Mutex<HashMap<String, SshTerminalTabsState>>,
     app_handle: Mutex<Option<AppHandle>>,
     subscribers: Arc<Mutex<HashMap<usize, mpsc::Sender<TerminalEvent>>>>,
+    stream_subscribers: Arc<Mutex<HashMap<usize, mpsc::Sender<TerminalStreamEvent>>>>,
+    echo_dispatch: Mutex<HashMap<String, TerminalEchoDispatchState>>,
     next_subscriber_id: AtomicUsize,
 }
 
@@ -446,6 +736,26 @@ impl TerminalSessionRegistry {
             TerminalSubscriberGuard {
                 id,
                 subscribers: Arc::clone(&self.subscribers),
+            },
+        )
+    }
+
+    pub fn subscribe_stream(
+        &self,
+    ) -> (
+        mpsc::Receiver<TerminalStreamEvent>,
+        TerminalStreamSubscriberGuard,
+    ) {
+        let (tx, rx) = mpsc::channel();
+        let id = self.next_subscriber_id.fetch_add(1, Ordering::SeqCst);
+        if let Ok(mut subscribers) = self.stream_subscribers.lock() {
+            subscribers.insert(id, tx);
+        }
+        (
+            rx,
+            TerminalStreamSubscriberGuard {
+                id,
+                subscribers: Arc::clone(&self.stream_subscribers),
             },
         )
     }
@@ -527,6 +837,18 @@ impl TerminalSessionRegistry {
             .master
             .take_writer()
             .map_err(|err| format!("failed to open terminal writer: {err}"))?;
+        let (input_tx, input_rx) = mpsc::sync_channel::<Vec<u8>>(256);
+        thread::spawn(move || {
+            let mut writer = writer;
+            while let Ok(data) = input_rx.recv() {
+                if data.is_empty() {
+                    continue;
+                }
+                if writer.write_all(&data).is_err() {
+                    break;
+                }
+            }
+        });
 
         let id = uuid::Uuid::new_v4().to_string();
         let title = title
@@ -555,7 +877,7 @@ impl TerminalSessionRegistry {
         let entry = Arc::new(TerminalSessionEntry {
             backend: TerminalSessionBackend::Local {
                 master: Mutex::new(pair.master),
-                writer: Mutex::new(writer),
+                input_tx,
                 child: Mutex::new(child),
             },
             record: Mutex::new(record),
@@ -571,22 +893,14 @@ impl TerminalSessionRegistry {
         let reader_session_id = id.clone();
         thread::spawn(move || {
             let mut buffer = [0u8; 8192];
-            let mut decoder = TerminalUtf8Decoder::default();
             loop {
                 match reader.read(&mut buffer) {
                     Ok(0) => break,
                     Ok(n) => {
-                        let data = decoder.push(&buffer[..n]);
-                        if !data.is_empty() {
-                            registry.append_output(&reader_session_id, data);
-                        }
+                        registry.append_output(&reader_session_id, buffer[..n].to_vec());
                     }
                     Err(_) => break,
                 }
-            }
-            let data = decoder.finish();
-            if !data.is_empty() {
-                registry.append_output(&reader_session_id, data);
             }
             registry.mark_finished(&reader_session_id);
         });
@@ -1072,6 +1386,7 @@ impl TerminalSessionRegistry {
         Ok(TerminalSshCreateResponse {
             session: None,
             output: String::new(),
+            output_bytes: Vec::new(),
             truncated: false,
             output_start_offset: 0,
             output_end_offset: 0,
@@ -1127,6 +1442,7 @@ impl TerminalSessionRegistry {
                 Ok(TerminalSshCreateResponse {
                     session: None,
                     output: String::new(),
+                    output_bytes: Vec::new(),
                     truncated: false,
                     output_start_offset: 0,
                     output_end_offset: 0,
@@ -1171,7 +1487,29 @@ impl TerminalSessionRegistry {
         let tail = read_output_tail(&entry, max_bytes.unwrap_or(MAX_TAIL_BYTES));
         Ok(TerminalSnapshotResponse {
             session,
-            output: tail.output,
+            output: String::from_utf8_lossy(&tail.output).into_owned(),
+            output_bytes: tail.output,
+            truncated: tail.truncated,
+            output_start_offset: tail.output_start_offset,
+            output_end_offset: tail.output_end_offset,
+        })
+    }
+
+    pub fn stream_attach(
+        &self,
+        session_id: String,
+        max_bytes: Option<usize>,
+    ) -> Result<TerminalStreamSnapshotResponse, String> {
+        let entry = self.entry(&session_id)?;
+        let session = entry
+            .record
+            .lock()
+            .map_err(|_| "terminal session lock poisoned".to_string())?
+            .clone();
+        let tail = read_output_tail(&entry, max_bytes.unwrap_or(MAX_TAIL_BYTES));
+        Ok(TerminalStreamSnapshotResponse {
+            session,
+            bytes: tail.output,
             truncated: tail.truncated,
             output_start_offset: tail.output_start_offset,
             output_end_offset: tail.output_end_offset,
@@ -1197,6 +1535,107 @@ impl TerminalSessionRegistry {
             host_id: ssh.host_id,
             sftp_enabled: ssh.sftp_enabled,
         })
+    }
+
+    pub fn ssh_terminal_tabs_list(
+        &self,
+        project_path_key: String,
+    ) -> Result<SshTerminalTabsSnapshot, String> {
+        let project_key = required_project_key(project_path_key)?;
+        let (snapshot, should_broadcast) = {
+            let _tabs_tx = self.lock_ssh_terminal_tabs_tx()?;
+            if let Some(snapshot) = self.prune_invalid_ssh_terminal_tabs_for_project(&project_key) {
+                (snapshot, true)
+            } else {
+                (self.ssh_terminal_tabs_snapshot(&project_key), false)
+            }
+        };
+        if should_broadcast {
+            self.broadcast_ssh_tabs_snapshot(snapshot.clone());
+        }
+        Ok(snapshot)
+    }
+
+    pub fn ssh_terminal_tab_open(
+        &self,
+        session_id: String,
+        kind: String,
+    ) -> Result<SshTerminalTabsSnapshot, String> {
+        let kind = normalize_ssh_terminal_tab_kind(&kind)?;
+        let (snapshot, should_broadcast) = {
+            let _tabs_tx = self.lock_ssh_terminal_tabs_tx()?;
+            let session = self.valid_ssh_terminal_tab_session(&session_id, &kind)?;
+            let tab_id = ssh_terminal_tab_id(&session.id, &kind);
+            let now = now_ms();
+            let mut tabs_by_project = self
+                .ssh_terminal_tabs
+                .lock()
+                .map_err(|_| "ssh terminal tabs registry poisoned".to_string())?;
+            let state = tabs_by_project
+                .entry(session.project_path_key.clone())
+                .or_default();
+            if state.tabs.iter().any(|tab| tab.id == tab_id) {
+                return Ok(ssh_terminal_tabs_snapshot_from_state(
+                    &session.project_path_key,
+                    state,
+                ));
+            } else {
+                state.tabs.push(SshTerminalTabRecord {
+                    id: tab_id.clone(),
+                    session_id: session.id.clone(),
+                    project_path_key: session.project_path_key.clone(),
+                    kind,
+                    created_at: now,
+                    updated_at: now,
+                });
+            }
+            state.revision = state.revision.saturating_add(1);
+            (
+                ssh_terminal_tabs_snapshot_from_state(&session.project_path_key, state),
+                true,
+            )
+        };
+        if should_broadcast {
+            self.broadcast_ssh_tabs_snapshot(snapshot.clone());
+        }
+        Ok(snapshot)
+    }
+
+    pub fn ssh_terminal_tab_close(
+        &self,
+        tab_id: String,
+    ) -> Result<SshTerminalTabsSnapshot, String> {
+        let tab_id = tab_id.trim();
+        if tab_id.is_empty() {
+            return Err("tab_id is required".to_string());
+        }
+        let snapshot = {
+            let _tabs_tx = self.lock_ssh_terminal_tabs_tx()?;
+            let mut tabs_by_project = self
+                .ssh_terminal_tabs
+                .lock()
+                .map_err(|_| "ssh terminal tabs registry poisoned".to_string())?;
+            let Some(project_key) = tabs_by_project.iter().find_map(|(project_key, state)| {
+                state
+                    .tabs
+                    .iter()
+                    .any(|tab| tab.id == tab_id)
+                    .then(|| project_key.clone())
+            }) else {
+                return Err(format!("ssh terminal tab not found: {tab_id}"));
+            };
+            let state = tabs_by_project
+                .get_mut(&project_key)
+                .ok_or_else(|| format!("ssh terminal tab not found: {tab_id}"))?;
+            let Some(index) = state.tabs.iter().position(|tab| tab.id == tab_id) else {
+                return Err(format!("ssh terminal tab not found: {tab_id}"));
+            };
+            state.tabs.remove(index);
+            state.revision = state.revision.saturating_add(1);
+            ssh_terminal_tabs_snapshot_from_state(&project_key, state)
+        };
+        self.broadcast_ssh_tabs_snapshot(snapshot.clone());
+        Ok(snapshot)
     }
 
     pub async fn ssh_latency(
@@ -1314,9 +1753,22 @@ impl TerminalSessionRegistry {
         }
     }
 
-    pub fn input(&self, session_id: String, data: String) -> Result<TerminalSessionRecord, String> {
+    pub fn input_bytes(&self, session_id: String, data: Vec<u8>) -> Result<(), String> {
+        self.input_bytes_with_origin(session_id, data, TerminalInputOrigin::Local)
+    }
+
+    pub fn input_bytes_from_remote(&self, session_id: String, data: Vec<u8>) -> Result<(), String> {
+        self.input_bytes_with_origin(session_id, data, TerminalInputOrigin::Remote)
+    }
+
+    fn input_bytes_with_origin(
+        &self,
+        session_id: String,
+        data: Vec<u8>,
+        origin: TerminalInputOrigin,
+    ) -> Result<(), String> {
         if data.is_empty() {
-            return self.record(session_id);
+            return Ok(());
         }
         let entry = self.entry(&session_id)?;
         let running = entry
@@ -1327,24 +1779,28 @@ impl TerminalSessionRegistry {
         if !running {
             return Err("terminal session is not running".to_string());
         }
+        let echo_bytes = terminal_input_echo_candidates(&data, origin);
         match &entry.backend {
-            TerminalSessionBackend::Local { writer, .. } => {
-                writer
-                    .lock()
-                    .map_err(|_| "terminal writer lock poisoned".to_string())?
-                    .write_all(data.as_bytes())
-                    .map_err(|err| format!("failed to write terminal input: {err}"))?;
+            TerminalSessionBackend::Local { input_tx, .. } => {
+                input_tx
+                    .try_send(data)
+                    .map_err(|err| format!("failed to enqueue terminal input: {err}"))?;
             }
             TerminalSessionBackend::Ssh { runtime } => {
                 runtime
                     .input_sender()
                     .ok_or_else(|| "SSH connection is not connected".to_string())?
-                    .try_send(SshSessionInput::Data(data.into_bytes()))
-                    .map_err(|err| format!("failed to write ssh terminal input: {err}"))?;
+                    .try_send(SshSessionInput::Data(data))
+                    .map_err(|err| format!("failed to enqueue ssh terminal input: {err}"))?;
             }
         }
+        self.record_input_echo_candidates(&session_id, echo_bytes);
         self.touch(&entry);
-        self.record(session_id)
+        Ok(())
+    }
+
+    pub fn stream_resize(&self, session_id: String, cols: u16, rows: u16) -> Result<(), String> {
+        self.resize(session_id, cols, rows).map(|_| ())
     }
 
     pub fn resize(
@@ -1415,17 +1871,25 @@ impl TerminalSessionRegistry {
     pub fn close(&self, session_id: String) -> Result<TerminalSessionRecord, String> {
         let entry = self.entry(&session_id)?;
         terminate_terminal_entry(&entry);
-        self.mark_finished(&session_id);
-        self.sessions
-            .lock()
-            .expect("terminal session registry poisoned")
-            .remove(session_id.trim());
-        let session = entry
-            .record
-            .lock()
-            .map_err(|_| "terminal session lock poisoned".to_string())?
-            .clone();
+        let (session, tab_snapshots) = {
+            let _tabs_tx = self.lock_ssh_terminal_tabs_tx()?;
+            self.mark_finished(&session_id);
+            self.sessions
+                .lock()
+                .expect("terminal session registry poisoned")
+                .remove(session_id.trim());
+            let session = entry
+                .record
+                .lock()
+                .map_err(|_| "terminal session lock poisoned".to_string())?
+                .clone();
+            let tab_snapshots = self.prune_ssh_terminal_tabs_for_session_locked(&session.id);
+            (session, tab_snapshots)
+        };
         self.broadcast("closed", &entry, None, None, None);
+        for snapshot in tab_snapshots {
+            self.broadcast_ssh_tabs_snapshot(snapshot);
+        }
         Ok(session)
     }
 
@@ -1523,6 +1987,125 @@ impl TerminalSessionRegistry {
         })
     }
 
+    fn lock_ssh_terminal_tabs_tx(&self) -> Result<MutexGuard<'_, ()>, String> {
+        self.ssh_terminal_tabs_tx
+            .lock()
+            .map_err(|_| "ssh terminal tabs transaction lock poisoned".to_string())
+    }
+
+    fn valid_ssh_terminal_tab_session(
+        &self,
+        session_id: &str,
+        kind: &str,
+    ) -> Result<TerminalSessionRecord, String> {
+        let session = self.record(session_id.trim().to_string())?;
+        if session.kind.trim() != "ssh" {
+            return Err("terminal session is not an SSH connection".to_string());
+        }
+        let ssh = session
+            .ssh
+            .as_ref()
+            .ok_or_else(|| "SSH session metadata is missing".to_string())?;
+        if ssh.status == SSH_STATUS_DISCONNECTED {
+            return Err("SSH connection is disconnected".to_string());
+        }
+        if kind == "sftp" && !ssh.sftp_enabled {
+            return Err("SFTP is not enabled for this SSH session".to_string());
+        }
+        Ok(session)
+    }
+
+    fn ssh_terminal_tabs_snapshot(&self, project_path_key: &str) -> SshTerminalTabsSnapshot {
+        self.ssh_terminal_tabs
+            .lock()
+            .ok()
+            .and_then(|tabs_by_project| {
+                tabs_by_project
+                    .get(project_path_key)
+                    .map(|state| ssh_terminal_tabs_snapshot_from_state(project_path_key, state))
+            })
+            .unwrap_or_else(|| SshTerminalTabsSnapshot {
+                project_path_key: project_path_key.to_string(),
+                tabs: Vec::new(),
+                revision: 0,
+            })
+    }
+
+    fn prune_invalid_ssh_terminal_tabs_for_project(
+        &self,
+        project_path_key: &str,
+    ) -> Option<SshTerminalTabsSnapshot> {
+        let valid_sessions = self
+            .sessions
+            .lock()
+            .ok()
+            .map(|sessions| {
+                sessions
+                    .values()
+                    .filter_map(|entry| entry.record.lock().ok().map(|record| record.clone()))
+                    .filter(|record| {
+                        project_path_keys_equal(&record.project_path_key, project_path_key)
+                            && record.kind.trim() == "ssh"
+                            && record
+                                .ssh
+                                .as_ref()
+                                .map(|ssh| ssh.status != SSH_STATUS_DISCONNECTED)
+                                .unwrap_or(false)
+                    })
+                    .map(|record| {
+                        (
+                            record.id,
+                            record.ssh.map(|ssh| ssh.sftp_enabled).unwrap_or(false),
+                        )
+                    })
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default();
+
+        let mut tabs_by_project = self.ssh_terminal_tabs.lock().ok()?;
+        let state = tabs_by_project.get_mut(project_path_key)?;
+        let before_len = state.tabs.len();
+        state.tabs.retain(|tab| {
+            valid_sessions
+                .get(&tab.session_id)
+                .map(|sftp_enabled| tab.kind != "sftp" || *sftp_enabled)
+                .unwrap_or(false)
+        });
+        if state.tabs.len() == before_len {
+            return None;
+        }
+        state.revision = state.revision.saturating_add(1);
+        Some(ssh_terminal_tabs_snapshot_from_state(
+            project_path_key,
+            state,
+        ))
+    }
+
+    fn prune_ssh_terminal_tabs_for_session_locked(
+        &self,
+        session_id: &str,
+    ) -> Vec<SshTerminalTabsSnapshot> {
+        let session_id = session_id.trim();
+        if session_id.is_empty() {
+            return Vec::new();
+        }
+        let mut tabs_by_project = match self.ssh_terminal_tabs.lock() {
+            Ok(tabs_by_project) => tabs_by_project,
+            Err(_) => return Vec::new(),
+        };
+        let mut snapshots = Vec::new();
+        for (project_key, state) in tabs_by_project.iter_mut() {
+            let before_len = state.tabs.len();
+            state.tabs.retain(|tab| tab.session_id != session_id);
+            if state.tabs.len() == before_len {
+                continue;
+            }
+            state.revision = state.revision.saturating_add(1);
+            snapshots.push(ssh_terminal_tabs_snapshot_from_state(project_key, state));
+        }
+        snapshots
+    }
+
     fn close_ids(&self, ids: Vec<String>) -> Result<TerminalListResponse, String> {
         let mut sessions = Vec::new();
         for id in ids {
@@ -1603,10 +2186,14 @@ impl TerminalSessionRegistry {
         }
     }
 
-    fn append_output(&self, session_id: &str, data: String) {
+    fn append_output(&self, session_id: &str, data: impl Into<Vec<u8>>) {
         let Ok(entry) = self.entry(session_id) else {
             return;
         };
+        let data = data.into();
+        if data.is_empty() {
+            return;
+        }
         let (output_start_offset, output_end_offset) = {
             let mut output = match entry.output.lock() {
                 Ok(output) => output,
@@ -1615,13 +2202,25 @@ impl TerminalSessionRegistry {
             output.append(data.clone())
         };
         self.touch(&entry);
-        self.broadcast(
-            "output",
-            &entry,
-            Some(data),
-            Some(output_start_offset),
-            Some(output_end_offset),
-        );
+        self.broadcast_output(&entry, data, output_start_offset, output_end_offset);
+    }
+
+    fn record_input_echo_candidates(
+        &self,
+        session_id: &str,
+        echo_bytes: Vec<PendingEchoByte>,
+    ) {
+        if echo_bytes.is_empty() {
+            return;
+        }
+        let Ok(mut states) = self.echo_dispatch.lock() else {
+            return;
+        };
+        let state = states.entry(session_id.to_string()).or_default();
+        state.pending.extend(echo_bytes);
+        while state.pending.len() > MAX_TAIL_BYTES {
+            state.pending.pop_front();
+        }
     }
 
     fn mark_finished(&self, session_id: &str) {
@@ -1671,22 +2270,33 @@ impl TerminalSessionRegistry {
     }
 
     fn mark_ssh_disconnected(&self, entry: &Arc<TerminalSessionEntry>) {
-        {
-            let mut record = match entry.record.lock() {
-                Ok(record) => record,
-                Err(_) => return,
+        let tab_snapshots = {
+            let Ok(_tabs_tx) = self.lock_ssh_terminal_tabs_tx() else {
+                return;
             };
-            record.running = false;
-            record.finished_at = Some(now_ms());
-            record.exit_code = None;
-            record.updated_at = now_ms();
-            if let Some(ssh) = record.ssh.as_mut() {
-                ssh.status = SSH_STATUS_DISCONNECTED.to_string();
-                ssh.reconnect_attempt = SSH_RECONNECT_MAX_ATTEMPTS;
-                ssh.reconnect_max_attempts = SSH_RECONNECT_MAX_ATTEMPTS;
-            }
-        }
+            let session_id = {
+                let mut record = match entry.record.lock() {
+                    Ok(record) => record,
+                    Err(_) => return,
+                };
+                let session_id = record.id.clone();
+                record.running = false;
+                record.finished_at = Some(now_ms());
+                record.exit_code = None;
+                record.updated_at = now_ms();
+                if let Some(ssh) = record.ssh.as_mut() {
+                    ssh.status = SSH_STATUS_DISCONNECTED.to_string();
+                    ssh.reconnect_attempt = SSH_RECONNECT_MAX_ATTEMPTS;
+                    ssh.reconnect_max_attempts = SSH_RECONNECT_MAX_ATTEMPTS;
+                }
+                session_id
+            };
+            self.prune_ssh_terminal_tabs_for_session_locked(&session_id)
+        };
         self.broadcast("exit", entry, None, None, None);
+        for snapshot in tab_snapshots {
+            self.broadcast_ssh_tabs_snapshot(snapshot);
+        }
     }
 
     async fn mark_ssh_shell_ended(
@@ -1712,7 +2322,7 @@ impl TerminalSessionRegistry {
         &self,
         kind: &str,
         entry: &Arc<TerminalSessionEntry>,
-        data: Option<String>,
+        data: Option<Vec<u8>>,
         output_start_offset: Option<u64>,
         output_end_offset: Option<u64>,
     ) {
@@ -1723,10 +2333,125 @@ impl TerminalSessionRegistry {
             kind: kind.to_string(),
             session_id: record.id.clone(),
             project_path_key: record.project_path_key.clone(),
-            session: record,
+            session: Some(record),
             data,
             output_start_offset,
             output_end_offset,
+            ssh_tabs: None,
+        };
+
+        if let Ok(app_handle) = self.app_handle.lock() {
+            if let Some(app_handle) = app_handle.as_ref() {
+                let _ = app_handle.emit(TERMINAL_EVENT_NAME, &payload);
+            }
+        }
+
+        let subscribers = self
+            .subscribers
+            .lock()
+            .map(|subscribers| subscribers.values().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        let event = TerminalEvent { payload };
+        for subscriber in subscribers {
+            let _ = subscriber.send(event.clone());
+        }
+    }
+
+    fn broadcast_output(
+        &self,
+        entry: &Arc<TerminalSessionEntry>,
+        bytes: Vec<u8>,
+        start_offset: u64,
+        end_offset: u64,
+    ) {
+        let Ok(record) = entry.record.lock().map(|record| record.clone()) else {
+            return;
+        };
+        let payload = TerminalStreamEventPayload {
+            kind: "output".to_string(),
+            session_id: record.id,
+            project_path_key: record.project_path_key,
+            start_offset,
+            end_offset,
+            bytes,
+        };
+
+        let dispatch = self.dispatch_terminal_stream_payload(payload);
+        self.broadcast_terminal_stream_subscribers(&dispatch.remote);
+        self.emit_terminal_stream_local(&dispatch.local);
+    }
+
+    fn dispatch_terminal_stream_payload(
+        &self,
+        payload: TerminalStreamEventPayload,
+    ) -> TerminalOutputDispatch {
+        let Ok(mut states) = self.echo_dispatch.lock() else {
+            return TerminalOutputDispatch {
+                local: vec![payload.clone()],
+                remote: vec![payload],
+            };
+        };
+        let session_id = payload.session_id.clone();
+        let dispatch = {
+            let Some(state) = states.get_mut(&session_id) else {
+                return TerminalOutputDispatch {
+                    local: vec![payload.clone()],
+                    remote: vec![payload],
+                };
+            };
+            state.dispatch(payload)
+        };
+        if states
+            .get(&session_id)
+            .is_some_and(TerminalEchoDispatchState::is_empty)
+        {
+            states.remove(&session_id);
+        }
+        dispatch
+    }
+
+    fn emit_terminal_stream_local(&self, payloads: &[TerminalStreamEventPayload]) {
+        if payloads.is_empty() {
+            return;
+        }
+        if let Ok(app_handle) = self.app_handle.lock() {
+            if let Some(app_handle) = app_handle.as_ref() {
+                for payload in payloads {
+                    let _ = app_handle.emit(TERMINAL_STREAM_EVENT_NAME, payload);
+                }
+            }
+        }
+    }
+
+    fn broadcast_terminal_stream_subscribers(&self, payloads: &[TerminalStreamEventPayload]) {
+        if payloads.is_empty() {
+            return;
+        }
+        let subscribers = self
+            .stream_subscribers
+            .lock()
+            .map(|subscribers| subscribers.values().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        for payload in payloads {
+            let event = TerminalStreamEvent {
+                payload: payload.clone(),
+            };
+            for subscriber in &subscribers {
+                let _ = subscriber.send(event.clone());
+            }
+        }
+    }
+
+    fn broadcast_ssh_tabs_snapshot(&self, snapshot: SshTerminalTabsSnapshot) {
+        let payload = TerminalEventPayload {
+            kind: "ssh_tabs_updated".to_string(),
+            session_id: String::new(),
+            project_path_key: snapshot.project_path_key.clone(),
+            session: None,
+            data: None,
+            output_start_offset: None,
+            output_end_offset: None,
+            ssh_tabs: Some(snapshot),
         };
 
         if let Ok(app_handle) = self.app_handle.lock() {
@@ -1839,25 +2564,34 @@ async fn connect_ssh_handle(
         port: host_config.port,
         captured_host_key,
     };
-    let config = Arc::new(client::Config {
-        ..Default::default()
-    });
+    let config = Arc::new(ssh_client_config());
     let stream = open_ssh_transport(host_config).await?;
     client::connect_stream(config, stream, ssh_client)
         .await
         .map_err(|error| format!("SSH connection failed: {error}"))
 }
 
+fn ssh_client_config() -> client::Config {
+    client::Config {
+        keepalive_interval: Some(SSH_KEEPALIVE_INTERVAL),
+        keepalive_max: SSH_KEEPALIVE_MAX_MISSES,
+        nodelay: true,
+        ..Default::default()
+    }
+}
+
 async fn open_ssh_transport(host_config: &RuntimeSshHostConfig) -> Result<TcpStream, String> {
     if !ssh_proxy_configured(host_config) {
-        return TcpStream::connect((host_config.host.as_str(), host_config.port))
+        let stream = TcpStream::connect((host_config.host.as_str(), host_config.port))
             .await
             .map_err(|error| {
                 format!(
                     "SSH TCP connection to {}:{} failed: {error}",
                     host_config.host, host_config.port
                 )
-            });
+            })?;
+        configure_ssh_transport_stream(&stream);
+        return Ok(stream);
     }
 
     let proxy = resolve_ssh_proxy(host_config)?;
@@ -1889,7 +2623,12 @@ async fn open_ssh_transport(host_config: &RuntimeSshHostConfig) -> Result<TcpStr
             .await?;
         }
     }
+    configure_ssh_transport_stream(&stream);
     Ok(stream)
+}
+
+fn configure_ssh_transport_stream(stream: &TcpStream) {
+    let _ = stream.set_nodelay(true);
 }
 
 fn resolve_ssh_proxy(host_config: &RuntimeSshHostConfig) -> Result<ResolvedSshProxy, String> {
@@ -2857,40 +3596,48 @@ async fn run_ssh_session_io(
     mut shutdown_rx: tokio::sync::mpsc::Receiver<()>,
 ) {
     let (mut read_half, write_half) = channel.split();
-    let mut writer = write_half.make_writer();
-    let mut decoder = TerminalUtf8Decoder::default();
+    let (writer_end_tx, mut writer_end_rx) = tokio::sync::mpsc::channel::<SshSessionIoEndReason>(1);
+    let writer_runtime = Arc::clone(&runtime);
+    tauri::async_runtime::spawn(async move {
+        let mut writer = write_half.make_writer();
+        let reason = loop {
+            tokio::select! {
+                _ = shutdown_rx.recv() => {
+                    let handle = writer_runtime.handle.lock().await;
+                    if let Some(handle) = handle.as_ref() {
+                        let _ = handle.disconnect(russh::Disconnect::ByApplication, "User disconnected", "en").await;
+                    }
+                    break SshSessionIoEndReason::Shutdown;
+                }
+                input = input_rx.recv() => {
+                    match input {
+                        Some(SshSessionInput::Data(data)) => {
+                            if writer.write_all(&data).await.is_err() {
+                                break SshSessionIoEndReason::WriteFailed;
+                            }
+                        }
+                        Some(SshSessionInput::Resize(cols, rows)) => {
+                            let _ = write_half.window_change(cols, rows, 0, 0).await;
+                        }
+                        None => {
+                            break SshSessionIoEndReason::InputClosed;
+                        },
+                    }
+                }
+            }
+        };
+        let _ = writer_end_tx.send(reason).await;
+    });
     let mut remote_exit_reason: Option<SshSessionIoEndReason> = None;
     let end_reason = loop {
         tokio::select! {
-            _ = shutdown_rx.recv() => {
-                let handle = runtime.handle.lock().await;
-                if let Some(handle) = handle.as_ref() {
-                    let _ = handle.disconnect(russh::Disconnect::ByApplication, "User disconnected", "en").await;
-                }
-                break SshSessionIoEndReason::Shutdown;
-            }
-            input = input_rx.recv() => {
-                match input {
-                    Some(SshSessionInput::Data(data)) => {
-                        if writer.write_all(&data).await.is_err() {
-                            break SshSessionIoEndReason::WriteFailed;
-                        }
-                    }
-                    Some(SshSessionInput::Resize(cols, rows)) => {
-                        let _ = write_half.window_change(cols, rows, 0, 0).await;
-                    }
-                    None => {
-                        break SshSessionIoEndReason::InputClosed;
-                    },
-                }
+            reason = writer_end_rx.recv() => {
+                break reason.unwrap_or(SshSessionIoEndReason::InputClosed);
             }
             message = read_half.wait() => {
                 match message {
                     Some(ChannelMsg::Data { data }) | Some(ChannelMsg::ExtendedData { data, .. }) => {
-                        let text = decoder.push(data.as_ref());
-                        if !text.is_empty() {
-                            registry.append_output(&session_id, text);
-                        }
+                        registry.append_output(&session_id, data.as_ref().to_vec());
                     }
                     Some(ChannelMsg::ExitStatus { exit_status }) => {
                         remote_exit_reason = Some(SshSessionIoEndReason::RemoteExitStatus(exit_status));
@@ -2910,10 +3657,6 @@ async fn run_ssh_session_io(
         }
     };
 
-    let text = decoder.finish();
-    if !text.is_empty() {
-        registry.append_output(&session_id, text);
-    }
     finish_ssh_session_io(registry, session_id, runtime, connection_id, end_reason).await;
 }
 
@@ -3015,10 +3758,43 @@ fn terminal_ssh_create_response_from_snapshot(
     TerminalSshCreateResponse {
         session: Some(snapshot.session),
         output: snapshot.output,
+        output_bytes: snapshot.output_bytes,
         truncated: snapshot.truncated,
         output_start_offset: snapshot.output_start_offset,
         output_end_offset: snapshot.output_end_offset,
         ssh_prompt: None,
+    }
+}
+
+fn required_project_key(project_path_key: String) -> Result<String, String> {
+    let project_key = normalize_project_path_key(&project_path_key);
+    if project_key.is_empty() {
+        return Err("project_path_key is required".to_string());
+    }
+    Ok(project_key)
+}
+
+fn normalize_ssh_terminal_tab_kind(kind: &str) -> Result<String, String> {
+    match kind.trim().to_ascii_lowercase().as_str() {
+        "bash" => Ok("bash".to_string()),
+        "sftp" => Ok("sftp".to_string()),
+        "" => Err("tab kind is required".to_string()),
+        other => Err(format!("unsupported ssh terminal tab kind: {other}")),
+    }
+}
+
+fn ssh_terminal_tab_id(session_id: &str, kind: &str) -> String {
+    format!("{}:{}", kind.trim(), session_id.trim())
+}
+
+fn ssh_terminal_tabs_snapshot_from_state(
+    project_path_key: &str,
+    state: &SshTerminalTabsState,
+) -> SshTerminalTabsSnapshot {
+    SshTerminalTabsSnapshot {
+        project_path_key: project_path_key.to_string(),
+        tabs: state.tabs.clone(),
+        revision: state.revision,
     }
 }
 
@@ -3028,6 +3804,19 @@ pub struct TerminalSubscriberGuard {
 }
 
 impl Drop for TerminalSubscriberGuard {
+    fn drop(&mut self) {
+        if let Ok(mut subscribers) = self.subscribers.lock() {
+            subscribers.remove(&self.id);
+        }
+    }
+}
+
+pub struct TerminalStreamSubscriberGuard {
+    id: usize,
+    subscribers: Arc<Mutex<HashMap<usize, mpsc::Sender<TerminalStreamEvent>>>>,
+}
+
+impl Drop for TerminalStreamSubscriberGuard {
     fn drop(&mut self) {
         if let Ok(mut subscribers) = self.subscribers.lock() {
             subscribers.remove(&self.id);
@@ -3049,7 +3838,7 @@ fn read_output_tail(entry: &TerminalSessionEntry, max_bytes: usize) -> TerminalO
         Ok(output) => output,
         Err(_) => {
             return TerminalOutputTail {
-                output: String::new(),
+                output: Vec::new(),
                 truncated: false,
                 output_start_offset: 0,
                 output_end_offset: 0,
@@ -3063,7 +3852,7 @@ fn read_output_chunks_tail(output: &TerminalOutputBuffer, max_bytes: usize) -> T
     let output_end_offset = output.next_offset;
     if max_bytes == 0 {
         return TerminalOutputTail {
-            output: String::new(),
+            output: Vec::new(),
             truncated: output_end_offset > 0,
             output_start_offset: output_end_offset,
             output_end_offset,
@@ -3079,15 +3868,10 @@ fn read_output_chunks_tail(output: &TerminalOutputBuffer, max_bytes: usize) -> T
         }
         let len = chunk.data.len();
         if len > remaining {
-            let start = chunk
-                .data
-                .char_indices()
-                .map(|(index, _)| index)
-                .find(|index| len.saturating_sub(*index) <= remaining)
-                .unwrap_or(len);
+            let start = len.saturating_sub(remaining);
             chunks.push_front(TerminalOutputChunk {
                 start_offset: chunk.start_offset.saturating_add(start as u64),
-                data: chunk.data[start..].to_string(),
+                data: chunk.data[start..].to_vec(),
             });
             truncated = true;
             break;
@@ -3099,12 +3883,12 @@ fn read_output_chunks_tail(output: &TerminalOutputBuffer, max_bytes: usize) -> T
         .front()
         .map(|chunk| chunk.start_offset)
         .unwrap_or(output_end_offset);
-    let output_text = chunks
-        .into_iter()
-        .map(|chunk| chunk.data)
-        .collect::<String>();
+    let mut output_bytes = Vec::new();
+    for chunk in chunks {
+        output_bytes.extend_from_slice(&chunk.data);
+    }
     TerminalOutputTail {
-        output: output_text,
+        output: output_bytes,
         truncated: truncated || output_start_offset > 0,
         output_start_offset,
         output_end_offset,
@@ -3266,57 +4050,6 @@ fn create_zsh_prompt_overlay(prompt: &str) -> Option<PathBuf> {
     Some(zdotdir)
 }
 
-#[derive(Default)]
-struct TerminalUtf8Decoder {
-    pending: Vec<u8>,
-}
-
-impl TerminalUtf8Decoder {
-    fn push(&mut self, bytes: &[u8]) -> String {
-        if bytes.is_empty() {
-            return String::new();
-        }
-        let mut input = if self.pending.is_empty() {
-            bytes.to_vec()
-        } else {
-            self.pending.extend_from_slice(bytes);
-            std::mem::take(&mut self.pending)
-        };
-
-        let mut output = String::new();
-        loop {
-            match str::from_utf8(&input) {
-                Ok(text) => {
-                    output.push_str(text);
-                    return output;
-                }
-                Err(error) => {
-                    let valid_up_to = error.valid_up_to();
-                    output.push_str(&String::from_utf8_lossy(&input[..valid_up_to]));
-                    let tail = &input[valid_up_to..];
-                    let Some(error_len) = error.error_len() else {
-                        self.pending.extend_from_slice(tail);
-                        return output;
-                    };
-                    let invalid_end = error_len.min(tail.len());
-                    output.push_str(&String::from_utf8_lossy(&tail[..invalid_end]));
-                    input = tail[invalid_end..].to_vec();
-                    if input.is_empty() {
-                        return output;
-                    }
-                }
-            }
-        }
-    }
-
-    fn finish(&mut self) -> String {
-        if self.pending.is_empty() {
-            return String::new();
-        }
-        String::from_utf8_lossy(&std::mem::take(&mut self.pending)).to_string()
-    }
-}
-
 struct ShellSpec {
     label: String,
     command: String,
@@ -3457,14 +4190,23 @@ mod tests {
     }
 
     #[test]
+    fn ssh_client_config_enables_interactive_keepalive() {
+        let config = ssh_client_config();
+
+        assert_eq!(config.keepalive_interval, Some(SSH_KEEPALIVE_INTERVAL));
+        assert_eq!(config.keepalive_max, SSH_KEEPALIVE_MAX_MISSES);
+        assert!(config.nodelay);
+    }
+
+    #[test]
     fn output_tail_respects_byte_limit_inside_large_chunk() {
         let mut output = TerminalOutputBuffer::default();
-        output.append("prefix".to_string());
-        output.append("abcdefghijklmnopqrstuvwxyz".to_string());
+        output.append(b"prefix".to_vec());
+        output.append(b"abcdefghijklmnopqrstuvwxyz".to_vec());
 
         let tail = read_output_chunks_tail(&output, 8);
 
-        assert_eq!(tail.output, "stuvwxyz");
+        assert_eq!(tail.output, b"stuvwxyz");
         assert_eq!(tail.output_start_offset, 24);
         assert_eq!(tail.output_end_offset, 32);
         assert!(tail.truncated);
@@ -3473,24 +4215,328 @@ mod tests {
     #[test]
     fn output_tail_keeps_offsets_for_repeated_text() {
         let mut output = TerminalOutputBuffer::default();
-        output.append("uploads\n".to_string());
-        output.append("uploads\n".to_string());
+        output.append(b"uploads\n".to_vec());
+        output.append(b"uploads\n".to_vec());
 
         let tail = read_output_chunks_tail(&output, MAX_TAIL_BYTES);
 
-        assert_eq!(tail.output, "uploads\nuploads\n");
+        assert_eq!(tail.output, b"uploads\nuploads\n");
         assert_eq!(tail.output_start_offset, 0);
         assert_eq!(tail.output_end_offset, 16);
         assert!(!tail.truncated);
     }
 
     #[test]
-    fn terminal_utf8_decoder_preserves_split_multibyte_character() {
-        let mut decoder = TerminalUtf8Decoder::default();
+    fn remote_input_echo_is_delayed_for_local_until_enter() {
+        let mut state = TerminalEchoDispatchState::default();
+        state
+            .pending
+            .extend(b"echo hi\r".iter().copied().map(|byte| PendingEchoByte {
+                byte,
+                origin: TerminalInputOrigin::Remote,
+            }));
 
-        assert_eq!(decoder.push(&[0xe4, 0xb8]), "");
-        assert_eq!(decoder.push(&[0xad]), "中");
-        assert_eq!(decoder.finish(), "");
+        let first = state.dispatch(test_stream_payload(0, b"echo"));
+        assert_eq!(collect_payload_bytes(&first.remote), b"echo");
+        assert!(first.local.is_empty());
+
+        let second = state.dispatch(test_stream_payload(4, b" hi\r\n"));
+        assert_eq!(collect_payload_bytes(&second.remote), b" hi\r\n");
+        assert_eq!(collect_payload_bytes(&second.local), b"echo hi\r\n");
+        assert!(state.is_empty());
+    }
+
+    #[test]
+    fn local_input_echo_is_delayed_for_remote_until_enter() {
+        let mut state = TerminalEchoDispatchState::default();
+        state
+            .pending
+            .extend(b"pwd\r".iter().copied().map(|byte| PendingEchoByte {
+                byte,
+                origin: TerminalInputOrigin::Local,
+            }));
+
+        let first = state.dispatch(test_stream_payload(10, b"pw"));
+        assert_eq!(collect_payload_bytes(&first.local), b"pw");
+        assert!(first.remote.is_empty());
+
+        let second = state.dispatch(test_stream_payload(12, b"d\r\n"));
+        assert_eq!(collect_payload_bytes(&second.local), b"d\r\n");
+        assert_eq!(collect_payload_bytes(&second.remote), b"pwd\r\n");
+        assert!(state.is_empty());
+    }
+
+    #[test]
+    fn no_echo_password_input_does_not_leak_to_other_side() {
+        let mut state = TerminalEchoDispatchState::default();
+        state
+            .pending
+            .extend(b"secret\r".iter().copied().map(|byte| PendingEchoByte {
+                byte,
+                origin: TerminalInputOrigin::Remote,
+            }));
+
+        let dispatch = state.dispatch(test_stream_payload(30, b"\r\n"));
+
+        assert_eq!(collect_payload_bytes(&dispatch.local), b"\r\n");
+        assert_eq!(collect_payload_bytes(&dispatch.remote), b"\r\n");
+        assert!(state.is_empty());
+    }
+
+    #[test]
+    fn non_echo_output_stays_visible_to_both_sides() {
+        let mut state = TerminalEchoDispatchState::default();
+        state.pending.push_back(PendingEchoByte {
+            byte: b'a',
+            origin: TerminalInputOrigin::Remote,
+        });
+
+        let dispatch = state.dispatch(test_stream_payload(50, b"build\n"));
+
+        assert_eq!(collect_payload_bytes(&dispatch.local), b"build\n");
+        assert_eq!(collect_payload_bytes(&dispatch.remote), b"build\n");
+        assert!(!state.is_empty());
+    }
+
+    #[test]
+    fn input_echo_candidates_skip_escape_sequences() {
+        let candidates =
+            terminal_input_echo_candidates(b"a\x1b[A\x1b[1;5Cb\r", TerminalInputOrigin::Remote);
+        let bytes = candidates
+            .iter()
+            .map(|candidate| candidate.byte)
+            .collect::<Vec<_>>();
+
+        assert_eq!(bytes, b"ab\r");
+    }
+
+    #[test]
+    fn failed_input_enqueue_does_not_record_pending_echo() {
+        let registry = TerminalSessionRegistry::default();
+        insert_test_ssh_session(
+            &registry,
+            "ssh-1",
+            "/tmp/project",
+            true,
+            SSH_STATUS_CONNECTED,
+        );
+
+        let result = registry.input_bytes_from_remote("ssh-1".to_string(), b"secret\r".to_vec());
+
+        assert!(result.is_err());
+        let states = registry
+            .echo_dispatch
+            .lock()
+            .expect("terminal echo dispatch lock");
+        assert!(!states.contains_key("ssh-1"));
+    }
+
+    fn insert_test_ssh_session(
+        registry: &TerminalSessionRegistry,
+        id: &str,
+        project_path_key: &str,
+        sftp_enabled: bool,
+        status: &str,
+    ) {
+        let now = now_ms();
+        let record = TerminalSessionRecord {
+            id: id.to_string(),
+            project_path_key: normalize_project_path_key(project_path_key),
+            cwd: project_path_key.to_string(),
+            shell: "ssh".to_string(),
+            title: id.to_string(),
+            kind: "ssh".to_string(),
+            ssh: Some(TerminalSshMetadata {
+                host_id: format!("host-{id}"),
+                host_name: format!("Host {id}"),
+                username: "tester".to_string(),
+                host: "127.0.0.1".to_string(),
+                port: 22,
+                auth_type: "password".to_string(),
+                status: status.to_string(),
+                reconnect_attempt: 0,
+                reconnect_max_attempts: SSH_RECONNECT_MAX_ATTEMPTS,
+                sftp_enabled,
+            }),
+            pid: None,
+            cols: DEFAULT_COLS,
+            rows: DEFAULT_ROWS,
+            created_at: now,
+            updated_at: now,
+            finished_at: None,
+            exit_code: None,
+            running: status == SSH_STATUS_CONNECTED,
+        };
+        let entry = Arc::new(TerminalSessionEntry {
+            backend: TerminalSessionBackend::Ssh {
+                runtime: Arc::new(SshSessionRuntime::new()),
+            },
+            record: Mutex::new(record),
+            output: Mutex::new(TerminalOutputBuffer::default()),
+        });
+        registry
+            .sessions
+            .lock()
+            .expect("terminal session registry poisoned")
+            .insert(id.to_string(), entry);
+    }
+
+    fn test_stream_payload(start_offset: u64, bytes: &[u8]) -> TerminalStreamEventPayload {
+        TerminalStreamEventPayload {
+            kind: "output".to_string(),
+            session_id: "terminal-1".to_string(),
+            project_path_key: "/tmp/project".to_string(),
+            start_offset,
+            end_offset: start_offset + bytes.len() as u64,
+            bytes: bytes.to_vec(),
+        }
+    }
+
+    fn collect_payload_bytes(payloads: &[TerminalStreamEventPayload]) -> Vec<u8> {
+        payloads
+            .iter()
+            .flat_map(|payload| payload.bytes.iter().copied())
+            .collect()
+    }
+
+    #[test]
+    fn ssh_terminal_tab_open_is_idempotent_without_shared_active() {
+        let registry = TerminalSessionRegistry::default();
+        insert_test_ssh_session(
+            &registry,
+            "ssh-1",
+            "/tmp/project",
+            true,
+            SSH_STATUS_CONNECTED,
+        );
+
+        let first = registry
+            .ssh_terminal_tab_open("ssh-1".to_string(), "bash".to_string())
+            .expect("open bash tab");
+        let second = registry
+            .ssh_terminal_tab_open("ssh-1".to_string(), "bash".to_string())
+            .expect("reopen bash tab");
+        let sftp = registry
+            .ssh_terminal_tab_open("ssh-1".to_string(), "sftp".to_string())
+            .expect("open sftp tab");
+
+        assert_eq!(first.tabs.len(), 1);
+        assert_eq!(second.tabs.len(), 1);
+        assert_eq!(sftp.tabs.len(), 2);
+        assert_eq!(first.revision, second.revision);
+    }
+
+    #[test]
+    fn ssh_terminal_tab_close_is_global_without_closing_session() {
+        let registry = TerminalSessionRegistry::default();
+        insert_test_ssh_session(
+            &registry,
+            "ssh-1",
+            "/tmp/project",
+            true,
+            SSH_STATUS_CONNECTED,
+        );
+        insert_test_ssh_session(
+            &registry,
+            "ssh-2",
+            "/tmp/project",
+            true,
+            SSH_STATUS_CONNECTED,
+        );
+        registry
+            .ssh_terminal_tab_open("ssh-1".to_string(), "bash".to_string())
+            .expect("open first tab");
+        registry
+            .ssh_terminal_tab_open("ssh-2".to_string(), "bash".to_string())
+            .expect("open second tab");
+
+        let snapshot = registry
+            .ssh_terminal_tab_close("bash:ssh-1".to_string())
+            .expect("close first tab");
+
+        assert_eq!(snapshot.tabs.len(), 1);
+        assert!(registry.session_record("ssh-1".to_string()).is_ok());
+    }
+
+    #[test]
+    fn ssh_terminal_tab_open_rejects_disabled_sftp() {
+        let registry = TerminalSessionRegistry::default();
+        insert_test_ssh_session(
+            &registry,
+            "ssh-1",
+            "/tmp/project",
+            false,
+            SSH_STATUS_CONNECTED,
+        );
+
+        let error = registry
+            .ssh_terminal_tab_open("ssh-1".to_string(), "sftp".to_string())
+            .expect_err("sftp tab should be rejected");
+
+        assert!(error.contains("SFTP is not enabled"));
+    }
+
+    #[test]
+    fn ssh_terminal_tabs_prune_when_session_closes() {
+        let registry = TerminalSessionRegistry::default();
+        insert_test_ssh_session(
+            &registry,
+            "ssh-1",
+            "/tmp/project",
+            true,
+            SSH_STATUS_CONNECTED,
+        );
+        registry
+            .ssh_terminal_tab_open("ssh-1".to_string(), "bash".to_string())
+            .expect("open bash tab");
+        registry
+            .ssh_terminal_tab_open("ssh-1".to_string(), "sftp".to_string())
+            .expect("open sftp tab");
+
+        registry
+            .close("ssh-1".to_string())
+            .expect("close ssh session");
+        let snapshot = registry
+            .ssh_terminal_tabs_list("/tmp/project".to_string())
+            .expect("list tabs");
+
+        assert!(snapshot.tabs.is_empty());
+    }
+
+    #[test]
+    fn ssh_terminal_tabs_prune_when_ssh_disconnects() {
+        let registry = TerminalSessionRegistry::default();
+        insert_test_ssh_session(
+            &registry,
+            "ssh-1",
+            "/tmp/project",
+            true,
+            SSH_STATUS_CONNECTED,
+        );
+        registry
+            .ssh_terminal_tab_open("ssh-1".to_string(), "bash".to_string())
+            .expect("open bash tab");
+        registry
+            .ssh_terminal_tab_open("ssh-1".to_string(), "sftp".to_string())
+            .expect("open sftp tab");
+        let entry = registry
+            .sessions
+            .lock()
+            .expect("terminal session registry poisoned")
+            .get("ssh-1")
+            .cloned()
+            .expect("ssh session entry");
+
+        registry.mark_ssh_disconnected(&entry);
+
+        let snapshot = registry
+            .ssh_terminal_tabs_list("/tmp/project".to_string())
+            .expect("list tabs");
+        assert!(snapshot.tabs.is_empty());
+        let error = registry
+            .ssh_terminal_tab_open("ssh-1".to_string(), "bash".to_string())
+            .expect_err("disconnected ssh tab should be rejected");
+        assert!(error.contains("disconnected"));
     }
 
     #[test]

@@ -145,10 +145,6 @@ export function summarizeToolCall(
   const args = toolCall.arguments || {};
   const name = toolCall.name;
   const path = summarizeToolArg(args.path);
-  const root =
-    typeof args.root === "string" && args.root.trim()
-      ? `root=${summarizeToolArg(args.root)}`
-      : null;
   const imagePaths = Array.isArray(args.paths)
     ? args.paths
         .map((value) => summarizeToolArg(value))
@@ -167,12 +163,12 @@ export function summarizeToolCall(
   const imageBase64s = Array.isArray(args.base64s)
     ? args.base64s.filter((value) => typeof value === "string" && value.trim()).length
     : 0;
-  const rootPath = "path=<root>";
+  const defaultPath = "path=.";
+  const defaultCwd = "cwd=.";
 
   const parts =
     name === "Image"
       ? [
-          root,
           imageSources.length > 0
             ? `sources=${imageSources.length}${imageSources[0] ? ` first=${imageSources[0]}` : ""}`
             : imagePaths.length > 0
@@ -193,7 +189,6 @@ export function summarizeToolCall(
         ]
       : name === "Read"
         ? [
-            root,
             path ? `path=${path}` : null,
             typeof args.start_line === "number" ? `start=${args.start_line}` : null,
             typeof args.limit === "number" ? `limit=${args.limit}` : null,
@@ -315,32 +310,38 @@ export function summarizeToolCall(
                           ]
                         : name === "Write"
                           ? [
-                              root,
                               path ? `path=${path}` : null,
                               "mode=rewrite",
                               typeof args.content === "string"
-                                ? `contentChars=${args.content.length}`
+                                ? `contentChars=${
+                                    streamingPreviewFieldChars(args, "content") ??
+                                    args.content.length
+                                  }`
                                 : null,
                             ]
                           : name === "Edit"
                             ? [
-                                root,
                                 path ? `path=${path}` : null,
                                 typeof args.expected_replacements === "number"
                                   ? `expected=${args.expected_replacements}`
                                   : null,
                                 args.replace_all === true ? "replaceAll=true" : null,
                                 typeof args.old_string === "string"
-                                  ? `oldChars=${args.old_string.length}`
+                                  ? `oldChars=${
+                                      streamingPreviewFieldChars(args, "old_string") ??
+                                      args.old_string.length
+                                    }`
                                   : null,
                                 typeof args.new_string === "string"
-                                  ? `newChars=${args.new_string.length}`
+                                  ? `newChars=${
+                                      streamingPreviewFieldChars(args, "new_string") ??
+                                      args.new_string.length
+                                    }`
                                   : null,
                               ]
                             : name === "List"
                               ? [
-                                  root,
-                                  path ? `path=${path}` : rootPath,
+                                  path ? `path=${path}` : defaultPath,
                                   typeof args.depth === "number" ? `depth=${args.depth}` : null,
                                   typeof args.offset === "number" ? `offset=${args.offset}` : null,
                                   typeof args.max_results === "number"
@@ -349,11 +350,10 @@ export function summarizeToolCall(
                                 ]
                               : name === "Glob"
                                 ? [
-                                    root,
                                     typeof args.pattern === "string"
                                       ? `pattern=${summarizeToolArg(args.pattern)}`
                                       : null,
-                                    path ? `path=${path}` : rootPath,
+                                    path ? `path=${path}` : defaultPath,
                                     typeof args.offset === "number"
                                       ? `offset=${args.offset}`
                                       : null,
@@ -363,11 +363,10 @@ export function summarizeToolCall(
                                   ]
                                 : name === "Grep"
                                   ? [
-                                      root,
                                       typeof args.pattern === "string"
                                         ? `pattern=${summarizeToolArg(args.pattern)}`
                                         : null,
-                                      path ? `path=${path}` : rootPath,
+                                      path ? `path=${path}` : defaultPath,
                                       typeof args.file_pattern === "string"
                                         ? `filePattern=${summarizeToolArg(args.file_pattern)}`
                                         : null,
@@ -389,13 +388,12 @@ export function summarizeToolCall(
                                         : null,
                                     ]
                                   : name === "Delete"
-                                    ? [root, path ? `path=${path}` : null]
+                                    ? [path ? `path=${path}` : null]
                                     : name === "Bash"
                                       ? [
-                                          root,
                                           typeof args.cwd === "string"
                                             ? `cwd=${summarizeToolArg(args.cwd)}`
-                                            : rootPath,
+                                            : defaultCwd,
                                           summarizeBashTimeout(args.timeout_ms),
                                           typeof args.command === "string"
                                             ? `command=${summarizeToolArg(args.command)}`
@@ -436,17 +434,6 @@ function summarizeImageArgValue(key: string, value: unknown) {
   return value;
 }
 
-function displayFileToolRoot(root: unknown) {
-  return typeof root === "string" && root.trim() && root.trim() !== "workspace"
-    ? root.trim()
-    : undefined;
-}
-
-function displayFileToolRootEntry(root: unknown) {
-  const displayRoot = displayFileToolRoot(root);
-  return displayRoot ? { root: displayRoot } : {};
-}
-
 export function toolCallArgsForDisplay(toolCall: ToolCall) {
   const args = toolCall.arguments || {};
   const name = toolCall.name;
@@ -454,19 +441,26 @@ export function toolCallArgsForDisplay(toolCall: ToolCall) {
   switch (name) {
     case "Write":
       return {
-        ...displayFileToolRootEntry(args.root),
         path: args.path,
         mode: "rewrite",
-        contentChars: typeof args.content === "string" ? args.content.length : undefined,
+        contentChars:
+          typeof args.content === "string"
+            ? (streamingPreviewFieldChars(args, "content") ?? args.content.length)
+            : undefined,
       };
     case "Edit":
       return {
-        ...displayFileToolRootEntry(args.root),
         path: args.path,
         expected_replacements: args.expected_replacements,
         replace_all: args.replace_all,
-        oldChars: typeof args.old_string === "string" ? args.old_string.length : undefined,
-        newChars: typeof args.new_string === "string" ? args.new_string.length : undefined,
+        oldChars:
+          typeof args.old_string === "string"
+            ? (streamingPreviewFieldChars(args, "old_string") ?? args.old_string.length)
+            : undefined,
+        newChars:
+          typeof args.new_string === "string"
+            ? (streamingPreviewFieldChars(args, "new_string") ?? args.new_string.length)
+            : undefined,
       };
     case "Image": {
       const out: Record<string, unknown> = {};
@@ -566,6 +560,116 @@ export function previewText(input: string, maxChars = 1200) {
   const text = input || "";
   if (text.length <= maxChars) return text;
   return `${text.slice(0, maxChars)}\n...（已截断预览，len=${text.length}）...`;
+}
+
+export const LIVE_TOOL_PREVIEW_META_KEY = "__liveagent_stream_preview";
+
+type StreamingPreviewFieldMetrics = {
+  chars?: number;
+  lines?: number;
+  truncated?: boolean;
+};
+
+function asPlainRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function finiteNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function readStreamingPreviewFieldMetrics(
+  args: Record<string, unknown>,
+  fieldName: string,
+): StreamingPreviewFieldMetrics | undefined {
+  const metadata = asPlainRecord(args[LIVE_TOOL_PREVIEW_META_KEY]);
+  const fields = asPlainRecord(metadata.fields);
+  const field = asPlainRecord(fields[fieldName]);
+  if (Object.keys(field).length === 0) return undefined;
+  return {
+    chars: finiteNumber(field.chars),
+    lines: finiteNumber(field.lines),
+    truncated: typeof field.truncated === "boolean" ? field.truncated : undefined,
+  };
+}
+
+function streamingPreviewFieldChars(args: Record<string, unknown>, fieldName: string) {
+  return readStreamingPreviewFieldMetrics(args, fieldName)?.chars;
+}
+
+export function countTextLines(input: string) {
+  if (input.length === 0) return 0;
+  let lines = 1;
+  for (let index = 0; index < input.length; index += 1) {
+    const code = input.charCodeAt(index);
+    if (code === 13) {
+      lines += 1;
+      if (input.charCodeAt(index + 1) === 10) {
+        index += 1;
+      }
+    } else if (code === 10) {
+      lines += 1;
+    }
+  }
+  return lines;
+}
+
+export function buildStreamingToolTextPreview(
+  input: string,
+  maxChars = 4000,
+  metrics?: StreamingPreviewFieldMetrics,
+) {
+  const text = input || "";
+  const renderedText = previewText(text, maxChars);
+  return {
+    text: renderedText,
+    chars: metrics?.chars ?? text.length,
+    lines: metrics?.lines ?? countTextLines(text),
+    truncated: metrics?.truncated ?? text.length > maxChars,
+  };
+}
+
+export function getStreamingWriteToolPreview(toolCall: {
+  name: string;
+  arguments?: Record<string, unknown>;
+}) {
+  if (toolCall.name !== "Write") return null;
+  const args = toolCall.arguments || {};
+  const hasContent = typeof args.content === "string";
+  const content = hasContent ? (args.content as string) : "";
+  const contentMetrics = readStreamingPreviewFieldMetrics(args, "content");
+  return {
+    path: typeof args.path === "string" ? (args.path as string) : "",
+    mode: "rewrite" as const,
+    hasContent,
+    content: buildStreamingToolTextPreview(content, 4000, contentMetrics),
+  };
+}
+
+export function getStreamingEditToolPreview(toolCall: {
+  name: string;
+  arguments?: Record<string, unknown>;
+}) {
+  if (toolCall.name !== "Edit") return null;
+  const args = toolCall.arguments || {};
+  const hasOldString = typeof args.old_string === "string";
+  const hasNewString = typeof args.new_string === "string";
+  const oldString = hasOldString ? (args.old_string as string) : "";
+  const newString = hasNewString ? (args.new_string as string) : "";
+  const oldStringMetrics = readStreamingPreviewFieldMetrics(args, "old_string");
+  const newStringMetrics = readStreamingPreviewFieldMetrics(args, "new_string");
+  return {
+    path: typeof args.path === "string" ? (args.path as string) : "",
+    hasOldString,
+    hasNewString,
+    oldString: buildStreamingToolTextPreview(oldString, 4000, oldStringMetrics),
+    newString: buildStreamingToolTextPreview(newString, 4000, newStringMetrics),
+    expectedReplacements:
+      typeof args.expected_replacements === "number" ? args.expected_replacements : undefined,
+    replaceAll: args.replace_all === true,
+  };
 }
 
 function appendTextLikeBlock(
@@ -721,28 +825,6 @@ function normalizePlaceholderApplyPolicy(
   return value === "none" || value === "explicit" || value === "auto" ? value : undefined;
 }
 
-function normalizePlaceholderRelativePath(value: string) {
-  const normalized = value.trim().replace(/\\/g, "/").replace(/^\.\//, "");
-  if (
-    !normalized ||
-    /^[a-zA-Z]:\//.test(normalized) ||
-    normalized.startsWith("/") ||
-    normalized.startsWith("//") ||
-    normalized === "." ||
-    normalized === ".."
-  ) {
-    return "";
-  }
-
-  const segments: string[] = [];
-  for (const segment of normalized.split("/")) {
-    if (!segment || segment === ".") continue;
-    if (segment === ".." || segment.includes(":")) return "";
-    segments.push(segment);
-  }
-  return segments.join("/");
-}
-
 function normalizePlaceholderPathList(value: unknown): string[] {
   const rawItems = Array.isArray(value)
     ? value
@@ -752,7 +834,7 @@ function normalizePlaceholderPathList(value: unknown): string[] {
   const out: string[] = [];
   for (const raw of rawItems) {
     if (typeof raw !== "string") continue;
-    const normalized = normalizePlaceholderRelativePath(raw);
+    const normalized = raw.trim().replace(/\\/g, "/").replace(/^\.\//, "");
     if (normalized && !out.includes(normalized)) out.push(normalized);
   }
   return out;
@@ -763,7 +845,7 @@ function maybePlaceholderOutputPath(value: string) {
   if (!text || /[*?[\]]/.test(text) || /^https?:\/\//i.test(text)) return "";
   if (/\s/.test(text)) return "";
   if (!/\.[a-z0-9]{1,12}$/i.test(text)) return "";
-  return normalizePlaceholderRelativePath(text);
+  return text.replace(/\\/g, "/").replace(/^\.\//, "");
 }
 
 function inferPlaceholderAllowedOutputPaths(params: { prompt?: string }): string[] {

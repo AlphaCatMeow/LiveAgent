@@ -253,10 +253,10 @@ export function useRightDockSessions(options: UseRightDockSessionsOptions) {
           next = current.filter((session) => session.id !== event.sessionId);
         } else {
           const index = current.findIndex((session) => session.id === event.sessionId);
-          if (index >= 0) {
+          if (index >= 0 && event.session) {
             next = [...current];
             next[index] = event.session;
-          } else if (event.kind === "created") {
+          } else if (event.kind === "created" && event.session) {
             next = [...current, event.session];
           }
         }

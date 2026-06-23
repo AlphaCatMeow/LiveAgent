@@ -45,6 +45,7 @@ export type TerminalSshPrompt = {
 export type TerminalSnapshot = {
   session: TerminalSession;
   output: string;
+  outputBytes?: Uint8Array;
   truncated: boolean;
   outputStartOffset?: number;
   outputEndOffset?: number;
@@ -71,14 +72,70 @@ export type TerminalShellOptions = {
   defaultShell: string;
 };
 
-export type TerminalEvent = {
-  kind: string;
+export type SshTerminalTabKind = "bash" | "sftp";
+
+export type SshTerminalTab = {
+  id: string;
   sessionId: string;
   projectPathKey: string;
-  session: TerminalSession;
-  data?: string;
+  kind: SshTerminalTabKind;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type SshTerminalTabsSnapshot = {
+  projectPathKey: string;
+  tabs: SshTerminalTab[];
+  revision: number;
+};
+
+export type TerminalEvent = {
+  kind: string;
+  sessionId?: string;
+  projectPathKey: string;
+  session?: TerminalSession;
   outputStartOffset?: number;
   outputEndOffset?: number;
+  sshTabs?: SshTerminalTabsSnapshot;
+};
+
+export type TerminalStreamChunk = {
+  sessionId: string;
+  projectPathKey: string;
+  bytes: Uint8Array;
+  startOffset: number;
+  endOffset: number;
+};
+
+export type TerminalStreamSnapshot = {
+  session: TerminalSession;
+  bytes: Uint8Array;
+  truncated: boolean;
+  outputStartOffset: number;
+  outputEndOffset: number;
+};
+
+export type TerminalStreamInputState = {
+  paused: boolean;
+  queuedBytes: number;
+  highWaterBytes: number;
+  reason?: "slow" | "offline" | "closed";
+};
+
+export type TerminalStreamHandle = {
+  snapshot: TerminalStreamSnapshot;
+  write(data: Uint8Array): boolean;
+  resize(cols: number, rows: number): void;
+  dispose(): void;
+  subscribeOutput(listener: (chunk: TerminalStreamChunk) => void): () => void;
+  subscribeInputState(listener: (state: TerminalStreamInputState) => void): () => void;
+};
+
+export type TerminalStreamClient = {
+  attach(
+    session: TerminalSession,
+    options?: { maxBytes?: number },
+  ): Promise<TerminalStreamHandle>;
 };
 
 export type TerminalClient = {
@@ -108,21 +165,15 @@ export type TerminalClient = {
   }): Promise<TerminalSshCreateResult>;
   cancelSshPrompt(promptId: string): Promise<void>;
   sshLatency(sessionId: string, projectPathKey?: string): Promise<TerminalSshLatency>;
-  snapshot(
-    sessionId: string,
-    maxBytes?: number,
-    projectPathKey?: string,
-  ): Promise<TerminalSnapshot>;
-  input(sessionId: string, data: string, projectPathKey?: string): Promise<void>;
-  resize(
-    sessionId: string,
-    cols: number,
-    rows: number,
-    projectPathKey?: string,
-  ): Promise<void>;
+  listSshTerminalTabs(projectPathKey: string): Promise<SshTerminalTabsSnapshot>;
+  openSshTerminalTab(params: {
+    sessionId: string;
+    kind: SshTerminalTabKind;
+  }): Promise<SshTerminalTabsSnapshot>;
+  closeSshTerminalTab(tabId: string): Promise<SshTerminalTabsSnapshot>;
   rename(sessionId: string, title: string, projectPathKey?: string): Promise<TerminalSession>;
   close(sessionId: string, projectPathKey?: string): Promise<TerminalSession>;
   closeProject(projectPathKey: string): Promise<TerminalSession[]>;
-  detach(sessionId: string, projectPathKey?: string): Promise<void>;
   subscribe(listener: (event: TerminalEvent) => void): () => void;
+  stream: TerminalStreamClient;
 };

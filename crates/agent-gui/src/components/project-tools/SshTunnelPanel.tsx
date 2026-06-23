@@ -703,7 +703,7 @@ export function SshTunnelPanel(props: SshTunnelPanelProps) {
                     <Server className="h-4 w-4" />
                   </span>
                   <select
-                    className="h-10 w-full appearance-none rounded-lg border border-border/70 bg-card/80 pl-10 pr-9 text-sm font-medium text-foreground shadow-[0_1px_2px_hsl(0_0%_0%_/_0.04)] outline-none transition-colors hover:border-emerald-500/40 focus-visible:border-emerald-500/50 focus-visible:ring-1 focus-visible:ring-emerald-500/20"
+                    className="h-10 w-full appearance-none rounded-lg border border-border/70 bg-card/80 pl-10 pr-9 text-[11px] font-medium text-foreground shadow-[0_1px_2px_hsl(0_0%_0%_/_0.04)] outline-none transition-colors hover:border-emerald-500/40 focus-visible:border-emerald-500/50 focus-visible:ring-1 focus-visible:ring-emerald-500/20"
                     value={selectedCreateHostId}
                     onChange={(event) => setCreateHostId(event.currentTarget.value)}
                   >
@@ -727,7 +727,7 @@ export function SshTunnelPanel(props: SshTunnelPanelProps) {
                 <input
                   value={createTitle}
                   onChange={(event) => setCreateTitle(event.currentTarget.value)}
-                  className="h-10 w-full rounded-lg border border-border/70 bg-background/80 px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus-visible:border-emerald-500/50 focus-visible:ring-1 focus-visible:ring-emerald-500/20"
+                  className="h-10 w-full rounded-lg border border-border/70 bg-background/80 px-3 text-[11px] text-foreground outline-none transition-colors placeholder:text-[11px] placeholder:text-muted-foreground/70 focus-visible:border-emerald-500/50 focus-visible:ring-1 focus-visible:ring-emerald-500/20"
                   placeholder={
                     selectedCreateHost?.name || t("projectTools.sshTunnelTabTitlePlaceholder")
                   }
@@ -1102,7 +1102,7 @@ export function SshTunnelPanel(props: SshTunnelPanelProps) {
               <input
                 value={promptAnswer}
                 onChange={(event) => setPromptAnswer(event.currentTarget.value)}
-                className="mt-3 h-10 w-full rounded-lg border border-border/70 bg-background/80 px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus-visible:border-emerald-500/50 focus-visible:ring-1 focus-visible:ring-emerald-500/20"
+                className="mt-3 h-10 w-full rounded-lg border border-border/70 bg-background/80 px-3 text-[11px] text-foreground outline-none transition-colors placeholder:text-[11px] placeholder:text-muted-foreground/70 focus-visible:border-emerald-500/50 focus-visible:ring-1 focus-visible:ring-emerald-500/20"
                 type={prompt.answerEcho ? "text" : "password"}
               />
             ) : null}

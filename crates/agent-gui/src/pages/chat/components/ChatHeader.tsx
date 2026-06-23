@@ -3,7 +3,7 @@ import {
   Check,
   ChevronDown,
   ClaudeIcon,
-  FileTypeGeminiIcon,
+  GeminiIcon,
   Moon,
   OpenaiChatgptIcon,
   PanelLeft,
@@ -31,7 +31,7 @@ import type { SectionId } from "../../settings/types";
 function ProviderBrandIcon({ type, className }: { type: ProviderId; className?: string }) {
   const cls = cn("h-4 w-4 shrink-0", className);
   if (type === "claude_code") return <ClaudeIcon className={cls} />;
-  if (type === "gemini") return <FileTypeGeminiIcon className={cls} />;
+  if (type === "gemini") return <GeminiIcon className={cls} />;
   return <OpenaiChatgptIcon className={cn(cls, "fill-current dark:text-white")} />;
 }
 

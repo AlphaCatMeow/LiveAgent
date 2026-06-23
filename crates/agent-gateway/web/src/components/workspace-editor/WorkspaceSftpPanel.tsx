@@ -9,96 +9,17 @@ import type {
   SftpTransfer,
 } from "@/lib/sftp/types";
 import type { TerminalSession } from "@/lib/terminal/types";
+import { getFileTypeIcon } from "../chat/fileTypeIcons";
 import {
   AlertTriangle,
   CheckCircle2,
   Copy,
-  DefaultFile,
   Download,
-  FileTypeApache,
-  FileTypeAudio,
-  FileTypeBinary,
-  FileTypeBun,
-  FileTypeC,
-  FileTypeCargo,
-  FileTypeCert,
-  FileTypeCmake,
-  FileTypeConfig,
-  FileTypeCpp,
-  FileTypeCsharp,
-  FileTypeCss,
-  FileTypeDart,
-  FileTypeDb,
-  FileTypeDocker,
-  FileTypeDotenv,
-  FileTypeEslint,
-  FileTypeExcel,
-  FileTypeFont,
-  FileTypeGit,
-  FileTypeGo,
-  FileTypeGoWork,
-  FileTypeGradle,
-  FileTypeGraphql,
-  FileTypeHtml,
-  FileTypeImage,
-  FileTypeIni,
-  FileTypeJava,
-  FileTypeJs,
-  FileTypeJsConfig,
-  FileTypeJson,
-  FileTypeKey,
-  FileTypeKotlin,
-  FileTypeLicense,
-  FileTypeLog,
-  FileTypeMarkdown,
-  FileTypeMaven,
-  FileTypeNginx,
-  FileTypeNode,
-  FileTypeNpm,
-  FileTypePackage,
-  FileTypePdf,
-  FileTypePhp,
-  FileTypePnpm,
-  FileTypePowerpoint,
-  FileTypePowershell,
-  FileTypePrettier,
-  FileTypePrisma,
-  FileTypePython,
-  FileTypeReactJs,
-  FileTypeReactTs,
-  FileTypeRuby,
-  FileTypeRust,
-  FileTypeScss,
-  FileTypeShell,
-  FileTypeSql,
-  FileTypeSqlite,
-  FileTypeSvelte,
-  FileTypeSwift,
-  FileTypeSystemd,
-  FileTypeTerraform,
-  FileTypeText,
-  FileTypeToml,
-  FileTypeTs,
-  FileTypeTsConfig,
-  FileTypeTsDef,
-  FileTypeVideo,
-  FileTypeVite,
-  FileTypeVitest,
-  FileTypeVue,
-  FileTypeWebpack,
-  FileTypeWord,
-  FileTypeXml,
-  FileTypeYaml,
-  FileTypeYarn,
-  FileTypeZip,
-  Folder,
-  FolderOpen,
   Loader2,
   Pencil,
   Plus,
   RefreshCw,
   Trash2,
-  type IconComponent,
   Upload,
 } from "../icons";
 import { useConfirmDialog } from "../ui/confirm-dialog";
@@ -170,252 +91,8 @@ const INITIAL_REMOTE_PATH = ".";
 const TERMINAL_TRANSFER_STATUSES = new Set(["completed", "failed", "cancelled"]);
 const POINTER_DRAG_THRESHOLD_PX = 6;
 const FILE_ICON_CLASS = "h-4 w-4 shrink-0";
-const FOLDER_ICON_CLASS = "h-4 w-4 shrink-0 text-amber-500";
+const FOLDER_ICON_CLASS = "h-4 w-4 shrink-0";
 
-const EXACT_FILE_ICONS: Record<string, IconComponent> = {
-  ".bash_profile": FileTypeShell,
-  ".bashrc": FileTypeShell,
-  ".dockerignore": FileTypeDocker,
-  ".editorconfig": FileTypeConfig,
-  ".eslintignore": FileTypeEslint,
-  ".eslintrc": FileTypeEslint,
-  ".gitattributes": FileTypeGit,
-  ".gitconfig": FileTypeGit,
-  ".gitignore": FileTypeGit,
-  ".gitkeep": FileTypeGit,
-  ".htaccess": FileTypeApache,
-  ".npmrc": FileTypeNpm,
-  ".profile": FileTypeShell,
-  ".prettierignore": FileTypePrettier,
-  ".prettierrc": FileTypePrettier,
-  ".vimrc": FileTypeConfig,
-  ".yarnrc": FileTypeYarn,
-  ".zprofile": FileTypeShell,
-  ".zshrc": FileTypeShell,
-  "authorized_keys": FileTypeKey,
-  "bun.lock": FileTypeBun,
-  "bun.lockb": FileTypeBun,
-  "cargo.lock": FileTypeCargo,
-  "cargo.toml": FileTypeCargo,
-  "cmakelists.txt": FileTypeCmake,
-  "composer.json": FileTypePhp,
-  "composer.lock": FileTypePhp,
-  "containerfile": FileTypeDocker,
-  "copying": FileTypeLicense,
-  "copying.md": FileTypeLicense,
-  "copying.txt": FileTypeLicense,
-  "dockerfile": FileTypeDocker,
-  "d.ts": FileTypeTsDef,
-  "go.mod": FileTypeGo,
-  "go.sum": FileTypeGo,
-  "go.work": FileTypeGoWork,
-  "go.work.sum": FileTypeGoWork,
-  "gradle.properties": FileTypeGradle,
-  "gnumakefile": FileTypeConfig,
-  "httpd.conf": FileTypeApache,
-  "id_dsa": FileTypeKey,
-  "id_ecdsa": FileTypeKey,
-  "id_ed25519": FileTypeKey,
-  "id_rsa": FileTypeKey,
-  "jenkinsfile": FileTypeConfig,
-  "jsconfig.json": FileTypeJsConfig,
-  "known_hosts": FileTypeKey,
-  "license": FileTypeLicense,
-  "license.md": FileTypeLicense,
-  "license.txt": FileTypeLicense,
-  "makefile": FileTypeConfig,
-  "nginx.conf": FileTypeNginx,
-  "package-lock.json": FileTypeNpm,
-  "package.json": FileTypePackage,
-  "pnpm-lock.yaml": FileTypePnpm,
-  "pnpm-workspace.yaml": FileTypePnpm,
-  "pom.xml": FileTypeMaven,
-  "procfile": FileTypeConfig,
-  "requirements.txt": FileTypePython,
-  "resolv.conf": FileTypeConfig,
-  "robots.txt": FileTypeText,
-  "settings.gradle": FileTypeGradle,
-  "settings.gradle.kts": FileTypeGradle,
-  "ssh_config": FileTypeKey,
-  "sshd_config": FileTypeKey,
-  "sudoers": FileTypeConfig,
-  "tsconfig.json": FileTypeTsConfig,
-  "yarn.lock": FileTypeYarn,
-};
-
-const EXTENSION_FILE_ICONS: Record<string, IconComponent> = {
-  "7z": FileTypeZip,
-  a: FileTypeBinary,
-  aac: FileTypeAudio,
-  apk: FileTypeZip,
-  avi: FileTypeVideo,
-  avif: FileTypeImage,
-  bash: FileTypeShell,
-  bin: FileTypeBinary,
-  bmp: FileTypeImage,
-  bz2: FileTypeZip,
-  c: FileTypeC,
-  cc: FileTypeCpp,
-  cer: FileTypeCert,
-  cert: FileTypeCert,
-  cfg: FileTypeConfig,
-  cjs: FileTypeJs,
-  class: FileTypeBinary,
-  cmake: FileTypeCmake,
-  conf: FileTypeConfig,
-  config: FileTypeConfig,
-  cpp: FileTypeCpp,
-  crt: FileTypeCert,
-  cs: FileTypeCsharp,
-  csr: FileTypeCert,
-  css: FileTypeCss,
-  csv: FileTypeExcel,
-  cts: FileTypeTs,
-  cxx: FileTypeCpp,
-  dart: FileTypeDart,
-  db: FileTypeDb,
-  deb: FileTypeZip,
-  dll: FileTypeBinary,
-  dmg: FileTypeZip,
-  doc: FileTypeWord,
-  docx: FileTypeWord,
-  dylib: FileTypeBinary,
-  env: FileTypeDotenv,
-  eot: FileTypeFont,
-  exe: FileTypeBinary,
-  fish: FileTypeShell,
-  flac: FileTypeAudio,
-  gif: FileTypeImage,
-  go: FileTypeGo,
-  gql: FileTypeGraphql,
-  gradle: FileTypeGradle,
-  graphql: FileTypeGraphql,
-  gz: FileTypeZip,
-  h: FileTypeC,
-  hpp: FileTypeCpp,
-  htm: FileTypeHtml,
-  html: FileTypeHtml,
-  icns: FileTypeImage,
-  ico: FileTypeImage,
-  ini: FileTypeIni,
-  ipa: FileTypeZip,
-  ipynb: FileTypePython,
-  iso: FileTypeZip,
-  jar: FileTypeZip,
-  java: FileTypeJava,
-  jpeg: FileTypeImage,
-  jpg: FileTypeImage,
-  js: FileTypeJs,
-  json: FileTypeJson,
-  json5: FileTypeJson,
-  jsonc: FileTypeJson,
-  jsx: FileTypeReactJs,
-  key: FileTypeKey,
-  ksh: FileTypeShell,
-  kt: FileTypeKotlin,
-  kts: FileTypeKotlin,
-  less: FileTypeCss,
-  lib: FileTypeBinary,
-  lock: FileTypeConfig,
-  log: FileTypeLog,
-  m4a: FileTypeAudio,
-  markdown: FileTypeMarkdown,
-  md: FileTypeMarkdown,
-  mdx: FileTypeMarkdown,
-  mjs: FileTypeJs,
-  mkv: FileTypeVideo,
-  mov: FileTypeVideo,
-  mp3: FileTypeAudio,
-  mp4: FileTypeVideo,
-  mpeg: FileTypeVideo,
-  mpg: FileTypeVideo,
-  mts: FileTypeTs,
-  node: FileTypeNode,
-  o: FileTypeBinary,
-  ogg: FileTypeAudio,
-  opus: FileTypeAudio,
-  otf: FileTypeFont,
-  out: FileTypeLog,
-  p12: FileTypeCert,
-  pdf: FileTypePdf,
-  pem: FileTypeCert,
-  pfx: FileTypeCert,
-  php: FileTypePhp,
-  plist: FileTypeConfig,
-  png: FileTypeImage,
-  ppt: FileTypePowerpoint,
-  pptx: FileTypePowerpoint,
-  prisma: FileTypePrisma,
-  properties: FileTypeConfig,
-  ps1: FileTypePowershell,
-  psd1: FileTypePowershell,
-  psm1: FileTypePowershell,
-  pub: FileTypeKey,
-  py: FileTypePython,
-  pyc: FileTypeBinary,
-  pyw: FileTypePython,
-  rar: FileTypeZip,
-  rb: FileTypeRuby,
-  rpm: FileTypeZip,
-  rs: FileTypeRust,
-  rtf: FileTypeText,
-  sass: FileTypeScss,
-  scss: FileTypeScss,
-  service: FileTypeSystemd,
-  sh: FileTypeShell,
-  so: FileTypeBinary,
-  socket: FileTypeSystemd,
-  sql: FileTypeSql,
-  sqlite: FileTypeSqlite,
-  sqlite3: FileTypeSqlite,
-  svelte: FileTypeSvelte,
-  svg: FileTypeImage,
-  swift: FileTypeSwift,
-  tar: FileTypeZip,
-  target: FileTypeSystemd,
-  tf: FileTypeTerraform,
-  tfvars: FileTypeTerraform,
-  tgz: FileTypeZip,
-  timer: FileTypeSystemd,
-  toml: FileTypeToml,
-  ts: FileTypeTs,
-  tsx: FileTypeReactTs,
-  tsv: FileTypeExcel,
-  ttf: FileTypeFont,
-  txt: FileTypeText,
-  vue: FileTypeVue,
-  war: FileTypeZip,
-  wasm: FileTypeBinary,
-  wav: FileTypeAudio,
-  webm: FileTypeVideo,
-  webp: FileTypeImage,
-  woff: FileTypeFont,
-  woff2: FileTypeFont,
-  xls: FileTypeExcel,
-  xlsx: FileTypeExcel,
-  xml: FileTypeXml,
-  xz: FileTypeZip,
-  yaml: FileTypeYaml,
-  yml: FileTypeYaml,
-  zip: FileTypeZip,
-  zsh: FileTypeShell,
-};
-
-const PREFIX_FILE_ICONS: Array<[string, IconComponent]> = [
-  [".env", FileTypeDotenv],
-  [".eslintrc", FileTypeEslint],
-  [".git", FileTypeGit],
-  [".npmrc", FileTypeNpm],
-  [".prettierrc", FileTypePrettier],
-  [".yarnrc", FileTypeYarn],
-  ["compose.", FileTypeDocker],
-  ["docker-compose.", FileTypeDocker],
-  ["eslint.config.", FileTypeEslint],
-  ["prettier.config.", FileTypePrettier],
-  ["vite.config.", FileTypeVite],
-  ["vitest.config.", FileTypeVitest],
-  ["webpack.config.", FileTypeWebpack],
-];
 
 function initialPane(path: string): PaneState {
   return {
@@ -538,29 +215,13 @@ function entryTypeLabel(entry: SftpEntry, t: (key: string) => string) {
   return entry.kind;
 }
 
-function iconForEntryName(name: string) {
-  const fileName = basename(name);
-  const normalized = fileName.toLowerCase();
-  const exactIcon = EXACT_FILE_ICONS[normalized];
-  if (exactIcon) return exactIcon;
-  for (const [prefix, Icon] of PREFIX_FILE_ICONS) {
-    if (normalized.startsWith(prefix)) return Icon;
-  }
-  const parts = normalized.split(".");
-  if (parts.length > 1) {
-    const compoundExtension = parts.slice(-2).join(".");
-    const compoundIcon = EXACT_FILE_ICONS[compoundExtension];
-    if (compoundIcon) return compoundIcon;
-    const extensionIcon = EXTENSION_FILE_ICONS[parts[parts.length - 1] ?? ""];
-    if (extensionIcon) return extensionIcon;
-  }
-  return DefaultFile;
-}
-
 function entryIcon(entry: SftpEntry, className?: string) {
-  if (entry.kind === "directory") return <Folder className={className ?? FOLDER_ICON_CLASS} />;
-  const Icon = iconForEntryName(entry.name || entry.path);
-  return <Icon className={className ?? FILE_ICON_CLASS} />;
+  if (entry.kind === "directory") {
+    const FolderIcon = getFileTypeIcon(entry.name || entry.path, "dir");
+    return <FolderIcon className={className ?? FOLDER_ICON_CLASS} />;
+  }
+  const FileIcon = getFileTypeIcon(entry.name || entry.path, "file");
+  return <FileIcon className={className ?? FILE_ICON_CLASS} />;
 }
 
 function transferProgress(transfer: SftpTransfer | null) {
@@ -1390,6 +1051,7 @@ export function WorkspaceSftpPanel(props: WorkspaceSftpPanelProps) {
             const dropActive = dropMode !== null && dropTarget?.side === side;
             const DropIcon = dropMode === "download" ? Download : Upload;
             const dropPath = dropActive ? dropTarget?.path || pane.path : pane.path;
+            const PaneFolderIcon = getFileTypeIcon(root || pane.path, "dir", { expanded: true });
 
             return (
             <div
@@ -1408,7 +1070,7 @@ export function WorkspaceSftpPanel(props: WorkspaceSftpPanelProps) {
             >
               <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-muted/30 px-3">
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-background text-muted-foreground">
-                  {side === "local" ? <FolderOpen className="h-4 w-4" /> : <Folder className="h-4 w-4" />}
+                  <PaneFolderIcon className="h-4 w-4" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-semibold text-foreground">{label}</div>
@@ -1805,7 +1467,7 @@ function CreateFolderDialog(props: {
             value={value}
             autoFocus
             disabled={submitting}
-            className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-60"
+            className="h-10 w-full rounded-lg border border-input bg-background px-3 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-60"
             onChange={(event) => onChange(event.currentTarget.value)}
           />
         </div>
@@ -1985,7 +1647,7 @@ function RenameEntryDialog(props: {
             value={value}
             autoFocus
             disabled={submitting}
-            className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-60"
+            className="h-10 w-full rounded-lg border border-input bg-background px-3 text-xs text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-ring focus:ring-2 focus:ring-ring/20 disabled:cursor-not-allowed disabled:opacity-60"
             onChange={(event) => onChange(event.currentTarget.value)}
           />
         </div>

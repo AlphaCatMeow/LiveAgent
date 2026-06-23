@@ -1,4 +1,6 @@
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { generateDiffFile } from "@git-diff-view/file";
+import { DiffModeEnum, DiffView } from "@git-diff-view/react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ImageContent, ToolResultMessage, Usage } from "../../lib/agentTypes";
 import {
   Bot,
@@ -28,6 +30,8 @@ import { ImagePreview, type ImagePreviewSlide } from "../../components/chat/Imag
 import { useLocale } from "../../i18n";
 import { cn } from "../../lib/shared/utils";
 import {
+  getStreamingEditToolPreview,
+  getStreamingWriteToolPreview,
   previewText,
   safeStringify,
   shouldDisplayToolTraceItem,
@@ -59,6 +63,7 @@ import type {
   SubagentMessageResultDetails,
   WriteResultDetails,
 } from "../../lib/tools/builtinTypes";
+import "@git-diff-view/react/styles/diff-view.css";
 
 export function AssistantAvatar(props: { className?: string }) {
   const { className } = props;
@@ -209,6 +214,149 @@ function AnimatedStatusText(props: { text: string; className?: string }) {
   );
 }
 
+const THINKING_SCROLL_BOTTOM_THRESHOLD_PX = 2;
+const THINKING_USER_SCROLL_INTENT_WINDOW_MS = 500;
+
+function getThinkingScrollBottomGap(viewport: HTMLElement) {
+  return Math.max(0, viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight);
+}
+
+function isThinkingScrollAtBottom(viewport: HTMLElement) {
+  return getThinkingScrollBottomGap(viewport) <= THINKING_SCROLL_BOTTOM_THRESHOLD_PX;
+}
+
+function hasThinkingScrollOverflow(viewport: HTMLElement) {
+  return viewport.scrollHeight - viewport.clientHeight > THINKING_SCROLL_BOTTOM_THRESHOLD_PX;
+}
+
+function useStickyBottomScroll(
+  viewportRef: { current: HTMLPreElement | null },
+  options: { enabled: boolean; contentKey: string },
+) {
+  const { enabled, contentKey } = options;
+  const shouldStickRef = useRef(true);
+  const scrollFrameRef = useRef<number | null>(null);
+  const userScrollIntentUntilRef = useRef(0);
+  const touchYRef = useRef<number | null>(null);
+  const previousContentKeyRef = useRef(contentKey);
+
+  const cancelScheduledScroll = useCallback(() => {
+    if (scrollFrameRef.current === null || typeof window === "undefined") {
+      scrollFrameRef.current = null;
+      return;
+    }
+    window.cancelAnimationFrame(scrollFrameRef.current);
+    scrollFrameRef.current = null;
+  }, []);
+
+  const scrollToBottom = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    viewport.scrollTop = viewport.scrollHeight;
+    shouldStickRef.current = true;
+  }, [viewportRef]);
+
+  const scheduleScrollToBottom = useCallback(() => {
+    if (scrollFrameRef.current !== null || typeof window === "undefined") {
+      return;
+    }
+    scrollFrameRef.current = window.requestAnimationFrame(() => {
+      scrollFrameRef.current = null;
+      if (!shouldStickRef.current) return;
+      scrollToBottom();
+    });
+  }, [scrollToBottom]);
+
+  useEffect(() => {
+    if (!enabled) {
+      shouldStickRef.current = true;
+      cancelScheduledScroll();
+      return;
+    }
+
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    shouldStickRef.current = true;
+    scheduleScrollToBottom();
+
+    const markUserScrollIntent = () => {
+      userScrollIntentUntilRef.current = Date.now() + THINKING_USER_SCROLL_INTENT_WINDOW_MS;
+    };
+
+    const hasRecentUserScrollIntent = () => Date.now() <= userScrollIntentUntilRef.current;
+
+    const syncStickyState = () => {
+      if (isThinkingScrollAtBottom(viewport)) {
+        shouldStickRef.current = true;
+      } else if (hasRecentUserScrollIntent()) {
+        shouldStickRef.current = false;
+      }
+    };
+
+    const handleScroll = () => {
+      syncStickyState();
+    };
+
+    const handleWheel = (event: WheelEvent) => {
+      markUserScrollIntent();
+      if (event.deltaY < 0 && hasThinkingScrollOverflow(viewport)) {
+        shouldStickRef.current = false;
+      }
+    };
+
+    const handleTouchStart = (event: TouchEvent) => {
+      touchYRef.current = event.touches[0]?.clientY ?? null;
+      markUserScrollIntent();
+    };
+
+    const handleTouchMove = (event: TouchEvent) => {
+      const nextY = event.touches[0]?.clientY ?? null;
+      const previousY = touchYRef.current;
+      markUserScrollIntent();
+      if (
+        hasThinkingScrollOverflow(viewport) &&
+        (previousY === null ||
+          nextY === null ||
+          nextY > previousY + 1 ||
+          !isThinkingScrollAtBottom(viewport))
+      ) {
+        shouldStickRef.current = false;
+      }
+      touchYRef.current = nextY;
+    };
+
+    const handlePointerDown = () => {
+      markUserScrollIntent();
+    };
+
+    viewport.addEventListener("scroll", handleScroll, { passive: true });
+    viewport.addEventListener("wheel", handleWheel, { passive: true });
+    viewport.addEventListener("touchstart", handleTouchStart, { passive: true });
+    viewport.addEventListener("touchmove", handleTouchMove, { passive: true });
+    viewport.addEventListener("pointerdown", handlePointerDown, { passive: true });
+
+    return () => {
+      viewport.removeEventListener("scroll", handleScroll);
+      viewport.removeEventListener("wheel", handleWheel);
+      viewport.removeEventListener("touchstart", handleTouchStart);
+      viewport.removeEventListener("touchmove", handleTouchMove);
+      viewport.removeEventListener("pointerdown", handlePointerDown);
+      cancelScheduledScroll();
+      touchYRef.current = null;
+    };
+  }, [cancelScheduledScroll, enabled, scheduleScrollToBottom, viewportRef]);
+
+  useEffect(() => {
+    const contentChanged = previousContentKeyRef.current !== contentKey;
+    previousContentKeyRef.current = contentKey;
+    if (!contentChanged || !enabled || !shouldStickRef.current) return;
+    scheduleScrollToBottom();
+  });
+
+  useEffect(() => () => cancelScheduledScroll(), [cancelScheduledScroll]);
+}
+
 function ThinkingBlock({
   text,
   open,
@@ -216,16 +364,21 @@ function ThinkingBlock({
   text: string;
   open?: boolean;
 }) {
-  if (!/\S/.test(text || "")) return null;
+  const hasText = /\S/.test(text || "");
   const { t } = useLocale();
   const [isOpen, setIsOpen] = useState(typeof open === "boolean" ? open : false);
   const userInteractedRef = useRef(false);
+  const thinkingPreRef = useRef<HTMLPreElement | null>(null);
+
+  useStickyBottomScroll(thinkingPreRef, { enabled: isOpen && hasText, contentKey: text });
 
   useEffect(() => {
     if (!userInteractedRef.current && typeof open === "boolean") {
       setIsOpen(open);
     }
   }, [open]);
+
+  if (!hasText) return null;
 
   return (
     <div className="group/think rounded-lg border border-border/40 bg-muted/30">
@@ -246,7 +399,10 @@ function ThinkingBlock({
       </button>
       {isOpen ? (
         <div className="border-t border-border/30 px-3 pb-3 pt-2">
-          <pre className="thinking-block-pre max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-muted/40 p-3 text-[12.5px] leading-relaxed text-muted-foreground">
+          <pre
+            ref={thinkingPreRef}
+            className="thinking-block-pre max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-muted/40 p-3 text-[12.5px] leading-relaxed text-muted-foreground"
+          >
             {text}
           </pre>
         </div>
@@ -1032,21 +1188,70 @@ function getToolDisplay(toolCall: { name: string; arguments?: Record<string, unk
 /** Inline meta tags */
 function MetaTags({ tags }: { tags: MetaTag[] }) {
   if (tags.length === 0) return null;
+  const labelCounts = new Map<string, number>();
   return (
     <div className="flex flex-wrap gap-1.5">
-      {tags.map((tag) => (
-        <span
-          key={`${tag.label}-${tag.value}`}
-          className="tool-arg-pill inline-flex min-h-6 items-center gap-1.5 rounded-full border border-black/[0.05] bg-white/[0.78] px-2 py-1 text-[10.5px] leading-none shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:border-white/[0.08] dark:bg-white/[0.04] dark:shadow-none"
-        >
-          <span className="font-semibold uppercase tracking-[0.12em] text-muted-foreground/55">
-            {tag.label}
+      {tags.map((tag) => {
+        const seenCount = labelCounts.get(tag.label) ?? 0;
+        labelCounts.set(tag.label, seenCount + 1);
+        const stableKey = seenCount === 0 ? tag.label : `${tag.label}-${seenCount}`;
+        return (
+          <span
+            key={stableKey}
+            className="tool-arg-pill inline-flex min-h-6 items-center gap-1.5 rounded-full border border-black/[0.05] bg-white/[0.78] px-2 py-1 text-[10.5px] leading-none shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] dark:border-white/[0.08] dark:bg-white/[0.04] dark:shadow-none"
+          >
+            <span className="font-semibold uppercase tracking-[0.12em] text-muted-foreground/55">
+              {tag.label}
+            </span>
+            <span className="h-3 w-px bg-black/[0.06] dark:bg-white/[0.08]" />
+            <span className="font-mono tabular-nums text-foreground/75">{tag.value}</span>
           </span>
-          <span className="h-3 w-px bg-black/[0.06] dark:bg-white/[0.08]" />
-          <span className="font-mono text-foreground/75">{tag.value}</span>
-        </span>
-      ))}
+        );
+      })}
     </div>
+  );
+}
+
+function StreamingArgPlaceholder({ label }: { label: string }) {
+  return (
+    <ToolSurface>
+      <div className="text-[11.5px] leading-[1.6] text-muted-foreground/62">{label}</div>
+    </ToolSurface>
+  );
+}
+
+function StreamingTextPreviewSurface({
+  label,
+  hasValue,
+  emptyLabel,
+  preview,
+}: {
+  label: string;
+  hasValue: boolean;
+  emptyLabel: string;
+  preview: { text: string; chars: number; lines: number; truncated: boolean };
+}) {
+  return (
+    <ToolSurface className="overflow-hidden px-0 py-0">
+      <div className="px-2.5 pt-2">
+        <ToolSurfaceLabel label={label} />
+      </div>
+      {hasValue ? (
+        preview.text ? (
+          <ToolScrollablePre className="max-h-56 rounded-none bg-black/[0.02] dark:bg-white/[0.03]">
+            {preview.text}
+          </ToolScrollablePre>
+        ) : (
+          <div className="px-2.5 pb-2 text-[11.5px] leading-[1.6] text-muted-foreground/62">
+            {emptyLabel}
+          </div>
+        )
+      ) : (
+        <div className="px-2.5 pb-2 text-[11.5px] leading-[1.6] text-muted-foreground/62">
+          Waiting for {label}...
+        </div>
+      )}
+    </ToolSurface>
   );
 }
 
@@ -1054,6 +1259,107 @@ function MetaTags({ tags }: { tags: MetaTag[] }) {
 function ToolArgsDisplay({ item }: { item: ToolTraceItem }) {
   const toolCall = item.toolCall;
   const display = getToolDisplay(toolCall);
+
+  const writePreview = getStreamingWriteToolPreview(toolCall);
+  if (writePreview) {
+    const hasAnyArg = Boolean(writePreview.path || writePreview.hasContent);
+    if (!hasAnyArg) {
+      return <StreamingArgPlaceholder label="Waiting for file content..." />;
+    }
+    return (
+      <div className="tool-expand flex flex-col gap-2">
+        {writePreview.path ? (
+          <ToolSurface>
+            <ToolSurfaceLabel label="path" />
+            <PathDisplay
+              path={writePreview.path}
+              className="block min-w-0 break-all font-mono text-[11.5px] leading-[1.6]"
+            />
+          </ToolSurface>
+        ) : null}
+        {writePreview.hasContent ? (
+          <MetaTags
+            tags={[
+              { label: "mode", value: writePreview.mode },
+              { label: "chars", value: String(writePreview.content.chars) },
+              { label: "lines", value: String(writePreview.content.lines) },
+              ...(writePreview.content.truncated ? [{ label: "preview", value: "partial" }] : []),
+            ]}
+          />
+        ) : null}
+        <StreamingTextPreviewSurface
+          label="content"
+          hasValue={writePreview.hasContent}
+          emptyLabel="(empty content)"
+          preview={writePreview.content}
+        />
+      </div>
+    );
+  }
+
+  const editPreview = getStreamingEditToolPreview(toolCall);
+  if (editPreview) {
+    const hasAnyArg =
+      Boolean(editPreview.path) || editPreview.hasOldString || editPreview.hasNewString;
+    if (!hasAnyArg) {
+      return <StreamingArgPlaceholder label="Waiting for replacement strings..." />;
+    }
+    return (
+      <div className="tool-expand flex flex-col gap-2">
+        {editPreview.path ? (
+          <ToolSurface>
+            <ToolSurfaceLabel label="path" />
+            <PathDisplay
+              path={editPreview.path}
+              className="block min-w-0 break-all font-mono text-[11.5px] leading-[1.6]"
+            />
+          </ToolSurface>
+        ) : null}
+        <MetaTags
+          tags={[
+            ...(typeof editPreview.expectedReplacements === "number"
+              ? [{ label: "expected", value: String(editPreview.expectedReplacements) }]
+              : []),
+            ...(editPreview.replaceAll ? [{ label: "all", value: "true" }] : []),
+            ...(editPreview.hasOldString
+              ? [
+                  { label: "old", value: `${editPreview.oldString.chars} chars` },
+                  { label: "old lines", value: String(editPreview.oldString.lines) },
+                ]
+              : []),
+            ...(editPreview.hasNewString
+              ? [
+                  { label: "new", value: `${editPreview.newString.chars} chars` },
+                  { label: "new lines", value: String(editPreview.newString.lines) },
+                ]
+              : []),
+          ]}
+        />
+        {editPreview.hasOldString && editPreview.hasNewString ? (
+          <EditDiffView
+            beforeText={editPreview.oldString.text}
+            afterText={editPreview.newString.text}
+            filePath={editPreview.path}
+          />
+        ) : (
+          <>
+            <StreamingTextPreviewSurface
+              label="old string"
+              hasValue={editPreview.hasOldString}
+              emptyLabel="(empty old string)"
+              preview={editPreview.oldString}
+            />
+            <StreamingTextPreviewSurface
+              label="new string"
+              hasValue={editPreview.hasNewString}
+              emptyLabel="(empty replacement)"
+              preview={editPreview.newString}
+            />
+          </>
+        )}
+      </div>
+    );
+  }
 
   if (isDelegateAgentCardToolCall(toolCall)) {
     const args = toolCall.arguments || {};
@@ -1777,40 +2083,93 @@ function CodePreview(props: { text: string; maxChars?: number }) {
   );
 }
 
+function guessLangFromPath(filePath?: string): string {
+  if (!filePath) return "txt";
+  const ext = filePath.split(".").pop()?.toLowerCase();
+  const map: Record<string, string> = {
+    ts: "typescript",
+    tsx: "typescript",
+    js: "javascript",
+    jsx: "javascript",
+    py: "python",
+    rs: "rust",
+    go: "go",
+    java: "java",
+    kt: "kotlin",
+    rb: "ruby",
+    swift: "swift",
+    c: "c",
+    cpp: "cpp",
+    h: "c",
+    hpp: "cpp",
+    cs: "csharp",
+    css: "css",
+    scss: "scss",
+    html: "html",
+    vue: "vue",
+    json: "json",
+    yaml: "yaml",
+    yml: "yaml",
+    toml: "toml",
+    xml: "xml",
+    md: "markdown",
+    sql: "sql",
+    sh: "bash",
+    zsh: "bash",
+    bash: "bash",
+    dockerfile: "dockerfile",
+    lua: "lua",
+    php: "php",
+    dart: "dart",
+  };
+  return (ext && map[ext]) || "txt";
+}
+
+function useIsDark() {
+  const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains("dark"));
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setIsDark(document.documentElement.classList.contains("dark"));
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
+  return isDark;
+}
+
 function EditDiffView(props: { beforeText: string; afterText: string; filePath?: string }) {
   const { beforeText, afterText, filePath } = props;
-  const sections = useMemo(
-    () => [
-      { key: "before", label: "Before", text: beforeText, tone: "text-destructive" },
-      { key: "after", label: "After", text: afterText, tone: "text-emerald-600 dark:text-emerald-400" },
-    ],
-    [afterText, beforeText],
-  );
+  const isDark = useIsDark();
+  const lang = guessLangFromPath(filePath);
 
-  if (!beforeText && !afterText) return null;
+  const diffFile = useMemo(() => {
+    if (!beforeText && !afterText) return undefined;
+    const instance = generateDiffFile(
+      filePath ?? "old",
+      beforeText,
+      filePath ?? "new",
+      afterText,
+      lang,
+      lang,
+    );
+    instance.init();
+    instance.buildSplitDiffLines();
+    return instance;
+  }, [beforeText, afterText, filePath, lang]);
+
+  if (!diffFile) return null;
 
   return (
-    <div className="space-y-2">
-      {filePath ? (
-        <ToolSurface>
-          <MetaTags tags={[{ label: "path", value: filePath }]} />
-        </ToolSurface>
-      ) : null}
-      <div className="overflow-hidden rounded-[10px] border border-black/[0.06] shadow-sm dark:border-white/[0.08] dark:shadow-none">
-        {sections.map((section) => (
-          <div
-            key={section.key}
-            className="border-b border-black/[0.06] last:border-b-0 dark:border-white/[0.08]"
-          >
-            <div className={cn("px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.08em]", section.tone)}>
-              {section.label}
-            </div>
-            <ToolScrollablePre className="max-h-64 rounded-none border-t border-black/[0.06] bg-black/[0.02] dark:border-white/[0.08] dark:bg-white/[0.03]">
-              {previewText(section.text, 8000)}
-            </ToolScrollablePre>
-          </div>
-        ))}
-      </div>
+    <div className="edit-tool-diff-view tool-text-scroll overflow-x-auto overflow-y-hidden rounded-[10px] border border-black/[0.06] bg-white/[0.58] shadow-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:shadow-none">
+      <DiffView
+        diffFile={diffFile}
+        diffViewMode={DiffModeEnum.Unified}
+        diffViewTheme={isDark ? "dark" : "light"}
+        diffViewHighlight
+        diffViewAddWidget={false}
+        diffViewWrap={false}
+        diffViewFontSize={12}
+      />
     </div>
   );
 }
@@ -2420,7 +2779,12 @@ function ToolCallItem({
   const [open, setOpen] = useState(readOnly || isRedactedToolContent ? false : shouldAutoOpen);
   const isDelegateAgentCard = isDelegateAgentCardToolCall(item.toolCall);
   const hasArgs = Object.keys(item.toolCall.arguments || {}).length > 0;
-  const shouldShowArgs = !isRedactedToolContent && hasArgs && (!isDelegateAgentCard || !result);
+  const isStreamingFilePreviewTool =
+    item.toolCall.name === "Write" || item.toolCall.name === "Edit";
+  const shouldShowArgs =
+    !isRedactedToolContent &&
+    (!isDelegateAgentCard || !result) &&
+    (isStreamingFilePreviewTool ? !result : hasArgs);
   const isBash = item.toolCall.name === "Bash";
   const bashCmd =
     !isRedactedToolContent && isBash && typeof item.toolCall.arguments?.command === "string"

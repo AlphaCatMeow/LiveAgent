@@ -172,6 +172,72 @@ function createStreamForAssistant(assistant) {
   };
 }
 
+function createQueuedStream(events, finalMessage) {
+  return {
+    __stream: true,
+    stream: {
+      async *[Symbol.asyncIterator]() {
+        for (const event of events) {
+          yield event;
+        }
+      },
+      async result() {
+        return finalMessage;
+      },
+    },
+  };
+}
+
+function createToolCallDeltaStream(finalToolCall, partialToolCalls, extra = {}) {
+  const assistant = createAssistant([finalToolCall], "toolUse", extra);
+  const startToolCall = partialToolCalls[0] ?? {
+    ...finalToolCall,
+    arguments: {},
+  };
+  const events = [
+    {
+      type: "start",
+      partial: {
+        ...assistant,
+        content: [],
+      },
+    },
+    {
+      type: "toolcall_start",
+      contentIndex: 0,
+      partial: {
+        ...assistant,
+        content: [startToolCall],
+      },
+    },
+    ...partialToolCalls.map((toolCall) => ({
+      type: "toolcall_delta",
+      contentIndex: 0,
+      delta: JSON.stringify(toolCall.arguments ?? {}),
+      partial: {
+        ...assistant,
+        content: [toolCall],
+      },
+    })),
+    {
+      type: "toolcall_end",
+      contentIndex: 0,
+      toolCall: finalToolCall,
+      partial: {
+        ...assistant,
+        content: [finalToolCall],
+      },
+    },
+    {
+      type: "done",
+      reason: "toolUse",
+      message: assistant,
+    },
+  ];
+
+  return createQueuedStream(events, assistant);
+}
+
 const llmMock = {
   buildProviderRequestMetadata(_providerId, sessionId) {
     return sessionId ? { sessionId } : undefined;
@@ -233,12 +299,12 @@ const llmMock = {
   },
   streamSimpleByApi(_model, context, options) {
     observedStreamContexts.push(context);
-    const assistant = streamQueue.shift();
-    if (!assistant) {
+    const queued = streamQueue.shift();
+    if (!queued) {
       throw new Error("No fake stream response queued");
     }
     const beforeStream = streamSideEffects.shift()?.(options);
-    const stream = createStreamForAssistant(assistant);
+    const stream = queued.__stream ? queued.stream : createStreamForAssistant(queued);
     return {
       async *[Symbol.asyncIterator]() {
         await beforeStream;
@@ -459,6 +525,44 @@ test("runAssistantWithTools calls onBeforeNextTurn only for toolUse turns with t
   );
 });
 
+test("runAssistantWithTools canonicalizes builtin tool call name casing before execution", async () => {
+  const lowerCaseWriteCall = createToolCall("call-write", "write", {
+    path: "report.html",
+    content: "<html></html>",
+  });
+  const writeTool = {
+    name: "Write",
+    description: "Write a file",
+    parameters: { type: "object", properties: {} },
+  };
+  resetFakeStreams(createToolUseAssistant(lowerCaseWriteCall), createTextAssistant("done"));
+  const toolEvents = createToolEventRecorder();
+  const { params, executedToolCalls } = createBaseParams({
+    context: {
+      systemPrompt: "Base system prompt",
+      messages: [{ role: "user", content: "Start", timestamp: 1 }],
+      tools: [writeTool],
+    },
+    tools: [writeTool],
+    ...toolEvents.handlers,
+  });
+
+  const result = await runAssistantWithTools(params);
+
+  assert.deepEqual(
+    observedStreamContexts[0].tools.map((tool) => tool.name),
+    ["Write"],
+  );
+  assert.equal(executedToolCalls.length, 1);
+  assert.equal(executedToolCalls[0].id, lowerCaseWriteCall.id);
+  assert.equal(executedToolCalls[0].name, "Write");
+  assert.equal(result.emittedMessages[0].role, "assistant");
+  assert.equal(result.emittedMessages[0].content.at(-1).name, "Write");
+  assert.equal(result.emittedMessages[1].role, "toolResult");
+  assert.equal(result.emittedMessages[1].toolName, "Write");
+  assert.equal(result.emittedMessages[1].isError, false);
+});
+
 test("runAssistantWithTools runs consecutive Agent tool calls in parallel", async () => {
   const agentA = {
     type: "toolCall",
@@ -523,6 +627,62 @@ test("runAssistantWithTools runs consecutive Agent tool calls in parallel", asyn
   assert.deepEqual(
     result.emittedMessages.map((message) => message.role),
     ["assistant", "toolResult", "toolResult", "assistant"],
+  );
+});
+
+test("runAssistantWithTools canonicalizes lowercase Agent calls before parallel grouping", async () => {
+  const agentA = createToolCall("call-agent-lower-a", "agent", {
+    id: "a",
+    prompt: "Ask A",
+  });
+  const agentB = createToolCall("call-agent-lower-b", "agent", {
+    id: "b",
+    prompt: "Ask B",
+  });
+  resetFakeStreams(
+    createAssistant([agentA, agentB], "toolUse"),
+    createTextAssistant("final answer"),
+  );
+  let active = 0;
+  let maxActive = 0;
+  const statuses = [];
+  const agentTool = {
+    name: "Agent",
+    description: "Delegate",
+    parameters: { type: "object", properties: {} },
+  };
+  const { params, executedToolCalls } = createBaseParams({
+    context: {
+      systemPrompt: "Base system prompt",
+      messages: [{ role: "user", content: "Start", timestamp: 1 }],
+      tools: [agentTool],
+    },
+    tools: [agentTool],
+    async executeToolCall(toolCall) {
+      executedToolCalls.push(toolCall);
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      active -= 1;
+      return createToolResult(toolCall, `result:${toolCall.id}`);
+    },
+    onToolStatus(status) {
+      if (status) statuses.push(status);
+    },
+    onBeforeNextTurn: async () => null,
+  });
+
+  const result = await runAssistantWithTools(params);
+
+  assert.equal(maxActive, 2);
+  assert.deepEqual(
+    executedToolCalls.map((call) => call.name),
+    ["Agent", "Agent"],
+  );
+  assert.ok(statuses.some((status) => /并行执行 2 个 Agent 调用/.test(status)));
+  assert.deepEqual(
+    result.emittedMessages[0].content.map((block) => block.name),
+    ["Agent", "Agent"],
   );
 });
 
@@ -808,7 +968,6 @@ test("runAssistantWithTools strips repeated historical tool call text without du
   const grepCall = createToolCall("call_00_native_grep", "Grep", {
     pattern: "express",
     file_pattern: "**/*.js",
-    root: "workspace",
     ignore_case: true,
   });
   resetFakeStreams(
@@ -822,7 +981,7 @@ test("runAssistantWithTools strips repeated historical tool call text without du
 
 Historical tool call (read-only, not repeating):
 tool_name: Grep
-arguments: {"pattern": "express", "file_pattern": "**/*.js", "root": "workspace", "ignore_case": true}`,
+arguments: {"pattern": "express", "file_pattern": "**/*.js", "ignore_case": true}`,
         },
         grepCall,
       ],
@@ -861,6 +1020,110 @@ arguments: {"pattern": "express", "file_pattern": "**/*.js", "root": "workspace"
     .map((block) => block.text)
     .join("\n");
   assert.equal(recoveredAssistantText.includes("Historical tool call"), false);
+  assert.deepEqual(
+    result.emittedMessages.map((message) => message.role),
+    ["assistant", "toolResult", "assistant"],
+  );
+});
+
+test("runAssistantWithTools dedupes recovered lowercase tool text against canonical structured calls", async () => {
+  const writeCall = createToolCall("call_00_native_write", "Write", {
+    path: "report.html",
+    content: "<html></html>",
+  });
+  resetFakeStreams(
+    createAssistant(
+      [
+        {
+          type: "text",
+          text: `Generated the report.
+
+Historical tool call (read-only, not repeating):
+tool_name: write
+arguments: {"path": "report.html", "content": "<html></html>"}`,
+        },
+        writeCall,
+      ],
+      "toolUse",
+      { api: "anthropic-messages", provider: "anthropic", model: "deepseek-chat" },
+    ),
+    createTextAssistant("after native write"),
+  );
+  const writeTool = {
+    name: "Write",
+    description: "Write files",
+    parameters: { type: "object", properties: {} },
+  };
+  const { params, executedToolCalls } = createBaseParams({
+    tools: [writeTool],
+    context: {
+      systemPrompt: "Base system prompt",
+      messages: [{ role: "user", content: "Start", timestamp: 1 }],
+      tools: [writeTool],
+    },
+  });
+
+  const result = await runAssistantWithTools(params);
+
+  assert.equal(executedToolCalls.length, 1);
+  assert.equal(executedToolCalls[0].id, writeCall.id);
+  assert.equal(executedToolCalls[0].name, "Write");
+  const assistantToolCalls = result.emittedMessages[0].content.filter(
+    (block) => block.type === "toolCall",
+  );
+  assert.deepEqual(
+    assistantToolCalls.map((toolCall) => toolCall.id),
+    [writeCall.id],
+  );
+});
+
+test("runAssistantWithTools emits streaming tool call argument deltas before final execution", async () => {
+  const finalWriteCall = createToolCall("call_00_streaming_write", "Write", {
+    path: "report.html",
+    content: "<html>\n<body>Done</body>\n</html>",
+  });
+  resetFakeStreams(
+    createToolCallDeltaStream(finalWriteCall, [
+      createToolCall(finalWriteCall.id, "Write", {}),
+      createToolCall(finalWriteCall.id, "Write", { path: "report.html" }),
+      createToolCall(finalWriteCall.id, "Write", {
+        path: "report.html",
+        content: "<html>\n<body>",
+      }),
+    ]),
+    createTextAssistant("after streaming write"),
+  );
+  const writeTool = {
+    name: "Write",
+    description: "Write files",
+    parameters: { type: "object", properties: {} },
+  };
+  const deltas = [];
+  const { params, executedToolCalls } = createBaseParams({
+    tools: [writeTool],
+    context: {
+      systemPrompt: "Base system prompt",
+      messages: [{ role: "user", content: "Start", timestamp: 1 }],
+      tools: [writeTool],
+    },
+    onToolCallDelta: (toolCall) => {
+      deltas.push({
+        id: toolCall.id,
+        name: toolCall.name,
+        arguments: { ...(toolCall.arguments ?? {}) },
+      });
+    },
+  });
+
+  const result = await runAssistantWithTools(params);
+
+  assert.deepEqual(
+    deltas.map((delta) => delta.arguments),
+    [{}, { path: "report.html" }, { path: "report.html", content: "<html>\n<body>" }],
+  );
+  assert.equal(executedToolCalls.length, 1);
+  assert.equal(executedToolCalls[0].id, finalWriteCall.id);
+  assert.deepEqual(executedToolCalls[0].arguments, finalWriteCall.arguments);
   assert.deepEqual(
     result.emittedMessages.map((message) => message.role),
     ["assistant", "toolResult", "assistant"],
@@ -930,7 +1193,6 @@ arguments:
 
 test("runAssistantWithTools strips malformed historical tool text without guessing execution", async () => {
   const bashCall = createToolCall("call_01_native_bash", "Bash", {
-    root: "workspace",
     command: "ls -la tool-test/",
     cwd: ".",
   });
@@ -946,7 +1208,6 @@ tool_call_id: call_00_malformed_bash
 tool_name: Bash
 arguments:
 {
-  "root": "workspace",
   "command": "echo 'Node: $(node --version 2>/dev/null || echo "未安装")'"
 }`,
         },

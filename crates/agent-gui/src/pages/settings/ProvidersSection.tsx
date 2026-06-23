@@ -4,7 +4,7 @@ import {
   ClaudeIcon,
   Eye,
   EyeOff,
-  FileTypeGeminiIcon,
+  GeminiIcon,
   OpenaiChatgptIcon,
   Pencil,
   Plus,
@@ -75,7 +75,7 @@ function getProviderLabel(type: ProviderId) {
 
 function ProviderBrandIcon({ type }: { type: ProviderId }) {
   if (type === "claude_code") return <ClaudeIcon height="1em" />;
-  if (type === "gemini") return <FileTypeGeminiIcon height="1em" />;
+  if (type === "gemini") return <GeminiIcon height="1em" />;
   return <OpenaiChatgptIcon height="1em" className="fill-current dark:text-white" />;
 }
 

@@ -80,12 +80,13 @@ export function EditDiffView(props: { beforeText: string; afterText: string; fil
   if (!diffFile) return null;
 
   return (
-    <div className="tool-text-scroll overflow-x-auto overflow-y-hidden rounded-[10px] border border-black/[0.06] shadow-sm dark:border-white/[0.08] dark:shadow-none">
+    <div className="edit-tool-diff-view tool-text-scroll overflow-x-auto overflow-y-hidden rounded-[10px] border border-black/[0.06] bg-white/[0.58] shadow-sm dark:border-white/[0.08] dark:bg-white/[0.04] dark:shadow-none">
       <DiffView
         diffFile={diffFile}
         diffViewMode={DiffModeEnum.Unified}
         diffViewTheme={isDark ? "dark" : "light"}
         diffViewHighlight
+        diffViewAddWidget={false}
         diffViewWrap={false}
         diffViewFontSize={12}
       />

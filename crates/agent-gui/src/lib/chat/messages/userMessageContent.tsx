@@ -10,17 +10,24 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { getFileTypeIcon } from "../../../components/chat/fileTypeIcons";
+import { mentionChipClassName } from "../../../components/chat/mentionChipStyles";
 import { useLocale } from "../../../i18n";
 
+import {
+  type FileMentionReference,
+  fileMentionDisplayName,
+  fileMentionTitle,
+  MARKDOWN_REFERENCE_PATTERN,
+  normalizeMarkdownReferenceDestination,
+  normalizeMentionPath,
+  parseMarkdownFileMentionReference,
+  unescapeMarkdownReferenceLabel,
+} from "./mentionReferences";
 import {
   type PastedTextDisplayReference,
   type PendingUploadedFile,
   parsePastedTextDisplayReferences,
 } from "./uploadedFiles";
-
-export function isMentionToken(token: string) {
-  return /^@[^\s@][^\s]*$/.test(token);
-}
 
 const COMMON_SKILL_MENTION_ENV_VARS = new Set([
   "PATH",
@@ -54,9 +61,9 @@ export function isSkillMentionToken(token: string) {
   return Boolean(name) && isSkillMentionName(name) && !isCommonSkillMentionEnvVar(name);
 }
 
-type UserMessageSegment =
+export type UserMessageSegment =
   | { type: "text"; value: string }
-  | { type: "mention"; path: string; isDir: boolean }
+  | { type: "mention"; reference: FileMentionReference }
   | { type: "skill"; name: string }
   | { type: "commit"; commit: CommitDisplayReference }
   | { type: "gitFile"; file: GitFileDisplayReference }
@@ -120,41 +127,8 @@ function appendSegments(segments: UserMessageSegment[], incoming: UserMessageSeg
   }
 }
 
-function unescapeMarkdown(value: string) {
-  return value.replace(/\\([\\[\]()])/g, "$1");
-}
-
-function normalizeMarkdownDestination(value: string) {
-  const trimmed = value.trim();
-  const inner = trimmed.startsWith("<") && trimmed.endsWith(">") ? trimmed.slice(1, -1) : trimmed;
-  return unescapeMarkdown(inner).replace(/%3C/gi, "<").replace(/%3E/gi, ">");
-}
-
 function normalizeReferencePath(value: string) {
-  return value.trim().replace(/\\/g, "/");
-}
-
-function buildFileReference(rawPath: string) {
-  const normalized = normalizeReferencePath(rawPath);
-  const isDir = normalized.endsWith("/");
-  const path = normalized.replace(/\/+$/, "");
-  if (!path || path.startsWith("/") || path.startsWith("#")) return null;
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(path)) return null;
-  if (path.split("/").some((part) => !part || part === "." || part === "..")) {
-    return null;
-  }
-  return { path, isDir };
-}
-
-function markdownFileReference(label: string, rawDestination: string) {
-  const reference = buildFileReference(normalizeMarkdownDestination(rawDestination));
-  if (!reference) return null;
-
-  const fileName = reference.path.split("/").pop() || reference.path;
-  const expectedLabel = reference.isDir ? `${fileName}/` : fileName;
-  if (unescapeMarkdown(label.trim()) !== expectedLabel) return null;
-
-  return reference;
+  return normalizeMentionPath(value);
 }
 
 function extractGitHubCommitSha(value: string) {
@@ -216,13 +190,13 @@ function markdownCommitReference(
   label: string,
   rawDestination: string,
 ): CommitDisplayReference | null {
-  const normalizedLabel = unescapeMarkdown(label.trim());
+  const normalizedLabel = unescapeMarkdownReferenceLabel(label.trim());
   const match = /^commit\s+([0-9a-f]{7,40})(?::\s*(.*))?$/i.exec(normalizedLabel);
   if (!match) return null;
 
   const shortSha = match[1] ?? "";
   const subject = (match[2] ?? "").trim();
-  const destination = normalizeMarkdownDestination(rawDestination);
+  const destination = normalizeMarkdownReferenceDestination(rawDestination);
   const githubSha = extractGitHubCommitSha(destination);
   return {
     sha: githubSha || shortSha,
@@ -253,12 +227,12 @@ function markdownGitFileReference(
   label: string,
   rawDestination: string,
 ): GitFileDisplayReference | null {
-  const normalizedLabel = unescapeMarkdown(label.trim());
+  const normalizedLabel = unescapeMarkdownReferenceLabel(label.trim());
   const match = /^git file\s+(.+?):\s*(.+)$/i.exec(normalizedLabel);
   if (!match) return null;
   const refName = (match[1] ?? "").trim();
   const labelPath = normalizeReferencePath(match[2] ?? "");
-  const destination = normalizeMarkdownDestination(rawDestination);
+  const destination = normalizeMarkdownReferenceDestination(rawDestination);
   const githubFile = extractGitHubFileReference(destination);
   if (!githubFile) return null;
   const path = labelPath || githubFile?.path || "";
@@ -376,27 +350,7 @@ function tokenizeInlineMentions(text: string): UserMessageSegment[] {
       continue;
     }
 
-    const marker = text[index];
-    if ((marker !== "@" && marker !== "$") || !isTokenBoundary(text, index)) {
-      continue;
-    }
-
-    if (marker === "@") {
-      let tokenEnd = index + 1;
-      while (tokenEnd < text.length && !/\s/.test(text[tokenEnd])) {
-        tokenEnd += 1;
-      }
-      const token = text.slice(index, tokenEnd);
-      if (!isMentionToken(token)) continue;
-      const reference = buildFileReference(token.slice(1));
-      if (reference) {
-        if (index > cursor) {
-          pushTextSegment(segments, text.slice(cursor, index));
-        }
-        segments.push({ type: "mention", ...reference });
-        cursor = tokenEnd;
-        index = tokenEnd - 1;
-      }
+    if (text[index] !== "$" || !isTokenBoundary(text, index)) {
       continue;
     }
 
@@ -427,17 +381,17 @@ function tokenizeInlineMentions(text: string): UserMessageSegment[] {
 
 function tokenizeMentions(text: string): UserMessageSegment[] {
   const segments: UserMessageSegment[] = [];
-  const markdownPattern = /\[((?:\\.|[^\]\\\r\n])+)]\((<[^>\r\n]+>|[^)\r\n]+)\)/g;
   let cursor = 0;
 
-  for (const match of text.matchAll(markdownPattern)) {
+  for (const match of text.matchAll(MARKDOWN_REFERENCE_PATTERN)) {
     const raw = match[0] ?? "";
     const label = match[1] ?? "";
     const destination = match[2] ?? "";
     const matchIndex = match.index ?? 0;
     const gitFile = markdownGitFileReference(label, destination);
     const commit = gitFile ? null : markdownCommitReference(label, destination);
-    const reference = gitFile || commit ? null : markdownFileReference(label, destination);
+    const reference =
+      gitFile || commit ? null : parseMarkdownFileMentionReference(label, destination);
     if (!gitFile && !commit && !reference) continue;
 
     if (matchIndex > cursor) {
@@ -448,7 +402,7 @@ function tokenizeMentions(text: string): UserMessageSegment[] {
     } else if (commit) {
       segments.push({ type: "commit", commit });
     } else if (reference) {
-      segments.push({ type: "mention", ...reference });
+      segments.push({ type: "mention", reference });
     }
     cursor = matchIndex + raw.length;
   }
@@ -460,7 +414,7 @@ function tokenizeMentions(text: string): UserMessageSegment[] {
   return segments.length > 0 ? segments : tokenizeInlineMentions(text);
 }
 
-function tokenizeUserMessage(
+export function tokenizeUserMessage(
   text: string,
   pastedTextFiles: PendingUploadedFile[],
 ): UserMessageSegment[] {
@@ -712,32 +666,37 @@ function PastedTextChip({
   const Icon = getFileTypeIcon(file.relativePath || "pasted.txt", "file");
 
   return (
-    <span
-      title={file.relativePath}
-      className="mention-chip mx-0.5 inline-flex items-center gap-1 rounded bg-emerald-500/15 px-1.5 text-emerald-700 align-baseline whitespace-nowrap dark:text-emerald-300"
-    >
+    <span title={file.relativePath} className={mentionChipClassName("pastedText")}>
       <Icon className="h-3 w-3 shrink-0" />
       {chipText}
     </span>
   );
 }
 
-function MentionChip({ path, isDir }: { path: string; isDir: boolean }) {
-  const fileName = path.split("/").pop() || path;
-  const Icon = getFileTypeIcon(path, isDir ? "dir" : "file");
+function MentionChip({ reference }: { reference: FileMentionReference }) {
+  const Icon = getFileTypeIcon(reference.path, reference.kind);
   return (
     <span
-      title={isDir ? `${path}/` : path}
-      className={
-        isDir
-          ? "mention-chip mx-0.5 inline-flex items-center gap-1 rounded bg-amber-400/25 px-1.5 align-baseline whitespace-nowrap"
-          : "mention-chip mx-0.5 inline-flex items-center gap-1 rounded bg-blue-500/20 px-1.5 align-baseline whitespace-nowrap"
-      }
+      title={fileMentionTitle(reference)}
+      className={mentionChipClassName(reference.kind === "dir" ? "dir" : "file")}
     >
       <Icon className="h-3 w-3 shrink-0" />
-      {fileName}
+      {fileMentionDisplayName(reference)}
     </span>
   );
+}
+
+function userMessageSegmentKey(part: UserMessageSegment, index: number) {
+  if (part.type === "text") return `text:${index}:${part.value}`;
+  if (part.type === "mention") {
+    return `mention:${index}:${part.reference.kind}:${part.reference.path}`;
+  }
+  if (part.type === "skill") return `skill:${index}:${part.name}`;
+  if (part.type === "commit") return `commit:${index}:${part.commit.sha}:${part.commit.subject}`;
+  if (part.type === "gitFile") {
+    return `git-file:${index}:${part.file.commitSha}:${part.file.path}`;
+  }
+  return `pasted-text:${index}:${part.file.relativePath}:${part.reference.raw}`;
 }
 
 function GitFileMentionChip({ file }: { file: GitFileDisplayReference }) {
@@ -757,9 +716,7 @@ function GitFileMentionChip({ file }: { file: GitFileDisplayReference }) {
       title={title}
       role={normalized.githubUrl ? "button" : undefined}
       tabIndex={normalized.githubUrl ? 0 : undefined}
-      className={`mention-chip mx-0.5 inline-flex items-center gap-1 rounded bg-sky-500/15 px-1.5 text-sky-800 align-baseline whitespace-nowrap dark:text-sky-200 ${
-        normalized.githubUrl ? "cursor-pointer hover:bg-sky-500/20" : "cursor-default"
-      }`}
+      className={mentionChipClassName("gitFile", { interactive: Boolean(normalized.githubUrl) })}
       onClick={openFile}
       onKeyDown={(event) => {
         if (!normalized.githubUrl || (event.key !== "Enter" && event.key !== " ")) return;
@@ -776,10 +733,7 @@ function GitFileMentionChip({ file }: { file: GitFileDisplayReference }) {
 
 function SkillMentionChip({ name }: { name: string }) {
   return (
-    <span
-      title={`Skill: ${name}`}
-      className="mention-chip mx-0.5 inline-flex items-center gap-1 rounded bg-violet-500/20 px-1.5 text-violet-700 align-baseline whitespace-nowrap dark:text-violet-300"
-    >
+    <span title={`Skill: ${name}`} className={mentionChipClassName("skill")}>
       <span className="text-[10px] font-semibold opacity-70">$</span>
       {name}
     </span>
@@ -872,12 +826,11 @@ function CommitMentionChip({
   return (
     <>
       <span
-        title={resolvedCommit.subject ? `${label}: ${resolvedCommit.subject}` : label}
         role={resolvedCommit.githubUrl ? "button" : undefined}
         tabIndex={resolvedCommit.githubUrl ? 0 : undefined}
-        className={`mention-chip mx-0.5 inline-flex items-center gap-1 rounded bg-cyan-500/15 px-1.5 text-cyan-800 align-baseline whitespace-nowrap dark:text-cyan-200 ${
-          resolvedCommit.githubUrl ? "cursor-pointer hover:bg-cyan-500/20" : "cursor-default"
-        }`}
+        className={mentionChipClassName("commit", {
+          interactive: Boolean(resolvedCommit.githubUrl),
+        })}
         onClick={openCommit}
         onFocus={handleFocus}
         onBlur={scheduleClose}
@@ -927,28 +880,29 @@ export function UserMessageContent({
   return (
     <>
       {parts.map((part, idx) => {
+        const key = userMessageSegmentKey(part, idx);
         if (part.type === "mention") {
-          return <MentionChip key={idx} path={part.path} isDir={part.isDir} />;
+          return <MentionChip key={key} reference={part.reference} />;
         }
         if (part.type === "skill") {
-          return <SkillMentionChip key={idx} name={part.name} />;
+          return <SkillMentionChip key={key} name={part.name} />;
         }
         if (part.type === "commit") {
           return (
             <CommitMentionChip
-              key={idx}
+              key={key}
               commit={part.commit}
               loadCommitDetails={loadCommitDetails}
             />
           );
         }
         if (part.type === "gitFile") {
-          return <GitFileMentionChip key={idx} file={part.file} />;
+          return <GitFileMentionChip key={key} file={part.file} />;
         }
         if (part.type === "pastedText") {
-          return <PastedTextChip key={idx} reference={part.reference} file={part.file} />;
+          return <PastedTextChip key={key} reference={part.reference} file={part.file} />;
         }
-        return <span key={idx}>{part.value}</span>;
+        return <span key={key}>{part.value}</span>;
       })}
     </>
   );

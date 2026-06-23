@@ -31,6 +31,12 @@ import {
   isProviderNativeWebSearchToolName,
 } from "../../providers/nativeWebSearch";
 import { prepareProxyRequest } from "../../providers/proxy";
+import {
+  inferRuntimePlatform,
+  normalizeRuntimePlatform,
+  type RuntimePlatform,
+  runtimePlatformLabel,
+} from "../../runtimePlatform";
 import type {
   CodexRequestFormat,
   ProviderId,
@@ -52,6 +58,7 @@ import {
   resolveProviderNativeWebSearchStatus,
 } from "../search/providerNativeSearchStatus";
 import { createSubagentScheduler, type SubagentScheduler } from "../subagent/subagentScheduler";
+import { comparableToolCall } from "./flattenedToolCallText";
 import { recoverAssistantSeedToolCalls } from "./seedToolCalls";
 
 function createLinkedAbortSignal(signals: Array<AbortSignal | undefined>): {
@@ -117,7 +124,13 @@ async function runWithConcurrency<T, R>(
   return results;
 }
 
-export function buildToolsSuffix(workdir: string, availableToolNames?: readonly string[]) {
+export function buildToolsSuffix(
+  workdir: string,
+  availableToolNames?: readonly string[],
+  runtimePlatformInput?: RuntimePlatform,
+) {
+  const runtimePlatform = normalizeRuntimePlatform(runtimePlatformInput) ?? inferRuntimePlatform();
+  const platformLabel = runtimePlatformLabel(runtimePlatform);
   const allowAll = availableToolNames === undefined;
   const toolNames = new Set(availableToolNames ?? []);
   const has = (name: string) => allowAll || toolNames.has(name);
@@ -161,21 +174,14 @@ export function buildToolsSuffix(workdir: string, availableToolNames?: readonly 
   if (hasFileTool || has("Bash")) {
     const subject =
       hasFileTool && has("Bash") ? "File tools and Bash" : hasFileTool ? "File tools" : "Bash";
-    const subjectVerb = subject === "Bash" ? "takes" : "take";
-    const skillsRootAllowed = has("SkillsManager") || hasFileTool;
     sections.push(
       [
         "## Workspace & Paths",
         `- Workspace root (sandbox): \`${workdir}\``,
-        `- ${subject} ${subjectVerb} an optional \`root\` argument that selects the sandbox the rest of the call resolves under:`,
-        "  • Omit `root` → workspace root above.",
-        skillsRootAllowed
-          ? '  • `root="skills"` → fixed Skills root. Authorized ONLY for Skills enabled in this conversation; do not access files from other installed Skills through any tool.'
-          : null,
-        "- `path` / `cwd` values must be relative. NEVER use an absolute path, `..` segments, `.`, `./`, or `.\\`. To target the root itself, simply omit the argument.",
+        `- ${subject} ${subject === "Bash" ? "accepts" : "accept"} the path you see: workspace-relative, absolute, ~/..., file://, pathRef values, or skill://<enabled-skill>/... paths.`,
+        "- To target the workspace root for optional `path` / `cwd` values, omit the argument.",
         "- Use `/` as the separator everywhere, including Glob and Grep patterns. Windows `\\` is auto-normalized.",
-        "- Absolute paths printed in Skill docs, examples, logs, or earlier messages are illustrations only. Do NOT pass them as `path` / `cwd` values — translate them into `(root, relative-path)` first.",
-        "- absolute workspace or Skills paths shown in Skill docs, examples, logs, or earlier messages are illustrations only. Convert them to scoped file-tool calls.",
+        "- For enabled Skill files, prefer skill://<baseDir>/... or a pathRef returned by SkillsManager/List/Glob/Grep/Read.",
       ]
         .filter((line): line is string => Boolean(line))
         .join("\n"),
@@ -217,7 +223,7 @@ export function buildToolsSuffix(workdir: string, availableToolNames?: readonly 
       );
     }
     if (has("Delete")) {
-      lines.push("- For workspace or Skills deletion, use Delete with the correct root/path.");
+      lines.push("- For workspace or Skill deletion, use Delete with the exact path or pathRef.");
     }
     if (hasAny("Grep", "Glob", "List")) {
       lines.push(
@@ -226,7 +232,7 @@ export function buildToolsSuffix(workdir: string, availableToolNames?: readonly 
     }
     if (has("SkillsManager") && hasReadFamily) {
       lines.push(
-        '- For files inside a Skill, call file tools with `root="skills"` and a path like `<baseDir>/references/guide.md`. Never expand the Skills root into an absolute path.',
+        "- For files inside a Skill, call file tools with a path like `skill://<baseDir>/references/guide.md` or a pathRef returned by a tool.",
       );
     }
     if (has("Bash")) {
@@ -260,11 +266,10 @@ export function buildToolsSuffix(workdir: string, availableToolNames?: readonly 
         "- Do not embed images with Markdown syntax like ![alt](path), HTML <img>, file:// URLs, or local relative image paths in your final text.",
         has("SkillsManager")
           ? [
-              '- Local image: pass `path` (+ matching `root`). Skill image: `root="skills"` + relative path; do not use Bash, `open`, `xdg-open`, or absolute Skills paths. Remote image: pass `url` / `urls` or `source` / `sources` directly — do not download unless the user asked to save it locally.',
-              '- For image files inside installed Skills, call Image with root="skills" and a path relative to the fixed Skills root.',
-              "- Do not use Bash, open, xdg-open, Markdown, HTML, or absolute Skills paths to display Skill images.",
+              "- Local image: pass `path` exactly as seen, including workspace-relative, absolute, pathRef, or skill:// paths. Remote image: pass `url` / `urls` or `source` / `sources` directly — do not download unless the user asked to save it locally.",
+              "- Do not use Bash, open, xdg-open, Markdown, or HTML to display Skill images.",
             ].join("\n")
-          : "- Local image: pass `path` (+ matching `root`). Remote image: pass `url` / `urls` or `source` / `sources` directly — do not download unless the user asked to save it locally.",
+          : "- Local image: pass `path` exactly as seen. Remote image: pass `url` / `urls` or `source` / `sources` directly — do not download unless the user asked to save it locally.",
         "- For remote images, call Image with url/urls or source/sources directly instead of downloading them, unless the user explicitly asks to save the file locally.",
         "- Whenever an image path or URL appears in the conversation (from the user, a tool result, or earlier context) and the user should see it, call Image with that path/URL before producing the final reply.",
         "- If another tool saves, downloads, screenshots, generates, or returns an image file path or image URL and the user should see it, call Image with that path or URL before the final response.",
@@ -275,16 +280,31 @@ export function buildToolsSuffix(workdir: string, availableToolNames?: readonly 
   }
 
   if (has("Bash")) {
+    const bashPlatformLines =
+      runtimePlatform === "windows"
+        ? [
+            `- Current platform: ${platformLabel}. Bash runs through Windows-native shells: pwsh, then Windows PowerShell, then cmd.`,
+            '- Use PowerShell syntax by default: `Write-Output`, `$env:NAME = "value"`, semicolon separators, and PowerShell quoting.',
+            "- Do not assume Git Bash or POSIX syntax on Windows: avoid `export`, `nohup`, `/dev/null`, and POSIX background detachment.",
+            "- For long-running Windows commands, dev servers, watchers, or detached processes, use ManagedProcess instead of background shell syntax.",
+          ]
+        : [
+            `- Current platform: ${platformLabel}. Bash runs through POSIX shells.`,
+            runtimePlatform === "macos"
+              ? "- macOS prefers zsh, then Bash, then sh. Use POSIX/zsh-compatible commands."
+              : "- Linux prefers Bash, then zsh, then sh. Use POSIX/bash-compatible commands.",
+            "- Background commands using `&` must redirect stdout and stderr before detaching, for example `nohup command > /tmp/liveagent-task.log 2>&1 < /dev/null &`.",
+          ];
     sections.push(
       [
         "## Bash",
-        "- Bash.cwd is relative to the selected Bash root.",
-        '- `Bash.cwd` follows the `root` rules in **Workspace & Paths**. The canonical form for running a Skill script is `root="skills"` with `cwd="<skill-name>/scripts"` plus a relative command.',
-        '- To run installed Skill scripts, use root="skills" with cwd="<skill-name>/scripts".',
-        "- The alternative form — passing an absolute path inside the command (e.g. `python ~/.liveagent/skills/<skill-name>/scripts/foo.py`) — is also accepted as long as the referenced Skill is enabled in this conversation. Both forms run the same script; prefer the canonical form for clarity, but you do not need to retry just to switch forms.",
+        "- Bash.cwd follows the path rules in **Workspace & Paths**.",
+        ...bashPlatformLines,
+        '- To run installed Skill scripts, use cwd="skill://<enabled-skill>/scripts" plus a relative command.',
+        "- Passing an absolute Skill script path inside the command is also accepted as long as the referenced Skill is enabled in this conversation.",
         "- For endpoint tests with curl, include an explicit timeout such as `--max-time 30` so a stalled local server or upstream request cannot hold the whole turn indefinitely.",
-        "- Background commands using `&` must redirect stdout and stderr to a log file before detaching, for example `nohup command > /tmp/liveagent-task.log 2>&1 < /dev/null &`; otherwise use a dedicated terminal or managed process workflow for dev servers/watchers.",
-        '- For reading, listing, or searching Skill content, always use Read/List/Glob/Grep with `root="skills"` — Bash `cat`/`ls`/`find`/`grep`/`rg`/`sed`/`awk` against `~/.liveagent/skills` is still routed back to the file tools.',
+        "- Use ManagedProcess instead of Bash for dev servers, watchers, preview servers, or anything that should keep running.",
+        "- For reading, listing, or searching Skill content, always use Read/List/Glob/Grep with skill:// paths — Bash cat/ls/find/grep/rg/sed/awk against ~/.liveagent/skills is still routed back to the file tools.",
         "- Do not guess `skills/` paths inside the workspace; if a Skill is needed, enable it in the chat Skills selector first.",
         "- Do not cd into ~/.liveagent/skills or workspace skills/ guesses.",
       ].join("\n"),
@@ -317,13 +337,17 @@ export function buildToolsSuffix(workdir: string, availableToolNames?: readonly 
   }
 
   if (has("ManagedProcess")) {
+    const managedProcessPreference =
+      runtimePlatform === "windows"
+        ? "- Prefer ManagedProcess over Bash for `pnpm dev`, `deno run main.ts`, `vite`, file watchers, local web servers, or commands that otherwise require detached Windows process syntax."
+        : "- Prefer ManagedProcess over Bash for `pnpm dev`, `deno run main.ts`, `vite`, file watchers, local web servers, or commands that otherwise require `nohup` and log redirection.";
     sections.push(
       [
         "## ManagedProcess",
         '- Use ManagedProcess(action="start") for dev servers, preview servers, watchers, or other long-running foreground commands that should continue while you run tests.',
         "- Do not append `&` to ManagedProcess.command. It starts the process in the background, redirects stdout/stderr to a log file, and returns process_id/pid/log_path.",
         '- Use ManagedProcess(action="status") to inspect running processes, action="read_log" to inspect recent output, and action="stop" to terminate the process tree.',
-        "- Prefer ManagedProcess over Bash for `pnpm dev`, `deno run main.ts`, `vite`, file watchers, local web servers, or commands that otherwise require `nohup` and log redirection.",
+        managedProcessPreference,
       ].join("\n"),
     );
   }
@@ -354,6 +378,93 @@ export function buildToolsSuffix(workdir: string, availableToolNames?: readonly 
   );
 
   return sections.join("\n\n");
+}
+
+function toolNameLookupKey(name: string) {
+  return name.trim().toLowerCase();
+}
+
+function buildToolNameCanonicalizer(tools: readonly { name: string }[]) {
+  const canonicalByKey = new Map<string, string | null>();
+  for (const tool of tools) {
+    const key = toolNameLookupKey(tool.name);
+    if (!key) continue;
+    const existing = canonicalByKey.get(key);
+    if (existing === undefined) {
+      canonicalByKey.set(key, tool.name);
+    } else if (existing !== tool.name) {
+      canonicalByKey.set(key, null);
+    }
+  }
+
+  return (name: string) => {
+    const canonical = canonicalByKey.get(toolNameLookupKey(name));
+    return canonical ?? name;
+  };
+}
+
+function normalizeToolCallName(toolCall: ToolCall, canonicalizeToolName: (name: string) => string) {
+  const canonicalName = canonicalizeToolName(toolCall.name);
+  if (canonicalName === toolCall.name) return toolCall;
+  return {
+    ...toolCall,
+    name: canonicalName,
+  };
+}
+
+function normalizeAssistantToolCallNames(
+  assistant: AssistantMessage,
+  canonicalizeToolName: (name: string) => string,
+) {
+  let changed = false;
+  const nextContent = assistant.content.map((block) => {
+    if (block.type !== "toolCall") return block;
+    const nextBlock = normalizeToolCallName(block, canonicalizeToolName);
+    if (nextBlock !== block) changed = true;
+    return nextBlock;
+  });
+
+  if (changed) {
+    assistant.content = nextContent;
+  }
+  return assistant;
+}
+
+function getComparableCanonicalToolCall(
+  toolCall: ToolCall,
+  canonicalizeToolName: (name: string) => string,
+) {
+  return comparableToolCall(normalizeToolCallName(toolCall, canonicalizeToolName));
+}
+
+function dedupeRecoveredToolCallsAgainstExisting(params: {
+  existingAssistant: AssistantMessage;
+  recoveredToolCalls: ToolCall[];
+  canonicalizeToolName: (name: string) => string;
+}) {
+  const seen = new Set(
+    params.existingAssistant.content
+      .filter((block): block is ToolCall => block.type === "toolCall")
+      .map((toolCall) => getComparableCanonicalToolCall(toolCall, params.canonicalizeToolName)),
+  );
+  const uniqueToolCalls: ToolCall[] = [];
+  const duplicateToolCallIds = new Set<string>();
+
+  for (const toolCall of params.recoveredToolCalls) {
+    const normalizedToolCall = normalizeToolCallName(toolCall, params.canonicalizeToolName);
+    const comparable = comparableToolCall(normalizedToolCall);
+    if (seen.has(comparable)) {
+      duplicateToolCallIds.add(normalizedToolCall.id);
+      continue;
+    }
+    seen.add(comparable);
+    uniqueToolCalls.push(normalizedToolCall);
+  }
+
+  return {
+    uniqueToolCalls,
+    duplicateToolCallIds,
+  };
 }
 
 function buildSystemPrompt(base: string | undefined, suffix: string) {
@@ -518,6 +629,7 @@ export async function runAssistantWithTools(params: {
     nativeWebSearchEnabled?: boolean;
     modelConfig?: ProviderModelConfig;
   };
+  runtimePlatform?: RuntimePlatform;
   context: Context;
   workdir: string;
   sessionId?: string;
@@ -532,6 +644,7 @@ export async function runAssistantWithTools(params: {
   onTextDelta: (delta: string, round: number) => void;
   onThinkingDelta?: (delta: string, round: number) => void;
   onToolCall?: (toolCall: ToolCall, round: number) => void;
+  onToolCallDelta?: (toolCall: ToolCall, round: number) => void;
   onHostedSearch?: (hostedSearch: HostedSearchBlock, round: number) => void;
   onToolExecutionStart?: (toolCall: ToolCall, round: number) => void;
   onToolResult?: (toolCall: ToolCall, toolResult: Message, round: number) => void;
@@ -601,18 +714,28 @@ export async function runAssistantWithTools(params: {
     const toolCallsById = new Map<string, ToolCall>();
     const parallelBatchKeyByToolCallId = new Map<string, string>();
     const parallelToolBatches = new Map<string, ParallelToolBatch>();
+    const llmTools = params.tools ?? [];
+    const canonicalizeToolName = buildToolNameCanonicalizer(llmTools);
+    const normalizeToolCallNameForExecution = (toolCall: ToolCall) =>
+      normalizeToolCallName(toolCall, canonicalizeToolName);
+    const normalizeAssistantToolCallNamesForExecution = (assistant: AssistantMessage) =>
+      normalizeAssistantToolCallNames(assistant, canonicalizeToolName);
     let currentRound = 0;
 
     const executeSingleToolCall = async (
       toolCall: ToolCall,
       signal?: AbortSignal,
     ): Promise<{ content: ToolResultMessage["content"]; details: unknown }> => {
+      const effectiveToolCall = normalizeToolCallNameForExecution(toolCall);
+      if (effectiveToolCall !== toolCall) {
+        toolCallsById.set(effectiveToolCall.id, effectiveToolCall);
+      }
       let toolResult: ToolResultMessage;
       const linkedSignal = createLinkedAbortSignal([signal, params.signal]);
       try {
-        if (shouldSilenceProviderNativeWebSearchToolCall(toolCall)) {
+        if (shouldSilenceProviderNativeWebSearchToolCall(effectiveToolCall)) {
           toolResult = buildProviderNativeWebSearchBridgeResult({
-            toolCall,
+            toolCall: effectiveToolCall,
             hostedSearchBlocks: hostedSearchBlocksByRound.get(currentRound) ?? [],
             sourcesIntro: "Hosted search sources already captured in this round:",
             fallbackText:
@@ -621,8 +744,8 @@ export async function runAssistantWithTools(params: {
           });
         } else {
           const execute = () =>
-            params.executeToolCall(toolCall, linkedSignal.signal, {
-              parentToolCall: toolCall,
+            params.executeToolCall(effectiveToolCall, linkedSignal.signal, {
+              parentToolCall: effectiveToolCall,
               subagentScheduler,
               emitToolCall: (emittedToolCall) => {
                 toolCallsById.set(emittedToolCall.id, emittedToolCall);
@@ -640,17 +763,17 @@ export async function runAssistantWithTools(params: {
               emitToolStatus: (status) => params.onToolStatus?.(status),
             });
           toolResult = toMessageToolResult(
-            await (toolCall.name === "Bash"
+            await (effectiveToolCall.name === "Bash"
               ? subagentScheduler.runBash(execute, linkedSignal.signal)
               : execute()),
-            toolCall,
+            effectiveToolCall,
           );
         }
       } catch (error) {
         toolResult = {
           role: "toolResult",
-          toolCallId: toolCall.id,
-          toolName: toolCall.name,
+          toolCallId: effectiveToolCall.id,
+          toolName: effectiveToolCall.name,
           content: [
             {
               type: "text",
@@ -668,7 +791,7 @@ export async function runAssistantWithTools(params: {
         linkedSignal.cleanup();
       }
 
-      toolResultErrorFlags.set(toolCall.id, Boolean(toolResult.isError));
+      toolResultErrorFlags.set(effectiveToolCall.id, Boolean(toolResult.isError));
       return {
         content: toolResult.content,
         details: toolResult.details ?? {},
@@ -712,7 +835,6 @@ export async function runAssistantWithTools(params: {
       return batch;
     };
 
-    const llmTools = params.tools ?? [];
     const localToolNames = new Set(llmTools.map((tool) => tool.name));
     const hiddenProviderNativeWebSearchToolNames = new Set<string>(
       nativeWebSearchStatus
@@ -732,6 +854,7 @@ export async function runAssistantWithTools(params: {
     const toolsSuffix = buildToolsSuffix(
       params.workdir,
       llmTools.map((tool) => tool.name),
+      params.runtimePlatform,
     );
     let currentSystemPrompt = params.context.systemPrompt;
     let pendingTurnOverridePromise: Promise<TurnContextOverride> | null = null;
@@ -1115,17 +1238,25 @@ export async function runAssistantWithTools(params: {
         isError: toolResultErrorFlags.get(toolCall.id) ?? false,
       }),
       beforeToolCall: async ({ assistantMessage, toolCall }) => {
-        toolCallsById.set(toolCall.id, toolCall);
-        if (toolCall.name !== "Agent") {
+        const effectiveToolCall = normalizeToolCallNameForExecution(toolCall);
+        const effectiveAssistantMessage =
+          normalizeAssistantToolCallNamesForExecution(assistantMessage);
+        toolCallsById.set(effectiveToolCall.id, effectiveToolCall);
+        if (effectiveToolCall.name !== "Agent") {
           return undefined;
         }
-        const group = findConsecutiveToolGroup(assistantMessage, toolCall.id, toolCall.name);
-        if (!group || group.length <= 1) return undefined;
+        const rawGroup = findConsecutiveToolGroup(
+          effectiveAssistantMessage,
+          effectiveToolCall.id,
+          effectiveToolCall.name,
+        );
+        if (!rawGroup || rawGroup.length <= 1) return undefined;
+        const group = rawGroup.map(normalizeToolCallNameForExecution);
 
         const batchKey = buildParallelToolBatchKey(group);
         if (!parallelToolBatches.has(batchKey)) {
           parallelToolBatches.set(batchKey, {
-            toolName: toolCall.name,
+            toolName: effectiveToolCall.name,
             toolCalls: group,
             started: false,
             announced: false,
@@ -1186,16 +1317,34 @@ export async function runAssistantWithTools(params: {
             nativeWebSearchStatusController.pause();
             const block = streamEvent.partial.content[streamEvent.contentIndex];
             if (block && block.type === "toolCall") {
-              toolCallsById.set(block.id, block);
-              if (!shouldSilenceProviderNativeWebSearchToolCall(block)) {
-                params.onToolCall?.(block, currentRound);
+              const effectiveToolCall = normalizeToolCallNameForExecution(block);
+              if (effectiveToolCall !== block) {
+                streamEvent.partial.content[streamEvent.contentIndex] = effectiveToolCall;
+              }
+              toolCallsById.set(effectiveToolCall.id, effectiveToolCall);
+              if (!shouldSilenceProviderNativeWebSearchToolCall(effectiveToolCall)) {
+                params.onToolCall?.(effectiveToolCall, currentRound);
+              }
+            }
+          } else if (streamEvent.type === "toolcall_delta") {
+            nativeWebSearchStatusController.pause();
+            const block = streamEvent.partial.content[streamEvent.contentIndex];
+            if (block && block.type === "toolCall") {
+              const effectiveToolCall = normalizeToolCallNameForExecution(block);
+              if (effectiveToolCall !== block) {
+                streamEvent.partial.content[streamEvent.contentIndex] = effectiveToolCall;
+              }
+              toolCallsById.set(effectiveToolCall.id, effectiveToolCall);
+              if (!shouldSilenceProviderNativeWebSearchToolCall(effectiveToolCall)) {
+                params.onToolCallDelta?.(effectiveToolCall, currentRound);
               }
             }
           } else if (streamEvent.type === "toolcall_end") {
             nativeWebSearchStatusController.pause();
-            toolCallsById.set(streamEvent.toolCall.id, streamEvent.toolCall);
-            if (!shouldSilenceProviderNativeWebSearchToolCall(streamEvent.toolCall)) {
-              params.onToolCall?.(streamEvent.toolCall, currentRound);
+            const effectiveToolCall = normalizeToolCallNameForExecution(streamEvent.toolCall);
+            toolCallsById.set(effectiveToolCall.id, effectiveToolCall);
+            if (!shouldSilenceProviderNativeWebSearchToolCall(effectiveToolCall)) {
+              params.onToolCall?.(effectiveToolCall, currentRound);
             }
           }
           break;
@@ -1209,29 +1358,58 @@ export async function runAssistantWithTools(params: {
                   ? "failed"
                   : "completed";
             const hostedSearchBlocks = getHostedSearchBlocksForRound(currentRound);
-            const assistantWithHostedSearch = applyHostedSearchBlocksToAssistant(
+            const assistantWithCanonicalToolNames = normalizeAssistantToolCallNamesForExecution(
               event.message as AssistantMessage,
+            );
+            const assistantWithHostedSearch = applyHostedSearchBlocksToAssistant(
+              assistantWithCanonicalToolNames,
               currentRound,
               hostedSearchBlocks,
             );
             const normalizedSeedTurn = recoverAssistantSeedToolCalls(assistantWithHostedSearch);
-            const assistantMessage = normalizedSeedTurn?.assistant ?? assistantWithHostedSearch;
-            if (normalizedSeedTurn || assistantWithHostedSearch !== event.message) {
+            let recoveredSeedToolCalls: ToolCall[] = [];
+            let assistantWithRecoveredToolCalls =
+              normalizedSeedTurn?.assistant ?? assistantWithHostedSearch;
+            if (normalizedSeedTurn) {
+              const deduped = dedupeRecoveredToolCallsAgainstExisting({
+                existingAssistant: assistantWithHostedSearch,
+                recoveredToolCalls: normalizedSeedTurn.toolCalls,
+                canonicalizeToolName,
+              });
+              recoveredSeedToolCalls = deduped.uniqueToolCalls;
+              if (deduped.duplicateToolCallIds.size > 0) {
+                assistantWithRecoveredToolCalls = {
+                  ...assistantWithRecoveredToolCalls,
+                  content: assistantWithRecoveredToolCalls.content.filter(
+                    (block) =>
+                      block.type !== "toolCall" || !deduped.duplicateToolCallIds.has(block.id),
+                  ),
+                };
+              }
+            }
+            const assistantMessage = normalizeAssistantToolCallNamesForExecution(
+              assistantWithRecoveredToolCalls,
+            );
+            if (
+              normalizedSeedTurn ||
+              assistantMessage !== event.message ||
+              assistantWithHostedSearch !== event.message
+            ) {
               const stateMessages = getAgentMessages(agent);
               if (stateMessages.length > 0) {
                 agent.state.messages = [...stateMessages.slice(0, -1), assistantMessage];
               }
             }
-            if (normalizedSeedTurn && normalizedSeedTurn.toolCalls.length > 0) {
+            if (normalizedSeedTurn && recoveredSeedToolCalls.length > 0) {
               pendingRecoveredSeedTurnRef.current = {
                 round: currentRound,
                 assistant: assistantMessage,
-                toolCalls: normalizedSeedTurn.toolCalls,
+                toolCalls: recoveredSeedToolCalls,
               };
               params.debugLogger?.logResponse({
                 type: "seed_tool_call_recovery",
                 round: currentRound,
-                toolCalls: normalizedSeedTurn.toolCalls,
+                toolCalls: recoveredSeedToolCalls,
               });
             }
             queueHostedSearchFinalization(currentRound, hostedSearchFinishMode, {

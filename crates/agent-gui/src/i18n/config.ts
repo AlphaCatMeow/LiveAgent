@@ -679,6 +679,12 @@ export const translations: Record<Locale, Record<string, string>> = {
     "workspaceFilePreview.empty": "未选择文件",
     "workspaceFilePreview.emptySheet": "表格为空",
     "workspaceFilePreview.truncated": "预览已截断，仅显示前几行和列。",
+    "workspaceFilePreview.previousImage": "上一张",
+    "workspaceFilePreview.nextImage": "下一张",
+    "workspaceFilePreview.zoomOut": "缩小",
+    "workspaceFilePreview.zoomIn": "放大",
+    "workspaceFilePreview.rotateImage": "旋转图片",
+    "workspaceFilePreview.imageCounter": "{index} / {total}",
 
     /* ── Settings Nav ── */
     "settings.navSystem": "系统设置",
@@ -2203,6 +2209,12 @@ export const translations: Record<Locale, Record<string, string>> = {
     "workspaceFilePreview.empty": "No file selected",
     "workspaceFilePreview.emptySheet": "Sheet is empty",
     "workspaceFilePreview.truncated": "Preview truncated to the first rows and columns.",
+    "workspaceFilePreview.previousImage": "Previous image",
+    "workspaceFilePreview.nextImage": "Next image",
+    "workspaceFilePreview.zoomOut": "Zoom out",
+    "workspaceFilePreview.zoomIn": "Zoom in",
+    "workspaceFilePreview.rotateImage": "Rotate image",
+    "workspaceFilePreview.imageCounter": "{index} / {total}",
 
     /* ── Settings Nav ── */
     "settings.navSystem": "System",

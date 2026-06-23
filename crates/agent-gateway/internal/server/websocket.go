@@ -50,6 +50,8 @@ type websocketTerminalRequestPayload struct {
 	PromptAnswer   string `json:"prompt_answer"`
 	TrustHostKey   bool   `json:"trust_host_key"`
 	SftpEnabled    bool   `json:"sftp_enabled"`
+	TabID          string `json:"tab_id"`
+	TabKind        string `json:"tab_kind"`
 }
 
 type websocketSshKnownHostResetPayload struct {

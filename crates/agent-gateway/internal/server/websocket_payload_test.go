@@ -34,6 +34,30 @@ func TestChatEventPayloadPreservesHostedSearch(t *testing.T) {
 	}
 }
 
+func TestChatEventPayloadPreservesToolCallDeltaType(t *testing.T) {
+	payload := chatEventPayload(&gatewayv1.ChatEvent{
+		Type:           gatewayv1.ChatEvent_TOOL_CALL,
+		ConversationId: "conversation-1",
+		Data:           `{"type":"tool_call_delta","id":"call-write","name":"Write","arguments":{"path":"src/app.ts","content":"con"},"round":1}`,
+	}, 8)
+
+	if payload["type"] != "tool_call_delta" {
+		t.Fatalf("expected tool_call_delta type, got %#v", payload["type"])
+	}
+	if payload["conversation_id"] != "conversation-1" {
+		t.Fatalf("expected conversation id, got %#v", payload["conversation_id"])
+	}
+	if payload["id"] != "call-write" {
+		t.Fatalf("expected tool call id, got %#v", payload["id"])
+	}
+	if payload["name"] != "Write" {
+		t.Fatalf("expected tool name, got %#v", payload["name"])
+	}
+	if payload["seq"] != int64(8) {
+		t.Fatalf("expected seq 8, got %#v", payload["seq"])
+	}
+}
+
 func TestActiveChatRunSummaryPayloadIncludesReplayCursor(t *testing.T) {
 	payload := websocketActiveChatRunSummariesPayload([]session.ActiveChatRunSummary{
 		{
@@ -61,7 +85,7 @@ func TestActiveChatRunSummaryPayloadIncludesReplayCursor(t *testing.T) {
 func TestWebsocketTerminalPayloadsPreserveOutputOffsets(t *testing.T) {
 	response := websocketTerminalResponsePayload(&gatewayv1.TerminalResponse{
 		Action:            "attach",
-		Output:            "uploads\n",
+		Output:            []byte("uploads\n"),
 		OutputStartOffset: 8,
 		OutputEndOffset:   16,
 	})
@@ -76,7 +100,7 @@ func TestWebsocketTerminalPayloadsPreserveOutputOffsets(t *testing.T) {
 		Kind:              "output",
 		SessionId:         "terminal-1",
 		ProjectPathKey:    "/workspace/project",
-		Data:              "uploads\n",
+		Data:              []byte("uploads\n"),
 		OutputStartOffset: 16,
 		OutputEndOffset:   24,
 	})
@@ -85,6 +109,40 @@ func TestWebsocketTerminalPayloadsPreserveOutputOffsets(t *testing.T) {
 	}
 	if event["output_end_offset"] != uint64(24) {
 		t.Fatalf("terminal event output_end_offset = %#v, want 24", event["output_end_offset"])
+	}
+}
+
+func TestWebsocketTerminalPayloadsIncludeSshTabsSnapshot(t *testing.T) {
+	response := websocketTerminalResponsePayload(&gatewayv1.TerminalResponse{
+		Action: "ssh_tabs_list",
+		SshTabs: &gatewayv1.TerminalSshTabsSnapshot{
+			ProjectPathKey: "/workspace/project",
+			Revision:       7,
+			Tabs: []*gatewayv1.TerminalSshTab{
+				{
+					Id:             "bash:ssh-1",
+					SessionId:      "ssh-1",
+					ProjectPathKey: "/workspace/project",
+					Kind:           "bash",
+					CreatedAt:      10,
+					UpdatedAt:      12,
+				},
+			},
+		},
+	})
+	snapshot, ok := response["ssh_tabs"].(map[string]any)
+	if !ok {
+		t.Fatalf("ssh_tabs payload missing: %#v", response)
+	}
+	if snapshot["project_path_key"] != "/workspace/project" || snapshot["revision"] != uint64(7) {
+		t.Fatalf("ssh_tabs snapshot = %#v", snapshot)
+	}
+	tabs, ok := snapshot["tabs"].([]map[string]any)
+	if !ok || len(tabs) != 1 {
+		t.Fatalf("ssh_tabs tabs = %#v", snapshot["tabs"])
+	}
+	if tabs[0]["session_id"] != "ssh-1" || tabs[0]["kind"] != "bash" {
+		t.Fatalf("ssh_tabs tab = %#v", tabs[0])
 	}
 }
 

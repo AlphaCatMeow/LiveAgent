@@ -47,13 +47,12 @@ func TestWebsocketRequestHandlersCoverKnownProtocolTypes(t *testing.T) {
 		"terminal.answer_ssh_prompt",
 		"terminal.cancel_ssh_prompt",
 		"terminal.ssh_latency",
-		"terminal.attach",
-		"terminal.input",
-		"terminal.resize",
+		"terminal.ssh_tabs_list",
+		"terminal.ssh_tab_open",
+		"terminal.ssh_tab_close",
 		"terminal.rename",
 		"terminal.close",
 		"terminal.close_project",
-		"terminal.detach",
 		"sftp.list",
 		"sftp.stat",
 		"sftp.mkdir",
@@ -107,9 +106,13 @@ func TestWebsocketRequestHandlersCoverKnownProtocolTypes(t *testing.T) {
 		"chat.attach",
 		"chat.detach",
 		"chat.cancel",
+		"terminal.attach",
+		"terminal.input",
+		"terminal.resize",
+		"terminal.detach",
 	} {
 		if websocketRequestHandlers[removedType] != nil {
-			t.Fatalf("websocketRequestHandlers[%q] should be removed; chat uses HTTP commands and SSE", removedType)
+			t.Fatalf("websocketRequestHandlers[%q] should be removed; chat uses HTTP/SSE and terminal bytes use /ws/terminal", removedType)
 		}
 	}
 }

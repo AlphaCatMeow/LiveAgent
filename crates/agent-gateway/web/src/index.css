@@ -590,11 +590,6 @@
     margin-bottom: 0;
   }
 
-  /* Smooth entrance for chat bubbles */
-  .chat-bubble-enter {
-    animation: chatBubbleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
   /*
    * User bubble text wrapping rules.
    * Width constraints live on the parent wrapper (.chat-user-bubble-wrap)
@@ -605,17 +600,6 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     word-break: break-word;
-  }
-
-  @keyframes chatBubbleIn {
-    from {
-      opacity: 0;
-      transform: translateY(6px) scale(0.98);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0) scale(1);
-    }
   }
 
   /* Settings page section transitions */

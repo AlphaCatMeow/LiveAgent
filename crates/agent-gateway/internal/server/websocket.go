@@ -266,7 +266,16 @@ func (c *websocketConnection) startHistorySyncForwarder() {
 				if !ok {
 					return
 				}
-				if err := c.writeEvent("history.event", websocketHistorySyncPayload(event, c.sm.ActiveChatRunSummaries()...)); err != nil {
+				payload := websocketHistorySyncPayload(event, c.sm.ActiveChatRunSummaries()...)
+				if payload["kind"] == "running" && payload["run_id"] == nil {
+					conversationID := historySyncPayloadConversationID(payload, event)
+					if conversationID != "" {
+						if summary, ok := c.sm.ConversationRunSummary(conversationID); ok {
+							enrichHistorySyncRunningPayload(payload, summary)
+						}
+					}
+				}
+				if err := c.writeEvent("history.event", payload); err != nil {
 					c.close()
 					return
 				}

@@ -13,12 +13,6 @@ export type ReloadHistoryOptions = {
 
 export type OverlayState = "closed" | "entering" | "open" | "leaving";
 
-export type LiveConversationStreamMeta = {
-  hasStream: boolean;
-  toolStatus: string | null;
-  toolStatusIsCompaction: boolean;
-};
-
 export type ConversationRuntimeEntry = {
   messages: ChatEntry[];
   error: string | null;

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -151,13 +150,12 @@ func (m *Manager) startPendingChatCommandRun(
 }
 
 func (m *Manager) latestConversationSeqLocked(conversationID string) int64 {
-	conversationID = strings.TrimSpace(conversationID)
 	if conversationID == "" {
 		return 0
 	}
 	var latestSeq int64
 	for _, run := range m.chatStore.chatRuns {
-		if run == nil || strings.TrimSpace(run.conversationID) != conversationID {
+		if run == nil || run.conversationID != conversationID {
 			continue
 		}
 		if run.nextSeq > latestSeq {
@@ -168,12 +166,10 @@ func (m *Manager) latestConversationSeqLocked(conversationID string) int64 {
 }
 
 func (m *Manager) chatRunCanClaimConversationLocked(conversationID string, requestID string) bool {
-	conversationID = strings.TrimSpace(conversationID)
-	requestID = strings.TrimSpace(requestID)
 	if conversationID == "" || requestID == "" {
 		return false
 	}
-	currentRequestID := strings.TrimSpace(m.chatStore.chatRunByConversation[conversationID])
+	currentRequestID := m.chatStore.chatRunByConversation[conversationID]
 	if currentRequestID == "" || currentRequestID == requestID {
 		return true
 	}
@@ -185,7 +181,7 @@ func chatRunControlCanClaimConversation(controlType string, state string) bool {
 	if normalizeChatRunState(state) == ChatRunStateRunning {
 		return true
 	}
-	return strings.TrimSpace(controlType) == "started"
+	return controlType == "started"
 }
 
 func (m *Manager) upsertChatRunSnapshotLocked(
@@ -250,17 +246,7 @@ func (m *Manager) applyChatRunSnapshotLocked(run *chatRun, snapshot ChatRunSnaps
 		requestID = run.requestID
 	}
 	conversationID := strings.TrimSpace(snapshot.ConversationID)
-	if conversationID != "" {
-		if run.conversationID != "" && run.conversationID != conversationID {
-			if m.chatStore.chatRunByConversation[run.conversationID] == requestID {
-				delete(m.chatStore.chatRunByConversation, run.conversationID)
-			}
-		}
-		run.conversationID = conversationID
-		if m.chatRunCanClaimConversationLocked(conversationID, requestID) {
-			m.chatStore.chatRunByConversation[conversationID] = requestID
-		}
-	}
+	m.updateRunConversationLocked(run, requestID, conversationID, false)
 	if clientRequestID := strings.TrimSpace(snapshot.ClientRequestID); clientRequestID != "" {
 		run.clientRequestID = clientRequestID
 		m.chatStore.chatRunByClientRequest[clientRequestID] = requestID
@@ -316,7 +302,7 @@ func (m *Manager) RemoveChatRunByConversation(conversationID string) {
 	run := m.chatStore.chatRuns[requestID]
 	if run == nil {
 		for candidateRequestID, candidateRun := range m.chatStore.chatRuns {
-			if strings.TrimSpace(candidateRun.conversationID) == conversationID {
+			if candidateRun.conversationID == conversationID {
 				requestID = candidateRequestID
 				run = candidateRun
 				break
@@ -338,10 +324,10 @@ func (m *Manager) ActiveChatRunSummaries() []ActiveChatRunSummary {
 	seen := make(map[string]int, len(m.chatStore.chatRuns))
 	summaries := make([]ActiveChatRunSummary, 0, len(m.chatStore.chatRuns))
 	for _, run := range m.chatStore.chatRuns {
-		if run == nil || run.done || !ChatRunStateIsActive(run.state) {
+		if run == nil || run.done || !activeChatRunStates[run.state] {
 			continue
 		}
-		conversationID := strings.TrimSpace(run.conversationID)
+		conversationID := run.conversationID
 		if conversationID == "" {
 			continue
 		}
@@ -351,8 +337,8 @@ func (m *Manager) ActiveChatRunSummaries() []ActiveChatRunSummary {
 		}
 		summary := ActiveChatRunSummary{
 			ConversationID: conversationID,
-			RequestID:      strings.TrimSpace(run.requestID),
-			Workdir:        strings.TrimSpace(run.workdir),
+			RequestID:      run.requestID,
+			Workdir:        run.workdir,
 			FirstSeq:       firstSeq,
 			LatestSeq:      run.nextSeq,
 			RunEpoch:       run.runEpoch,
@@ -362,7 +348,7 @@ func (m *Manager) ActiveChatRunSummaries() []ActiveChatRunSummary {
 			if summaries[index].Workdir == "" {
 				summaries[index].Workdir = summary.Workdir
 			}
-			currentOwner := strings.TrimSpace(m.chatStore.chatRunByConversation[conversationID])
+			currentOwner := m.chatStore.chatRunByConversation[conversationID]
 			if shouldReplaceActiveChatRunSummary(summary, summaries[index], currentOwner) {
 				summaries[index].RequestID = summary.RequestID
 				summaries[index].FirstSeq = summary.FirstSeq
@@ -383,24 +369,42 @@ func (m *Manager) ActiveChatRunSummaries() []ActiveChatRunSummary {
 }
 
 func shouldReplaceActiveChatRunSummary(candidate ActiveChatRunSummary, current ActiveChatRunSummary, currentOwner string) bool {
-	candidatePriority := activeChatRunSummaryPriority(candidate, currentOwner)
-	currentPriority := activeChatRunSummaryPriority(current, currentOwner)
-	if candidatePriority != currentPriority {
-		return candidatePriority > currentPriority
+	candidateIsOwner := currentOwner != "" && candidate.RequestID == currentOwner
+	currentIsOwner := currentOwner != "" && current.RequestID == currentOwner
+	if candidateIsOwner != currentIsOwner {
+		return candidateIsOwner
 	}
 	return candidate.UpdatedAt > current.UpdatedAt
 }
 
-func activeChatRunSummaryPriority(summary ActiveChatRunSummary, currentOwner string) int {
-	requestID := strings.TrimSpace(summary.RequestID)
-	priority := 0
-	if requestID != "" {
-		priority += 3
+func (m *Manager) ConversationRunSummary(conversationID string) (ActiveChatRunSummary, bool) {
+	conversationID = strings.TrimSpace(conversationID)
+	if conversationID == "" {
+		return ActiveChatRunSummary{}, false
 	}
-	if currentOwner != "" && requestID == currentOwner {
-		priority += 4
+	m.chatStore.chatMu.Lock()
+	defer m.chatStore.chatMu.Unlock()
+	requestID := m.chatStore.chatRunByConversation[conversationID]
+	if requestID == "" {
+		return ActiveChatRunSummary{}, false
 	}
-	return priority
+	run := m.chatStore.chatRuns[requestID]
+	if run == nil {
+		return ActiveChatRunSummary{}, false
+	}
+	firstSeq := run.snapshot().FirstSeq
+	if firstSeq <= 0 {
+		firstSeq = run.nextSeq + 1
+	}
+	return ActiveChatRunSummary{
+		ConversationID: conversationID,
+		RequestID:      run.requestID,
+		Workdir:        run.workdir,
+		FirstSeq:       firstSeq,
+		LatestSeq:      run.nextSeq,
+		RunEpoch:       run.runEpoch,
+		UpdatedAt:      run.updatedAt.UnixMilli(),
+	}, true
 }
 
 func (m *Manager) FailStartingChatRun(requestID string, message string) bool {
@@ -486,30 +490,22 @@ func (m *Manager) failChatRunIf(
 	run.expiresAt = now.Add(chatRunDoneRetention)
 	chatEvent := &gatewayv1.ChatEvent{
 		Type:           gatewayv1.ChatEvent_ERROR,
-		ConversationId: strings.TrimSpace(run.conversationID),
+		ConversationId: run.conversationID,
 		Data:           string(data),
 	}
 	broadcast = &ChatBroadcastEvent{
 		RequestID: requestID,
 		Event:     chatEvent,
 		Seq:       run.nextSeq,
-		Workdir:   strings.TrimSpace(run.workdir),
+		Workdir:   run.workdir,
 	}
 	run.appendEvent(broadcast)
 	persist = chatRunEventAppendSnapshot(run, broadcast, now)
-	runSubscribers = make([]*chatRunSubscriber, 0, len(run.subscribers))
-	for _, subscriber := range run.subscribers {
-		runSubscribers = append(runSubscribers, subscriber)
-	}
+	runSubscribers = run.collectSubscribers()
 	m.chatStore.chatMu.Unlock()
 
 	m.persistChatBroadcast(persist)
-	for _, subscriber := range runSubscribers {
-		select {
-		case <-subscriber.done:
-		case subscriber.ch <- cloneChatBroadcastEvent(broadcast):
-		}
-	}
+	notifySubscribers(runSubscribers, broadcast)
 	return true, sessionEpoch
 }
 
@@ -552,7 +548,7 @@ func (m *Manager) SubscribeChatRun(
 	m.pruneExpiredChatRunsLocked(now)
 
 	if conversationReplayRequested && conversationID != "" {
-		if liveRequestID := strings.TrimSpace(m.chatStore.chatRunByConversation[conversationID]); liveRequestID != "" {
+		if liveRequestID := m.chatStore.chatRunByConversation[conversationID]; liveRequestID != "" {
 			requestID = liveRequestID
 		}
 	} else if requestID == "" && conversationID != "" {
@@ -563,12 +559,12 @@ func (m *Manager) SubscribeChatRun(
 		run = m.upsertChatRunSnapshotLocked(persistedSnapshot, m.currentSessionEpoch(), now)
 		if run != nil {
 			for _, event := range persistedReplay {
-				if strings.TrimSpace(event.RequestID) == strings.TrimSpace(run.requestID) {
+				if event.RequestID == run.requestID {
 					run.appendEvent(event)
 				}
 			}
 		}
-	} else if run != nil && persistedFound && strings.TrimSpace(run.requestID) == strings.TrimSpace(persistedSnapshot.RequestID) {
+	} else if run != nil && persistedFound && run.requestID == persistedSnapshot.RequestID {
 		m.applyChatRunSnapshotLocked(run, persistedSnapshot, now)
 	}
 	if run == nil {
@@ -578,31 +574,19 @@ func (m *Manager) SubscribeChatRun(
 	}
 
 	replay := make([]*ChatBroadcastEvent, 0)
+	var buffered []*ChatBroadcastEvent
+	if conversationReplayRequested && conversationID != "" {
+		buffered = m.collectConversationEventsLocked(conversationID, afterSeq)
+	} else {
+		buffered = collectBufferedEventsAfterSeq(run, afterSeq)
+	}
 	if persistedFound {
 		for _, event := range persistedReplay {
 			replay = append(replay, cloneChatBroadcastEvent(event))
 		}
-		replay = mergeChatReplayEvents(replay, m.collectBufferedChatReplayLocked(run, conversationID, afterSeq, conversationReplayRequested))
-	} else if conversationReplayRequested {
-		for _, candidate := range m.chatStore.chatRuns {
-			if candidate == nil || strings.TrimSpace(candidate.conversationID) != conversationID {
-				continue
-			}
-			for _, event := range candidate.events {
-				if event.Seq > afterSeq {
-					replay = append(replay, cloneChatBroadcastEvent(event))
-				}
-			}
-		}
-		sort.SliceStable(replay, func(i, j int) bool {
-			return replay[i].Seq < replay[j].Seq
-		})
+		replay = mergeChatReplayEvents(replay, buffered)
 	} else {
-		for _, event := range run.events {
-			if event.Seq > afterSeq {
-				replay = append(replay, cloneChatBroadcastEvent(event))
-			}
-		}
+		replay = buffered
 	}
 
 	bufferSize := len(replay) + 128
@@ -652,30 +636,7 @@ func (m *Manager) SubscribeChatRun(
 	return ch, done, cleanup, run.snapshot(), nil
 }
 
-func (m *Manager) collectBufferedChatReplayLocked(
-	run *chatRun,
-	conversationID string,
-	afterSeq int64,
-	conversationReplayRequested bool,
-) []*ChatBroadcastEvent {
-	if conversationReplayRequested {
-		conversationID = strings.TrimSpace(conversationID)
-		if conversationID == "" {
-			return nil
-		}
-		replay := make([]*ChatBroadcastEvent, 0)
-		for _, candidate := range m.chatStore.chatRuns {
-			if candidate == nil || strings.TrimSpace(candidate.conversationID) != conversationID {
-				continue
-			}
-			for _, event := range candidate.events {
-				if event.Seq > afterSeq {
-					replay = append(replay, cloneChatBroadcastEvent(event))
-				}
-			}
-		}
-		return replay
-	}
+func collectBufferedEventsAfterSeq(run *chatRun, afterSeq int64) []*ChatBroadcastEvent {
 	if run == nil {
 		return nil
 	}
@@ -688,36 +649,47 @@ func (m *Manager) collectBufferedChatReplayLocked(
 	return replay
 }
 
+func (m *Manager) collectConversationEventsLocked(conversationID string, afterSeq int64) []*ChatBroadcastEvent {
+	var replay []*ChatBroadcastEvent
+	for _, run := range m.chatStore.chatRuns {
+		if run == nil || run.conversationID != conversationID {
+			continue
+		}
+		for _, event := range run.events {
+			if event.Seq > afterSeq {
+				replay = append(replay, cloneChatBroadcastEvent(event))
+			}
+		}
+	}
+	return replay
+}
+
 func mergeChatReplayEvents(
 	persisted []*ChatBroadcastEvent,
 	buffered []*ChatBroadcastEvent,
 ) []*ChatBroadcastEvent {
-	if len(persisted) == 0 && len(buffered) == 0 {
-		return nil
+	if len(persisted) == 0 {
+		return buffered
+	}
+	if len(buffered) == 0 {
+		return persisted
+	}
+	seen := make(map[int64]struct{}, len(persisted))
+	for _, e := range persisted {
+		if e != nil && e.Seq > 0 {
+			seen[e.Seq] = struct{}{}
+		}
 	}
 	merged := make([]*ChatBroadcastEvent, 0, len(persisted)+len(buffered))
-	seen := make(map[string]struct{}, len(persisted)+len(buffered))
-	appendEvent := func(event *ChatBroadcastEvent) {
-		if event == nil || event.Seq <= 0 {
-			return
+	merged = append(merged, persisted...)
+	for _, e := range buffered {
+		if e != nil && e.Seq > 0 {
+			if _, dup := seen[e.Seq]; !dup {
+				merged = append(merged, cloneChatBroadcastEvent(e))
+			}
 		}
-		key := strings.TrimSpace(event.RequestID) + "\x00" + strconv.FormatInt(event.Seq, 10)
-		if _, ok := seen[key]; ok {
-			return
-		}
-		seen[key] = struct{}{}
-		merged = append(merged, cloneChatBroadcastEvent(event))
-	}
-	for _, event := range persisted {
-		appendEvent(event)
-	}
-	for _, event := range buffered {
-		appendEvent(event)
 	}
 	sort.SliceStable(merged, func(i, j int) bool {
-		if merged[i].Seq == merged[j].Seq {
-			return strings.TrimSpace(merged[i].RequestID) < strings.TrimSpace(merged[j].RequestID)
-		}
 		return merged[i].Seq < merged[j].Seq
 	})
 	return merged
@@ -745,7 +717,6 @@ func (m *Manager) ChatRunSnapshot(
 }
 
 func (m *Manager) RunningChatRunSnapshot(conversationID string) (ChatRunSnapshot, bool) {
-	conversationID = strings.TrimSpace(conversationID)
 	if conversationID == "" {
 		return ChatRunSnapshot{}, false
 	}
@@ -754,7 +725,7 @@ func (m *Manager) RunningChatRunSnapshot(conversationID string) (ChatRunSnapshot
 	defer m.chatStore.chatMu.Unlock()
 	m.pruneExpiredChatRunsLocked(time.Now())
 
-	if requestID := strings.TrimSpace(m.chatStore.chatRunByConversation[conversationID]); requestID != "" {
+	if requestID := m.chatStore.chatRunByConversation[conversationID]; requestID != "" {
 		if run := m.chatStore.chatRuns[requestID]; chatRunIsRunningForConversation(run, conversationID) {
 			return run.snapshot(), true
 		}
@@ -768,9 +739,9 @@ func (m *Manager) RunningChatRunSnapshot(conversationID string) (ChatRunSnapshot
 		}
 		if best == nil ||
 			run.updatedAt.After(best.updatedAt) ||
-			(run.updatedAt.Equal(best.updatedAt) && strings.TrimSpace(requestID) > bestRequestID) {
+			(run.updatedAt.Equal(best.updatedAt) && requestID > bestRequestID) {
 			best = run
-			bestRequestID = strings.TrimSpace(requestID)
+			bestRequestID = requestID
 		}
 	}
 	if best == nil {
@@ -782,7 +753,7 @@ func (m *Manager) RunningChatRunSnapshot(conversationID string) (ChatRunSnapshot
 func chatRunIsRunningForConversation(run *chatRun, conversationID string) bool {
 	return run != nil &&
 		!run.done &&
-		strings.TrimSpace(run.conversationID) == conversationID &&
+		run.conversationID == conversationID &&
 		normalizeChatRunState(run.state) == ChatRunStateRunning
 }
 
@@ -833,37 +804,14 @@ func (m *Manager) MarkChatRunPayloads(
 	m.chatStore.chatMu.Lock()
 	m.pruneExpiredChatRunsLocked(now)
 	run := m.chatStore.chatRuns[requestID]
-	if run == nil {
-		m.chatStore.nextChatRunEpoch += 1
-		latestSeq := m.latestConversationSeqLocked(conversationID)
-		run = &chatRun{
-			requestID:      requestID,
-			conversationID: conversationID,
-			sessionEpoch:   m.currentSessionEpoch(),
-			runEpoch:       m.chatStore.nextChatRunEpoch,
-			state:          ChatRunStateQueued,
-			nextSeq:        latestSeq,
-			updatedAt:      now,
-			subscribers:    make(map[int]*chatRunSubscriber),
-		}
-		run.applyState(ChatRunStateQueued)
-		m.chatStore.chatRuns[requestID] = run
-	}
-	if run.done {
+	if run == nil || run.done {
 		m.chatStore.chatMu.Unlock()
+		if run == nil {
+			log.Printf("MarkChatRunPayloads: no run for requestID=%s", requestID)
+		}
 		return nil
 	}
-	if conversationID != "" {
-		if run.conversationID != "" && run.conversationID != conversationID {
-			if m.chatStore.chatRunByConversation[run.conversationID] == requestID {
-				delete(m.chatStore.chatRunByConversation, run.conversationID)
-			}
-		}
-		run.conversationID = conversationID
-		if m.chatRunCanClaimConversationLocked(conversationID, requestID) {
-			m.chatStore.chatRunByConversation[conversationID] = requestID
-		}
-	}
+	m.updateRunConversationLocked(run, requestID, conversationID, false)
 	for _, payload := range payloads {
 		broadcast := m.appendChatPayloadLocked(run, payload, now)
 		if broadcast == nil {
@@ -874,21 +822,18 @@ func (m *Manager) MarkChatRunPayloads(
 			persists = append(persists, chatRunEventAppendSnapshot(run, broadcast, now))
 		}
 	}
-	runSubscribers := make([]*chatRunSubscriber, 0, len(run.subscribers))
-	for _, subscriber := range run.subscribers {
-		runSubscribers = append(runSubscribers, subscriber)
-	}
+	runSubscribers := run.collectSubscribers()
 	m.chatStore.chatMu.Unlock()
 
 	if len(broadcasts) == 0 {
 		return nil
 	}
 	m.persistChatBroadcasts(persists)
-	for _, subscriber := range runSubscribers {
+	for _, s := range runSubscribers {
 		for _, broadcast := range broadcasts {
 			select {
-			case <-subscriber.done:
-			case subscriber.ch <- cloneChatBroadcastEvent(broadcast):
+			case <-s.done:
+			case s.ch <- cloneChatBroadcastEvent(broadcast):
 			}
 		}
 	}
@@ -975,12 +920,7 @@ func (m *Manager) ApplyChatRuntimeSnapshot(snapshot *gatewayv1.ChatRuntimeSnapsh
 		return
 	}
 	previousState := normalizeChatRunState(run.state)
-	if run.conversationID != "" && run.conversationID != conversationID {
-		if m.chatStore.chatRunByConversation[run.conversationID] == requestID {
-			delete(m.chatStore.chatRunByConversation, run.conversationID)
-		}
-	}
-	run.conversationID = conversationID
+	m.updateRunConversationLocked(run, requestID, conversationID, state == ChatRunStateRunning)
 	if clientRequestID != "" {
 		run.clientRequestID = clientRequestID
 		m.chatStore.chatRunByClientRequest[clientRequestID] = requestID
@@ -996,39 +936,28 @@ func (m *Manager) ApplyChatRuntimeSnapshot(snapshot *gatewayv1.ChatRuntimeSnapsh
 	if snapshotRevision > 0 {
 		run.runtimeSnapshotRevision = snapshotRevision
 	}
-	if state == ChatRunStateRunning || m.chatRunCanClaimConversationLocked(conversationID, requestID) {
-		m.chatStore.chatRunByConversation[conversationID] = requestID
-	}
 	broadcast = m.appendChatPayloadLocked(run, payload, now)
 	if broadcast != nil {
 		persist = chatRunEventAppendSnapshot(run, broadcast, now)
 	}
-	runSubscribers = make([]*chatRunSubscriber, 0, len(run.subscribers))
-	for _, subscriber := range run.subscribers {
-		runSubscribers = append(runSubscribers, subscriber)
-	}
+	runSubscribers = run.collectSubscribers()
 	if state == ChatRunStateRunning && (created || previousState != ChatRunStateRunning) {
 		activityKind = "running"
 	} else if terminalState {
 		activityKind = "idle"
 	}
-	activityConversationID = strings.TrimSpace(run.conversationID)
-	activityWorkdir = strings.TrimSpace(run.workdir)
+	activityConversationID = run.conversationID
+	activityWorkdir = run.workdir
 	m.chatStore.chatMu.Unlock()
 
 	if broadcast == nil {
 		return
 	}
 	m.persistChatBroadcast(persist)
-	for _, subscriber := range runSubscribers {
-		select {
-		case <-subscriber.done:
-		case subscriber.ch <- cloneChatBroadcastEvent(broadcast):
-		}
-	}
+	notifySubscribers(runSubscribers, broadcast)
 	if terminalState {
-		for _, subscriber := range runSubscribers {
-			subscriber.close()
+		for _, s := range runSubscribers {
+			s.close()
 		}
 	}
 	if activityKind != "" {
@@ -1054,8 +983,6 @@ func (m *Manager) broadcastChatEvent(requestID string, event *gatewayv1.ChatEven
 	requestID = strings.TrimSpace(requestID)
 	conversationID := strings.TrimSpace(event.GetConversationId())
 	now := time.Now()
-	sessionEpoch := m.currentSessionEpoch()
-
 	m.chatStore.chatMu.Lock()
 	m.pruneExpiredChatRunsLocked(now)
 	broadcast := &ChatBroadcastEvent{
@@ -1070,6 +997,7 @@ func (m *Manager) broadcastChatEvent(requestID string, event *gatewayv1.ChatEven
 	var activityWorkdir string
 	run := m.chatStore.chatRuns[requestID]
 	if run == nil && requestID != "" {
+		sessionEpoch := m.currentSessionEpoch()
 		m.chatStore.nextChatRunEpoch += 1
 		latestSeq := m.latestConversationSeqLocked(conversationID)
 		run = &chatRun{
@@ -1084,85 +1012,51 @@ func (m *Manager) broadcastChatEvent(requestID string, event *gatewayv1.ChatEven
 		}
 		run.applyState(ChatRunStateQueued)
 		m.chatStore.chatRuns[requestID] = run
-		if conversationID != "" {
-			if m.chatRunCanClaimConversationLocked(conversationID, requestID) {
-				m.chatStore.chatRunByConversation[conversationID] = requestID
-			}
+		if conversationID != "" && m.chatRunCanClaimConversationLocked(conversationID, requestID) {
+			m.chatStore.chatRunByConversation[conversationID] = requestID
 		}
 	}
-	if run != nil {
-		if run.done {
-			m.chatStore.chatMu.Unlock()
-			return
-		}
-		previousState := normalizeChatRunState(run.state)
-		if conversationID != "" {
-			if run.conversationID != "" && run.conversationID != conversationID {
-				if m.chatStore.chatRunByConversation[run.conversationID] == requestID {
-					delete(m.chatStore.chatRunByConversation, run.conversationID)
-				}
-			}
-			run.conversationID = conversationID
-			if m.chatRunCanClaimConversationLocked(conversationID, requestID) {
-				m.chatStore.chatRunByConversation[conversationID] = requestID
-			}
-		}
-		if !run.done && normalizeChatRunState(run.state) != ChatRunStateRunning && !isTerminalChatEvent(event) {
-			run.applyState(ChatRunStateRunning)
-		}
-		run.nextSeq += 1
-		run.updatedAt = now
-		broadcast.Seq = run.nextSeq
-		broadcast.Workdir = strings.TrimSpace(run.workdir)
-		if isTerminalChatEvent(event) {
-			if event.GetType() == gatewayv1.ChatEvent_DONE {
-				run.applyState(ChatRunStateCompleted)
-			} else {
-				run.applyState(ChatRunStateFailed)
-				if run.errorCode == "" {
-					run.errorCode = "desktop_error"
-				}
-			}
-			run.expiresAt = now.Add(chatRunDoneRetention)
-		}
-		nextState := normalizeChatRunState(run.state)
-		if isTerminalChatEvent(event) {
-			activityKind = "idle"
-		} else if previousState != ChatRunStateRunning && nextState == ChatRunStateRunning {
-			activityKind = "running"
-		}
-		if activityKind != "" {
-			activityConversationID = strings.TrimSpace(run.conversationID)
-			activityWorkdir = strings.TrimSpace(run.workdir)
-		}
-		run.appendEvent(broadcast)
-		if !isEphemeralChatBroadcastEvent(broadcast) {
-			persist = chatRunEventAppendSnapshot(run, broadcast, now)
-		}
-		if isFirstDeltaChatEvent(event) && !run.firstDeltaLogged {
-			run.firstDeltaLogged = true
-			firstDelta = cloneChatBroadcastEvent(broadcast)
-		}
-		runSubscribers = make([]*chatRunSubscriber, 0, len(run.subscribers))
-		for _, subscriber := range run.subscribers {
-			runSubscribers = append(runSubscribers, subscriber)
-		}
+	if run == nil || run.done {
+		m.chatStore.chatMu.Unlock()
+		return
 	}
+	previousState := normalizeChatRunState(run.state)
+	m.updateRunConversationLocked(run, requestID, conversationID, false)
+	if normalizeChatRunState(run.state) != ChatRunStateRunning && !isTerminalChatEvent(event) {
+		run.applyState(ChatRunStateRunning)
+	}
+	run.nextSeq += 1
+	run.updatedAt = now
+	broadcast.Seq = run.nextSeq
+	broadcast.Workdir = run.workdir
+	if isTerminalChatEvent(event) {
+		if event.GetType() == gatewayv1.ChatEvent_DONE {
+			run.applyState(ChatRunStateCompleted)
+		} else {
+			run.applyState(ChatRunStateFailed)
+			if run.errorCode == "" {
+				run.errorCode = "desktop_error"
+			}
+		}
+		run.expiresAt = now.Add(chatRunDoneRetention)
+	}
+	nextState := normalizeChatRunState(run.state)
+	activityKind, activityConversationID, activityWorkdir = detectRunActivity(run, previousState, nextState)
+	run.appendEvent(broadcast)
+	if !isEphemeralChatBroadcastEvent(broadcast) {
+		persist = chatRunEventAppendSnapshot(run, broadcast, now)
+	}
+	if isFirstDeltaChatEvent(event) && !run.firstDeltaLogged {
+		run.firstDeltaLogged = true
+		firstDelta = cloneChatBroadcastEvent(broadcast)
+	}
+	runSubscribers = run.collectSubscribers()
 	m.chatStore.chatMu.Unlock()
 
 	if firstDelta != nil {
 		logChatRunSpan("first_delta", firstDelta)
 	}
-	m.persistChatBroadcast(persist)
-	for _, subscriber := range runSubscribers {
-		select {
-		case <-subscriber.done:
-		case subscriber.ch <- cloneChatBroadcastEvent(broadcast):
-		}
-	}
-	if activityKind != "" {
-		m.broadcastChatRunActivity(activityKind, activityConversationID, activityWorkdir, now)
-	}
+	m.finalizeChatRunBroadcast(broadcast, persist, runSubscribers, activityKind, activityConversationID, activityWorkdir, now)
 }
 
 func (m *Manager) broadcastChatControl(requestID string, control *gatewayv1.ChatControlEvent) {
@@ -1177,7 +1071,7 @@ func (m *Manager) broadcastChatControl(requestID string, control *gatewayv1.Chat
 	controlType := strings.TrimSpace(control.GetType())
 	state := normalizeChatRunState(control.GetState())
 	if state == "" {
-		state = chatRunStateForControlType(controlType)
+		state = controlTypeToState[controlType]
 	}
 	errorCode := strings.TrimSpace(control.GetErrorCode())
 	message := strings.TrimSpace(control.GetMessage())
@@ -1190,8 +1084,6 @@ func (m *Manager) markChatRunStateSilent(
 	state string,
 	now time.Time,
 ) {
-	requestID = strings.TrimSpace(requestID)
-	conversationID = strings.TrimSpace(conversationID)
 	state = normalizeChatRunState(state)
 	if requestID == "" || state == "" {
 		return
@@ -1203,17 +1095,7 @@ func (m *Manager) markChatRunStateSilent(
 	if run == nil || run.done {
 		return
 	}
-	if conversationID != "" {
-		if run.conversationID != "" && run.conversationID != conversationID {
-			if m.chatStore.chatRunByConversation[run.conversationID] == requestID {
-				delete(m.chatStore.chatRunByConversation, run.conversationID)
-			}
-		}
-		run.conversationID = conversationID
-		if state == ChatRunStateRunning || m.chatRunCanClaimConversationLocked(conversationID, requestID) {
-			m.chatStore.chatRunByConversation[conversationID] = requestID
-		}
-	}
+	m.updateRunConversationLocked(run, requestID, conversationID, state == ChatRunStateRunning)
 	run.applyState(state)
 	run.updatedAt = now
 	if isTerminalChatRunState(state) {
@@ -1230,16 +1112,16 @@ func (m *Manager) markChatRunControl(
 	message string,
 	now time.Time,
 ) {
-	requestID = strings.TrimSpace(requestID)
-	conversationID = strings.TrimSpace(conversationID)
 	if requestID == "" {
 		return
 	}
 
 	state = normalizeChatRunState(state)
-	controlType = strings.TrimSpace(controlType)
 	if controlType == "" {
-		controlType = chatControlTypeForState(state)
+		controlType = stateToControlType[normalizeChatRunState(state)]
+		if controlType == "" {
+			controlType = "progress"
+		}
 	}
 
 	var persist ChatRunEventAppend
@@ -1249,73 +1131,27 @@ func (m *Manager) markChatRunControl(
 	m.chatStore.chatMu.Lock()
 	m.pruneExpiredChatRunsLocked(now)
 	run := m.chatStore.chatRuns[requestID]
-	if run == nil {
-		m.chatStore.nextChatRunEpoch += 1
-		latestSeq := m.latestConversationSeqLocked(conversationID)
-		run = &chatRun{
-			requestID:      requestID,
-			conversationID: conversationID,
-			sessionEpoch:   m.currentSessionEpoch(),
-			runEpoch:       m.chatStore.nextChatRunEpoch,
-			state:          ChatRunStateQueued,
-			nextSeq:        latestSeq,
-			updatedAt:      now,
-			subscribers:    make(map[int]*chatRunSubscriber),
-		}
-		run.applyState(ChatRunStateQueued)
-		m.chatStore.chatRuns[requestID] = run
-	}
-	if run.done {
+	if run == nil || run.done {
 		m.chatStore.chatMu.Unlock()
+		if run == nil {
+			log.Printf("markChatRunControl: no run for requestID=%s controlType=%s", requestID, controlType)
+		}
 		return
 	}
 	previousState := normalizeChatRunState(run.state)
-	if conversationID != "" {
-		if run.conversationID != "" && run.conversationID != conversationID {
-			if m.chatStore.chatRunByConversation[run.conversationID] == requestID {
-				delete(m.chatStore.chatRunByConversation, run.conversationID)
-			}
-		}
-		run.conversationID = conversationID
-		if chatRunControlCanClaimConversation(controlType, state) ||
-			m.chatRunCanClaimConversationLocked(conversationID, requestID) {
-			m.chatStore.chatRunByConversation[conversationID] = requestID
-		}
-	}
+	canClaim := chatRunControlCanClaimConversation(controlType, state)
+	m.updateRunConversationLocked(run, requestID, conversationID, canClaim)
 	broadcast := m.appendChatControlLocked(run, controlType, errorCode, message, now)
 	nextState := normalizeChatRunState(run.state)
-	if isTerminalChatRunState(nextState) {
-		activityKind = "idle"
-	} else if previousState != ChatRunStateRunning && nextState == ChatRunStateRunning {
-		activityKind = "running"
-	}
-	if activityKind != "" {
-		activityConversationID = strings.TrimSpace(run.conversationID)
-		activityWorkdir = strings.TrimSpace(run.workdir)
-	}
+	activityKind, activityConversationID, activityWorkdir = detectRunActivity(run, previousState, nextState)
 	persist = chatRunEventAppendSnapshot(run, broadcast, now)
-	runSubscribers := make([]*chatRunSubscriber, 0, len(run.subscribers))
-	for _, subscriber := range run.subscribers {
-		runSubscribers = append(runSubscribers, subscriber)
-	}
+	runSubscribers := run.collectSubscribers()
 	m.chatStore.chatMu.Unlock()
 
-	if broadcast == nil {
-		return
-	}
 	if span := chatControlSpanName(broadcast.Control); span != "" {
 		logChatRunSpan(span, broadcast)
 	}
-	m.persistChatBroadcast(persist)
-	for _, subscriber := range runSubscribers {
-		select {
-		case <-subscriber.done:
-		case subscriber.ch <- cloneChatBroadcastEvent(broadcast):
-		}
-	}
-	if activityKind != "" {
-		m.broadcastChatRunActivity(activityKind, activityConversationID, activityWorkdir, now)
-	}
+	m.finalizeChatRunBroadcast(broadcast, persist, runSubscribers, activityKind, activityConversationID, activityWorkdir, now)
 }
 
 func (m *Manager) DispatchFromAgent(env *gatewayv1.AgentEnvelope) {
@@ -1391,11 +1227,10 @@ func (m *Manager) dispatchFromAgent(expected *AgentSession, env *gatewayv1.Agent
 }
 
 func (r *chatRun) snapshot() ChatRunSnapshot {
-	firstSeq := int64(0)
+	var firstSeq int64
 	if len(r.events) > 0 {
 		firstSeq = r.events[0].Seq
 	}
-	state := normalizeChatRunState(r.state)
 	return ChatRunSnapshot{
 		RequestID:       r.requestID,
 		ConversationID:  r.conversationID,
@@ -1404,8 +1239,8 @@ func (r *chatRun) snapshot() ChatRunSnapshot {
 		FirstSeq:        firstSeq,
 		LatestSeq:       r.nextSeq,
 		RunEpoch:        r.runEpoch,
-		State:           state,
-		ErrorCode:       strings.TrimSpace(r.errorCode),
+		State:           r.state,
+		ErrorCode:       r.errorCode,
 		Done:            r.done,
 	}
 }
@@ -1464,22 +1299,45 @@ func (r *chatRun) shouldPrune(now time.Time) bool {
 	if r.done {
 		return !r.expiresAt.IsZero() && now.After(r.expiresAt)
 	}
-	if chatRunUpdatedBefore(r.updatedAt, now, chatRunStaleRetention) {
-		return true
-	}
-	return normalizeChatRunState(r.state) != ChatRunStateRunning &&
-		normalizeChatRunState(r.state) != ChatRunStateDesktopQueued &&
-		chatRunUpdatedBefore(r.updatedAt, now, chatRunStartRetention)
-}
-
-func chatRunUpdatedBefore(updatedAt time.Time, now time.Time, retention time.Duration) bool {
-	return !updatedAt.IsZero() && retention > 0 && now.Sub(updatedAt) > retention
+	return !r.updatedAt.IsZero() && now.Sub(r.updatedAt) > chatRunStaleRetention
 }
 
 func (s *chatRunSubscriber) close() {
 	s.closeOnce.Do(func() {
 		close(s.done)
 	})
+}
+
+func (m *Manager) updateRunConversationLocked(run *chatRun, requestID string, conversationID string, canClaim bool) {
+	if conversationID == "" {
+		return
+	}
+	if run.conversationID != "" && run.conversationID != conversationID {
+		if m.chatStore.chatRunByConversation[run.conversationID] == requestID {
+			delete(m.chatStore.chatRunByConversation, run.conversationID)
+		}
+	}
+	run.conversationID = conversationID
+	if canClaim || m.chatRunCanClaimConversationLocked(conversationID, requestID) {
+		m.chatStore.chatRunByConversation[conversationID] = requestID
+	}
+}
+
+func (r *chatRun) collectSubscribers() []*chatRunSubscriber {
+	subs := make([]*chatRunSubscriber, 0, len(r.subscribers))
+	for _, s := range r.subscribers {
+		subs = append(subs, s)
+	}
+	return subs
+}
+
+func notifySubscribers(subscribers []*chatRunSubscriber, broadcast *ChatBroadcastEvent) {
+	for _, s := range subscribers {
+		select {
+		case <-s.done:
+		case s.ch <- cloneChatBroadcastEvent(broadcast):
+		}
+	}
 }
 
 func (m *Manager) pruneExpiredChatRunsLocked(now time.Time) {
@@ -1535,114 +1393,95 @@ func cloneChatPayloadMap(input map[string]any) map[string]any {
 	if len(input) == 0 {
 		return nil
 	}
-	raw, err := json.Marshal(input)
-	if err != nil {
-		out := make(map[string]any, len(input))
-		for key, value := range input {
-			out[key] = value
-		}
-		return out
-	}
-	var out map[string]any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		out = make(map[string]any, len(input))
-		for key, value := range input {
-			out[key] = value
-		}
+	out := make(map[string]any, len(input))
+	for k, v := range input {
+		out[k] = v
 	}
 	return out
 }
 
+var validChatRunStates = map[string]bool{
+	ChatRunStateQueued:        true,
+	ChatRunStateDelivered:     true,
+	ChatRunStateClaimed:       true,
+	ChatRunStateStarting:      true,
+	ChatRunStateDesktopQueued: true,
+	ChatRunStateRunning:       true,
+	ChatRunStateCompleted:     true,
+	ChatRunStateFailed:        true,
+	ChatRunStateCancelled:     true,
+}
+
 func normalizeChatRunState(state string) string {
-	switch strings.TrimSpace(state) {
-	case ChatRunStateQueued:
-		return ChatRunStateQueued
-	case ChatRunStateDelivered:
-		return ChatRunStateDelivered
-	case ChatRunStateClaimed:
-		return ChatRunStateClaimed
-	case ChatRunStateStarting:
-		return ChatRunStateStarting
-	case ChatRunStateDesktopQueued:
-		return ChatRunStateDesktopQueued
-	case ChatRunStateRunning:
-		return ChatRunStateRunning
-	case ChatRunStateCompleted:
-		return ChatRunStateCompleted
-	case ChatRunStateFailed:
-		return ChatRunStateFailed
-	case ChatRunStateCancelled:
-		return ChatRunStateCancelled
-	default:
-		return ""
+	if validChatRunStates[state] {
+		return state
 	}
+	return ""
+}
+
+var terminalChatRunStates = map[string]bool{
+	ChatRunStateCompleted: true,
+	ChatRunStateFailed:    true,
+	ChatRunStateCancelled: true,
 }
 
 func isTerminalChatRunState(state string) bool {
-	switch normalizeChatRunState(state) {
-	case ChatRunStateCompleted, ChatRunStateFailed, ChatRunStateCancelled:
-		return true
-	default:
-		return false
-	}
+	return terminalChatRunStates[normalizeChatRunState(state)]
 }
 
-func ChatRunStateIsActive(state string) bool {
-	switch normalizeChatRunState(state) {
-	case ChatRunStateQueued, ChatRunStateDelivered, ChatRunStateClaimed, ChatRunStateStarting, ChatRunStateRunning:
-		return true
-	default:
-		return false
-	}
+var activeChatRunStates = map[string]bool{
+	ChatRunStateQueued:    true,
+	ChatRunStateDelivered: true,
+	ChatRunStateClaimed:   true,
+	ChatRunStateStarting:  true,
+	ChatRunStateRunning:   true,
 }
 
-func chatRunStateForControlType(controlType string) string {
-	switch strings.TrimSpace(controlType) {
-	case "accepted":
-		return ChatRunStateQueued
-	case "delivered":
-		return ChatRunStateDelivered
-	case "claimed":
-		return ChatRunStateClaimed
-	case "starting":
-		return ChatRunStateStarting
-	case "queued_in_gui":
-		return ChatRunStateDesktopQueued
-	case "started":
-		return ChatRunStateRunning
-	case "completed":
-		return ChatRunStateCompleted
-	case "failed":
-		return ChatRunStateFailed
-	case "cancelled":
-		return ChatRunStateCancelled
-	default:
-		return ""
-	}
+var controlTypeToState = map[string]string{
+	"accepted":     ChatRunStateQueued,
+	"delivered":    ChatRunStateDelivered,
+	"claimed":      ChatRunStateClaimed,
+	"starting":     ChatRunStateStarting,
+	"queued_in_gui": ChatRunStateDesktopQueued,
+	"started":      ChatRunStateRunning,
+	"completed":    ChatRunStateCompleted,
+	"failed":       ChatRunStateFailed,
+	"cancelled":    ChatRunStateCancelled,
 }
 
-func chatControlTypeForState(state string) string {
-	switch normalizeChatRunState(state) {
-	case ChatRunStateQueued:
-		return "accepted"
-	case ChatRunStateDelivered:
-		return "delivered"
-	case ChatRunStateClaimed:
-		return "claimed"
-	case ChatRunStateStarting:
-		return "starting"
-	case ChatRunStateDesktopQueued:
-		return "queued_in_gui"
-	case ChatRunStateRunning:
-		return "started"
-	case ChatRunStateCompleted:
-		return "completed"
-	case ChatRunStateFailed:
-		return "failed"
-	case ChatRunStateCancelled:
-		return "cancelled"
-	default:
-		return "progress"
+var stateToControlType = map[string]string{
+	ChatRunStateQueued:        "accepted",
+	ChatRunStateDelivered:     "delivered",
+	ChatRunStateClaimed:       "claimed",
+	ChatRunStateStarting:      "starting",
+	ChatRunStateDesktopQueued: "queued_in_gui",
+	ChatRunStateRunning:       "started",
+	ChatRunStateCompleted:     "completed",
+	ChatRunStateFailed:        "failed",
+	ChatRunStateCancelled:     "cancelled",
+}
+
+func detectRunActivity(run *chatRun, previousState, nextState string) (kind, conversationID, workdir string) {
+	if isTerminalChatRunState(nextState) {
+		kind = "idle"
+	} else if previousState != ChatRunStateRunning && nextState == ChatRunStateRunning {
+		kind = "running"
+	}
+	if kind != "" {
+		conversationID = run.conversationID
+		workdir = run.workdir
+	}
+	return
+}
+
+func (m *Manager) finalizeChatRunBroadcast(broadcast *ChatBroadcastEvent, persist ChatRunEventAppend, subscribers []*chatRunSubscriber, activityKind, activityConversationID, activityWorkdir string, now time.Time) {
+	if broadcast == nil {
+		return
+	}
+	m.persistChatBroadcast(persist)
+	notifySubscribers(subscribers, broadcast)
+	if activityKind != "" {
+		m.broadcastChatRunActivity(activityKind, activityConversationID, activityWorkdir, now)
 	}
 }
 
@@ -1656,8 +1495,7 @@ func (m *Manager) appendChatControlLocked(
 	if run == nil {
 		return nil
 	}
-	controlType = strings.TrimSpace(controlType)
-	state := chatRunStateForControlType(controlType)
+	state := controlTypeToState[controlType]
 	if state == "" {
 		state = normalizeChatRunState(run.state)
 	}
@@ -1665,7 +1503,7 @@ func (m *Manager) appendChatControlLocked(
 		state = ChatRunStateQueued
 	}
 	run.applyState(state)
-	if errorCode = strings.TrimSpace(errorCode); errorCode != "" {
+	if errorCode != "" {
 		run.errorCode = errorCode
 	}
 	run.updatedAt = now
@@ -1675,24 +1513,27 @@ func (m *Manager) appendChatControlLocked(
 	run.nextSeq += 1
 	seq := run.nextSeq
 	if controlType == "" {
-		controlType = chatControlTypeForState(state)
+		controlType = stateToControlType[normalizeChatRunState(state)]
+		if controlType == "" {
+			controlType = "progress"
+		}
 	}
 	control := &gatewayv1.ChatControlEvent{
-		RequestId:       strings.TrimSpace(run.requestID),
-		ClientRequestId: strings.TrimSpace(run.clientRequestID),
-		ConversationId:  strings.TrimSpace(run.conversationID),
+		RequestId:       run.requestID,
+		ClientRequestId: run.clientRequestID,
+		ConversationId:  run.conversationID,
 		RunEpoch:        run.runEpoch,
 		Type:            controlType,
-		State:           normalizeChatRunState(run.state),
-		ErrorCode:       strings.TrimSpace(run.errorCode),
-		Message:         strings.TrimSpace(message),
+		State:           run.state,
+		ErrorCode:       run.errorCode,
+		Message:         message,
 		Seq:             seq,
 	}
 	broadcast := &ChatBroadcastEvent{
-		RequestID: strings.TrimSpace(run.requestID),
+		RequestID: run.requestID,
 		Control:   control,
 		Seq:       seq,
-		Workdir:   strings.TrimSpace(run.workdir),
+		Workdir:   run.workdir,
 	}
 	run.appendEvent(broadcast)
 	return broadcast
@@ -1713,20 +1554,17 @@ func (m *Manager) appendChatPayloadLocked(
 	if nextPayload == nil {
 		nextPayload = make(map[string]any)
 	}
-	if eventType, _ := nextPayload["type"].(string); strings.TrimSpace(eventType) != "" {
-		nextPayload["type"] = strings.TrimSpace(eventType)
-	}
-	nextPayload["request_id"] = strings.TrimSpace(run.requestID)
-	nextPayload["client_request_id"] = strings.TrimSpace(run.clientRequestID)
-	nextPayload["conversation_id"] = strings.TrimSpace(run.conversationID)
+	nextPayload["request_id"] = run.requestID
+	nextPayload["client_request_id"] = run.clientRequestID
+	nextPayload["conversation_id"] = run.conversationID
 	nextPayload["run_epoch"] = run.runEpoch
-	nextPayload["state"] = normalizeChatRunState(run.state)
+	nextPayload["state"] = run.state
 	nextPayload["seq"] = seq
 	broadcast := &ChatBroadcastEvent{
-		RequestID: strings.TrimSpace(run.requestID),
+		RequestID: run.requestID,
 		Payload:   nextPayload,
 		Seq:       seq,
-		Workdir:   strings.TrimSpace(run.workdir),
+		Workdir:   run.workdir,
 	}
 	run.appendEvent(broadcast)
 	return broadcast
@@ -1741,13 +1579,13 @@ func chatRunEventAppendSnapshot(
 		return ChatRunEventAppend{}
 	}
 	return ChatRunEventAppend{
-		RequestID:       strings.TrimSpace(run.requestID),
-		ConversationID:  strings.TrimSpace(run.conversationID),
-		ClientRequestID: strings.TrimSpace(run.clientRequestID),
-		Workdir:         strings.TrimSpace(run.workdir),
+		RequestID:       run.requestID,
+		ConversationID:  run.conversationID,
+		ClientRequestID: run.clientRequestID,
+		Workdir:         run.workdir,
 		RunEpoch:        run.runEpoch,
-		State:           normalizeChatRunState(run.state),
-		ErrorCode:       strings.TrimSpace(run.errorCode),
+		State:           run.state,
+		ErrorCode:       run.errorCode,
 		Done:            run.done,
 		Event:           cloneChatBroadcastEvent(broadcast),
 		CreatedAt:       now,
@@ -1805,7 +1643,7 @@ func isEphemeralChatPayload(payload map[string]any) bool {
 		return false
 	}
 	eventType, _ := payload["type"].(string)
-	return strings.TrimSpace(eventType) == "tool_call_delta"
+	return eventType == "tool_call_delta"
 }
 
 func isEphemeralChatEvent(event *gatewayv1.ChatEvent) bool {
@@ -1834,37 +1672,29 @@ func runtimeSnapshotRevisionFromPayload(payload map[string]any) int64 {
 		return 0
 	}
 	eventType, _ := payload["type"].(string)
-	if strings.TrimSpace(eventType) != "runtime_snapshot" {
+	if eventType != "runtime_snapshot" {
 		return 0
 	}
-	switch value := payload["revision"].(type) {
+	return toPositiveInt64(payload["revision"])
+}
+
+func toPositiveInt64(v any) int64 {
+	switch n := v.(type) {
 	case int64:
-		if value > 0 {
-			return value
-		}
-	case int:
-		if value > 0 {
-			return int64(value)
-		}
-	case int32:
-		if value > 0 {
-			return int64(value)
-		}
-	case uint64:
-		if value > 0 && value <= uint64(^uint64(0)>>1) {
-			return int64(value)
+		if n > 0 {
+			return n
 		}
 	case float64:
-		if value > 0 {
-			return int64(value)
+		if n > 0 {
+			return int64(n)
 		}
 	case json.Number:
-		if parsed, err := value.Int64(); err == nil && parsed > 0 {
+		if parsed, err := n.Int64(); err == nil && parsed > 0 {
 			return parsed
 		}
-	case string:
-		if parsed, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err == nil && parsed > 0 {
-			return parsed
+	case int:
+		if n > 0 {
+			return int64(n)
 		}
 	}
 	return 0
@@ -1874,7 +1704,7 @@ func chatControlSpanName(control *gatewayv1.ChatControlEvent) string {
 	if control == nil {
 		return ""
 	}
-	switch strings.TrimSpace(control.GetType()) {
+	switch control.GetType() {
 	case "claimed":
 		return "runtime_claimed"
 	case "started":
@@ -1894,25 +1724,25 @@ func logChatRunSpan(span string, event *ChatBroadcastEvent) {
 	if event == nil {
 		return
 	}
-	runID := strings.TrimSpace(event.RequestID)
+	runID := event.RequestID
 	conversationID := ""
 	clientRequestID := ""
 	if event.Control != nil {
-		conversationID = strings.TrimSpace(event.Control.GetConversationId())
-		clientRequestID = strings.TrimSpace(event.Control.GetClientRequestId())
+		conversationID = event.Control.GetConversationId()
+		clientRequestID = event.Control.GetClientRequestId()
 	} else if event.Payload != nil {
 		if value, ok := event.Payload["conversation_id"].(string); ok {
-			conversationID = strings.TrimSpace(value)
+			conversationID = value
 		}
 		if value, ok := event.Payload["client_request_id"].(string); ok {
-			clientRequestID = strings.TrimSpace(value)
+			clientRequestID = value
 		}
 	} else if event.Event != nil {
-		conversationID = strings.TrimSpace(event.Event.GetConversationId())
+		conversationID = event.Event.GetConversationId()
 	}
 	log.Printf(
 		"chat_run_span span=%s run_id=%q conversation_id=%q client_request_id=%q seq=%d",
-		strings.TrimSpace(span),
+		span,
 		runID,
 		conversationID,
 		clientRequestID,

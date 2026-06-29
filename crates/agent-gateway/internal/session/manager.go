@@ -17,9 +17,8 @@ var ErrTunnelLimitExceeded = errors.New("tunnel limit exceeded")
 
 const (
 	maxBufferedChatRunEvents = 50000
-	chatRunDoneRetention     = time.Hour
-	chatRunStartRetention    = 5 * time.Minute
-	chatRunStaleRetention    = 12 * time.Hour
+	chatRunDoneRetention  = time.Hour
+	chatRunStaleRetention = 12 * time.Hour
 
 	chatRuntimeReadyTTL      = 15 * time.Second
 	agentSessionHeartbeatTTL = 90 * time.Second

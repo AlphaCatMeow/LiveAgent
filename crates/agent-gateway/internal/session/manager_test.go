@@ -157,18 +157,18 @@ func TestChatRunShouldPruneRetainsRunningUntilStale(t *testing.T) {
 	now := time.Now()
 	running := &chatRun{
 		state:     ChatRunStateRunning,
-		updatedAt: now.Add(-(chatRunStartRetention + time.Second)),
+		updatedAt: now.Add(-time.Hour),
 	}
 	if running.shouldPrune(now) {
-		t.Fatal("running chat should survive the start retention window")
+		t.Fatal("running chat should survive well before stale retention")
 	}
 
-	queued := &chatRun{
+	stale := &chatRun{
 		state:     ChatRunStateQueued,
-		updatedAt: now.Add(-(chatRunStartRetention + time.Second)),
+		updatedAt: now.Add(-(chatRunStaleRetention + time.Second)),
 	}
-	if !queued.shouldPrune(now) {
-		t.Fatal("unstarted queued chat should prune after start retention")
+	if !stale.shouldPrune(now) {
+		t.Fatal("non-done chat should prune after stale retention")
 	}
 
 	done := &chatRun{
@@ -190,5 +190,36 @@ func TestPruneExpiredChatRunsDropsNilEntries(t *testing.T) {
 
 	if exists {
 		t.Fatal("nil chat run should be deleted during pruning")
+	}
+}
+
+func TestConversationRunSummaryReturnsCompletedRun(t *testing.T) {
+	manager := NewManager()
+
+	snapshot, created, _, err := manager.StartAcceptedChatCommandRun("run-1", "conv-1", "client-1", "/workspace", nil)
+	if err != nil || !created {
+		t.Fatalf("StartAcceptedChatCommandRun failed: err=%v created=%v", err, created)
+	}
+	_ = snapshot
+
+	manager.MarkChatRunControl("run-1", "conv-1", "started", "", "")
+
+	summary, ok := manager.ConversationRunSummary("conv-1")
+	if !ok || summary.RequestID != "run-1" {
+		t.Fatalf("expected running run summary, got ok=%v summary=%+v", ok, summary)
+	}
+
+	manager.MarkChatRunControl("run-1", "conv-1", "completed", "", "")
+
+	summary, ok = manager.ConversationRunSummary("conv-1")
+	if !ok || summary.RequestID != "run-1" {
+		t.Fatalf("expected completed run summary via ConversationRunSummary, got ok=%v summary=%+v", ok, summary)
+	}
+
+	actives := manager.ActiveChatRunSummaries()
+	for _, s := range actives {
+		if s.ConversationID == "conv-1" {
+			t.Fatal("completed run should not appear in ActiveChatRunSummaries")
+		}
 	}
 }

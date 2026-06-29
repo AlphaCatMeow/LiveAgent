@@ -181,6 +181,39 @@ func websocketHistorySyncPayload(
 	return payload
 }
 
+func historySyncPayloadConversationID(payload map[string]any, event *gatewayv1.HistorySyncEvent) string {
+	if cid, ok := payload["conversation_id"].(string); ok && cid != "" {
+		return cid
+	}
+	if event != nil {
+		if cid := strings.TrimSpace(event.GetConversationId()); cid != "" {
+			return cid
+		}
+		if event.GetConversation() != nil {
+			return strings.TrimSpace(event.GetConversation().GetId())
+		}
+	}
+	return ""
+}
+
+func enrichHistorySyncRunningPayload(payload map[string]any, summary session.ActiveChatRunSummary) {
+	if requestID := strings.TrimSpace(summary.RequestID); requestID != "" {
+		payload["run_id"] = requestID
+	}
+	if summary.FirstSeq > 0 {
+		payload["first_seq"] = summary.FirstSeq
+	}
+	if summary.LatestSeq > 0 {
+		payload["latest_seq"] = summary.LatestSeq
+	}
+	if summary.RunEpoch > 0 {
+		payload["run_epoch"] = summary.RunEpoch
+	}
+	if summary.UpdatedAt > 0 {
+		payload["updated_at"] = summary.UpdatedAt
+	}
+}
+
 func websocketSettingsJSONPayload(raw string) (map[string]any, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {

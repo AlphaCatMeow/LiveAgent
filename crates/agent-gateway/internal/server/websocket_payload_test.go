@@ -108,6 +108,40 @@ func TestHistoryRunningPayloadIncludesReplayCursor(t *testing.T) {
 	}
 }
 
+func TestHistoryRunningPayloadFallbackEnrichment(t *testing.T) {
+	event := &gatewayv1.HistorySyncEvent{
+		Kind:           "running",
+		ConversationId: "conversation-1",
+	}
+	payload := websocketHistorySyncPayload(event)
+
+	if payload["run_id"] != nil {
+		t.Fatalf("expected no run_id before enrichment, got %#v", payload["run_id"])
+	}
+
+	cid := historySyncPayloadConversationID(payload, event)
+	if cid != "conversation-1" {
+		t.Fatalf("expected conversation_id conversation-1, got %q", cid)
+	}
+
+	enrichHistorySyncRunningPayload(payload, session.ActiveChatRunSummary{
+		ConversationID: "conversation-1",
+		RequestID:      "run-fallback",
+		FirstSeq:       10,
+		LatestSeq:      15,
+		RunEpoch:       3,
+		UpdatedAt:      456,
+	})
+
+	if payload["run_id"] != "run-fallback" ||
+		payload["first_seq"] != int64(10) ||
+		payload["latest_seq"] != int64(15) ||
+		payload["run_epoch"] != int64(3) ||
+		payload["updated_at"] != int64(456) {
+		t.Fatalf("fallback enriched payload = %#v", payload)
+	}
+}
+
 func TestWebsocketChatQueueSnapshotResponsePayload(t *testing.T) {
 	payload := websocketChatQueueSnapshotResponsePayload(&gatewayv1.ChatQueueEvent{
 		ConversationId: "conversation-1",

@@ -9,7 +9,9 @@ import {
   type WorkspaceProject,
 } from "@/lib/settings";
 import { formatConversationTitle } from "@/lib/chatUi";
-import { isLocalDraftConversationId } from "@/lib/localDraftConversation";
+function isLocalDraftConversationId(id: string) {
+  return id.trim().startsWith("__local_draft__:");
+}
 import {
   fallbackWorkspaceProjectName,
 } from "@/lib/workspaceProjects";

@@ -1,3 +1,4 @@
+import type { ChatEntry } from "@/lib/chatUi";
 import type {
   CodexRequestFormat,
   ChatRuntimeControls,
@@ -324,3 +325,24 @@ export type GatewayHistoryEvent =
       run_epoch?: number;
       updated_at?: number;
     };
+
+export type LiveConversationStreamSnapshot = {
+  revision: number;
+  entries: ChatEntry[];
+  toolStatus: string | null;
+  toolStatusIsCompaction: boolean;
+};
+
+export type LiveConversationStreamStore = {
+  getSnapshot: () => LiveConversationStreamSnapshot;
+  subscribe: (listener: () => void) => () => void;
+  applySnapshot: (event: ChatRuntimeSnapshotEvent, options?: { flush?: boolean }) => void;
+  appendEvent: (event: ChatEvent, options?: { flush?: boolean }) => void;
+  setToolStatus: (
+    toolStatus: string | null | undefined,
+    isCompaction?: boolean,
+    options?: { flush?: boolean },
+  ) => void;
+  reset: () => void;
+  flush: () => void;
+};

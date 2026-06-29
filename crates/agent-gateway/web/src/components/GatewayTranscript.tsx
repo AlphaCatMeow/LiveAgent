@@ -51,11 +51,36 @@ import {
   type GatewayTranscriptItem,
   type GatewayTranscriptRound,
 } from "../lib/chatUi";
-import { omitEquivalentTailEntries } from "../lib/liveConversationCommit";
+function entryMatchesForDedup(a: ChatEntry, b: ChatEntry): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === "user" && b.kind === "user") {
+    return a.text === b.text;
+  }
+  const { id: _a, ...restA } = a;
+  const { id: _b, ...restB } = b;
+  return JSON.stringify(restA) === JSON.stringify(restB);
+}
+
+function omitEquivalentTailEntries(existing: ChatEntry[], live: ChatEntry[]) {
+  if (live.length === 0) return existing;
+  const maxOverlap = Math.min(existing.length, live.length);
+  for (let overlap = maxOverlap; overlap > 0; overlap--) {
+    const start = existing.length - overlap;
+    let matches = true;
+    for (let i = 0; i < overlap; i++) {
+      if (!entryMatchesForDedup(existing[start + i], live[i])) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) return existing.slice(0, start);
+  }
+  return existing;
+}
 import type {
   LiveConversationStreamSnapshot,
   LiveConversationStreamStore,
-} from "../lib/liveConversationStreamStore";
+} from "../lib/gatewayTypes";
 import type { SectionId } from "../pages/settings/types";
 
 type GatewayTranscriptProps = {
@@ -645,7 +670,7 @@ function GatewayUserMessageBubbleBody(props: {
   );
 
   return (
-    <div className="chat-bubble-enter chat-user-bubble rounded-2xl rounded-br-md bg-[hsl(var(--chat-user-bg))] px-4 py-2.5 font-openai-chat text-[14.5px] leading-relaxed text-[hsl(var(--chat-user-fg))]">
+    <div className="chat-user-bubble rounded-2xl rounded-br-md bg-[hsl(var(--chat-user-bg))] px-4 py-2.5 font-openai-chat text-[14.5px] leading-relaxed text-[hsl(var(--chat-user-fg))]">
       <GatewayUserAttachmentCards
         files={visibleFiles}
         workspaceRoot={workspaceRoot}

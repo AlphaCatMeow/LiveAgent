@@ -8,7 +8,7 @@ import (
 )
 
 func (m *Manager) SubscribeHistorySync() (<-chan *gatewayv1.HistorySyncEvent, func()) {
-	ch := make(chan *gatewayv1.HistorySyncEvent, 32)
+	ch := make(chan *gatewayv1.HistorySyncEvent, 128)
 
 	m.syncHub.historyMu.Lock()
 	subID := m.syncHub.nextHistorySubID

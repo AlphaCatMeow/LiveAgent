@@ -1343,10 +1343,10 @@ func TestQueuedRunStartedHistoryEventSurvivesFullSubscriberQueue(t *testing.T) {
 	historyEvents, cleanupHistoryEvents := sm.SubscribeHistorySync()
 	defer cleanupHistoryEvents()
 
-	for index := 0; index < 40; index += 1 {
-		conversationID := fmt.Sprintf("filler-%02d", index)
+	for index := 0; index < 140; index += 1 {
+		conversationID := fmt.Sprintf("filler-%03d", index)
 		sm.DispatchFromAgent(&gatewayv1.AgentEnvelope{
-			RequestId: fmt.Sprintf("history-filler-%02d", index),
+			RequestId: fmt.Sprintf("history-filler-%03d", index),
 			Payload: &gatewayv1.AgentEnvelope_HistorySync{
 				HistorySync: &gatewayv1.HistorySyncEvent{
 					Kind:           "upsert",
@@ -1392,10 +1392,10 @@ func TestCriticalHistoryEventDoesNotDrainEarlierCriticalEvent(t *testing.T) {
 	}
 	dispatchChatControl(sm, "request-a", "conversation-a", "started", session.ChatRunStateRunning)
 
-	for index := 0; index < 40; index += 1 {
-		conversationID := fmt.Sprintf("filler-%02d", index)
+	for index := 0; index < 140; index += 1 {
+		conversationID := fmt.Sprintf("filler-%03d", index)
 		sm.DispatchFromAgent(&gatewayv1.AgentEnvelope{
-			RequestId: fmt.Sprintf("history-filler-%02d", index),
+			RequestId: fmt.Sprintf("history-filler-%03d", index),
 			Payload: &gatewayv1.AgentEnvelope_HistorySync{
 				HistorySync: &gatewayv1.HistorySyncEvent{
 					Kind:           "upsert",

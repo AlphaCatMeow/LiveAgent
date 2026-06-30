@@ -89,6 +89,12 @@ type websocketGitRequestPayload struct {
 	Args    json.RawMessage `json:"args,omitempty"`
 }
 
+const (
+	websocketWriteQueueDefault = 512
+	websocketMaxWriteRetries   = 2
+	websocketRetryBackoff      = 100 * time.Millisecond
+)
+
 type websocketConnection struct {
 	cfg *config.Config
 	sm  *session.Manager
@@ -97,10 +103,14 @@ type websocketConnection struct {
 	req          *http.Request
 	writeMu      sync.Mutex
 	writeTimeout time.Duration
+	outbox       chan websocketEnvelope
 
 	closeOnce  sync.Once
 	done       chan struct{}
 	authorized bool
+
+	lastPongAt time.Time
+	lastPongMu sync.Mutex
 
 	historyEvents          <-chan *gatewayv1.HistorySyncEvent
 	historyEventsCleanup   func()
@@ -134,12 +144,17 @@ func NewWebSocketServer(cfg *config.Config, sm *session.Manager) http.Handler {
 		}
 		conn.SetReadLimit(webSocketReadLimit(cfg))
 
+		queueSize := websocketWriteQueueDefault
+		if cfg.WebSocketWriteQueueSize > 0 {
+			queueSize = cfg.WebSocketWriteQueueSize
+		}
 		state := &websocketConnection{
 			cfg:              cfg,
 			sm:               sm,
 			conn:             conn,
 			req:              r,
 			writeTimeout:     cfg.WebSocketWriteTimeout,
+			outbox:           make(chan websocketEnvelope, queueSize),
 			done:             make(chan struct{}),
 			terminalInterest: newWebsocketTerminalInterestTracker(),
 		}
@@ -168,6 +183,10 @@ func (c *websocketConnection) serve() {
 		req.ID = strings.TrimSpace(req.ID)
 		req.Type = strings.TrimSpace(req.Type)
 		if req.Type == "pong" {
+			c.lastPongMu.Lock()
+			c.lastPongAt = time.Now()
+			c.lastPongMu.Unlock()
+			_ = c.conn.SetReadDeadline(time.Now().Add(c.pongTimeout()))
 			continue
 		}
 		if req.ID == "" {
@@ -235,6 +254,8 @@ func (c *websocketConnection) handleAuth(req websocketRequest) {
 	}
 
 	c.authorized = true
+	go c.writeLoop()
+	_ = c.conn.SetReadDeadline(time.Now().Add(c.pongTimeout()))
 	c.startHistorySyncForwarder()
 	c.startSettingsSyncForwarder()
 	c.startTerminalEventForwarder()
@@ -275,8 +296,17 @@ func (c *websocketConnection) startHistorySyncForwarder() {
 						}
 					}
 				}
+				if payload["kind"] == "idle" && payload["run_id"] == nil {
+					conversationID := historySyncPayloadConversationID(payload, event)
+					if conversationID != "" {
+						if summary, ok := c.sm.ConversationRunSummary(conversationID); ok {
+							if rid := strings.TrimSpace(summary.RequestID); rid != "" {
+								payload["run_id"] = rid
+							}
+						}
+					}
+				}
 				if err := c.writeEvent("history.event", payload); err != nil {
-					c.close()
 					return
 				}
 			}
@@ -307,7 +337,6 @@ func (c *websocketConnection) startSettingsSyncForwarder() {
 					return
 				}
 				if err := c.writeEvent("settings.event", payload); err != nil {
-					c.close()
 					return
 				}
 			}
@@ -337,7 +366,6 @@ func (c *websocketConnection) startTerminalEventForwarder() {
 					continue
 				}
 				if err := c.writeEvent("terminal.event", websocketTerminalEventPayload(event)); err != nil {
-					c.close()
 					return
 				}
 			}
@@ -367,7 +395,6 @@ func (c *websocketConnection) startSftpEventForwarder() {
 					continue
 				}
 				if err := c.writeEvent("sftp.event", websocketSftpEventPayload(event)); err != nil {
-					c.close()
 					return
 				}
 			}
@@ -394,7 +421,6 @@ func (c *websocketConnection) startChatQueueEventForwarder() {
 					return
 				}
 				if err := c.writeEvent("chat_queue.event", websocketChatQueueEventPayload(event)); err != nil {
-					c.close()
 					return
 				}
 			}
@@ -416,7 +442,6 @@ func (c *websocketConnection) replayTerminalSessionSnapshot() {
 			ProjectPathKey: terminalSession.GetProjectPathKey(),
 			Session:        terminalSession,
 		})); err != nil {
-			c.close()
 			return
 		}
 	}
@@ -444,6 +469,9 @@ func (c *websocketConnection) startWebSocketHeartbeat() {
 		if period <= 0 {
 			period = 15 * time.Second
 		}
+		c.lastPongMu.Lock()
+		c.lastPongAt = time.Now()
+		c.lastPongMu.Unlock()
 		go func() {
 			ticker := time.NewTicker(period)
 			defer ticker.Stop()
@@ -452,19 +480,33 @@ func (c *websocketConnection) startWebSocketHeartbeat() {
 				case <-c.done:
 					return
 				case <-ticker.C:
+					c.lastPongMu.Lock()
+					lastPong := c.lastPongAt
+					c.lastPongMu.Unlock()
+					if time.Since(lastPong) > c.pongTimeout() {
+						c.close()
+						return
+					}
 					if err := c.writeEnvelope(websocketEnvelope{
 						Type: "ping",
 						Payload: map[string]any{
 							"timestamp": time.Now().Unix(),
 						},
 					}); err != nil {
-						c.close()
 						return
 					}
 				}
 			}
 		}()
 	})
+}
+
+func (c *websocketConnection) pongTimeout() time.Duration {
+	period := c.cfg.WebSocketHeartbeatPeriod
+	if period <= 0 {
+		period = 15 * time.Second
+	}
+	return period*3 + 5*time.Second
 }
 
 func (c *websocketConnection) dispatch(req websocketRequest) {
@@ -537,6 +579,58 @@ func (c *websocketConnection) writeEvent(eventType string, payload any) error {
 }
 
 func (c *websocketConnection) writeEnvelope(envelope websocketEnvelope) error {
+	select {
+	case <-c.done:
+		return errors.New("connection closed")
+	case c.outbox <- envelope:
+		return nil
+	default:
+		c.close()
+		return errors.New("write queue full")
+	}
+}
+
+func (c *websocketConnection) writeLoop() {
+	for {
+		select {
+		case <-c.done:
+			return
+		case envelope := <-c.outbox:
+			if err := c.writeEnvelopeDirect(envelope); err != nil {
+				ok := false
+				for attempt := 0; attempt < websocketMaxWriteRetries; attempt++ {
+					select {
+					case <-c.done:
+						return
+					case <-time.After(websocketRetryBackoff):
+					}
+					if err := c.writeEnvelopeDirect(envelope); err == nil {
+						ok = true
+						break
+					}
+				}
+				if !ok {
+					c.close()
+					return
+				}
+			}
+			for drained := 0; drained < 64; drained++ {
+				select {
+				case extra := <-c.outbox:
+					if err := c.writeEnvelopeDirect(extra); err != nil {
+						c.close()
+						return
+					}
+				default:
+					goto batchDone
+				}
+			}
+		batchDone:
+		}
+	}
+}
+
+func (c *websocketConnection) writeEnvelopeDirect(envelope websocketEnvelope) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	if c.writeTimeout > 0 {

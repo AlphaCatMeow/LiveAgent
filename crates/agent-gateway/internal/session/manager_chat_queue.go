@@ -24,7 +24,7 @@ func (m *Manager) SubscribeChatQueueEvents() (<-chan *gatewayv1.ChatQueueEvent, 
 	for _, conversationID := range conversationIDs {
 		replay = append(replay, cloneChatQueueEvent(m.syncHub.chatQueueSnapshots[conversationID].event))
 	}
-	ch := make(chan *gatewayv1.ChatQueueEvent, 64+len(replay))
+	ch := make(chan *gatewayv1.ChatQueueEvent, 128+len(replay))
 	subID := m.syncHub.nextChatQueueSubID
 	m.syncHub.nextChatQueueSubID += 1
 	m.syncHub.chatQueueSubscribers[subID] = ch

@@ -297,6 +297,7 @@ func chatBroadcastPayload(event *session.ChatBroadcastEvent) (map[string]any, bo
 				payload["workdir"] = workdir
 			}
 		}
+		trimLargeToolContentForSSE(payload, "")
 		return publicChatPayload(payload), isTerminalChatPayload(payload)
 	}
 	if event.Control != nil {

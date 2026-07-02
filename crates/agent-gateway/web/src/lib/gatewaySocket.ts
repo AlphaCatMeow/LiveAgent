@@ -38,7 +38,6 @@ import type {
   AgentStatus,
   ChatQueueResponse,
   ChatQueueSnapshot,
-  ChatEvent,
   ConversationSummary,
   GatewayHistoryEvent,
   CronManagePayload,
@@ -54,6 +53,17 @@ import type {
   HistoryWorkdirsResponse,
   MemoryManagePayload,
 } from "./gatewayTypes";
+import { ConversationStreamClient } from "@/lib/chat/stream/conversationStreamClient";
+import type {
+  ChatCommandAccepted,
+  ChatCommandUpdate,
+  ConversationActivityEvent,
+  ConversationStreamHandlers,
+} from "@/lib/chat/stream/streamTypes";
+import {
+  normalizeActivityEvent,
+  normalizeCommandUpdate,
+} from "@/lib/chat/stream/streamTypes";
 
 type GatewaySocketEnvelope = {
   id?: string;
@@ -72,17 +82,13 @@ type GatewaySettingsUpdateResponse = {
 type TerminalListener = (event: TerminalEvent) => void;
 type SftpTransferListener = (event: SftpTransferEvent) => void;
 type ChatQueueListener = (snapshot: ChatQueueSnapshot) => void;
+type ChatActivityListener = (event: ConversationActivityEvent) => void;
+type ChatCommandUpdateListener = (update: ChatCommandUpdate) => void;
 
 type PendingRequest = {
   resolve: (value: any) => void;
   reject: (reason?: unknown) => void;
   timeoutId: number;
-};
-
-type ChatEventStreamOptions = {
-  runId?: string;
-  afterSeq?: number;
-  signal?: AbortSignal;
 };
 
 type GatewayChatSystemSettings = {
@@ -568,7 +574,7 @@ function buildHistoryMessageRefPayload(ref: HistoryMessageRef) {
   };
 }
 
-type ChatCommandResponse = {
+type RawChatCommandResponse = {
   run_id?: string;
   conversation_id?: string;
   accepted_seq?: number;
@@ -647,25 +653,6 @@ function normalizeChatQueueEvent(
     raw.conversation_id,
     raw.revision,
   );
-}
-
-// Consumers (sendChat's preserveRemoteRunOnMismatch cleanup guards) read the
-// originating run id from non-enumerable event metadata so it never leaks into
-// persisted transcript entries. The gateway includes `run_id` on every
-// forwarded chat event; without this attachment a webui-initiated run's
-// cleanup cannot tell its own run apart from a newer run (e.g. a GUI queue
-// auto-send) and wipes the new run's remote-running state.
-function attachChatEventRunMetadata(event: ChatEvent) {
-  const runId = (event as ChatEvent & { run_id?: unknown }).run_id;
-  if (typeof runId !== "string" || !runId.trim()) {
-    return event;
-  }
-  Object.defineProperty(event, "__gatewayRunId", {
-    value: runId.trim(),
-    enumerable: false,
-    configurable: true,
-  });
-  return event;
 }
 
 const RECONNECT_INITIAL_DELAY_MS = 500;
@@ -1137,7 +1124,11 @@ export class GatewayWebSocketClient {
   private terminalListeners = new Set<TerminalListener>();
   private sftpTransferListeners = new Set<SftpTransferListener>();
   private chatQueueListeners = new Set<ChatQueueListener>();
-  private chatSubscriptions = new Map<string, { callback: (event: ChatEvent) => void; done: () => void }>();
+  private chatActivityListeners = new Set<ChatActivityListener>();
+  private chatCommandUpdateListeners = new Set<ChatCommandUpdateListener>();
+  readonly conversationStreams = new ConversationStreamClient({
+    request: (type, payload) => this.request(type, payload),
+  });
   private terminalSessionSnapshot = new Map<string, TerminalSession>();
   private statusPollTimer: number | null = null;
   private lastStatus: AgentStatus | null = null;
@@ -1335,60 +1326,62 @@ export class GatewayWebSocketClient {
     );
   }
 
-  async *commandChat(input: GatewayChatCommandInput): AsyncGenerator<ChatEvent> {
-    const signal = input.signal;
-    if (signal?.aborted) {
-      return;
-    }
+  // Submit a chat command. Streaming does not hang off the command: the
+  // conversation subscription (persistent, run-agnostic) carries the reply.
+  async chatCommand(input: GatewayChatCommandInput): Promise<ChatCommandAccepted> {
     if (this.token.trim() === "") {
       throw new Error("Gateway token is required");
     }
-
-    // Submit command via WebSocket
-    const commandResponse = await this.request<ChatCommandResponse>("chat.command", buildChatCommandPayload(input));
-    const runId = String(commandResponse.run_id ?? "").trim();
+    const response = await this.request<RawChatCommandResponse>(
+      "chat.command",
+      buildChatCommandPayload(input),
+    );
+    const runId = String(response.run_id ?? "").trim();
     if (!runId) {
       throw new Error("Gateway chat command returned no run_id");
     }
-    let conversationId =
-      String(commandResponse.conversation_id ?? "").trim() || input.conversationId?.trim() || "";
-
-    // Set up abort handler
-    const handleAbort = () => {
-      void this.request("chat.cancel", {
-        conversation_id: conversationId,
-        run_id: runId,
-      }).catch(() => undefined);
+    return {
+      runId,
+      conversationId:
+        String(response.conversation_id ?? "").trim() || input.conversationId?.trim() || "",
+      acceptedSeq:
+        typeof response.accepted_seq === "number" && Number.isFinite(response.accepted_seq)
+          ? response.accepted_seq
+          : 0,
     };
-    if (signal) {
-      if (signal.aborted) {
-        handleAbort();
-        return;
-      }
-      signal.addEventListener("abort", handleAbort, { once: true });
-    }
-
-    try {
-      yield* this.subscribeChatRunEvents(runId, conversationId, 0, signal);
-    } finally {
-      signal?.removeEventListener("abort", handleAbort);
-    }
   }
 
-  async *streamChatEvents(
+  // Persistent per-conversation stream subscription with built-in resume.
+  subscribeConversationStream(
     conversationId: string,
-    options?: ChatEventStreamOptions,
-  ): AsyncGenerator<ChatEvent> {
-    const normalizedConversationId = conversationId.trim();
-    if (!normalizedConversationId) {
-      throw new Error("conversation_id is required");
-    }
-    const signal = options?.signal;
-    if (signal?.aborted) {
-      return;
-    }
-    const normalizedRunId = options?.runId?.trim() ?? "";
-    yield* this.subscribeChatRunEvents(normalizedRunId, normalizedConversationId, options?.afterSeq ?? 0, signal);
+    handlers: ConversationStreamHandlers,
+  ): () => void {
+    const cleanup = this.conversationStreams.subscribe(conversationId, handlers);
+    // Establish the connection (and thereby the subscription) eagerly.
+    void this.ensureConnected()
+      .then(() => {
+        if (this.authenticated) {
+          this.conversationStreams.handleConnected();
+        }
+      })
+      .catch(() => {
+        this.scheduleReconnect();
+      });
+    return cleanup;
+  }
+
+  subscribeChatActivity(listener: ChatActivityListener): () => void {
+    this.chatActivityListeners.add(listener);
+    return () => {
+      this.chatActivityListeners.delete(listener);
+    };
+  }
+
+  subscribeChatCommandUpdates(listener: ChatCommandUpdateListener): () => void {
+    this.chatCommandUpdateListeners.add(listener);
+    return () => {
+      this.chatCommandUpdateListeners.delete(listener);
+    };
   }
 
   async cancelChat(conversationId: string, runId?: string): Promise<void> {
@@ -1400,79 +1393,6 @@ export class GatewayWebSocketClient {
       conversation_id: normalized,
       run_id: runId?.trim() || undefined,
     });
-  }
-
-  private async *subscribeChatRunEvents(
-    runId: string,
-    conversationId: string,
-    afterSeq: number,
-    signal?: AbortSignal,
-  ): AsyncGenerator<ChatEvent> {
-    const subResponse = await this.request<{
-      subscription_id: string;
-      snapshot: { run_id: string; conversation_id: string; state: string; latest_seq: number };
-      gap?: boolean;
-    }>("chat.subscribe", {
-      run_id: runId || undefined,
-      conversation_id: conversationId || undefined,
-      after_seq: afterSeq,
-    });
-
-    const subscriptionId = subResponse.subscription_id;
-    if (!subscriptionId) {
-      throw new Error("No subscription_id from chat.subscribe");
-    }
-
-    // Create event queue
-    const eventQueue: ChatEvent[] = [];
-    let resolve: (() => void) | null = null;
-    let done = false;
-
-    const onEvent = (event: ChatEvent) => {
-      eventQueue.push(event);
-      if (resolve) {
-        resolve();
-        resolve = null;
-      }
-    };
-    const onDone = () => {
-      done = true;
-      if (resolve) {
-        resolve();
-        resolve = null;
-      }
-    };
-
-    this.chatSubscriptions.set(subscriptionId, { callback: onEvent, done: onDone });
-
-    try {
-      while (!done && !signal?.aborted) {
-        if (eventQueue.length === 0) {
-          await new Promise<void>((r) => {
-            resolve = r;
-          });
-          continue;
-        }
-        const event = eventQueue.shift()!;
-        if (event.conversation_id?.trim()) {
-          conversationId = event.conversation_id.trim();
-        }
-        yield event;
-        const eventType = typeof event.type === "string" ? event.type.trim() : "";
-        if (
-          eventType === "done" ||
-          eventType === "completed" ||
-          eventType === "error" ||
-          eventType === "failed" ||
-          eventType === "cancelled"
-        ) {
-          return;
-        }
-      }
-    } finally {
-      this.chatSubscriptions.delete(subscriptionId);
-      void this.request("chat.unsubscribe", { subscription_id: subscriptionId }).catch(() => {});
-    }
   }
 
   async cronManage(payload: CronManagePayload): Promise<CronManageResponse> {
@@ -2190,7 +2110,9 @@ export class GatewayWebSocketClient {
         this.historyListeners.size > 0 ||
         this.settingsListeners.size > 0 ||
         this.terminalListeners.size > 0 ||
-        this.sftpTransferListeners.size > 0)
+        this.sftpTransferListeners.size > 0 ||
+        this.chatActivityListeners.size > 0 ||
+        this.conversationStreams.size > 0)
     );
   }
 
@@ -2432,6 +2354,7 @@ export class GatewayWebSocketClient {
             this.authenticated = true;
             this.clearReconnectNoticeTimer();
             this.reconnectAttempt = 0;
+            this.conversationStreams.handleConnected();
             if (!settled) {
               settled = true;
               resolve();
@@ -2498,12 +2421,7 @@ export class GatewayWebSocketClient {
 
     if (envelope.type === "history.event") {
       const event = envelope.payload as GatewayHistoryEvent;
-      if (
-        event?.kind === "upsert" ||
-        event?.kind === "delete" ||
-        event?.kind === "running" ||
-        event?.kind === "idle"
-      ) {
+      if (event?.kind === "upsert" || event?.kind === "delete") {
         this.emitHistory(event);
       }
       return;
@@ -2542,21 +2460,31 @@ export class GatewayWebSocketClient {
     }
 
     if (envelope.type === "chat.event") {
-      const payload = envelope.payload as any;
-      const subId = typeof payload?.subscription_id === "string" ? payload.subscription_id : "";
-      const sub = subId ? this.chatSubscriptions.get(subId) : undefined;
-      if (sub) {
-        sub.callback(attachChatEventRunMetadata(payload as ChatEvent));
+      this.conversationStreams.handleChatEvent(envelope.payload);
+      return;
+    }
+
+    if (envelope.type === "chat.subscription_reset") {
+      this.conversationStreams.handleSubscriptionReset(envelope.payload);
+      return;
+    }
+
+    if (envelope.type === "chat.activity") {
+      const event = normalizeActivityEvent(envelope.payload);
+      if (event) {
+        for (const listener of this.chatActivityListeners) {
+          listener(event);
+        }
       }
       return;
     }
 
-    if (envelope.type === "chat.subscription_end") {
-      const payload = envelope.payload as any;
-      const subId = typeof payload?.subscription_id === "string" ? payload.subscription_id : "";
-      const sub = subId ? this.chatSubscriptions.get(subId) : undefined;
-      if (sub) {
-        sub.done();
+    if (envelope.type === "chat.command_update") {
+      const update = normalizeCommandUpdate(envelope.payload);
+      if (update) {
+        for (const listener of this.chatCommandUpdateListeners) {
+          listener(update);
+        }
       }
       return;
     }
@@ -2603,11 +2531,9 @@ export class GatewayWebSocketClient {
       entry.reject(error);
     }
 
-    const chatSubs = [...this.chatSubscriptions.values()];
-    this.chatSubscriptions.clear();
-    for (const sub of chatSubs) {
-      sub.done();
-    }
+    // Conversation stream registrations survive the disconnect; they resume
+    // with their seq cursors when the socket re-authenticates.
+    this.conversationStreams.handleDisconnected();
 
     if (!this.disposed && this.statusListeners.size > 0) {
       if (isRecoverableGatewayTransportError(error) && this.shouldMaintainConnection()) {
@@ -2693,11 +2619,13 @@ export type GatewayWebSocketClientLike = {
   subscribeTerminal(listener: TerminalListener): () => void;
   subscribeSftpTransfers(listener: SftpTransferListener): () => void;
   subscribeChatQueue(listener: ChatQueueListener): () => void;
-  commandChat(input: GatewayChatCommandInput): AsyncGenerator<ChatEvent>;
-  streamChatEvents(
+  subscribeChatActivity(listener: ChatActivityListener): () => void;
+  subscribeChatCommandUpdates(listener: ChatCommandUpdateListener): () => void;
+  subscribeConversationStream(
     conversationId: string,
-    options?: ChatEventStreamOptions,
-  ): AsyncGenerator<ChatEvent>;
+    handlers: ConversationStreamHandlers,
+  ): () => void;
+  chatCommand(input: GatewayChatCommandInput): Promise<ChatCommandAccepted>;
   cancelChat(conversationId: string, runId?: string): Promise<void>;
   chatQueueGet(conversationId: string): Promise<ChatQueueResponse>;
   chatQueueGetItem(conversationId: string, itemId: string): Promise<ChatQueueResponse>;

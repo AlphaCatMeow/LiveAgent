@@ -1,0 +1,535 @@
+import type { ChatEntry, PushChatEventOptions } from "@/lib/chatUi";
+import { chatEntryDedupKey, pushChatEvent } from "@/lib/chatUi";
+import type { ChatEvent } from "@/lib/gatewayTypes";
+import type {
+  ConversationStreamEvent,
+  ConversationSubscribeResult,
+  StreamRunActivity,
+} from "./streamTypes";
+import { readEventRunId, readEventSeq } from "./streamTypes";
+
+// One transcript store per conversation, modeled after the GUI's proven
+// split between committed history and an append-only live tail:
+//
+//   committed  — history-backed entries (stable ids, virtualized region)
+//   settled    — entries of finished runs, not yet folded into committed;
+//                they stay in the (non-virtualized) tail region so the end
+//                of a reply moves zero DOM nodes
+//   live       — entries of the current in-flight segment
+//
+// Entry ids never change. Completion is supersession, not refetch: at the
+// next run_started the settled tail folds into committed in one commit,
+// together with the incoming user bubble.
+
+export type TranscriptSnapshot = {
+  committed: ChatEntry[];
+  // settled + live — everything rendered in the tail region.
+  tail: ChatEntry[];
+  activeRun: StreamRunActivity | null;
+  toolStatus: string | null;
+  toolStatusIsCompaction: boolean;
+  // Bumped whenever the settled tail folds into committed (the one moment a
+  // scroll-preserving flushSync commit is warranted).
+  foldRevision: number;
+  revision: number;
+};
+
+export type TranscriptStore = {
+  getSnapshot(): TranscriptSnapshot;
+  subscribe(listener: () => void): () => void;
+  // Stream plumbing.
+  applySync(result: ConversationSubscribeResult): void;
+  applyEvent(event: ConversationStreamEvent): void;
+  // Optimistic local echo for a command this client is submitting. The
+  // matching seeded user_message adopts the entry by client_request_id,
+  // keeping this id — the user bubble never remounts.
+  addOptimisticUserEntry(params: {
+    clientRequestId: string;
+    text: string;
+    attachments?: UserAttachments;
+  }): void;
+  removeOptimisticUserEntry(clientRequestId: string): void;
+  // Failure surfaced outside the stream (command never bound).
+  appendLocalError(message: string): void;
+  // History snapshot (initial load / quiet upsert merge). Preserves existing
+  // ids by dedup key and leaves tail entries in place — committed only takes
+  // history entries the tail is not already showing.
+  applyHistorySnapshot(entries: ChatEntry[]): void;
+  // Fold the settled tail into committed outside of run_started (used when
+  // the conversation is switched away; keeps the next mount clean).
+  foldSettledTail(): void;
+  reset(): void;
+  flush(): void;
+};
+
+type UserAttachments = Extract<ChatEntry, { kind: "user" }>["attachments"];
+
+const EMPTY_SNAPSHOT: TranscriptSnapshot = {
+  committed: [],
+  tail: [],
+  activeRun: null,
+  toolStatus: null,
+  toolStatusIsCompaction: false,
+  foldRevision: 0,
+  revision: 0,
+};
+
+function runIdPrefix(runId: string): string {
+  return runId ? `${runId}/` : "";
+}
+
+function optimisticEntryId(clientRequestId: string): string {
+  return `optimistic-user-${clientRequestId}`;
+}
+
+export function createTranscriptStore(): TranscriptStore {
+  let committed: ChatEntry[] = [];
+  let settled: ChatEntry[] = [];
+  let live: ChatEntry[] = [];
+  let activeRun: StreamRunActivity | null = null;
+  let toolStatus: string | null = null;
+  let toolStatusIsCompaction = false;
+  let foldRevision = 0;
+
+  let snapshot = EMPTY_SNAPSHOT;
+  let dirty = false;
+  let rafId: number | null = null;
+  const listeners = new Set<() => void>();
+  // clientRequestId → optimistic entry id, until adopted or removed.
+  const pendingOptimistic = new Map<string, string>();
+  // runId → ids of entries that belong to it but carry foreign ids (adopted
+  // optimistic entries), so run_queued compensation can remove them too.
+  const adoptedEntryIds = new Map<string, string[]>();
+
+  const buildSnapshot = (): TranscriptSnapshot => ({
+    committed,
+    tail: settled.length === 0 ? live : live.length === 0 ? settled : [...settled, ...live],
+    activeRun,
+    toolStatus,
+    toolStatusIsCompaction,
+    foldRevision,
+    revision: snapshot.revision + 1,
+  });
+
+  const emit = () => {
+    for (const listener of listeners) {
+      listener();
+    }
+  };
+  const commit = () => {
+    rafId = null;
+    if (!dirty) {
+      return;
+    }
+    dirty = false;
+    snapshot = buildSnapshot();
+    emit();
+  };
+  const schedule = (flush?: boolean) => {
+    dirty = true;
+    if (flush) {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      commit();
+      return;
+    }
+    if (rafId === null && typeof requestAnimationFrame === "function") {
+      rafId = requestAnimationFrame(commit);
+    } else if (typeof requestAnimationFrame !== "function") {
+      commit();
+    }
+  };
+
+  const foldSettled = (flush: boolean) => {
+    if (settled.length === 0) {
+      return;
+    }
+    committed = [...committed, ...settled];
+    settled = [];
+    foldRevision += 1;
+    schedule(flush);
+  };
+
+  const setToolStatus = (status: string | null, isCompaction: boolean, flush?: boolean) => {
+    const next = status && status.trim() ? status.trim() : null;
+    const nextCompaction = Boolean(next) && isCompaction;
+    if (toolStatus === next && toolStatusIsCompaction === nextCompaction) {
+      return;
+    }
+    toolStatus = next;
+    toolStatusIsCompaction = nextCompaction;
+    schedule(flush);
+  };
+
+  const adoptOptimisticEntry = (event: ConversationStreamEvent, runId: string): boolean => {
+    const clientRequestId =
+      typeof (event as { client_request_id?: unknown }).client_request_id === "string"
+        ? ((event as { client_request_id: string }).client_request_id ?? "").trim()
+        : "";
+    if (!clientRequestId) {
+      return false;
+    }
+    const entryId = pendingOptimistic.get(clientRequestId);
+    if (!entryId) {
+      return false;
+    }
+    pendingOptimistic.delete(clientRequestId);
+    // The optimistic entry already shows this exact message; keep it (and its
+    // id) and record the ownership for run_queued compensation.
+    if (runId) {
+      const owned = adoptedEntryIds.get(runId) ?? [];
+      owned.push(entryId);
+      adoptedEntryIds.set(runId, owned);
+    }
+    return live.some((entry) => entry.id === entryId);
+  };
+
+  const removeRunEntries = (runId: string) => {
+    const prefix = runIdPrefix(runId);
+    const adopted = new Set(adoptedEntryIds.get(runId) ?? []);
+    adoptedEntryIds.delete(runId);
+    const matches = (entry: ChatEntry) =>
+      (prefix !== "" && entry.id.startsWith(prefix)) || adopted.has(entry.id);
+    const nextLive = live.filter((entry) => !matches(entry));
+    const nextSettled = settled.filter((entry) => !matches(entry));
+    if (nextLive.length !== live.length || nextSettled.length !== settled.length) {
+      live = nextLive;
+      settled = nextSettled;
+      schedule(true);
+    }
+  };
+
+  const applyRunFinished = (event: ConversationStreamEvent) => {
+    const payload = event as {
+      status?: string;
+      message?: string;
+      reason?: string;
+    };
+    if (payload.status === "failed" && payload.message && payload.reason !== "superseded") {
+      live = pushChatEvent(
+        live,
+        { type: "error", message: payload.message } as ChatEvent,
+        { entryIdPrefix: runIdPrefix(readEventRunId(event)) },
+      );
+    }
+    settled = live.length === 0 ? settled : [...settled, ...live];
+    live = [];
+    activeRun = null;
+    setToolStatus(null, false);
+    schedule(true);
+  };
+
+  const applyDelta = (event: ConversationStreamEvent, runId: string) => {
+    if (event.type === "user_message" && adoptOptimisticEntry(event, runId)) {
+      schedule(true);
+      return;
+    }
+    const options: PushChatEventOptions = { entryIdPrefix: runIdPrefix(runId) };
+    const next = pushChatEvent(live, event as ChatEvent, options);
+    if (next !== live) {
+      live = next;
+      schedule(event.type === "user_message");
+    }
+  };
+
+  const rebuildLiveFromSnapshot = (entriesJson: string, runId: string) => {
+    const entries = parseSnapshotEntries(entriesJson);
+    if (entries.length === 0 && live.length === 0) {
+      return;
+    }
+    // Snapshot entries carry their own (runtime-assigned) ids; prefix them so
+    // they cannot collide with entries of other runs.
+    const prefix = runIdPrefix(runId);
+    live = entries.map((entry) =>
+      prefix && !entry.id.startsWith(prefix) ? { ...entry, id: `${prefix}${entry.id}` } : entry,
+    );
+    schedule(true);
+  };
+
+  return {
+    getSnapshot: () => snapshot,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+
+    applySync: (result) => {
+      if (result.reset) {
+        // Seq continuity broke (gateway restart / buffer gap). Committed
+        // history is still valid; rebuild the tail from scratch.
+        settled = [];
+        live = [];
+        activeRun = null;
+        toolStatus = null;
+        toolStatusIsCompaction = false;
+        if (result.snapshot) {
+          rebuildLiveFromSnapshot(result.snapshot.entriesJson, result.snapshot.runId);
+        }
+      } else if (result.snapshot && live.length === 0) {
+        // Late join mid-run where the buffer cannot cover the run start.
+        rebuildLiveFromSnapshot(result.snapshot.entriesJson, result.snapshot.runId);
+      }
+      activeRun = result.activity;
+      if (result.activity) {
+        setToolStatus(result.activity.toolStatus, result.activity.toolStatusIsCompaction);
+      } else if (result.reset) {
+        setToolStatus(null, false);
+      }
+      for (const event of result.events) {
+        applyOne(event);
+      }
+      schedule(true);
+    },
+
+    applyEvent: (event) => {
+      applyOne(event);
+    },
+
+    addOptimisticUserEntry: ({ clientRequestId, text, attachments }) => {
+      const id = optimisticEntryId(clientRequestId);
+      if (live.some((entry) => entry.id === id)) {
+        return;
+      }
+      pendingOptimistic.set(clientRequestId, id);
+      live = [
+        ...live,
+        {
+          id,
+          kind: "user",
+          text,
+          attachments: (attachments ?? []) as UserAttachments,
+        },
+      ];
+      schedule(true);
+    },
+
+    removeOptimisticUserEntry: (clientRequestId) => {
+      const id = pendingOptimistic.get(clientRequestId) ?? optimisticEntryId(clientRequestId);
+      pendingOptimistic.delete(clientRequestId);
+      const next = live.filter((entry) => entry.id !== id);
+      if (next.length !== live.length) {
+        live = next;
+        schedule(true);
+      }
+    },
+
+    appendLocalError: (message) => {
+      live = pushChatEvent(live, { type: "error", message } as ChatEvent, {
+        entryIdPrefix: "local/",
+      });
+      schedule(true);
+    },
+
+    applyHistorySnapshot: (entries) => {
+      // Preserve ids of entries we already render (matched by dedup key —
+      // tool entries match by tool-call identity, immune to live-path
+      // trimming) and keep tail entries where they are: committed only takes
+      // what the tail is not showing.
+      const existingByKey = new Map<string, ChatEntry>();
+      for (const entry of committed) {
+        existingByKey.set(chatEntryDedupKey(entry), entry);
+      }
+      const tailKeys = new Set<string>();
+      for (const entry of settled) {
+        tailKeys.add(chatEntryDedupKey(entry));
+      }
+      for (const entry of live) {
+        tailKeys.add(chatEntryDedupKey(entry));
+      }
+
+      const nextCommitted: ChatEntry[] = [];
+      let changed = entries.length !== committed.length;
+      for (const entry of entries) {
+        const key = chatEntryDedupKey(entry);
+        if (tailKeys.has(key)) {
+          // Already rendered in the tail region; folds in at run_started.
+          changed = true;
+          continue;
+        }
+        const existing = existingByKey.get(key);
+        if (existing) {
+          // Same logical entry: keep the rendered id, upgrade the payload
+          // (history carries full, untrimmed tool content).
+          const upgraded = entry.id === existing.id ? entry : { ...entry, id: existing.id };
+          nextCommitted.push(upgraded);
+          if (existing !== upgraded) {
+            changed = true;
+          }
+        } else {
+          nextCommitted.push(entry);
+          changed = true;
+        }
+      }
+      if (!changed && nextCommitted.length === committed.length) {
+        return;
+      }
+      committed = nextCommitted;
+      schedule(true);
+    },
+
+    foldSettledTail: () => {
+      foldSettled(true);
+    },
+
+    reset: () => {
+      committed = [];
+      settled = [];
+      live = [];
+      activeRun = null;
+      toolStatus = null;
+      toolStatusIsCompaction = false;
+      pendingOptimistic.clear();
+      adoptedEntryIds.clear();
+      schedule(true);
+    },
+
+    flush: () => {
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      commit();
+    },
+  };
+
+  // edit_resend: truncate the transcript at the edited user message. The new
+  // user_message (adopting the optimistic entry) follows in the stream.
+  function applyRebased(event: ConversationStreamEvent) {
+    const ref = (event as { base_message_ref?: unknown }).base_message_ref;
+    if (!ref || typeof ref !== "object") {
+      return;
+    }
+    const refValue = ref as Record<string, unknown>;
+    const messageId =
+      typeof refValue.message_id === "string" ? refValue.message_id.trim() : "";
+    const contentHash =
+      typeof refValue.content_hash === "string" ? refValue.content_hash.trim() : "";
+    if (!messageId && !contentHash) {
+      return;
+    }
+    foldSettled(true);
+    const index = committed.findIndex(
+      (entry) =>
+        entry.kind === "user" &&
+        entry.messageRef != null &&
+        ((messageId !== "" && entry.messageRef.messageId === messageId) ||
+          (contentHash !== "" && entry.messageRef.contentHash === contentHash)),
+    );
+    if (index < 0) {
+      return;
+    }
+    committed = committed.slice(0, index);
+    schedule(true);
+  }
+
+  function applyOne(event: ConversationStreamEvent) {
+    const runId = readEventRunId(event);
+    switch (event.type) {
+      case "run_started": {
+        // Fold the previous reply into history in the same commit that will
+        // render the new run — the one intentional layout change.
+        foldSettled(true);
+        activeRun = {
+          runId,
+          state: "running",
+          startedSeq: readEventSeq(event),
+          toolStatus: null,
+          toolStatusIsCompaction: false,
+          clientRequestId:
+            typeof (event as { client_request_id?: unknown }).client_request_id === "string"
+              ? (event as { client_request_id: string }).client_request_id
+              : undefined,
+          updatedAt: Date.now(),
+        };
+        setToolStatus(null, false, true);
+        return;
+      }
+      case "run_finished": {
+        applyRunFinished(event);
+        return;
+      }
+      case "run_queued": {
+        // The prompt went into the desktop queue: drop its provisional
+        // entries; the queue UI shows it instead.
+        removeRunEntries(runId);
+        if (activeRun?.runId === runId) {
+          activeRun = null;
+          schedule(true);
+        }
+        return;
+      }
+      case "rebased": {
+        applyRebased(event);
+        return;
+      }
+      case "snapshot": {
+        const payload = event as { entries_json?: string };
+        rebuildLiveFromSnapshot(payload.entries_json ?? "", runId);
+        const status = (event as { tool_status?: string | null }).tool_status ?? null;
+        setToolStatus(
+          typeof status === "string" ? status : null,
+          (event as { tool_status_is_compaction?: boolean }).tool_status_is_compaction === true,
+          true,
+        );
+        return;
+      }
+      case "tool_status": {
+        const status = (event as { status?: string | null }).status ?? null;
+        setToolStatus(
+          typeof status === "string" ? status : null,
+          (event as { isCompaction?: boolean }).isCompaction === true,
+        );
+        if (activeRun && activeRun.runId === runId) {
+          activeRun = { ...activeRun, toolStatus, toolStatusIsCompaction };
+        }
+        return;
+      }
+      default: {
+        applyDelta(event, runId);
+      }
+    }
+  }
+}
+
+function isSnapshotChatEntry(value: unknown): value is ChatEntry {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const v = value as Record<string, unknown>;
+  if (typeof v.id !== "string" || typeof v.kind !== "string") {
+    return false;
+  }
+  switch (v.kind) {
+    case "user":
+      return typeof v.text === "string" && Array.isArray(v.attachments);
+    case "assistant":
+    case "thinking":
+    case "error":
+      return typeof v.text === "string";
+    case "tool_call":
+      return v.toolCall != null && typeof v.toolCall === "object";
+    case "tool_result":
+      return v.toolResult != null && typeof v.toolResult === "object";
+    case "hosted_search":
+      return v.hostedSearch != null && typeof v.hostedSearch === "object";
+    default:
+      return false;
+  }
+}
+
+export function parseSnapshotEntries(json: string | undefined): ChatEntry[] {
+  const raw = typeof json === "string" ? json.trim() : "";
+  if (!raw) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(isSnapshotChatEntry) : [];
+  } catch {
+    return [];
+  }
+}

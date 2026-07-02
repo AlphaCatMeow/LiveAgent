@@ -1017,8 +1017,8 @@ function buildLiveAssistantEntryId(round?: number, occurrence = 0) {
   return occurrence <= 0 ? baseId : `${baseId}-${occurrence}`;
 }
 
-function isLiveAssistantEntryIdForRound(id: string, round?: number) {
-  const baseId = `live-assistant-${round ?? 0}`;
+function isLiveAssistantEntryIdForRound(id: string, round?: number, idPrefix = "") {
+  const baseId = `${idPrefix}live-assistant-${round ?? 0}`;
   return id === baseId || id.startsWith(`${baseId}-`);
 }
 
@@ -1286,7 +1286,18 @@ function enrichTailHostedSearchEntriesWithText(entries: ChatEntry[]): ChatEntry[
   return next ?? entries;
 }
 
-export function pushChatEvent(entries: ChatEntry[], event: ChatEvent): ChatEntry[] {
+export type PushChatEventOptions = {
+  // Namespaces generated entry ids (e.g. "run-abc/") so entries from
+  // different runs of one conversation can never collide on id.
+  entryIdPrefix?: string;
+};
+
+export function pushChatEvent(
+  entries: ChatEntry[],
+  event: ChatEvent,
+  options?: PushChatEventOptions,
+): ChatEntry[] {
+  const idPrefix = options?.entryIdPrefix ?? "";
   if (event.type === "user_message") {
     const text = readString(event.message);
     const attachments = normalizeLiveUploadedFiles(event.uploaded_files);
@@ -1299,7 +1310,7 @@ export function pushChatEvent(entries: ChatEntry[], event: ChatEvent): ChatEntry
     return [
       ...entries,
       {
-        id: randomId("live-user"),
+        id: idPrefix + randomId("live-user"),
         kind: "user",
         text,
         attachments,
@@ -1364,12 +1375,12 @@ export function pushChatEvent(entries: ChatEntry[], event: ChatEvent): ChatEntry
       entries,
       (entry) =>
         entry.kind === "assistant" &&
-        isLiveAssistantEntryIdForRound(entry.id, round),
+        isLiveAssistantEntryIdForRound(entry.id, round, idPrefix),
     );
     const next: ChatEntry[] = [
       ...entries,
       {
-        id: buildLiveAssistantEntryId(round, occurrence),
+        id: idPrefix + buildLiveAssistantEntryId(round, occurrence),
         kind: "assistant",
         text,
         round,
@@ -1396,7 +1407,7 @@ export function pushChatEvent(entries: ChatEntry[], event: ChatEvent): ChatEntry
     return [
       ...entries,
       {
-        id: buildLiveThinkingEntryId(round, occurrence),
+        id: idPrefix + buildLiveThinkingEntryId(round, occurrence),
         kind: "thinking",
         round,
         text,
@@ -1417,7 +1428,7 @@ export function pushChatEvent(entries: ChatEntry[], event: ChatEvent): ChatEntry
       return mergedToolCall.entries;
     }
 
-    const baseId = buildLiveToolCallBaseId({
+    const baseId = idPrefix + buildLiveToolCallBaseId({
       round,
       id: eventToolCall.id,
       name: eventToolCall.name,
@@ -1472,7 +1483,7 @@ export function pushChatEvent(entries: ChatEntry[], event: ChatEvent): ChatEntry
       return nextEntries;
     }
 
-    const baseId = buildLiveToolResultBaseId({
+    const baseId = idPrefix + buildLiveToolResultBaseId({
       round,
       toolCallId: resultToolCall.id ?? event.id,
       toolName: resultToolCall.name ?? event.name,
@@ -1563,7 +1574,7 @@ export function pushChatEvent(entries: ChatEntry[], event: ChatEvent): ChatEntry
       }
     }
 
-    const baseId = buildLiveHostedSearchBaseId({
+    const baseId = idPrefix + buildLiveHostedSearchBaseId({
       round,
       id: hostedSearch.id,
       queries: hostedSearch.queries,
@@ -1593,7 +1604,7 @@ export function pushChatEvent(entries: ChatEntry[], event: ChatEvent): ChatEntry
     return [
       ...entries,
       {
-        id: `live-error-${round ?? 0}-${errorId}`,
+        id: `${idPrefix}live-error-${round ?? 0}-${errorId}`,
         kind: "assistant",
         round,
         text,

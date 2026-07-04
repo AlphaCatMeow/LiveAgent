@@ -2954,6 +2954,9 @@ function GitOperationNoticeToast({
 }
 
 type GitReviewPanelProps = {
+  // Visibility contract from the right-dock registry (consumed in a later
+  // phase; declared now so the wiring is stable).
+  active?: boolean;
   cwd: string;
   gitClient?: GitClient | null;
   canWrite?: boolean;

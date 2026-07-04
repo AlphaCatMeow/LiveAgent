@@ -4,6 +4,12 @@
   "webRoot": "crates/agent-gateway/web/src",
   "files": [
     "components/project-tools/rightDockModel.ts",
+    "components/project-tools/rightDockRegistry.tsx",
+    "components/project-tools/RightDockContent.tsx",
+    "components/project-tools/RightDockContext.tsx",
+    "components/project-tools/RightDockLauncher.tsx",
+    "components/project-tools/RightDockPanel.tsx",
+    "components/project-tools/RightDockTabStrip.tsx",
     "components/project-tools/useRightDockSessions.ts",
     "components/project-tools/useRightDockProjectTabs.ts",
     "components/project-tools/useRightDockTabReorder.tsx",

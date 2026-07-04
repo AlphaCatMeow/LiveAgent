@@ -1,7 +1,8 @@
 import { useLocale } from "../../i18n";
+import { cn } from "../../lib/shared/utils";
 import type { TerminalShellOption } from "../../lib/terminal/types";
 import { ChevronRight, Plus, Terminal } from "../icons";
-import { Button } from "../ui/button";
+import { buttonVariants } from "../ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -92,16 +93,18 @@ export function RightDockCreateMenu(props: RightDockCreateMenuProps) {
 
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          disabled={!(projectReady || tunnelAvailable) || creating}
-          title={t("projectTools.newProjectTool")}
-          className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground"
-        >
-          <Plus className="h-4 w-4" />
-        </Button>
+      {/* Native trigger button styled via buttonVariants: the Base UI (GUI) and
+          Radix (web) triggers both render a plain <button>, so this markup can
+          stay byte-identical on both ends without asChild/render adapters. */}
+      <DropdownMenuTrigger
+        disabled={!(projectReady || tunnelAvailable) || creating}
+        title={t("projectTools.newProjectTool")}
+        className={cn(
+          buttonVariants({ variant: "ghost", size: "icon" }),
+          "h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground",
+        )}
+      >
+        <Plus className="h-4 w-4" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" sideOffset={6} className="min-w-40">
         {terminalItem}

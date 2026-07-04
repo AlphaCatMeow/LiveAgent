@@ -2443,3 +2443,25 @@ body > div:not(#root) [data-streamdown="mermaid"] svg {
   animation: editorContextMenuIn 0.15s cubic-bezier(0.16, 1, 0.3, 1);
   transform-origin: top left;
 }
+
+/*
+ * Right-dock header metrics — the dock markup is byte-mirrored with the
+ * gateway WebUI and therefore carries the web-sized utilities (h-11 header,
+ * h-8 tab row, no vertical padding). The desktop GUI restores its own
+ * metrics here. MUST stay outside @layer so these rules beat the Tailwind
+ * utility classes baked into the mirrored markup (unlayered styles win over
+ * the utilities layer in Tailwind v4).
+ */
+.project-tools-panel-header {
+  height: 3.25rem;
+}
+.project-tools-panel-tabs {
+  height: 2.5rem;
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+}
+/* Mobile drag handle from the mirrored WebUI markup; the desktop GUI has no
+ * mobile sheet presentation, so it is never shown here. */
+.project-tools-panel-handle {
+  display: none;
+}

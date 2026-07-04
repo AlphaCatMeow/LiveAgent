@@ -1,8 +1,11 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
+  memo,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
   useCallback,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -16,11 +19,13 @@ import type {
 } from "../../lib/settings";
 import { cn } from "../../lib/shared/utils";
 import type { TerminalClient, TerminalSession } from "../../lib/terminal/types";
+import type { WorkspaceActivityClient } from "../../lib/workspace-activity/types";
 import { X } from "../icons";
 import { Button } from "../ui/button";
 import type { GitCommitContextPayload, GitFileContextPayload } from "./GitReviewPanel";
 import type { LocalTunnelClient } from "./LocalTunnelPanel";
 import { RightDockContent } from "./RightDockContent";
+import { RightDockToolContext, type RightDockToolContextValue } from "./RightDockContext";
 import { RightDockChooser, RightDockCreateMenu } from "./RightDockLauncher";
 import { RightDockTabStrip } from "./RightDockTabStrip";
 import {
@@ -58,6 +63,7 @@ type RightDockPanelProps = {
   tunnelEnabled?: boolean;
   tunnelDisabledMessage?: string;
   tunnelPublicBaseUrl: string;
+  workspaceActivityClient?: WorkspaceActivityClient | null;
   onWidthChange: (width: number) => void;
   onProjectStateChange: (
     updater: (current: RightDockProjectState) => RightDockProjectState,
@@ -86,6 +92,11 @@ type RightDockTabsScrollbarDragState = {
 };
 
 const RIGHT_DOCK_TABS_SCROLLBAR_MIN_THUMB_WIDTH = 28;
+
+// Stable fallbacks for optional array props: fresh `[]` defaults would defeat
+// both the panel memo and the context useMemo below.
+const NO_SSH_HOSTS: SshHostConfig[] = [];
+const NO_ASSOCIATED_SSH_HOST_IDS: string[] = [];
 
 function RightDockTabsScrollbar(props: { scrollRef: RefObject<HTMLDivElement | null> }) {
   const { scrollRef } = props;
@@ -305,7 +316,7 @@ function RightDockTabsScrollbar(props: { scrollRef: RefObject<HTMLDivElement | n
   );
 }
 
-export function RightDockPanel(props: RightDockPanelProps) {
+export const RightDockPanel = memo(function RightDockPanel(props: RightDockPanelProps) {
   const {
     isOpen,
     collapseImmediately = false,
@@ -319,8 +330,8 @@ export function RightDockPanel(props: RightDockPanelProps) {
     terminalDisabledMessage,
     projectState,
     fileTreeState,
-    sshHosts = [],
-    associatedSshHostIds = [],
+    sshHosts = NO_SSH_HOSTS,
+    associatedSshHostIds = NO_ASSOCIATED_SSH_HOST_IDS,
     client,
     gitClient,
     gitWriteEnabled = true,
@@ -329,6 +340,7 @@ export function RightDockPanel(props: RightDockPanelProps) {
     tunnelEnabled = true,
     tunnelDisabledMessage,
     tunnelPublicBaseUrl,
+    workspaceActivityClient,
     onWidthChange,
     onProjectStateChange,
     onFileTreeStateChange,
@@ -488,199 +500,269 @@ export function RightDockPanel(props: RightDockPanelProps) {
     [fileTreeState.expandedPaths, onFileTreeStateChange, projectReady, startToolTab],
   );
 
-  return (
-    <aside
-      ref={panelRef}
-      aria-hidden={!isOpen}
-      inert={!isOpen}
-      data-state={isOpen ? "open" : "closed"}
-      data-project-tools-resizing={isResizing ? "true" : undefined}
-      className={cn(
-        "fixed inset-x-0 bottom-0 z-40 flex h-[min(72vh,34rem)] min-h-0 w-full shrink-0 flex-col overflow-hidden bg-background shadow-2xl transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none md:relative md:inset-auto md:z-10 md:h-full md:overflow-visible md:shadow-none",
-        isOpen
-          ? "pointer-events-auto translate-y-0 border-t border-border opacity-100 md:w-[var(--project-tools-panel-width)] md:translate-x-0 md:border-l md:border-t-0"
-          : "pointer-events-none translate-y-full border-t border-transparent opacity-0 md:translate-x-3 md:translate-y-0 md:border-l-0 md:border-t-0",
-        effectiveWidthCollapsed ? "md:w-0" : "md:w-[var(--project-tools-panel-width)]",
-      )}
-      style={panelStyle}
-    >
-      <div
-        className={cn(
-          "flex h-full min-h-0 w-full flex-col transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none md:w-[var(--project-tools-panel-width)] md:min-w-[var(--project-tools-panel-width)]",
-          isOpen
-            ? "translate-y-0 opacity-100 md:translate-x-0"
-            : "translate-y-3 opacity-0 md:translate-x-2 md:translate-y-0",
-        )}
-      >
-        {effectiveShouldRenderContent ? (
-          <>
-            <button
-              type="button"
-              aria-label={t("projectTools.resizePanel")}
-              title={t("projectTools.resizePanel")}
-              className={cn(
-                "group absolute inset-y-0 left-0 z-[90] hidden w-3 cursor-col-resize touch-none items-center justify-center border-0 bg-transparent p-0 md:flex",
-                "focus-visible:outline-none",
-              )}
-              onMouseDown={handleResizeStart}
-            >
-              <span
-                aria-hidden="true"
-                className={cn(
-                  "h-10 w-0.5 rounded-full bg-muted-foreground/25 opacity-70 shadow-sm transition-[height,background-color,opacity]",
-                  "group-hover:h-16 group-hover:bg-primary/60 group-hover:opacity-100 group-focus-visible:h-16 group-focus-visible:bg-primary group-focus-visible:opacity-100",
-                  isResizing && "h-20 bg-primary opacity-100",
-                )}
-              />
-            </button>
-            <div className="project-tools-panel-header flex h-[3.25rem] shrink-0 items-center gap-2 border-b border-border px-3">
-              <div className="project-tools-panel-tabs-shell flex min-w-0 flex-1 flex-col justify-center gap-1">
-                <div
-                  ref={tabsScrollRef}
-                  className="project-tools-panel-tabs flex h-10 min-w-0 items-center gap-1 overflow-x-auto overflow-y-hidden py-1"
-                >
-                  <RightDockTabStrip
-                    tabs={orderedProjectTabs}
-                    currentActiveTab={currentActiveTab}
-                    activeSession={activeSession}
-                    pendingCloseSessionId={pendingCloseSessionId}
-                    closingSessionIds={closingSessionIds}
-                    draggingTabId={draggingTabId}
-                    renderTabDragHandle={renderTabDragHandle}
-                    consumeSuppressedTabClick={consumeSuppressedTabClick}
-                    onActivateTab={activateTab}
-                    onActivateTerminalSession={activateTerminalSession}
-                    onCloseToolTab={closeToolTab}
-                    onCloseTerminalRequest={handleCloseRequest}
-                  />
-                </div>
-                <RightDockTabsScrollbar scrollRef={tabsScrollRef} />
-              </div>
-              <RightDockCreateMenu
-                open={createMenuOpen}
-                onOpenChange={setCreateMenuOpen}
-                shellOptions={shellOptions}
-                terminalReady={terminalReady}
-                terminalDisabledMessage={terminalDisabledMessage}
-                projectReady={projectReady}
-                tunnelAvailable={tunnelAvailable}
-                creating={creating}
-                onCreateTerminal={createTerminal}
-                onStartTool={startToolTab}
-              />
-              {onClose ? (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={onClose}
-                  title={t("projectTools.closePanel")}
-                  className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground md:hidden"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              ) : null}
-            </div>
+  const openExternal = useCallback((url: string) => {
+    void openUrl(url);
+  }, []);
 
-            {pendingCloseSession ? (
-              <div className="flex shrink-0 items-center gap-2 border-b border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                <span className="min-w-0 flex-1 truncate">
-                  {t("projectTools.closeRunningTerminal").replace(
-                    "{title}",
-                    formatTerminalSessionTitle(
-                      pendingCloseSession.title,
-                      t("projectTools.terminalTitle"),
-                    ),
-                  )}
-                </span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-7 shrink-0 px-2.5 text-xs"
-                  onClick={clearPendingCloseSession}
-                >
-                  {t("settings.cancel")}
-                </Button>
-                <Button
-                  type="button"
-                  variant="destructive"
-                  size="sm"
-                  className="h-7 shrink-0 px-2.5 text-xs"
-                  disabled={closingSessionIds.has(pendingCloseSession.id)}
-                  onClick={() => closeSession(pendingCloseSession)}
-                >
-                  {t("projectTools.close")}
-                </Button>
-              </div>
-            ) : null}
-
-            {showDisabledMessage ? (
-              <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
-                {disabledMessage}
-              </div>
-            ) : showRightDockChooser ? (
-              <RightDockChooser
-                terminalReady={terminalReady}
-                terminalDisabledMessage={terminalDisabledMessage}
-                disabledMessage={disabledMessage}
-                projectReady={projectReady}
-                tunnelAvailable={tunnelAvailable}
-                creating={creating}
-                loading={loading}
-                error={error}
-                onCreateTerminal={createTerminal}
-                onStartTool={startToolTab}
-              />
-            ) : (
-              <RightDockContent
-                projectPathKey={projectPathKey}
-                cwd={cwd}
-                currentActiveTab={currentActiveTab}
-                fileTreeInitialized={fileTreeInitialized}
-                gitReviewInitialized={gitReviewInitialized}
-                tunnelInitialized={tunnelInitialized}
-                sshTunnelInitialized={sshTunnelInitialized}
-                fileTreeState={fileTreeState}
-                gitClient={gitClient}
-                gitWriteEnabled={gitWriteEnabled}
-                gitDisabledMessage={gitDisabledMessage}
-                tunnelClient={tunnelClient}
-                tunnelEnabled={tunnelEnabled}
-                tunnelDisabledMessage={tunnelDisabledMessage}
-                tunnelPublicBaseUrl={tunnelPublicBaseUrl}
-                sshHosts={sshHosts}
-                associatedSshHostIds={associatedSshHostIds}
-                client={client}
-                sshSessions={sshSessions}
-                localSessions={localSessions}
-                activeSession={activeSession}
-                initialTerminalSnapshotsRef={initialTerminalSnapshotsRef}
-                theme={theme}
-                error={error}
-                terminalReady={terminalReady}
-                terminalDisabledMessage={terminalDisabledMessage}
-                creating={creating}
-                loading={loading}
-                onFileTreeInitializedChange={setFileTreeInitialized}
-                onFileTreeStateChange={onFileTreeStateChange}
-                onInsertFileMention={onInsertFileMention}
-                onOpenFile={onOpenFile}
-                onRevealInFileTree={revealPathInFileTree}
-                onInsertCommitMention={onInsertCommitMention}
-                onInsertGitFileMention={onInsertGitFileMention}
-                onSessionSnapshot={rememberTerminalSnapshot}
-                onSessionClosed={forgetTerminalSession}
-                onSshSessionsReconcile={reconcileSshSessions}
-                onOpenSshSession={onOpenSshSession}
-                onSshProjectHostIdsChange={onSshProjectHostIdsChange}
-                onTerminalError={setError}
-                onInitialTerminalSnapshotConsumed={handleInitialTerminalSnapshotConsumed}
-                onCreateTerminal={handleCreate}
-              />
-            )}
-          </>
-        ) : null}
-      </div>
-    </aside>
+  const toolContextValue = useMemo<RightDockToolContextValue>(
+    () => ({
+      projectPathKey,
+      cwd,
+      theme,
+      clients: {
+        terminal: client,
+        git: gitClient,
+        tunnel: tunnelClient,
+        workspaceActivity: workspaceActivityClient,
+      },
+      capabilities: {
+        projectReady,
+        terminalReady,
+        disabledMessage,
+        terminalDisabledMessage,
+        gitWriteEnabled,
+        gitDisabledMessage,
+        tunnelEnabled,
+        tunnelDisabledMessage,
+        tunnelPublicBaseUrl,
+      },
+      fileTree: {
+        state: fileTreeState,
+        initialized: fileTreeInitialized,
+        onInitializedChange: setFileTreeInitialized,
+        onStateChange: onFileTreeStateChange,
+        onInsertFileMention,
+        onOpenFile,
+        onRevealInFileTree: revealPathInFileTree,
+      },
+      git: {
+        onInsertCommitMention,
+        onInsertGitFileMention,
+      },
+      ssh: {
+        hosts: sshHosts,
+        associatedHostIds: associatedSshHostIds,
+        sessions: sshSessions,
+        onOpenSession: onOpenSshSession,
+        onAssociatedHostIdsChange: onSshProjectHostIdsChange,
+        onSessionSnapshot: rememberTerminalSnapshot,
+        onSessionClosed: forgetTerminalSession,
+        onSessionsReconcile: reconcileSshSessions,
+      },
+      openExternal,
+    }),
+    [
+      associatedSshHostIds,
+      client,
+      cwd,
+      disabledMessage,
+      fileTreeInitialized,
+      fileTreeState,
+      forgetTerminalSession,
+      gitClient,
+      gitDisabledMessage,
+      gitWriteEnabled,
+      onFileTreeStateChange,
+      onInsertCommitMention,
+      onInsertFileMention,
+      onInsertGitFileMention,
+      onOpenFile,
+      onOpenSshSession,
+      onSshProjectHostIdsChange,
+      openExternal,
+      projectPathKey,
+      projectReady,
+      reconcileSshSessions,
+      rememberTerminalSnapshot,
+      revealPathInFileTree,
+      setFileTreeInitialized,
+      sshHosts,
+      sshSessions,
+      terminalDisabledMessage,
+      terminalReady,
+      theme,
+      tunnelClient,
+      tunnelDisabledMessage,
+      tunnelEnabled,
+      tunnelPublicBaseUrl,
+      workspaceActivityClient,
+    ],
   );
-}
+
+  const initializedTools = useMemo<Record<RightDockSingletonTabKind, boolean>>(
+    () => ({
+      fileTree: fileTreeInitialized,
+      gitReview: gitReviewInitialized,
+      tunnel: tunnelInitialized,
+      sshTunnel: sshTunnelInitialized,
+    }),
+    [fileTreeInitialized, gitReviewInitialized, sshTunnelInitialized, tunnelInitialized],
+  );
+
+  return (
+    <RightDockToolContext.Provider value={toolContextValue}>
+      <aside
+        ref={panelRef}
+        aria-hidden={!isOpen}
+        inert={!isOpen}
+        data-state={isOpen ? "open" : "closed"}
+        data-project-tools-resizing={isResizing ? "true" : undefined}
+        className={cn(
+          "project-tools-panel fixed inset-x-0 bottom-0 z-40 flex h-[min(72vh,34rem)] min-h-0 w-full shrink-0 flex-col overflow-hidden bg-background shadow-2xl transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none md:relative md:inset-auto md:z-10 md:h-full md:overflow-visible md:shadow-none",
+          isOpen
+            ? "pointer-events-auto translate-y-0 border-t border-border opacity-100 md:w-[var(--project-tools-panel-width)] md:translate-x-0 md:border-l md:border-t-0"
+            : "pointer-events-none translate-y-full border-t border-transparent opacity-0 md:translate-x-3 md:translate-y-0 md:border-l-0 md:border-t-0",
+          effectiveWidthCollapsed ? "md:w-0" : "md:w-[var(--project-tools-panel-width)]",
+        )}
+        style={panelStyle}
+      >
+        <div
+          className={cn(
+            "project-tools-panel-inner flex h-full min-h-0 w-full flex-col transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none md:w-[var(--project-tools-panel-width)] md:min-w-[var(--project-tools-panel-width)]",
+            isOpen
+              ? "translate-y-0 opacity-100 md:translate-x-0"
+              : "translate-y-3 opacity-0 md:translate-x-2 md:translate-y-0",
+          )}
+        >
+          {effectiveShouldRenderContent ? (
+            <>
+              <div className="project-tools-panel-handle" aria-hidden="true" />
+              <button
+                type="button"
+                aria-label={t("projectTools.resizePanel")}
+                title={t("projectTools.resizePanel")}
+                className={cn(
+                  "group absolute inset-y-0 left-0 z-[90] hidden w-3 cursor-col-resize touch-none items-center justify-center border-0 bg-transparent p-0 md:flex",
+                  "focus-visible:outline-none",
+                )}
+                onMouseDown={handleResizeStart}
+              >
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "h-10 w-0.5 rounded-full bg-muted-foreground/25 opacity-70 shadow-sm transition-[height,background-color,opacity]",
+                    "group-hover:h-16 group-hover:bg-primary/60 group-hover:opacity-100 group-focus-visible:h-16 group-focus-visible:bg-primary group-focus-visible:opacity-100",
+                    isResizing && "h-20 bg-primary opacity-100",
+                  )}
+                />
+              </button>
+              <div className="project-tools-panel-header flex h-11 shrink-0 items-center gap-2 border-b border-border px-3">
+                <div className="project-tools-panel-tabs-shell flex min-w-0 flex-1 flex-col justify-center gap-1">
+                  <div
+                    ref={tabsScrollRef}
+                    className="project-tools-panel-tabs flex h-8 min-w-0 items-center gap-1 overflow-x-auto overflow-y-hidden"
+                  >
+                    <RightDockTabStrip
+                      tabs={orderedProjectTabs}
+                      currentActiveTab={currentActiveTab}
+                      activeSession={activeSession}
+                      pendingCloseSessionId={pendingCloseSessionId}
+                      closingSessionIds={closingSessionIds}
+                      draggingTabId={draggingTabId}
+                      renderTabDragHandle={renderTabDragHandle}
+                      consumeSuppressedTabClick={consumeSuppressedTabClick}
+                      onActivateTab={activateTab}
+                      onActivateTerminalSession={activateTerminalSession}
+                      onCloseToolTab={closeToolTab}
+                      onCloseTerminalRequest={handleCloseRequest}
+                    />
+                  </div>
+                  <RightDockTabsScrollbar scrollRef={tabsScrollRef} />
+                </div>
+                <RightDockCreateMenu
+                  open={createMenuOpen}
+                  onOpenChange={setCreateMenuOpen}
+                  shellOptions={shellOptions}
+                  terminalReady={terminalReady}
+                  terminalDisabledMessage={terminalDisabledMessage}
+                  projectReady={projectReady}
+                  tunnelAvailable={tunnelAvailable}
+                  creating={creating}
+                  onCreateTerminal={createTerminal}
+                  onStartTool={startToolTab}
+                />
+                {onClose ? (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={onClose}
+                    title={t("projectTools.closePanel")}
+                    className="h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground md:hidden"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                ) : null}
+              </div>
+
+              {pendingCloseSession ? (
+                <div className="flex shrink-0 items-center gap-2 border-b border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                  <span className="min-w-0 flex-1 truncate">
+                    {t("projectTools.closeRunningTerminal").replace(
+                      "{title}",
+                      formatTerminalSessionTitle(
+                        pendingCloseSession.title,
+                        t("projectTools.terminalTitle"),
+                      ),
+                    )}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 shrink-0 px-2.5 text-xs"
+                    onClick={clearPendingCloseSession}
+                  >
+                    {t("settings.cancel")}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="sm"
+                    className="h-7 shrink-0 px-2.5 text-xs"
+                    disabled={closingSessionIds.has(pendingCloseSession.id)}
+                    onClick={() => closeSession(pendingCloseSession)}
+                  >
+                    {t("projectTools.close")}
+                  </Button>
+                </div>
+              ) : null}
+
+              {showDisabledMessage ? (
+                <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+                  {disabledMessage}
+                </div>
+              ) : showRightDockChooser ? (
+                <RightDockChooser
+                  terminalReady={terminalReady}
+                  terminalDisabledMessage={terminalDisabledMessage}
+                  disabledMessage={disabledMessage}
+                  projectReady={projectReady}
+                  tunnelAvailable={tunnelAvailable}
+                  creating={creating}
+                  loading={loading}
+                  error={error}
+                  onCreateTerminal={createTerminal}
+                  onStartTool={startToolTab}
+                />
+              ) : (
+                <RightDockContent
+                  currentActiveTab={currentActiveTab}
+                  initializedTools={initializedTools}
+                  localSessions={localSessions}
+                  activeSession={activeSession}
+                  initialTerminalSnapshotsRef={initialTerminalSnapshotsRef}
+                  error={error}
+                  creating={creating}
+                  loading={loading}
+                  onTerminalError={setError}
+                  onInitialTerminalSnapshotConsumed={handleInitialTerminalSnapshotConsumed}
+                  onCreateTerminal={handleCreate}
+                />
+              )}
+            </>
+          ) : null}
+        </div>
+      </aside>
+    </RightDockToolContext.Provider>
+  );
+});

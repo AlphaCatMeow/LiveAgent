@@ -38,6 +38,9 @@ import { Label } from "../ui/label";
 export type { LocalTunnelClient } from "../../lib/tunnels/constants";
 
 type LocalTunnelPanelProps = {
+  // Visibility contract from the right-dock registry (consumed in a later
+  // phase; declared now so the wiring is stable).
+  active?: boolean;
   client: LocalTunnelClient | null;
   enabled: boolean;
   disabledMessage?: string;

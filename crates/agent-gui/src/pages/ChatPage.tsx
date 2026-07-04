@@ -26,6 +26,10 @@ import { type NotifyItem, NotifyToast } from "../components/chat/NotifyToast";
 import { SharedHistoryManagerModal } from "../components/chat/SharedHistoryManagerModal";
 import { Ban, PanelRightClose, PanelRightOpen, Terminal, Upload } from "../components/icons";
 import { MacOsTitleBarSpacer, MacOsTitleBarToggle } from "../components/MacOsTitleBarSpacer";
+import type {
+  GitCommitContextPayload,
+  GitFileContextPayload,
+} from "../components/project-tools/GitReviewPanel";
 import { RightDockPanel } from "../components/project-tools/RightDockPanel";
 import { Button } from "../components/ui/button";
 import { useConfirmDialog } from "../components/ui/confirm-dialog";
@@ -131,6 +135,8 @@ import {
   normalizeChatRuntimeControlsForProvider,
   normalizeSystemToolSelection,
   openRightDockSingletonTab,
+  type RightDockFileTreeStatePatch,
+  type RightDockProjectState,
   removeRightDockProjectState,
   resolveEffectiveTheme,
   resolveWorkspaceProjects,
@@ -169,6 +175,7 @@ import type {
   TunnelStateSnapshot,
   TunnelUpdateInput,
 } from "../lib/tunnels/constants";
+import { tauriWorkspaceActivityClient } from "../lib/workspace-activity/tauriWorkspaceActivityClient";
 import {
   applyWorkspaceProjectConversationActivityMap,
   buildWorkspaceProjectActivityUpdatedAts,
@@ -1559,16 +1566,28 @@ export function ChatPage(props: ChatPageProps) {
         : [],
     [terminalProjectPathKey, terminalSessions],
   );
-  const rightDockProjectState = getRightDockProjectState(
-    settings.customSettings,
-    terminalProjectPathKey,
+  // getRightDockProjectState / getRightDockFileTreeState / getSshProjectHostIds
+  // build fresh objects on every call, so memoize on the owning settings slice
+  // + path key: RightDockPanel is memo'd and these references are props.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on settings.customSettings.rightDock (the only slice these getters read) so unrelated settings changes keep the reference stable.
+  const rightDockProjectState = useMemo(
+    () => getRightDockProjectState(settings.customSettings, terminalProjectPathKey),
+    [settings.customSettings.rightDock, terminalProjectPathKey],
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on settings.customSettings.rightDock (the only slice these getters read) so unrelated settings changes keep the reference stable.
+  const rightDockFileTreeState = useMemo(
+    () => getRightDockFileTreeState(settings.customSettings, terminalProjectPathKey),
+    [settings.customSettings.rightDock, terminalProjectPathKey],
   );
   const rightDockFileTreeOpen = isRightDockSingletonTabOpen(
     settings.customSettings,
     terminalProjectPathKey,
     "fileTree",
   );
-  const associatedSshHostIds = getSshProjectHostIds(settings.ssh, terminalProjectPathKey);
+  const associatedSshHostIds = useMemo(
+    () => getSshProjectHostIds(settings.ssh, terminalProjectPathKey),
+    [settings.ssh, terminalProjectPathKey],
+  );
   const terminalDisabledMessage = !isAgentMode
     ? "Project tools require Agent project mode."
     : !terminalProjectPath
@@ -1578,6 +1597,47 @@ export function ChatPage(props: ChatPageProps) {
   const tunnelDisabledMessage = !settings.remote.enableWebTunnels
     ? t("projectTools.tunnelWebDisabled")
     : undefined;
+  // RightDockPanel is memo'd: every callback handed to it must be stable or
+  // the memo boundary is void (see the panel-side context useMemo).
+  const handleRightDockWidthChange = useCallback(
+    (nextWidth: number) => {
+      setSettings((prev) => updateRightDockWidth(prev, nextWidth));
+    },
+    [setSettings],
+  );
+  const handleRightDockProjectStateChange = useCallback(
+    (updater: (current: RightDockProjectState) => RightDockProjectState) => {
+      setSettings((prev) => updateRightDockProjectState(prev, terminalProjectPathKey, updater));
+    },
+    [setSettings, terminalProjectPathKey],
+  );
+  const handleRightDockFileTreeStateChange = useCallback(
+    (patch: RightDockFileTreeStatePatch) => {
+      setSettings((prev) => updateRightDockFileTreeState(prev, terminalProjectPathKey, patch));
+    },
+    [setSettings, terminalProjectPathKey],
+  );
+  const handleSshProjectHostIdsChange = useCallback(
+    (hostIds: string[]) => {
+      setSettings((prev) => updateSshProjectHostIds(prev, terminalProjectPathKey, hostIds));
+    },
+    [setSettings, terminalProjectPathKey],
+  );
+  const handleRightDockSessionsChange = useCallback((sessions: TerminalSession[]) => {
+    setTerminalSessions(sortTerminalSessions(sessions));
+  }, []);
+  const handleRightDockInsertFileMention = useCallback((path: string, kind: "file" | "dir") => {
+    composerRef.current?.insertFileMention(path, kind);
+    composerRef.current?.focus();
+  }, []);
+  const handleRightDockInsertCommitMention = useCallback((commit: GitCommitContextPayload) => {
+    composerRef.current?.insertCommitMention(commit);
+    composerRef.current?.focus();
+  }, []);
+  const handleRightDockInsertGitFileMention = useCallback((file: GitFileContextPayload) => {
+    composerRef.current?.insertGitFileMention(file);
+    composerRef.current?.focus();
+  }, []);
   const hideWorkspaceSshTerminalOverlay = useCallback(() => {
     setWorkspaceSshTerminalOpen(false);
   }, []);
@@ -5882,7 +5942,7 @@ export function ChatPage(props: ChatPageProps) {
         theme={effectiveTheme}
         disabledMessage={terminalDisabledMessage}
         projectState={rightDockProjectState}
-        fileTreeState={getRightDockFileTreeState(settings.customSettings, terminalProjectPathKey)}
+        fileTreeState={rightDockFileTreeState}
         sshHosts={settings.ssh.hosts}
         associatedSshHostIds={associatedSshHostIds}
         client={tauriTerminalClient}
@@ -5892,31 +5952,17 @@ export function ChatPage(props: ChatPageProps) {
         tunnelEnabled={tunnelEnabled}
         tunnelDisabledMessage={tunnelDisabledMessage}
         tunnelPublicBaseUrl={settings.remote.gatewayUrl.trim()}
-        onWidthChange={(nextWidth) => setSettings((prev) => updateRightDockWidth(prev, nextWidth))}
-        onProjectStateChange={(updater) =>
-          setSettings((prev) => updateRightDockProjectState(prev, terminalProjectPathKey, updater))
-        }
-        onFileTreeStateChange={(patch) =>
-          setSettings((prev) => updateRightDockFileTreeState(prev, terminalProjectPathKey, patch))
-        }
-        onSshProjectHostIdsChange={(hostIds) =>
-          setSettings((prev) => updateSshProjectHostIds(prev, terminalProjectPathKey, hostIds))
-        }
+        workspaceActivityClient={tauriWorkspaceActivityClient}
+        onWidthChange={handleRightDockWidthChange}
+        onProjectStateChange={handleRightDockProjectStateChange}
+        onFileTreeStateChange={handleRightDockFileTreeStateChange}
+        onSshProjectHostIdsChange={handleSshProjectHostIdsChange}
         onOpenSshSession={handleOpenSshTerminal}
-        onSessionsChange={(sessions) => setTerminalSessions(sortTerminalSessions(sessions))}
-        onInsertFileMention={(path, kind) => {
-          composerRef.current?.insertFileMention(path, kind);
-          composerRef.current?.focus();
-        }}
+        onSessionsChange={handleRightDockSessionsChange}
+        onInsertFileMention={handleRightDockInsertFileMention}
         onOpenFile={handleOpenWorkspaceFile}
-        onInsertCommitMention={(commit) => {
-          composerRef.current?.insertCommitMention(commit);
-          composerRef.current?.focus();
-        }}
-        onInsertGitFileMention={(file) => {
-          composerRef.current?.insertGitFileMention(file);
-          composerRef.current?.focus();
-        }}
+        onInsertCommitMention={handleRightDockInsertCommitMention}
+        onInsertGitFileMention={handleRightDockInsertGitFileMention}
       />
     </div>
   );

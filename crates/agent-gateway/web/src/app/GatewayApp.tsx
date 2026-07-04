@@ -16,6 +16,10 @@ import type {
 } from "@/components/chat/MentionComposer";
 import { SharedHistoryManagerModal } from "@/components/chat/SharedHistoryManagerModal";
 import { ChevronDown, PanelRightClose, PanelRightOpen, Terminal } from "@/components/icons";
+import type {
+  GitCommitContextPayload,
+  GitFileContextPayload,
+} from "@/components/project-tools/GitReviewPanel";
 import { RightDockPanel } from "@/components/project-tools/RightDockPanel";
 import { Button } from "@/components/ui/button";
 import { useConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -80,6 +84,8 @@ import {
   isRightDockSingletonTabOpen,
   normalizeChatRuntimeControlsForProvider,
   openRightDockSingletonTab,
+  type RightDockFileTreeStatePatch,
+  type RightDockProjectState,
   removeRightDockProjectState,
   resolveEffectiveTheme,
   resolveWorkspaceProjects,
@@ -95,6 +101,7 @@ import {
 import { mergeAlwaysEnabledSkillNames } from "@/lib/skills";
 import { terminalSessionBelongsToProject } from "@/lib/terminal/sessionStore";
 import type { TerminalSession } from "@/lib/terminal/types";
+import { createGatewayWorkspaceActivityClient } from "@/lib/workspace-activity/gatewayWorkspaceActivityClient";
 import { ChatComposerBar, type ChatQueueTurnPreview } from "@/pages/chat/ChatComposerBar";
 import { ChatHeader } from "@/pages/chat/ChatHeader";
 import { queuedChatTurnHasContent } from "@/pages/chat/queue/chatTurnQueue";
@@ -3689,9 +3696,18 @@ export default function GatewayApp() {
   const terminalProjectPathKey = terminalProjectPath
     ? workspaceProjectPathKey(terminalProjectPath)
     : "";
-  const rightDockProjectState = getRightDockProjectState(
-    settings.customSettings,
-    terminalProjectPathKey,
+  // getRightDockProjectState / getRightDockFileTreeState / getSshProjectHostIds
+  // build fresh objects on every call, so memoize on the owning settings slice
+  // + path key: RightDockPanel is memo'd and these references are props.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on settings.customSettings.rightDock (the only slice these getters read) so unrelated settings changes keep the reference stable.
+  const rightDockProjectState = useMemo(
+    () => getRightDockProjectState(settings.customSettings, terminalProjectPathKey),
+    [settings.customSettings.rightDock, terminalProjectPathKey],
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on settings.customSettings.rightDock (the only slice these getters read) so unrelated settings changes keep the reference stable.
+  const rightDockFileTreeState = useMemo(
+    () => getRightDockFileTreeState(settings.customSettings, terminalProjectPathKey),
+    [settings.customSettings.rightDock, terminalProjectPathKey],
   );
   const rightDockFileTreeOpen = isRightDockSingletonTabOpen(
     settings.customSettings,
@@ -3708,7 +3724,10 @@ export default function GatewayApp() {
     terminalProjectPathKey,
     "sshTunnel",
   );
-  const associatedSshHostIds = getSshProjectHostIds(settings.ssh, terminalProjectPathKey);
+  const associatedSshHostIds = useMemo(
+    () => getSshProjectHostIds(settings.ssh, terminalProjectPathKey),
+    [settings.ssh, terminalProjectPathKey],
+  );
   const projectToolsDisabledMessage = !settingsSyncReady
     ? "Syncing desktop settings..."
     : !isAgentMode
@@ -3777,6 +3796,51 @@ export default function GatewayApp() {
     : !settings.remote.enableWebTunnels
       ? translate("projectTools.tunnelWebDisabled", settings.locale)
       : undefined;
+  const workspaceActivityClient = useMemo(
+    () => (api ? createGatewayWorkspaceActivityClient(api) : null),
+    [api],
+  );
+  // RightDockPanel is memo'd: every callback handed to it must be stable or
+  // the memo boundary is void (see the panel-side context useMemo).
+  const handleRightDockWidthChange = useCallback(
+    (nextWidth: number) => {
+      setSettings((prev) => updateRightDockWidth(prev, nextWidth));
+    },
+    [setSettings],
+  );
+  const handleRightDockProjectStateChange = useCallback(
+    (updater: (current: RightDockProjectState) => RightDockProjectState) => {
+      setSettings((prev) => updateRightDockProjectState(prev, terminalProjectPathKey, updater));
+    },
+    [setSettings, terminalProjectPathKey],
+  );
+  const handleRightDockFileTreeStateChange = useCallback(
+    (patch: RightDockFileTreeStatePatch) => {
+      setSettings((prev) => updateRightDockFileTreeState(prev, terminalProjectPathKey, patch));
+    },
+    [setSettings, terminalProjectPathKey],
+  );
+  const handleSshProjectHostIdsChange = useCallback(
+    (hostIds: string[]) => {
+      setSettings((prev) => updateSshProjectHostIds(prev, terminalProjectPathKey, hostIds));
+    },
+    [setSettings, terminalProjectPathKey],
+  );
+  const handleRightDockInsertFileMention = useCallback((path: string, kind: "file" | "dir") => {
+    composerRef.current?.insertFileMention(path, kind);
+    composerRef.current?.focus();
+  }, []);
+  const handleRightDockInsertCommitMention = useCallback((commit: GitCommitContextPayload) => {
+    composerRef.current?.insertCommitMention(commit);
+    composerRef.current?.focus();
+  }, []);
+  const handleRightDockInsertGitFileMention = useCallback((file: GitFileContextPayload) => {
+    composerRef.current?.insertGitFileMention(file);
+    composerRef.current?.focus();
+  }, []);
+  const handleRightDockClose = useCallback(() => {
+    setRightDockOpen(false);
+  }, []);
   useEffect(() => {
     if (activeView !== "chat") {
       return;
@@ -4615,10 +4679,7 @@ export default function GatewayApp() {
             disabledMessage={projectToolsDisabledMessage}
             terminalDisabledMessage={terminalDisabledMessage}
             projectState={rightDockProjectState}
-            fileTreeState={getRightDockFileTreeState(
-              settings.customSettings,
-              terminalProjectPathKey,
-            )}
+            fileTreeState={rightDockFileTreeState}
             sshHosts={settings.ssh.hosts}
             associatedSshHostIds={associatedSshHostIds}
             client={terminalClient}
@@ -4629,38 +4690,18 @@ export default function GatewayApp() {
             tunnelEnabled={tunnelEnabled}
             tunnelDisabledMessage={tunnelDisabledMessage}
             tunnelPublicBaseUrl={window.location.origin}
-            onWidthChange={(nextWidth) =>
-              setSettings((prev) => updateRightDockWidth(prev, nextWidth))
-            }
-            onProjectStateChange={(updater) =>
-              setSettings((prev) =>
-                updateRightDockProjectState(prev, terminalProjectPathKey, updater),
-              )
-            }
-            onFileTreeStateChange={(patch) =>
-              setSettings((prev) =>
-                updateRightDockFileTreeState(prev, terminalProjectPathKey, patch),
-              )
-            }
-            onSshProjectHostIdsChange={(hostIds) =>
-              setSettings((prev) => updateSshProjectHostIds(prev, terminalProjectPathKey, hostIds))
-            }
+            workspaceActivityClient={workspaceActivityClient}
+            onWidthChange={handleRightDockWidthChange}
+            onProjectStateChange={handleRightDockProjectStateChange}
+            onFileTreeStateChange={handleRightDockFileTreeStateChange}
+            onSshProjectHostIdsChange={handleSshProjectHostIdsChange}
             onOpenSshSession={handleOpenSshTerminal}
             onSessionsChange={handleProjectTerminalSessionsChange}
-            onInsertFileMention={(path, kind) => {
-              composerRef.current?.insertFileMention(path, kind);
-              composerRef.current?.focus();
-            }}
+            onInsertFileMention={handleRightDockInsertFileMention}
             onOpenFile={handleOpenWorkspaceFile}
-            onInsertCommitMention={(commit) => {
-              composerRef.current?.insertCommitMention(commit);
-              composerRef.current?.focus();
-            }}
-            onInsertGitFileMention={(file) => {
-              composerRef.current?.insertGitFileMention(file);
-              composerRef.current?.focus();
-            }}
-            onClose={() => setRightDockOpen(false)}
+            onInsertCommitMention={handleRightDockInsertCommitMention}
+            onInsertGitFileMention={handleRightDockInsertGitFileMention}
+            onClose={handleRightDockClose}
           />
         ) : null}
 

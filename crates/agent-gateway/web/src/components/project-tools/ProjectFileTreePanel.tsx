@@ -145,6 +145,9 @@ function toErrorMessage(error: unknown, fallback: string) {
 }
 
 export function ProjectFileTreePanel(props: {
+  // Visibility contract from the right-dock registry (consumed in a later
+  // phase; declared now so the wiring is stable).
+  active?: boolean;
   projectPathKey: string;
   cwd: string;
   initialized: boolean;

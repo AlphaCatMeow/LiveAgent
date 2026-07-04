@@ -18,7 +18,7 @@ import {
   Trash2,
   X,
 } from "../../components/icons";
-import { pokeMemoryOrganizerRunner } from "../../components/memory/MemoryOrganizerRunner";
+import { pokeMemoryOrganizer } from "../../lib/memory/organizer/service";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { useLocale } from "../../i18n";
@@ -1391,7 +1391,7 @@ function MemorySettingsDrawer(props: {
         setHistoryOpen(true);
         return;
       }
-      const runnerPoked = pokeMemoryOrganizerRunner();
+      const runnerPoked = pokeMemoryOrganizer();
       setOrganizerFeedback(
         t(runnerPoked ? "settings.memoryOrganizerQueued" : "settings.memoryOrganizerQueuedRemote"),
       );

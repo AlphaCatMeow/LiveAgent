@@ -2,7 +2,7 @@ import type { Context } from "@earendil-works/pi-ai";
 import { listen } from "@tauri-apps/api/event";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CronPromptRunner } from "./components/cron/CronPromptRunner";
-import { MemoryOrganizerRunner } from "./components/memory/MemoryOrganizerRunner";
+import { MemoryOrganizerHost } from "./components/memory/useMemoryOrganizer";
 import { WindowsTitleBar } from "./components/WindowsTitleBar";
 import { LocaleContext, t as translate } from "./i18n";
 import { type AppUpdateController, useAppUpdateController } from "./lib/appUpdates";
@@ -389,7 +389,7 @@ export default function App() {
     <LocaleContext.Provider value={localeContextValue}>
       <AppChrome appUpdate={appUpdate}>
         <CronPromptRunner settings={settings} />
-        <MemoryOrganizerRunner settings={settings} setSettings={setSettings} />
+        <MemoryOrganizerHost settings={settings} setSettings={setSettings} />
         <ChatPage
           settings={settings}
           setSettings={setSettings}

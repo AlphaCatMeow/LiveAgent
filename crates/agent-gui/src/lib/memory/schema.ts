@@ -186,16 +186,16 @@ export const ORGANIZE_PHASES = ["scan", "cluster", "plan", "gate", "apply"] as c
 export type OrganizePhase = (typeof ORGANIZE_PHASES)[number];
 
 export const REJECTION_BUCKET_KEYS = [
-  "invalid_decision",
-  "unknown_slug",
-  "risk_gate",
-  "low_confidence",
-  "body_too_large",
-  "missing_sources",
-  "other",
+  "reviewedProtected",
+  "lowConfidence",
+  "crossType",
+  "crossScope",
+  "reviewRequiredByLlm",
+  "missingPayload",
+  "unsupported",
 ] as const;
 export type RejectionBucketKey = (typeof REJECTION_BUCKET_KEYS)[number];
-export type RejectionBuckets = Partial<Record<RejectionBucketKey, number>>;
+export type RejectionBuckets = Record<RejectionBucketKey, number>;
 
 // ---------------------------------------------------------------------------
 // Reviewer mode (extraction strictness)

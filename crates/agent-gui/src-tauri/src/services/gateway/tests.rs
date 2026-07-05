@@ -306,7 +306,7 @@ fn history_share_resolve_error_code_maps_public_share_failures() {
 fn merge_settings_sync_snapshot_keeps_cached_ui_only_fields() {
     let db_snapshot = json!({
         "system": { "executionMode": "agent-dev" },
-        "cron": [{ "id": "cron-a" }],
+        "automationCron": { "revision": 3, "tasks": [{ "id": "cron-a" }] },
         "theme": "light",
         "locale": "zh-CN",
         "skills": {},
@@ -342,7 +342,10 @@ fn merge_settings_sync_snapshot_keeps_cached_ui_only_fields() {
     let merged = merge_settings_sync_snapshot(db_snapshot, Some(&cached_snapshot))
         .expect("merge settings sync snapshot");
 
-    assert_eq!(merged["cron"], json!([{ "id": "cron-a" }]));
+    assert_eq!(
+        merged["automationCron"],
+        json!({ "revision": 3, "tasks": [{ "id": "cron-a" }] })
+    );
     assert_eq!(merged["theme"], json!("dark"));
     assert_eq!(merged["locale"], json!("en-US"));
     assert_eq!(merged["skills"], json!({ "enabled": true }));
@@ -376,7 +379,7 @@ fn merge_settings_sync_snapshot_keeps_cached_ui_only_fields() {
 fn merge_settings_sync_snapshot_without_cache_leaves_ui_only_fields_absent() {
     let db_snapshot = json!({
         "system": { "executionMode": "agent-dev" },
-        "cron": [{ "id": "cron-a" }],
+        "automationCron": { "revision": 3, "tasks": [{ "id": "cron-a" }] },
     });
 
     let merged =

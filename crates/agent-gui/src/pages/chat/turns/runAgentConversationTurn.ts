@@ -740,7 +740,6 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
 
   function queueToolCallDelta(toolCall: ToolCall, round: number) {
     if (!shouldShowToolEvent(toolCall)) return;
-    hookLifecycle.messageUpdated();
     pendingToolCallDeltas.set(toolCallDeltaKey(round, toolCall.id), { round, toolCall });
     schedulePendingToolCallDeltaFlush();
   }
@@ -805,7 +804,6 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
         },
         onTextDelta: (delta, round) => {
           gatewayBridgeEvents.queueToken(delta, { round });
-          hookLifecycle.messageUpdated();
           streamedAgentText += delta;
           batchLiveRoundsUpdate(
             (prev) =>
@@ -866,7 +864,6 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
             round,
             conversation_id: conversationId,
           });
-          hookLifecycle.messageUpdated();
           batchLiveRoundsUpdate(
             (prev) =>
               updateLiveRound(prev, round, (target) => ({
@@ -878,7 +875,6 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
           );
         },
         onHostedSearch: (hostedSearch, round) => {
-          hookLifecycle.messageUpdated();
           updateHostedSearch(hostedSearch, round);
         },
         onToolCall: (toolCall, round) => {

@@ -1,17 +1,14 @@
-import { invoke } from "@tauri-apps/api/core";
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import {
   AlertTriangle,
   Check,
   CheckCircle2,
-  ChevronDown,
   Clock3,
   Globe,
   MessageSquare,
   Plus,
   Terminal,
-  Trash2,
   X,
 } from "../../components/icons";
 
@@ -27,26 +24,17 @@ import {
 } from "../../components/ui/select";
 import { Textarea } from "../../components/ui/textarea";
 import { useLocale } from "../../i18n";
+import { type CronTask, type CronTaskType, validateCronExpression } from "../../lib/automation";
 import { parseModelValue, toModelValue } from "../../lib/providers/llm";
-import {
-  type CronTask,
-  type CronTaskType,
-  canHookHttpMethodHaveBody,
-  type ExecutionMode,
-  HOOK_HTTP_METHODS,
-  type HookHttpMethod,
-  isAgentExecutionMode,
-} from "../../lib/settings";
+import { type ExecutionMode, isAgentExecutionMode } from "../../lib/settings";
 import { useModalMotion } from "../../lib/shared/modalMotion";
 import {
-  createEmptyTaskRequestDraft,
-  parseHttpRequests,
-  type TaskHttpRequestDraft,
-  taskRequestToDraft,
-} from "./taskConfigUtils";
-
-export type { CronTask, CronTaskType } from "../../lib/settings";
-export type CronHttpRequestDraft = TaskHttpRequestDraft;
+  createEmptyRequestDraft,
+  type HttpRequestDraft,
+  HttpRequestListEditor,
+  parseHttpRequestDrafts,
+  requestToDraft,
+} from "./httpRequestEditor";
 
 type CronPromptModelOption = {
   value: string;
@@ -54,18 +42,21 @@ type CronPromptModelOption = {
   providerName: string;
 };
 
+/**
+ * Fields the modal edits. `enabled` is deliberately not part of the payload:
+ * toggling is its own operation, so saving an edit can never write back a
+ * stale enabled flag captured when the modal opened.
+ */
+export type CronTaskFormData = Omit<CronTask, "id" | "enabled" | "lastError">;
+
 type CronTaskModalProps = {
   mode: "add" | "edit";
   initialData?: CronTask;
   modelOptions: CronPromptModelOption[];
   executionMode: ExecutionMode;
-  onSave: (data: Omit<CronTask, "id">) => void | Promise<void>;
+  onSave: (data: CronTaskFormData) => void | Promise<void>;
   onClose: () => void;
 };
-
-function createEmptyRequestDraft(): CronHttpRequestDraft {
-  return createEmptyTaskRequestDraft();
-}
 
 export function CronTaskModal({
   mode,
@@ -86,9 +77,9 @@ export function CronTaskModal({
   );
   const [type, setType] = useState<CronTaskType>(initialData?.type ?? "bash");
   const [scriptText, setScriptText] = useState(initialData?.script ?? "");
-  const [requests, setRequests] = useState<CronHttpRequestDraft[]>(() => {
+  const [requests, setRequests] = useState<HttpRequestDraft[]>(() => {
     if (initialData?.requests?.length) {
-      return initialData.requests.map((request) => taskRequestToDraft(request));
+      return initialData.requests.map((request) => requestToDraft(request));
     }
     return [createEmptyRequestDraft()];
   });
@@ -120,16 +111,18 @@ export function CronTaskModal({
   const selectedPromptModel =
     promptModelOptions.find((option) => option.value === selectedModelValue) ?? null;
 
-  function updateRequest(id: string, patch: Partial<CronHttpRequestDraft>) {
-    setRequests((prev) => prev.map((req) => (req.id === id ? { ...req, ...patch } : req)));
-  }
+  const formReady =
+    Boolean(name.trim()) &&
+    Boolean(cron.trim()) &&
+    (type !== "bash" || Boolean(scriptText.trim())) &&
+    (type !== "prompt" || Boolean(prompt.trim() && parseModelValue(selectedModelValue)));
 
   async function handleSave() {
     try {
       setIsSaving(true);
       const trimmedName = name.trim();
-      if (!trimmedName) throw new Error(t("settings.cronTaskName") + " is required");
-      if (!cron.trim()) throw new Error(t("settings.cronExpression") + " is required");
+      if (!trimmedName) throw new Error(`${t("settings.cronTaskName")} is required`);
+      if (!cron.trim()) throw new Error(`${t("settings.cronExpression")} is required`);
       const trimmedRemainingExecutions = remainingExecutions.trim();
       const parsedRemainingExecutions = trimmedRemainingExecutions
         ? Number(trimmedRemainingExecutions)
@@ -141,9 +134,7 @@ export function CronTaskModal({
         throw new Error(t("settings.cronRemainingExecutionsInvalid"));
       }
 
-      await invoke("cron_validate_expression", {
-        expression: cron.trim(),
-      } as any);
+      await validateCronExpression(cron.trim());
 
       const trimmedPrompt = prompt.trim();
       const trimmedScript = scriptText.trim();
@@ -167,24 +158,14 @@ export function CronTaskModal({
         }
       }
 
-      const data: Omit<CronTask, "id"> = {
+      const data: CronTaskFormData = {
         name: trimmedName,
         description: description.trim(),
         cron: cron.trim(),
-        enabled: parsedRemainingExecutions === 0 ? false : (initialData?.enabled ?? true),
         remainingExecutions: parsedRemainingExecutions,
         type,
         script: type === "bash" ? trimmedScript : undefined,
-        requests:
-          type === "http"
-            ? parseHttpRequests(requests, {
-                required: t("settings.cronHttpRequestRequired"),
-                urlRequired: (index) => `${t("settings.cronHttpUrlRequired")} #${index + 1}`,
-                urlInvalid: (index) => `${t("settings.cronHttpUrlInvalid")} #${index + 1}`,
-                headersInvalid: t("settings.cronHttpHeadersInvalid"),
-                bodyInvalid: t("settings.cronHttpBodyInvalid"),
-              })
-            : undefined,
+        requests: type === "http" ? parseHttpRequestDrafts(requests, t) : undefined,
         prompt: type === "prompt" ? trimmedPrompt : undefined,
         selectedModel: type === "prompt" ? (parsedSelectedModel ?? undefined) : undefined,
       };
@@ -498,134 +479,14 @@ export function CronTaskModal({
 
             {/* HTTP request config */}
             {type === "http" ? (
-              <div className="space-y-3">
-                {requests.map((request, index) => {
-                  const bodyEnabled = canHookHttpMethodHaveBody(request.method);
-                  const isExpanded = expandedRequest === request.id;
-
-                  return (
-                    <div
-                      key={request.id}
-                      className="overflow-hidden rounded-xl border border-border/60 bg-background/80 transition-colors hover:border-border/80"
-                    >
-                      <div className="settings-http-row flex items-center gap-3 px-4 py-3">
-                        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-xs font-bold text-emerald-600 dark:text-emerald-400">
-                          {index + 1}
-                        </div>
-
-                        <Select
-                          value={request.method}
-                          onValueChange={(value) => {
-                            setFormError(null);
-                            updateRequest(request.id, {
-                              method: value as HookHttpMethod,
-                              bodyText: canHookHttpMethodHaveBody(value as HookHttpMethod)
-                                ? request.bodyText
-                                : "",
-                            });
-                          }}
-                        >
-                          <SelectTrigger className="h-8 w-[100px] text-xs font-semibold">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {HOOK_HTTP_METHODS.map((method) => (
-                              <SelectItem key={method} value={method}>
-                                {method}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-
-                        <Input
-                          value={request.url}
-                          placeholder="https://example.com/webhook"
-                          className="h-8 flex-1 font-mono text-xs"
-                          onChange={(e) => {
-                            setFormError(null);
-                            updateRequest(request.id, { url: e.currentTarget.value });
-                          }}
-                        />
-
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => setExpandedRequest(isExpanded ? null : request.id)}
-                            className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-muted/50 ${
-                              isExpanded ? "text-primary" : "text-muted-foreground"
-                            }`}
-                          >
-                            <ChevronDown
-                              className={`h-3.5 w-3.5 transition-transform ${isExpanded ? "" : "-rotate-90"}`}
-                            />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setFormError(null);
-                              setRequests((prev) => prev.filter((r) => r.id !== request.id));
-                              if (expandedRequest === request.id) setExpandedRequest(null);
-                            }}
-                            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {isExpanded ? (
-                        <div className="border-t border-border/30 bg-muted/10 px-4 py-4">
-                          <div className="settings-form-grid grid gap-4 sm:grid-cols-2">
-                            <div className="space-y-1.5">
-                              <Label className="text-xs font-medium text-muted-foreground">
-                                Headers
-                              </Label>
-                              <Textarea
-                                value={request.headersText}
-                                placeholder={'{\n  "Authorization": "Bearer ..."\n}'}
-                                className="min-h-[100px] resize-y font-mono text-xs leading-relaxed"
-                                onChange={(e) => {
-                                  setFormError(null);
-                                  updateRequest(request.id, { headersText: e.currentTarget.value });
-                                }}
-                              />
-                            </div>
-                            <div className="space-y-1.5">
-                              <Label className="text-xs font-medium text-muted-foreground">
-                                Body
-                              </Label>
-                              {bodyEnabled ? (
-                                <Textarea
-                                  value={request.bodyText}
-                                  placeholder={'{\n  "message": "hello"\n}'}
-                                  className="min-h-[100px] resize-y font-mono text-xs leading-relaxed"
-                                  onChange={(e) => {
-                                    setFormError(null);
-                                    updateRequest(request.id, { bodyText: e.currentTarget.value });
-                                  }}
-                                />
-                              ) : (
-                                <div className="flex min-h-[100px] items-center justify-center rounded-lg border border-dashed border-border/50 bg-muted/10 text-xs text-muted-foreground/60">
-                                  {t("settings.cronHttpBodyDisabled")}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-
-                {requests.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border/50 bg-muted/5 py-8 text-center">
-                    <Globe className="mx-auto h-6 w-6 text-muted-foreground/30" />
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      {t("settings.cronHttpRequests")}
-                    </p>
-                  </div>
-                ) : null}
-              </div>
+              <HttpRequestListEditor
+                requests={requests}
+                expandedRequestId={expandedRequest}
+                onExpand={setExpandedRequest}
+                onChange={setRequests}
+                onDirty={() => setFormError(null)}
+                urlPlaceholder="https://example.com/webhook"
+              />
             ) : null}
 
             {/* Prompt config */}
@@ -703,10 +564,7 @@ export function CronTaskModal({
                 <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
                 <span className="truncate">{formError}</span>
               </div>
-            ) : name.trim() &&
-              cron.trim() &&
-              (type !== "prompt" ||
-                (prompt.trim() && Boolean(parseModelValue(selectedModelValue)))) ? (
+            ) : formReady ? (
               <div className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
                 <Check className="h-3.5 w-3.5" />
                 <span>{t("settings.agentsReady")}</span>

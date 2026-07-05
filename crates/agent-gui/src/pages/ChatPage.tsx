@@ -99,7 +99,8 @@ import {
 import { createSubagentRuntimeManager } from "../lib/chat/subagent/subagentRuntimeManager";
 import { createStreamDebugLogger } from "../lib/debug/agentDebug";
 import { tauriGitClient } from "../lib/git/tauriGitClient";
-import { createConversationHookDispatcher } from "../lib/hooks/conversationHooks";
+import { getAutomationState } from "../lib/automation";
+import { createHookRunScope } from "../lib/automation/hookRunner";
 import { memoryDeleteProject } from "../lib/memory/api";
 import { buildMemoryOverviewSection } from "../lib/memory/prompts/injection";
 import {
@@ -1268,7 +1269,6 @@ export function ChatPage(props: ChatPageProps) {
   const subagentRuntimeManagerRef = useRef(createSubagentRuntimeManager());
   const previousSubagentRuntimeConversationRef = useRef(currentConversationId);
   const subagentWarmupSignatureRef = useRef("");
-  const hookRunSequenceRef = useRef(0);
   const titleJobRef = useRef<{
     conversationId: string;
     promise: Promise<string | null>;
@@ -4196,12 +4196,11 @@ export function ChatPage(props: ChatPageProps) {
       memoryPrompt = "";
     }
 
-    const hookRunSequence = ++hookRunSequenceRef.current;
-    const hookDispatcher = createConversationHookDispatcher({
-      hooks: settings.hooks,
+    const hookScope = createHookRunScope({
+      hooks: getAutomationState().hooks.hooks,
+      conversationId,
       workdir: effectiveWorkdir,
       onWarning: (warning) => {
-        if (hookRunSequenceRef.current !== hookRunSequence) return;
         updateConversationRuntimeEntry(conversationId, (prev) => ({
           ...prev,
           hookWarning: formatHookWarningMessage(settings.locale, t, warning),
@@ -4210,7 +4209,7 @@ export function ChatPage(props: ChatPageProps) {
     });
 
     const hookLifecycle = createConversationHookLifecycle((event) => {
-      void hookDispatcher.dispatch(event);
+      hookScope.dispatch(event);
     });
 
     let abortedConversationCommitted = false;
@@ -4722,6 +4721,7 @@ export function ChatPage(props: ChatPageProps) {
       gatewayBridgeEvents.emitError(remoteErrorMessage, conversationId);
       gatewayBridgeEvents.close();
       if (aborted) {
+        hookScope.cancel();
         const rolledBack = await rollbackCompactionIfNeeded();
         if (!rolledBack) {
           resetRunningCompaction(conversationId);
@@ -4741,6 +4741,7 @@ export function ChatPage(props: ChatPageProps) {
     } finally {
       clearCompactionRollback();
       hookLifecycle.endAgent();
+      hookScope.close();
       clearAbortSnapshot(transcriptStore);
       markConversationRunStopped(gatewayRuntimeFinalState);
       pruneIdleConversationCaches([conversationId]);

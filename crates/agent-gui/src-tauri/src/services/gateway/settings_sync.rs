@@ -73,9 +73,16 @@ pub(crate) fn merge_settings_update_into_snapshot(
     };
 
     for (field, value) in update {
-        // Remote settings are desktop-owned (loaded from the local DB on every
-        // snapshot rebuild); never let a remote client overwrite them.
-        if field == "remote" {
+        // Remote settings and automation snapshots are desktop-owned (loaded
+        // from the local DB on every snapshot rebuild); never let a remote
+        // client overwrite them. Automation edits go through the versioned
+        // cron.manage apply protocol instead.
+        if field == "remote"
+            || field == "automationCron"
+            || field == "automationHooks"
+            || field == "hooks"
+            || field == "cron"
+        {
             continue;
         }
         merged.insert(field, value);

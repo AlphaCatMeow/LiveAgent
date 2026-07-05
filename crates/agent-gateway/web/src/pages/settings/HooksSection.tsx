@@ -1,5 +1,6 @@
 import { type ReactNode, useState } from "react";
 import {
+  AlertTriangle,
   Bot,
   CheckCircle2,
   ChevronDown,
@@ -19,13 +20,15 @@ import {
 import { Button } from "../../components/ui/button";
 import { useLocale } from "../../i18n";
 import {
-  type ConversationHook,
-  HOOK_LIFECYCLE_EVENTS,
-  type HookLifecycleEventType,
-  updateHooks,
-} from "../../lib/settings";
+  applyHookOps,
+  HOOK_EVENT_DESCRIPTION_TRANSLATION_KEYS,
+  HOOK_EVENT_TRANSLATION_KEYS,
+  type HookDef,
+  type HookEvent,
+  type HookType,
+  useAutomation,
+} from "../../lib/automation";
 import { HookModal } from "./HookModal";
-import { getHookEventDescription, getHookEventLabel, getHookTypeTone } from "./hookUtils";
 import { AgentActivationSwitch, ConfirmDeletePopover } from "./shared";
 import type { SettingsSectionProps } from "./types";
 
@@ -38,29 +41,51 @@ type LifecyclePhase = {
   borderColor: string;
   dotColor: string;
   icon: ReactNode;
-  events: HookLifecycleEventType[];
 };
 
 type PhaseGroup = {
   phase: LifecyclePhase;
-  items: { event: HookLifecycleEventType; index: number }[];
+  items: { event: HookEvent; index: number }[];
 };
 
-export function HooksSection(props: SettingsSectionProps) {
-  const { settings, setSettings } = props;
-  const { t } = useLocale();
-  const [activeEvent, setActiveEvent] = useState<HookLifecycleEventType>(HOOK_LIFECYCLE_EVENTS[0]);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingHook, setEditingHook] = useState<ConversationHook | null>(null);
-  const [collapsedPhases, setCollapsedPhases] = useState<Set<string>>(new Set());
+/** Conversation-order event flow; the single source for the lifecycle rail. */
+const EVENT_FLOW: { event: HookEvent; phaseKey: string }[] = [
+  { event: "agent_start", phaseKey: "agent" },
+  { event: "turn_start", phaseKey: "turn" },
+  { event: "message_start", phaseKey: "message" },
+  { event: "message_end", phaseKey: "message" },
+  { event: "tool_execution_start", phaseKey: "tool" },
+  { event: "tool_execution_end", phaseKey: "tool" },
+  { event: "turn_end", phaseKey: "turn" },
+  { event: "agent_end", phaseKey: "agent" },
+];
 
-  const hooks = settings.hooks;
+function getHookEventLabel(t: (key: string) => string, event: HookEvent) {
+  return t(HOOK_EVENT_TRANSLATION_KEYS[event]);
+}
+
+function getHookTypeTone(type: HookType) {
+  return type === "command"
+    ? "bg-blue-500/10 text-blue-600 dark:text-blue-300"
+    : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-300";
+}
+
+export function HooksSection(_props: SettingsSectionProps) {
+  const { t } = useLocale();
+  const [activeEvent, setActiveEvent] = useState<HookEvent>(EVENT_FLOW[0].event);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingHook, setEditingHook] = useState<HookDef | null>(null);
+  const [collapsedPhases, setCollapsedPhases] = useState<Set<string>>(new Set());
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const { hooks: hooksSnapshot } = useAutomation();
+  const hooks = hooksSnapshot.hooks;
   const activeHooks = hooks.filter((hook) => hook.event === activeEvent);
   const enabledCount = hooks.filter((hook) => hook.enabled).length;
   const disabledCount = hooks.length - enabledCount;
 
-  const phases: LifecyclePhase[] = [
-    {
+  const phasesByKey: Record<string, LifecyclePhase> = {
+    agent: {
       key: "agent",
       label: t("settings.hooksPhaseAgent"),
       description: t("settings.hooksPhaseAgentDesc"),
@@ -69,9 +94,8 @@ export function HooksSection(props: SettingsSectionProps) {
       borderColor: "border-violet-500/20",
       dotColor: "bg-violet-500",
       icon: <Bot className="h-3.5 w-3.5" />,
-      events: ["agent_start", "agent_end"],
     },
-    {
+    turn: {
       key: "turn",
       label: t("settings.hooksPhaseTurn"),
       description: t("settings.hooksPhaseTurnDesc"),
@@ -80,9 +104,8 @@ export function HooksSection(props: SettingsSectionProps) {
       borderColor: "border-blue-500/20",
       dotColor: "bg-blue-500",
       icon: <RefreshCw className="h-3.5 w-3.5" />,
-      events: ["turn_start", "turn_end"],
     },
-    {
+    message: {
       key: "message",
       label: t("settings.hooksPhaseMessage"),
       description: t("settings.hooksPhaseMessageDesc"),
@@ -91,9 +114,8 @@ export function HooksSection(props: SettingsSectionProps) {
       borderColor: "border-emerald-500/20",
       dotColor: "bg-emerald-500",
       icon: <MessageSquare className="h-3.5 w-3.5" />,
-      events: ["message_start", "message_update", "message_end"],
     },
-    {
+    tool: {
       key: "tool",
       label: t("settings.hooksPhaseTool"),
       description: t("settings.hooksPhaseToolDesc"),
@@ -102,22 +124,13 @@ export function HooksSection(props: SettingsSectionProps) {
       borderColor: "border-amber-500/20",
       dotColor: "bg-amber-500",
       icon: <Wrench className="h-3.5 w-3.5" />,
-      events: ["tool_execution_start", "tool_execution_update", "tool_execution_end"],
     },
-  ];
+  };
 
-  const orderedEvents: { event: HookLifecycleEventType; phase: LifecyclePhase }[] = [
-    { event: "agent_start", phase: phases[0] },
-    { event: "turn_start", phase: phases[1] },
-    { event: "message_start", phase: phases[2] },
-    { event: "message_update", phase: phases[2] },
-    { event: "message_end", phase: phases[2] },
-    { event: "tool_execution_start", phase: phases[3] },
-    { event: "tool_execution_update", phase: phases[3] },
-    { event: "tool_execution_end", phase: phases[3] },
-    { event: "turn_end", phase: phases[1] },
-    { event: "agent_end", phase: phases[0] },
-  ];
+  const orderedEvents = EVENT_FLOW.map(({ event, phaseKey }) => ({
+    event,
+    phase: phasesByKey[phaseKey],
+  }));
 
   function togglePhase(key: string) {
     setCollapsedPhases((prev) => {
@@ -138,43 +151,34 @@ export function HooksSection(props: SettingsSectionProps) {
     setModalOpen(true);
   }
 
-  function openEdit(hook: ConversationHook) {
+  function openEdit(hook: HookDef) {
     setEditingHook(hook);
     setActiveEvent(hook.event);
     setModalOpen(true);
   }
 
-  function handleSave(data: Omit<ConversationHook, "id">) {
-    setSettings((prev) => {
-      const nextHook: ConversationHook = editingHook
-        ? { ...editingHook, ...data }
-        : { id: crypto.randomUUID(), ...data };
-
-      return updateHooks(
-        prev,
-        editingHook
-          ? prev.hooks.map((hook) => (hook.id === editingHook.id ? nextHook : hook))
-          : [...prev.hooks, nextHook],
-      );
+  function runOps(run: () => Promise<unknown>) {
+    setActionError(null);
+    void run().catch((error) => {
+      setActionError(error instanceof Error ? error.message : String(error));
     });
   }
 
-  function updateHookState(hookId: string, updater: (hook: ConversationHook) => ConversationHook) {
-    setSettings((prev) =>
-      updateHooks(
-        prev,
-        prev.hooks.map((hook) => (hook.id === hookId ? updater(hook) : hook)),
-      ),
-    );
+  async function handleSave(data: Omit<HookDef, "id">) {
+    setActionError(null);
+    if (editingHook) {
+      await applyHookOps([{ op: "update", id: editingHook.id, patch: { ...data } }]);
+    } else {
+      await applyHookOps([{ op: "create", item: { ...data } }]);
+    }
+  }
+
+  function toggleHook(hook: HookDef) {
+    runOps(() => applyHookOps([{ op: "update", id: hook.id, patch: { enabled: !hook.enabled } }]));
   }
 
   function deleteHook(hookId: string) {
-    setSettings((prev) =>
-      updateHooks(
-        prev,
-        prev.hooks.filter((hook) => hook.id !== hookId),
-      ),
-    );
+    runOps(() => applyHookOps([{ op: "delete", id: hookId }]));
   }
 
   const phaseGroups: PhaseGroup[] = [];
@@ -235,6 +239,13 @@ export function HooksSection(props: SettingsSectionProps) {
           ) : null}
         </div>
       </div>
+
+      {actionError ? (
+        <div className="flex shrink-0 items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-xs text-destructive">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{actionError}</span>
+        </div>
+      ) : null}
 
       <div className="settings-hooks-grid grid min-h-0 flex-1 gap-5 xl:grid-cols-[300px_minmax(0,1fr)]">
         <aside className="settings-hooks-lifecycle flex flex-col overflow-hidden rounded-2xl border border-border/60 bg-card">
@@ -387,7 +398,7 @@ export function HooksSection(props: SettingsSectionProps) {
                     </h3>
                   </div>
                   <p className="settings-hooks-detail-desc mt-0.5 text-sm text-muted-foreground">
-                    {getHookEventDescription(t, activeEvent)}
+                    {t(HOOK_EVENT_DESCRIPTION_TRANSLATION_KEYS[activeEvent])}
                   </p>
                 </div>
               </div>
@@ -461,12 +472,7 @@ export function HooksSection(props: SettingsSectionProps) {
                           <AgentActivationSwitch
                             checked={hook.enabled}
                             title={hook.enabled ? t("settings.disable") : t("settings.enable")}
-                            onToggle={() =>
-                              updateHookState(hook.id, (current) => ({
-                                ...current,
-                                enabled: !current.enabled,
-                              }))
-                            }
+                            onToggle={() => toggleHook(hook)}
                           />
                           <Button
                             type="button"

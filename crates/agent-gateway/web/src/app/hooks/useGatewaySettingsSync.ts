@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import {
+  type CronSnapshot,
+  feedCronSnapshot,
+  feedHooksSnapshot,
+  type HooksSnapshot,
+  initAutomation,
+} from "@/lib/automation";
 import type { GatewayWebSocketClientLike } from "@/lib/gatewaySocket";
 import { setPreferredMonacoNlsLocale } from "@/lib/monacoNls";
 import {
@@ -128,6 +135,19 @@ export function useGatewaySettingsSync(params: {
 
   const applyGatewaySettings = useCallback(
     (payload: GatewaySettingsSyncPayload) => {
+      // Automation snapshots ride along on the settings-sync channel but are
+      // desktop-owned state with their own revision — feed them straight into
+      // the automation store instead of the settings state.
+      const automation = payload as {
+        automationCron?: CronSnapshot;
+        automationHooks?: HooksSnapshot;
+      };
+      if (automation.automationCron) {
+        feedCronSnapshot(automation.automationCron);
+      }
+      if (automation.automationHooks) {
+        feedHooksSnapshot(automation.automationHooks);
+      }
       const prev = settingsRef.current;
       const rawNext = resolveAppWorkspaceProjects(applyGatewaySettingsSyncPayload(prev, payload));
       const next = redactSettingsForWebStorage(rawNext);
@@ -165,6 +185,9 @@ export function useGatewaySettingsSync(params: {
     let cancelled = false;
     setSettingsSyncReady(false);
     setSettingsSyncError(null);
+    // Best-effort: the desktop may be offline; the settings-sync push
+    // populates the store once it connects.
+    void initAutomation().catch(() => undefined);
     const unsubscribe = api.subscribeSettings((payload) => {
       if (cancelled) {
         return;

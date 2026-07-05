@@ -122,8 +122,6 @@ macro_rules! app_invoke_handler {
             commands::settings::settings_save_ssh,
             commands::settings::settings_apply_ssh_patch,
             commands::settings::settings_reset_ssh_known_host,
-            commands::settings::settings_save_hooks,
-            commands::settings::settings_save_cron,
             commands::settings::settings_save_remote,
             commands::settings::settings_save_memory,
             commands::update::app_update_check,
@@ -135,12 +133,17 @@ macro_rules! app_invoke_handler {
             // Hooks
             commands::hook::hook_run_script,
             commands::hook::hook_run_http_requests,
-            // Cron
+            commands::hook::hook_cancel_scope,
+            // Automation (cron tasks + hooks store)
             commands::cron::cron_validate_expression,
-            commands::cron::cron_list_logs,
-            commands::cron::cron_clear_logs,
-            commands::cron::cron_take_pending_prompt_runs,
-            commands::cron::cron_complete_prompt_run,
+            commands::cron::automation_snapshot,
+            commands::cron::automation_cron_apply,
+            commands::cron::automation_hooks_apply,
+            commands::cron::automation_list_runs,
+            commands::cron::automation_clear_runs,
+            commands::cron::automation_claim_prompt_runs,
+            commands::cron::automation_release_prompt_run,
+            commands::cron::automation_complete_prompt_run,
             // Local command execution
             commands::shell::shell_run,
             commands::shell::shell_cancel,
@@ -215,8 +218,6 @@ macro_rules! app_invoke_handler {
             commands::system::system_append_debug_jsonl,
             commands::system::system_begin_power_activity,
             commands::system::system_end_power_activity,
-            commands::system::system_add_cron_task,
-            commands::system::system_manage_cron_task,
             commands::system_tools::system_http_get_test,
             commands::gateway::gateway_connect,
             commands::gateway::gateway_disconnect,
@@ -377,7 +378,13 @@ fn configure_windows_window_chrome(app: &tauri::App) -> tauri::Result<()> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let cron_manager = Arc::new(services::cron::CronManager::new());
+    let automation_store = Arc::new(
+        services::automation::AutomationStore::open()
+            .expect("failed to initialize LiveAgent automation store"),
+    );
+    let automation_scheduler = Arc::new(services::automation::AutomationScheduler::new(
+        Arc::clone(&automation_store),
+    ));
     let memory_store = Arc::new(
         services::memory::MemoryStore::open().expect("failed to initialize LiveAgent memory store"),
     );
@@ -402,7 +409,11 @@ pub fn run() {
         .manage(Arc::clone(&terminal_registry))
         .manage(Arc::clone(&sftp_registry))
         .manage(Arc::clone(&allow_exit))
-        .manage(Arc::clone(&cron_manager))
+        .manage(Arc::clone(&automation_store))
+        .manage(Arc::clone(&automation_scheduler))
+        .manage(Arc::new(
+            commands::hook::HookScopeRegistry::default(),
+        ))
         .setup({
             let allow_exit = Arc::clone(&allow_exit);
             let terminal_registry = Arc::clone(&terminal_registry);
@@ -420,20 +431,21 @@ pub fn run() {
                 if let Err(error) = services::skills::ensure_builtin_agent_skills_sync() {
                     eprintln!("failed to seed builtin skills: {error}");
                 }
-                cron_manager.attach_app_handle(app.handle().clone())?;
                 terminal_registry.attach_app_handle(app.handle().clone());
                 sftp_registry.attach_app_handle(app.handle().clone());
-                Arc::clone(&cron_manager).start();
-                cron_manager.request_reload();
                 let gateway_controller = Arc::new(services::gateway::GatewayController::new(
                     app.handle().clone(),
-                    Arc::clone(&cron_manager),
+                    Arc::clone(&automation_store),
                     Arc::clone(&memory_store),
                     Arc::clone(&terminal_registry),
                     Arc::clone(&sftp_registry),
                 ));
-                cron_manager
-                    .attach_settings_sync_controller(Arc::downgrade(&gateway_controller))?;
+                automation_store.set_notifier(services::automation::AutomationNotifier {
+                    app_handle: app.handle().clone(),
+                    gateway: Arc::downgrade(&gateway_controller),
+                    scheduler: Arc::downgrade(&automation_scheduler),
+                });
+                Arc::clone(&automation_scheduler).start();
                 app.manage(Arc::clone(&gateway_controller));
                 if let Err(error) = gateway_controller.start() {
                     eprintln!("failed to start remote gateway controller: {error}");

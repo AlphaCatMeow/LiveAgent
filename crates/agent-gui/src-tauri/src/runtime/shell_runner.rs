@@ -563,6 +563,7 @@ fn default_platform_shell_profile() -> ShellExecutionProfile {
 pub(crate) fn spawn_platform_shell_command<F>(
     command: &str,
     cwd: &Path,
+    envs: &[(String, String)],
     mut stdio_factory: F,
 ) -> Result<SpawnedPlatformShell, String>
 where
@@ -575,6 +576,7 @@ where
             stdio_factory().map_err(|err| format!("Failed to prepare shell stdio: {err}"))?;
         let mut c = Command::new(&candidate.program);
         c.args(&candidate.args);
+        c.envs(envs.iter().map(|(key, value)| (key.as_str(), value.as_str())));
         if candidate.augment_macos_path {
             maybe_augment_macos_path(&mut c);
         }
@@ -614,8 +616,31 @@ pub(crate) fn run_shell_script(
     cwd: Option<String>,
     timeout_ms: Option<u64>,
     max_timeout_ms: Option<u64>,
+    provider_id: Option<String>,
+    cancel_token: Option<ShellCancelToken>,
+) -> Result<ShellRunResponse, String> {
+    run_shell_script_with_envs(
+        workdir,
+        command,
+        cwd,
+        timeout_ms,
+        max_timeout_ms,
+        provider_id,
+        cancel_token,
+        &[],
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_shell_script_with_envs(
+    workdir: String,
+    command: String,
+    cwd: Option<String>,
+    timeout_ms: Option<u64>,
+    max_timeout_ms: Option<u64>,
     _provider_id: Option<String>,
     cancel_token: Option<ShellCancelToken>,
+    envs: &[(String, String)],
 ) -> Result<ShellRunResponse, String> {
     let wd = canonicalize_workdir(&workdir).map_err(|e| e.to_string())?;
 
@@ -650,8 +675,9 @@ pub(crate) fn run_shell_script(
     let timeout = Duration::from_millis(effective_timeout_ms);
     let start = Instant::now();
 
-    let spawned =
-        spawn_platform_shell_command(cmd, &actual_cwd, || Ok((Stdio::piped(), Stdio::piped())))?;
+    let spawned = spawn_platform_shell_command(cmd, &actual_cwd, envs, || {
+        Ok((Stdio::piped(), Stdio::piped()))
+    })?;
     let mut child = spawned.child;
     let shell_profile = spawned.profile;
     let shell_name = shell_basename(shell_profile.display_shell);

@@ -48,6 +48,14 @@
     "pages/settings/memory/useMemoryPanelData.ts",
     "pages/settings/memory/MemoryPanel.tsx",
     "pages/settings/memory/OrganizerHistoryModal.tsx",
-    "pages/settings/memory/MemorySettingsDrawer.tsx"
+    "pages/settings/memory/MemorySettingsDrawer.tsx",
+    "lib/automation/types.ts",
+    "lib/automation/store.ts",
+    "lib/automation/index.ts",
+    "pages/settings/httpRequestEditor.tsx",
+    "pages/settings/HookModal.tsx",
+    "pages/settings/HooksSection.tsx",
+    "pages/settings/CronTaskModal.tsx",
+    "pages/settings/CronTaskViewModal.tsx"
   ]
 }

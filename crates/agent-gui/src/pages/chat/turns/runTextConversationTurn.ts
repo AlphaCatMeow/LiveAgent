@@ -323,7 +323,6 @@ export async function runTextConversationTurn(params: RunTextConversationTurnPar
           onTextDelta: (delta) => {
             nativeWebSearchStatusController.noteVisibleActivity();
             gatewayBridgeEvents.queueToken(delta, { round: textRound });
-            hookLifecycle.messageUpdated();
             if (textModeUsesLiveRounds) {
               batchLiveRoundsUpdate(
                 (prev) =>
@@ -379,7 +378,6 @@ export async function runTextConversationTurn(params: RunTextConversationTurnPar
             } else {
               nativeWebSearchStatusController.pause();
             }
-            hookLifecycle.messageUpdated();
             updateHostedSearch(hostedSearch, textRound, streamedAssistantText);
           },
           signal: getRequestController().signal,

@@ -15,67 +15,6 @@ export type ReasoningLevel = "off" | "minimal" | "low" | "medium" | "high" | "xh
 
 export type McpTransport = "stdio" | "http" | "sse";
 
-export type HookLifecycleEventType =
-  | "agent_start"
-  | "turn_start"
-  | "message_start"
-  | "message_update"
-  | "message_end"
-  | "tool_execution_start"
-  | "tool_execution_update"
-  | "tool_execution_end"
-  | "turn_end"
-  | "agent_end";
-
-export type ConversationHookType = "command" | "http";
-
-export type HookHttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
-
-export type HookHttpRequest = {
-  id: string;
-  url: string;
-  method: HookHttpMethod;
-  headers?: Record<string, string>;
-  body?: unknown;
-};
-
-export type CronTaskType = "bash" | "http" | "prompt";
-
-export type CronTask = {
-  id: string;
-  name: string;
-  description: string;
-  cron: string;
-  enabled: boolean;
-  remainingExecutions?: number;
-  type: CronTaskType;
-  script?: string;
-  requests?: HookHttpRequest[];
-  prompt?: string;
-  selectedModel?: SelectedModel;
-};
-
-export type CronExecutionLog = {
-  id: string;
-  taskId: string;
-  startedAt: number;
-  success: boolean;
-  durationMs: number;
-  exitCode?: number;
-  output?: string;
-};
-
-export type ConversationHook = {
-  id: string;
-  event: HookLifecycleEventType;
-  name: string;
-  description: string;
-  enabled: boolean;
-  type: ConversationHookType;
-  script?: string;
-  requests?: HookHttpRequest[];
-};
-
 export type McpServerConfig = {
   id: string;
   enabled: boolean;
@@ -312,8 +251,6 @@ export type AppSettings = {
   mcp: McpSettings;
   agents: AgentPromptTemplate[];
   ssh: SshSettings;
-  hooks: ConversationHook[];
-  cron: CronTask[];
   remote: RemoteSettings;
   memory: MemorySettings;
   customSettings: CustomSettings;
@@ -327,55 +264,6 @@ export type AppSettings = {
 export const CODEX_REQUEST_FORMAT_LABELS: Record<CodexRequestFormat, string> = {
   "openai-completions": "OpenAI-Completions",
   "openai-responses": "Responses API",
-};
-
-export const HOOK_LIFECYCLE_EVENTS: HookLifecycleEventType[] = [
-  "agent_start",
-  "turn_start",
-  "message_start",
-  "message_update",
-  "message_end",
-  "tool_execution_start",
-  "tool_execution_update",
-  "tool_execution_end",
-  "turn_end",
-  "agent_end",
-];
-
-export const HOOK_HTTP_METHODS: HookHttpMethod[] = [
-  "GET",
-  "POST",
-  "PUT",
-  "PATCH",
-  "DELETE",
-  "HEAD",
-  "OPTIONS",
-];
-
-export const HOOK_EVENT_TRANSLATION_KEYS: Record<HookLifecycleEventType, string> = {
-  agent_start: "settings.hooksEventAgentStart",
-  turn_start: "settings.hooksEventTurnStart",
-  message_start: "settings.hooksEventMessageStart",
-  message_update: "settings.hooksEventMessageUpdate",
-  message_end: "settings.hooksEventMessageEnd",
-  tool_execution_start: "settings.hooksEventToolExecutionStart",
-  tool_execution_update: "settings.hooksEventToolExecutionUpdate",
-  tool_execution_end: "settings.hooksEventToolExecutionEnd",
-  turn_end: "settings.hooksEventTurnEnd",
-  agent_end: "settings.hooksEventAgentEnd",
-};
-
-export const HOOK_EVENT_DESCRIPTION_TRANSLATION_KEYS: Record<HookLifecycleEventType, string> = {
-  agent_start: "settings.hooksEventAgentStartDesc",
-  turn_start: "settings.hooksEventTurnStartDesc",
-  message_start: "settings.hooksEventMessageStartDesc",
-  message_update: "settings.hooksEventMessageUpdateDesc",
-  message_end: "settings.hooksEventMessageEndDesc",
-  tool_execution_start: "settings.hooksEventToolExecutionStartDesc",
-  tool_execution_update: "settings.hooksEventToolExecutionUpdateDesc",
-  tool_execution_end: "settings.hooksEventToolExecutionEndDesc",
-  turn_end: "settings.hooksEventTurnEndDesc",
-  agent_end: "settings.hooksEventAgentEndDesc",
 };
 
 const CODEX_RESPONSES_SUFFIX = "/responses";
@@ -946,113 +834,6 @@ function normalizeStringArray(input: unknown): string[] {
 
 function normalizeOptionalText(input: unknown): string {
   return typeof input === "string" ? input.trim() : "";
-}
-
-function normalizeCronRemainingExecutions(input: unknown): number | undefined {
-  if (input == null) return undefined;
-  if (typeof input === "string" && input.trim() === "") return undefined;
-  const numeric =
-    typeof input === "number" ? input : typeof input === "string" ? Number(input) : NaN;
-  if (!Number.isFinite(numeric) || !Number.isInteger(numeric) || numeric < 0) {
-    return undefined;
-  }
-  return numeric;
-}
-
-function normalizeHookLifecycleEventType(input: unknown): HookLifecycleEventType {
-  return HOOK_LIFECYCLE_EVENTS.includes(input as HookLifecycleEventType)
-    ? (input as HookLifecycleEventType)
-    : "agent_start";
-}
-
-function normalizeConversationHookType(input: unknown): ConversationHookType {
-  return input === "http" ? "http" : "command";
-}
-
-function normalizeCronTaskType(input: unknown): CronTaskType {
-  switch (input) {
-    case "http":
-    case "prompt":
-      return input;
-    default:
-      return "bash";
-  }
-}
-
-function normalizeHookHttpMethod(input: unknown): HookHttpMethod {
-  const value = typeof input === "string" ? input.trim().toUpperCase() : "";
-  return HOOK_HTTP_METHODS.includes(value as HookHttpMethod) ? (value as HookHttpMethod) : "POST";
-}
-
-export function canHookHttpMethodHaveBody(method: HookHttpMethod): boolean {
-  return method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE";
-}
-
-function normalizeHookHttpRequest(input: unknown): HookHttpRequest {
-  const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
-  const method = normalizeHookHttpMethod(obj.method);
-  const body =
-    canHookHttpMethodHaveBody(method) && Object.hasOwn(obj, "body") ? obj.body : undefined;
-
-  return {
-    id: typeof obj.id === "string" && obj.id.trim() ? obj.id.trim() : crypto.randomUUID(),
-    url: normalizeOptionalText(obj.url),
-    method,
-    headers: normalizeRecordStringString(obj.headers),
-    body,
-  };
-}
-
-export function normalizeConversationHook(input: unknown): ConversationHook {
-  const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
-  const type = normalizeConversationHookType(obj.type);
-
-  return {
-    id: typeof obj.id === "string" && obj.id.trim() ? obj.id.trim() : crypto.randomUUID(),
-    event: normalizeHookLifecycleEventType(obj.event),
-    name: typeof obj.name === "string" && obj.name.trim() ? obj.name.trim() : "未命名 Hook",
-    description: normalizeOptionalText(obj.description),
-    enabled: obj.enabled === true,
-    type,
-    script: type === "command" ? normalizeOptionalText(obj.script) : undefined,
-    requests:
-      type === "http" && Array.isArray(obj.requests)
-        ? obj.requests.map((request) => normalizeHookHttpRequest(request))
-        : undefined,
-  };
-}
-
-export function normalizeConversationHooks(input: unknown): ConversationHook[] {
-  if (!Array.isArray(input)) return [];
-  return input.map((hook) => normalizeConversationHook(hook));
-}
-
-export function normalizeCronTask(input: unknown): CronTask {
-  const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
-  const type = normalizeCronTaskType(obj.type);
-  const remainingExecutions = normalizeCronRemainingExecutions(obj.remainingExecutions);
-
-  return {
-    id: typeof obj.id === "string" && obj.id.trim() ? obj.id.trim() : crypto.randomUUID(),
-    name: typeof obj.name === "string" && obj.name.trim() ? obj.name.trim() : "未命名任务",
-    description: normalizeOptionalText(obj.description),
-    cron: normalizeOptionalText(obj.cron),
-    enabled: obj.enabled === true && remainingExecutions !== 0,
-    remainingExecutions,
-    type,
-    script: type === "bash" ? normalizeOptionalText(obj.script) : undefined,
-    requests:
-      type === "http" && Array.isArray(obj.requests)
-        ? obj.requests.map((request) => normalizeHookHttpRequest(request))
-        : undefined,
-    prompt: type === "prompt" ? normalizeOptionalText(obj.prompt) : undefined,
-    selectedModel: type === "prompt" ? normalizeSelectedModel(obj.selectedModel) : undefined,
-  };
-}
-
-export function normalizeCronTasks(input: unknown): CronTask[] {
-  if (!Array.isArray(input)) return [];
-  return input.map((task) => normalizeCronTask(task));
 }
 
 function normalizeRecordStringString(input: unknown): Record<string, string> | undefined {
@@ -1945,8 +1726,6 @@ export function getDefaultSettings(): AppSettings {
       hosts: [],
       projectHostAssociations: {},
     },
-    hooks: [],
-    cron: [],
     remote: {
       enabled: false,
       gatewayUrl: "",
@@ -1991,8 +1770,6 @@ export function normalizeSettings(input?: Partial<AppSettings> | null): AppSetti
     mcp: normalizeMcpSettings(obj.mcp ?? defaults.mcp),
     agents: normalizeAgentPromptTemplates(obj.agents ?? defaults.agents),
     ssh: normalizeSshSettings(obj.ssh ?? defaults.ssh),
-    hooks: normalizeConversationHooks(obj.hooks ?? defaults.hooks),
-    cron: normalizeCronTasks(obj.cron ?? defaults.cron),
     remote: normalizeRemoteSettings(obj.remote ?? defaults.remote),
     memory: normalizeMemorySettings(obj.memory ?? defaults.memory, customProviders),
     customSettings: normalizeCustomSettings(
@@ -2108,20 +1885,6 @@ export function removeSshHostFromProjectAssociations(
     }
   }
   return changed ? updateSsh(prev, { projectHostAssociations }) : prev;
-}
-
-export function updateHooks(prev: AppSettings, hooks: ConversationHook[]): AppSettings {
-  return normalizeSettings({
-    ...prev,
-    hooks,
-  });
-}
-
-export function updateCronTasks(prev: AppSettings, cron: CronTask[]): AppSettings {
-  return normalizeSettings({
-    ...prev,
-    cron,
-  });
 }
 
 export function updateSkills(prev: AppSettings, patch: Partial<SkillsSettings>): AppSettings {

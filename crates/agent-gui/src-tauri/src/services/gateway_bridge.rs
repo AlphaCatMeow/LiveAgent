@@ -14,12 +14,14 @@ use crate::commands::{
     settings::{load_providers, open_db},
     system::{
         system_create_project_folder_sync, system_import_uploaded_readable_files_sync,
-        system_list_skill_files_sync, system_manage_cron_task_sync,
-        system_read_skill_metadata_sync, system_read_skill_text_sync,
-        system_read_uploaded_image_preview_sync, SystemReadableFileUploadInput,
+        system_list_skill_files_sync, system_read_skill_metadata_sync,
+        system_read_skill_text_sync, system_read_uploaded_image_preview_sync,
+        SystemReadableFileUploadInput,
     },
 };
-use crate::services::cron::{clear_logs_sync, list_logs_sync, CronManager};
+use crate::services::automation::{
+    validate_cron_expression, AutomationApplyInput, AutomationStore,
+};
 use crate::services::gateway::proto;
 use crate::services::memory::{
     MemoryAcceptArgs, MemoryBatchArgs, MemoryDeleteArgs, MemoryDeleteProjectArgs, MemoryListArgs,
@@ -40,58 +42,73 @@ struct HistorySharedListArgs {
     page_size: i64,
 }
 
+/// Gateway relay for the automation domain. Web clients speak the same
+/// versioned apply protocol as the desktop webview and the LLM tool; the
+/// legacy per-task create/update/delete actions no longer exist.
 pub async fn handle_cron_manage(
-    cron_manager: Arc<CronManager>,
+    store: Arc<AutomationStore>,
     request: proto::CronManageRequest,
 ) -> Result<proto::CronManageResponse, String> {
     let action = request.action.trim().to_string();
-    match action.as_str() {
-        "list_logs" => {
-            let task_id = parse_required_cron_task_id(&request, "list_logs")?;
-            let limit = parse_cron_logs_limit(&request.task_json)?;
-            let logs = tauri::async_runtime::spawn_blocking(move || list_logs_sync(task_id, limit))
-                .await
-                .map_err(|e| format!("gateway cron list_logs join failed: {e}"))??;
-            return Ok(proto::CronManageResponse {
-                action,
-                result_json: serialize_cron_manage_result(&json!({
-                    "action": "list_logs",
-                    "logs": logs,
-                }))?,
-            });
-        }
-        "clear_logs" => {
-            let task_id = parse_required_cron_task_id(&request, "clear_logs")?;
-            let cleared_count =
-                tauri::async_runtime::spawn_blocking(move || clear_logs_sync(task_id))
+    let result_json = match action.as_str() {
+        "snapshot" => {
+            let store = Arc::clone(&store);
+            let snapshot =
+                tauri::async_runtime::spawn_blocking(move || store.snapshot())
                     .await
-                    .map_err(|e| format!("gateway cron clear_logs join failed: {e}"))??;
-            return Ok(proto::CronManageResponse {
-                action,
-                result_json: serialize_cron_manage_result(&json!({
-                    "action": "clear_logs",
-                    "clearedCount": cleared_count,
-                }))?,
-            });
+                    .map_err(|e| format!("gateway automation snapshot join failed: {e}"))??;
+            serialize_cron_manage_result(&snapshot)?
         }
-        _ => {}
-    }
-
-    let payload = build_cron_manage_payload(&request)?;
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        let mut conn = open_db()?;
-        system_manage_cron_task_sync(&mut conn, payload)
-    })
-    .await
-    .map_err(|e| format!("gateway cron manage join failed: {e}"))??;
-
-    if result.should_reload {
-        cron_manager.request_reload();
-    }
+        "cron_apply" => {
+            let input = parse_apply_input(&request.task_json)?;
+            let store = Arc::clone(&store);
+            let response =
+                tauri::async_runtime::spawn_blocking(move || store.cron_apply(input))
+                    .await
+                    .map_err(|e| format!("gateway cron apply join failed: {e}"))??;
+            serialize_cron_manage_result(&response)?
+        }
+        "hooks_apply" => {
+            let input = parse_apply_input(&request.task_json)?;
+            let store = Arc::clone(&store);
+            let response =
+                tauri::async_runtime::spawn_blocking(move || store.hooks_apply(input))
+                    .await
+                    .map_err(|e| format!("gateway hooks apply join failed: {e}"))??;
+            serialize_cron_manage_result(&response)?
+        }
+        "list_runs" => {
+            let task_id = parse_required_cron_task_id(&request, "list_runs")?;
+            let limit = parse_runs_limit(&request.task_json)?;
+            let store = Arc::clone(&store);
+            let runs =
+                tauri::async_runtime::spawn_blocking(move || store.list_runs(&task_id, limit))
+                    .await
+                    .map_err(|e| format!("gateway list_runs join failed: {e}"))??;
+            serialize_cron_manage_result(&json!({ "runs": runs }))?
+        }
+        "clear_runs" => {
+            let task_id = parse_required_cron_task_id(&request, "clear_runs")?;
+            let store = Arc::clone(&store);
+            let cleared =
+                tauri::async_runtime::spawn_blocking(move || store.clear_runs(&task_id))
+                    .await
+                    .map_err(|e| format!("gateway clear_runs join failed: {e}"))??;
+            serialize_cron_manage_result(&json!({ "clearedCount": cleared }))?
+        }
+        "validate" => {
+            let expression = parse_validate_expression(&request.task_json)?;
+            tauri::async_runtime::spawn_blocking(move || validate_cron_expression(&expression))
+                .await
+                .map_err(|e| format!("gateway cron validate join failed: {e}"))??;
+            serialize_cron_manage_result(&json!({ "valid": true }))?
+        }
+        other => return Err(format!("unsupported cron action: {other}")),
+    };
 
     Ok(proto::CronManageResponse {
-        action: result.response.action.clone(),
-        result_json: serialize_cron_manage_result(&result.response)?,
+        action,
+        result_json,
     })
 }
 
@@ -848,34 +865,9 @@ pub async fn handle_skill_manage(
         })
 }
 
-fn build_cron_manage_payload(request: &proto::CronManageRequest) -> Result<Value, String> {
-    let action = request.action.trim();
-    match action {
-        "create" => Ok(json!({
-            "action": "create",
-            "task": parse_task_json(&request.task_json)?,
-        })),
-        "read" => {
-            if request.task_id.trim().is_empty() {
-                Ok(json!({ "action": "read" }))
-            } else {
-                Ok(json!({
-                    "action": "read",
-                    "task_id": request.task_id.trim(),
-                }))
-            }
-        }
-        "update" => Ok(json!({
-            "action": "update",
-            "task_id": request.task_id.trim(),
-            "task": parse_task_json(&request.task_json)?,
-        })),
-        "delete" => Ok(json!({
-            "action": "delete",
-            "task_id": request.task_id.trim(),
-        })),
-        _ => Err(format!("unsupported cron action: {action}")),
-    }
+fn parse_apply_input(raw: &str) -> Result<AutomationApplyInput, String> {
+    serde_json::from_str::<AutomationApplyInput>(raw.trim())
+        .map_err(|e| format!("invalid automation apply payload: {e}"))
 }
 
 fn parse_required_cron_task_id(
@@ -889,31 +881,39 @@ fn parse_required_cron_task_id(
     Ok(task_id.to_string())
 }
 
-fn parse_cron_logs_limit(raw: &str) -> Result<usize, String> {
+fn parse_runs_limit(raw: &str) -> Result<usize, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Ok(100);
     }
-
     let payload = serde_json::from_str::<Value>(trimmed)
-        .map_err(|e| format!("invalid cron logs query: {e}"))?;
-    let limit = payload
+        .map_err(|e| format!("invalid runs query: {e}"))?;
+    Ok(payload
         .as_object()
         .and_then(|obj| obj.get("limit"))
         .and_then(Value::as_u64)
         .and_then(|value| usize::try_from(value).ok())
         .filter(|value| *value > 0)
-        .unwrap_or(100);
-    Ok(limit)
+        .map(|value| value.clamp(1, 500))
+        .unwrap_or(100))
+}
+
+fn parse_validate_expression(raw: &str) -> Result<String, String> {
+    let payload = serde_json::from_str::<Value>(raw.trim())
+        .map_err(|e| format!("invalid validate payload: {e}"))?;
+    payload
+        .as_object()
+        .and_then(|obj| obj.get("expression"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .ok_or_else(|| "validate requires expression".to_string())
 }
 
 fn serialize_cron_manage_result(payload: &impl serde::Serialize) -> Result<String, String> {
     serde_json::to_string(payload)
         .map_err(|e| format!("serialize cron manage response failed: {e}"))
-}
-
-fn parse_task_json(raw: &str) -> Result<Value, String> {
-    serde_json::from_str::<Value>(raw).map_err(|e| format!("invalid task_json: {e}"))
 }
 
 fn is_builtin_share_tool_name(name: &str) -> bool {
@@ -1598,7 +1598,7 @@ mod tests {
 
     use super::{
         build_history_prefix_segments, flatten_history_messages_json,
-        flatten_history_messages_json_window, history_message_content_hash, parse_cron_logs_limit,
+        flatten_history_messages_json_window, history_message_content_hash, parse_runs_limit,
         redact_builtin_tool_content_json, sanitize_provider_summaries,
     };
     use crate::commands::chat_history::ChatHistorySegmentRecord;
@@ -1623,19 +1623,19 @@ mod tests {
     }
 
     #[test]
-    fn parse_cron_logs_limit_defaults_to_100() {
-        assert_eq!(parse_cron_logs_limit("").expect("default limit"), 100);
-        assert_eq!(parse_cron_logs_limit("{}").expect("object default"), 100);
+    fn parse_runs_limit_defaults_to_100() {
+        assert_eq!(parse_runs_limit("").expect("default limit"), 100);
+        assert_eq!(parse_runs_limit("{}").expect("object default"), 100);
         assert_eq!(
-            parse_cron_logs_limit(r#"{"limit":0}"#).expect("zero fallback"),
+            parse_runs_limit(r#"{"limit":0}"#).expect("zero fallback"),
             100
         );
     }
 
     #[test]
-    fn parse_cron_logs_limit_accepts_positive_limit() {
+    fn parse_runs_limit_accepts_positive_limit() {
         assert_eq!(
-            parse_cron_logs_limit(r#"{"limit":25}"#).expect("parse explicit limit"),
+            parse_runs_limit(r#"{"limit":25}"#).expect("parse explicit limit"),
             25
         );
     }

@@ -23,7 +23,7 @@ use crate::commands::settings::RemoteSettingsPayload;
 use crate::runtime::sftp::SftpSessionRegistry;
 use crate::runtime::terminal::TerminalSessionRegistry;
 use crate::services::chat_run_ledger::ChatRunLedger;
-use crate::services::cron::CronManager;
+use crate::services::automation::AutomationStore;
 use crate::services::memory::MemoryStore;
 use crate::services::tunnel::{TunnelProxy, TunnelStore};
 use crate::services::workspace_watch::WorkspaceWatchService;
@@ -77,7 +77,7 @@ pub(crate) const GATEWAY_CHAT_LEASE_SWEEP_INTERVAL: Duration = Duration::from_se
 
 pub struct GatewayController {
     app_handle: tauri::AppHandle,
-    cron_manager: Arc<CronManager>,
+    automation_store: Arc<AutomationStore>,
     memory_store: Arc<MemoryStore>,
     terminal_registry: Arc<TerminalSessionRegistry>,
     sftp_registry: Arc<SftpSessionRegistry>,

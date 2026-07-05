@@ -59,29 +59,20 @@ impl GatewayController {
                 self.handle_chat_queue_request(request_id, request).await
             }
             Some(proto::gateway_envelope::Payload::CronManage(request)) => {
-                let should_refresh_settings =
-                    matches!(request.action.trim(), "create" | "update" | "delete");
-                match gateway_bridge::handle_cron_manage(Arc::clone(&self.cron_manager), request)
+                // Successful apply actions broadcast their own snapshot via the
+                // AutomationStore notifier; no extra refresh is needed here.
+                match gateway_bridge::handle_cron_manage(Arc::clone(&self.automation_store), request)
                     .await
                 {
                     Ok(response) => {
-                        let send_result = self
-                            .send_agent_envelope(proto::AgentEnvelope {
-                                request_id,
-                                timestamp: now_unix_seconds(),
-                                payload: Some(proto::agent_envelope::Payload::CronManageResp(
-                                    response,
-                                )),
-                            })
-                            .await;
-                        if send_result.is_ok() && should_refresh_settings {
-                            if let Err(error) = self.refresh_settings_sync_from_db().await {
-                                eprintln!(
-                                    "refresh gateway settings sync after cron manage failed: {error}"
-                                );
-                            }
-                        }
-                        send_result
+                        self.send_agent_envelope(proto::AgentEnvelope {
+                            request_id,
+                            timestamp: now_unix_seconds(),
+                            payload: Some(proto::agent_envelope::Payload::CronManageResp(
+                                response,
+                            )),
+                        })
+                        .await
                     }
                     Err(error) => self.send_error_response(request_id, 500, error).await,
                 }

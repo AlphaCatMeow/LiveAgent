@@ -1,5 +1,4 @@
 import { getGatewayWebSocketClient } from "../lib/gatewaySocket";
-import type { CronExecutionLog } from "../lib/settings";
 import { loadToken } from "../lib/storage";
 
 type GatewayRuntimeStatus = {
@@ -12,72 +11,6 @@ type GatewayRuntimeStatus = {
   lastHeartbeat?: number | null;
   lastError?: string | null;
 };
-
-type GatewayCronLogsListResponse = {
-  action?: string;
-  logs?: CronExecutionLog[];
-};
-
-type GatewayCronLogsClearResponse = {
-  action?: string;
-  clearedCount?: number;
-};
-
-function isValidCronExpression(expression: string) {
-  const parts = expression.trim().split(/\s+/);
-  return parts.length === 6;
-}
-
-function requireGatewayCronTaskId(args?: Record<string, unknown>) {
-  const taskId = String(args?.task_id ?? "").trim();
-  if (!taskId) {
-    throw new Error("task_id is required");
-  }
-  return taskId;
-}
-
-function parseGatewayCronManageResult<T>(resultJson: string, fallback: string): T {
-  try {
-    return JSON.parse(resultJson) as T;
-  } catch (error) {
-    throw new Error(
-      error instanceof Error && error.message.trim()
-        ? `${fallback}: ${error.message.trim()}`
-        : fallback,
-    );
-  }
-}
-
-async function listGatewayCronLogs(args?: Record<string, unknown>) {
-  const taskId = requireGatewayCronTaskId(args);
-  const limit =
-    typeof args?.limit === "number" && Number.isFinite(args.limit) && args.limit > 0
-      ? Math.trunc(args.limit)
-      : 100;
-  const response = await getGatewayWebSocketClient(loadToken().trim()).cronManage({
-    action: "list_logs",
-    task_id: taskId,
-    task_json: JSON.stringify({ limit }),
-  });
-  const payload = parseGatewayCronManageResult<GatewayCronLogsListResponse>(
-    response.result_json,
-    "Cron log list response is not valid JSON",
-  );
-  return Array.isArray(payload.logs) ? payload.logs : [];
-}
-
-async function clearGatewayCronLogs(args?: Record<string, unknown>) {
-  const taskId = requireGatewayCronTaskId(args);
-  const response = await getGatewayWebSocketClient(loadToken().trim()).cronManage({
-    action: "clear_logs",
-    task_id: taskId,
-  });
-  const payload = parseGatewayCronManageResult<GatewayCronLogsClearResponse>(
-    response.result_json,
-    "Cron log clear response is not valid JSON",
-  );
-  return typeof payload.clearedCount === "number" ? payload.clearedCount : 0;
-}
 
 async function readGatewayStatus(): Promise<GatewayRuntimeStatus> {
   const token = loadToken().trim();
@@ -372,17 +305,6 @@ export async function invoke<T>(command: string, args?: Record<string, unknown>)
         String(args?.base_url ?? ""),
         String(args?.api_key ?? ""),
       )) as T;
-    case "cron_validate_expression": {
-      const expression = String(args?.expression ?? "").trim();
-      if (!isValidCronExpression(expression)) {
-        throw new Error("Cron 表达式必须严格包含 6 段。");
-      }
-      return true as T;
-    }
-    case "cron_list_logs":
-      return (await listGatewayCronLogs(args)) as T;
-    case "cron_clear_logs":
-      return (await clearGatewayCronLogs(args)) as T;
     case "settings_reset_ssh_known_host": {
       const host = String(args?.host ?? "").trim();
       const port = typeof args?.port === "number" ? args.port : Number(args?.port ?? 0);

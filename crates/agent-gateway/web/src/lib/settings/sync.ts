@@ -43,8 +43,6 @@ export type GatewaySettingsSyncPayload = {
   mcp: AppSettings["mcp"];
   agents: AppSettings["agents"];
   ssh: AppSettings["ssh"];
-  hooks: AppSettings["hooks"];
-  cron: AppSettings["cron"];
   remote?: Pick<
     AppSettings["remote"],
     "enableWebTerminal" | "enableWebSshTerminal" | "enableWebGit" | "enableWebTunnels"
@@ -68,8 +66,6 @@ const GATEWAY_SETTINGS_SYNC_FIELDS = [
   "mcp",
   "agents",
   "ssh",
-  "hooks",
-  "cron",
   "remote",
   "memory",
   "customSettings",
@@ -793,8 +789,6 @@ export function buildGatewaySettingsSyncPayload(
     mcp: settings.mcp,
     agents: settings.agents,
     ssh: redactSshSettingsForGateway(settings.ssh),
-    hooks: settings.hooks,
-    cron: settings.cron,
     remote: {
       enableWebTerminal: settings.remote.enableWebTerminal,
       enableWebSshTerminal: settings.remote.enableWebSshTerminal,
@@ -901,8 +895,6 @@ export function applyGatewaySettingsSyncPayload(
       : Object.hasOwn(source, "sshPatch")
         ? applySyncedSshPatch(current.ssh, source.sshPatch, sshSecretUpdates)
         : current.ssh,
-    hooks: (source.hooks as AppSettings["hooks"] | undefined) ?? current.hooks,
-    cron: (source.cron as AppSettings["cron"] | undefined) ?? current.cron,
     memory: memory as AppSettings["memory"],
     customSettings: {
       ...incomingCustomSettings,

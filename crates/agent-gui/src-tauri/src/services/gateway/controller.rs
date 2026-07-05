@@ -12,7 +12,7 @@ use crate::commands::settings::{
 use crate::runtime::sftp::SftpSessionRegistry;
 use crate::runtime::terminal::TerminalSessionRegistry;
 use crate::services::chat_run_ledger::{ChatRunLedger, ChatRunLedgerState};
-use crate::services::cron::CronManager;
+use crate::services::automation::AutomationStore;
 use crate::services::memory::MemoryStore;
 use crate::services::tunnel::{TunnelProxy, TunnelStore};
 use crate::services::workspace_watch::WorkspaceWatchService;
@@ -22,7 +22,7 @@ use super::*;
 impl GatewayController {
     pub fn new(
         app_handle: tauri::AppHandle,
-        cron_manager: Arc<CronManager>,
+        automation_store: Arc<AutomationStore>,
         memory_store: Arc<MemoryStore>,
         terminal_registry: Arc<TerminalSessionRegistry>,
         sftp_registry: Arc<SftpSessionRegistry>,
@@ -33,7 +33,7 @@ impl GatewayController {
         let workspace_watch = Arc::new(WorkspaceWatchService::new(app_handle.clone()));
         Self {
             app_handle,
-            cron_manager,
+            automation_store,
             memory_store,
             terminal_registry,
             sftp_registry,

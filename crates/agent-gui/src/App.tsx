@@ -2,6 +2,7 @@ import type { Context } from "@earendil-works/pi-ai";
 import { listen } from "@tauri-apps/api/event";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CronPromptRunner } from "./components/cron/CronPromptRunner";
+import { initAutomation } from "./lib/automation";
 import { MemoryOrganizerHost } from "./components/memory/useMemoryOrganizer";
 import { WindowsTitleBar } from "./components/WindowsTitleBar";
 import { LocaleContext, t as translate } from "./i18n";
@@ -335,6 +336,13 @@ export default function App() {
     includePrereleases: settings.updates.includePrereleases,
     messages: appUpdateMessages,
   });
+
+  useEffect(() => {
+    if (!settingsReady) return;
+    void initAutomation().catch((error) => {
+      console.warn("Failed to initialize automation store", error);
+    });
+  }, [settingsReady]);
 
   useEffect(() => {
     if (!settingsReady) {

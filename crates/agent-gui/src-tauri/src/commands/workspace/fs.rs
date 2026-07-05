@@ -893,6 +893,7 @@ fn infer_workspace_preview_mime(path: &Path, bytes: &[u8]) -> Option<&'static st
     }
 }
 
+#[cfg(target_os = "macos")]
 fn truncate_process_error(bytes: &[u8]) -> String {
     let text = String::from_utf8_lossy(bytes).trim().to_string();
     let mut chars = text.chars();

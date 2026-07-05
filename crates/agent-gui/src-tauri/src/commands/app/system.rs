@@ -1259,16 +1259,7 @@ pub fn system_end_power_activity(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::settings::initialize_schema;
-    use rusqlite::params;
-    use serde_json::json;
     use tempfile::tempdir;
-
-    fn open_memory_db() -> rusqlite::Connection {
-        let conn = rusqlite::Connection::open_in_memory().expect("open in-memory sqlite");
-        initialize_schema(&conn).expect("initialize schema");
-        conn
-    }
 
     #[test]
     fn sanitize_uploaded_file_name_avoids_windows_reserved_names() {

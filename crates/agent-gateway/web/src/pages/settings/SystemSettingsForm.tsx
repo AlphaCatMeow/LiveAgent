@@ -11,7 +11,6 @@ import {
 
 import { SUPPORTED_LOCALES, useLocale } from "../../i18n";
 import { type ExecutionMode, THEME_OPTIONS, type Theme, updateSystem } from "../../lib/settings";
-import { SystemToolsSection } from "./SystemToolsSection";
 import type { SettingsSectionProps } from "./types";
 
 export function SystemSettingsForm(props: SettingsSectionProps) {
@@ -255,8 +254,6 @@ export function SystemSettingsForm(props: SettingsSectionProps) {
           </div>
         </section>
       </div>
-
-      <SystemToolsSection settings={settings} setSettings={setSettings} />
     </div>
   );
 }

@@ -11,6 +11,7 @@ import { createPortal } from "react-dom";
 import {
   Bot,
   Brain,
+  CheckCircle2,
   Clock3,
   Eye,
   FilePenLine,
@@ -74,6 +75,69 @@ const TOOL_ICONS: Record<ToolCatalogIconId, IconComponent> = {
   wrench: Wrench,
 };
 
+type CategoryAccent = {
+  chipBorder: string;
+  chipBg: string;
+  chipText: string;
+  iconBg: string;
+  icon: string;
+  bar: string;
+};
+
+/* Per-category accent used to color chips, row icons/edge bars, and the
+ * detail modal badge — purely presentational, no bearing on tool behavior. */
+const CATEGORY_ACCENTS: Record<BuiltinToolCategoryId, CategoryAccent> = {
+  fs: {
+    chipBorder: "border-sky-500/40",
+    chipBg: "bg-sky-500/10",
+    chipText: "text-sky-500",
+    iconBg: "bg-sky-500/10",
+    icon: "text-sky-500",
+    bar: "bg-sky-500",
+  },
+  process: {
+    chipBorder: "border-orange-500/40",
+    chipBg: "bg-orange-500/10",
+    chipText: "text-orange-500",
+    iconBg: "bg-orange-500/10",
+    icon: "text-orange-500",
+    bar: "bg-orange-500",
+  },
+  intelligence: {
+    chipBorder: "border-fuchsia-500/40",
+    chipBg: "bg-fuchsia-500/10",
+    chipText: "text-fuchsia-500",
+    iconBg: "bg-fuchsia-500/10",
+    icon: "text-fuchsia-500",
+    bar: "bg-fuchsia-500",
+  },
+  automation: {
+    chipBorder: "border-amber-500/40",
+    chipBg: "bg-amber-500/10",
+    chipText: "text-amber-500",
+    iconBg: "bg-amber-500/10",
+    icon: "text-amber-500",
+    bar: "bg-amber-500",
+  },
+  connectivity: {
+    chipBorder: "border-emerald-500/40",
+    chipBg: "bg-emerald-500/10",
+    chipText: "text-emerald-500",
+    iconBg: "bg-emerald-500/10",
+    icon: "text-emerald-500",
+    bar: "bg-emerald-500",
+  },
+};
+
+const CUSTOM_TOOL_ACCENT: CategoryAccent = {
+  chipBorder: "border-violet-500/40",
+  chipBg: "bg-violet-500/10",
+  chipText: "text-violet-500",
+  iconBg: "bg-violet-500/10",
+  icon: "text-violet-500",
+  bar: "bg-violet-500",
+};
+
 type ToolsTab = "builtin" | "custom";
 
 type ToolDetail =
@@ -135,6 +199,10 @@ export function SystemToolsSection(props: SettingsSectionProps) {
     () => SYSTEM_TOOL_OPTIONS.filter((option) => option.kind === "custom"),
     [],
   );
+  const enabledCustomCount = useMemo(
+    () => customOptions.filter((option) => selectedSystemTools.includes(option.id)).length,
+    [customOptions, selectedSystemTools],
+  );
   const builtinGroups = useMemo(
     () =>
       BUILTIN_TOOL_CATEGORIES.map((category) => ({
@@ -158,11 +226,31 @@ export function SystemToolsSection(props: SettingsSectionProps) {
   }
 
   return (
-    <div className="settings-tools-section space-y-3">
+    <div className="settings-tools-section space-y-4">
       <div className="settings-tools-header flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-          <Wrench className="h-4 w-4 text-muted-foreground" />
-          {t("settings.systemTools")}
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10">
+            <Wrench className="h-[18px] w-[18px] text-primary" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-semibold">{t("settings.systemTools")}</h3>
+              {activeTab === "custom" && customOptions.length > 0 ? (
+                <span
+                  title={`${t("settings.systemToolsTabCustom")}: ${enabledCustomCount}/${customOptions.length}`}
+                  className="inline-flex items-center gap-1 rounded-full bg-violet-500/10 px-2 py-0.5 text-[11px] font-medium leading-none text-violet-500"
+                >
+                  <CheckCircle2 className="h-3 w-3" />
+                  {enabledCustomCount}/{customOptions.length}
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+              {activeTab === "builtin"
+                ? t("settings.systemToolsBuiltinDesc")
+                : t("settings.systemToolsCustomDesc")}
+            </p>
+          </div>
         </div>
         <ToolsTabSwitch
           activeTab={activeTab}
@@ -171,11 +259,6 @@ export function SystemToolsSection(props: SettingsSectionProps) {
           onSelect={selectTab}
         />
       </div>
-      <p className="text-xs leading-relaxed text-muted-foreground">
-        {activeTab === "builtin"
-          ? t("settings.systemToolsBuiltinDesc")
-          : t("settings.systemToolsCustomDesc")}
-      </p>
 
       <div
         ref={switchPanelRef}
@@ -188,6 +271,7 @@ export function SystemToolsSection(props: SettingsSectionProps) {
                 {builtinGroups.map(({ category, entries }) => {
                   const active = category.id === activeCategory;
                   const CategoryIcon = TOOL_ICONS[category.icon];
+                  const accent = CATEGORY_ACCENTS[category.id];
                   return (
                     <button
                       key={category.id}
@@ -196,7 +280,7 @@ export function SystemToolsSection(props: SettingsSectionProps) {
                       onClick={() => selectCategory(category.id)}
                       className={`settings-tools-category-chip flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 ${
                         active
-                          ? "border-primary/40 bg-primary/10 text-primary"
+                          ? `${accent.chipBorder} ${accent.chipBg} ${accent.chipText}`
                           : "border-border/60 bg-muted/30 text-muted-foreground hover:border-border hover:text-foreground"
                       }`}
                     >
@@ -205,7 +289,7 @@ export function SystemToolsSection(props: SettingsSectionProps) {
                       <span
                         className={`rounded-full px-1.5 py-px text-[10px] leading-none ${
                           active
-                            ? "bg-primary/15 text-primary"
+                            ? `${accent.chipBg} ${accent.chipText}`
                             : "bg-muted/70 text-muted-foreground"
                         }`}
                       >
@@ -215,7 +299,10 @@ export function SystemToolsSection(props: SettingsSectionProps) {
                   );
                 })}
               </div>
-              <div key={activeCategory} className="settings-tools-view-enter space-y-2">
+              <div
+                key={activeCategory}
+                className="settings-tools-view-enter settings-tools-grid grid gap-2 xl:grid-cols-2"
+              >
                 {activeCategoryEntries.map((entry) => (
                   <ToolRow
                     key={entry.id}
@@ -224,13 +311,14 @@ export function SystemToolsSection(props: SettingsSectionProps) {
                     identifier={entry.toolName}
                     description={t(`settings.builtinTool.${entry.id}.desc`)}
                     readOnly={entry.isReadOnly}
+                    accent={CATEGORY_ACCENTS[entry.categoryId]}
                     actions={<EyeButton onClick={() => setDetail({ kind: "builtin", entry })} />}
                   />
                 ))}
               </div>
             </>
           ) : customOptions.length > 0 ? (
-            <div className="space-y-2">
+            <div className="settings-tools-grid grid gap-2 xl:grid-cols-2">
               {customOptions.map((option) => {
                 const presentation = CUSTOM_TOOL_PRESENTATION[option.id];
                 const enabled = isToolEnabled(option);
@@ -242,6 +330,7 @@ export function SystemToolsSection(props: SettingsSectionProps) {
                     identifier={option.id}
                     description={presentation ? t(presentation.descKey) : option.description}
                     readOnly={presentation?.isReadOnly ?? false}
+                    accent={CUSTOM_TOOL_ACCENT}
                     highlighted={enabled}
                     actions={
                       <>
@@ -334,26 +423,28 @@ function ToolRow(props: {
   identifier: string;
   description: string;
   readOnly: boolean;
+  accent: CategoryAccent;
   highlighted?: boolean;
   actions: ReactNode;
 }) {
   const { t } = useLocale();
   const Icon = TOOL_ICONS[props.icon];
+  const { accent } = props;
 
   return (
     <div
-      className={`settings-tools-row group flex items-center gap-3 rounded-xl border p-3 pl-3.5 transition-all ${
+      className={`settings-tools-row group relative flex items-center gap-3 overflow-hidden rounded-xl border p-3 pl-4 transition-all ${
         props.highlighted
-          ? "border-primary/40 bg-primary/5"
+          ? `${accent.chipBorder} ${accent.chipBg}`
           : "border-border/60 bg-background/80 hover:border-border hover:bg-muted/35"
       }`}
     >
+      <span
+        aria-hidden="true"
+        className={`absolute inset-y-0 left-0 w-[3px] opacity-70 ${accent.bar}`}
+      />
       <div
-        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors ${
-          props.highlighted
-            ? "bg-primary/10 text-primary"
-            : "bg-muted text-muted-foreground group-hover:bg-accent/80"
-        }`}
+        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors ${accent.iconBg} ${accent.icon}`}
       >
         <Icon className="h-4.5 w-4.5" />
       </div>
@@ -439,6 +530,7 @@ function ToolDetailModal(props: {
   const runtimeScopes = isBuiltin ? detail.entry.runtimeScopes : detail.option.runtimeScopes;
   const readOnly = isBuiltin ? detail.entry.isReadOnly : (presentation?.isReadOnly ?? false);
   const conditional = isBuiltin && detail.entry.conditional === true;
+  const accent = category ? CATEGORY_ACCENTS[category.id] : CUSTOM_TOOL_ACCENT;
 
   return createPortal(
     <div
@@ -458,7 +550,9 @@ function ToolDetailModal(props: {
         </div>
 
         <div className="settings-modal-header flex items-start gap-3 border-b border-border/40 px-6 py-4">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <div
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${accent.iconBg} ${accent.icon}`}
+          >
             <Icon className="h-5 w-5" />
           </div>
           <div className="min-w-0 flex-1">
@@ -467,9 +561,7 @@ function ToolDetailModal(props: {
             </h2>
             <div className="mt-1 flex flex-wrap items-center gap-1.5">
               <span
-                className={`rounded-full px-2 py-0.5 text-[10px] font-medium leading-none ${
-                  isBuiltin ? "bg-sky-500/10 text-sky-500" : "bg-violet-500/10 text-violet-500"
-                }`}
+                className={`rounded-full px-2 py-0.5 text-[10px] font-medium leading-none ${accent.chipBg} ${accent.chipText}`}
               >
                 {t(isBuiltin ? "settings.toolBadgeBuiltin" : "settings.toolBadgeCustom")}
               </span>

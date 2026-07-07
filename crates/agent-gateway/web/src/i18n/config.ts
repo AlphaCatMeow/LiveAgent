@@ -728,6 +728,7 @@ export const translations: Record<Locale, Record<string, string>> = {
 
     /* ── Settings Nav ── */
     "settings.navSystem": "系统设置",
+    "settings.navSystemTools": "系统工具",
     "settings.navProviders": "供应商配置",
     "settings.navHooks": "Hooks",
     "settings.navAgents": "全局提示词",
@@ -975,7 +976,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.systemToolsTabBuiltin": "系统工具",
     "settings.systemToolsTabCustom": "自定义工具",
     "settings.systemToolsBuiltinDesc":
-      "LiveAgent 在 Agent 模式下自动注册的内置工具，此处仅供查阅；点击眼睛图标查看详情。",
+      "LiveAgent 在 Agent 模式下自动注册的内置工具，此处仅供查阅。",
     "settings.systemToolsCustomDesc":
       "可按需启用的自定义系统工具；启用后会在 Agent 模式下注册，供模型在对话中调用。",
     "settings.systemToolsViewDetail": "查看详情",
@@ -2378,6 +2379,7 @@ export const translations: Record<Locale, Record<string, string>> = {
 
     /* ── Settings Nav ── */
     "settings.navSystem": "System",
+    "settings.navSystemTools": "System Tools",
     "settings.navProviders": "Providers",
     "settings.navHooks": "Hooks",
     "settings.navAgents": "Prompt",

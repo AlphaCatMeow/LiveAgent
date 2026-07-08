@@ -1721,8 +1721,8 @@ export function ChatPage(props: ChatPageProps) {
   const {
     isUploadingFiles,
     pendingUploadedFiles,
-    setPendingUploadedFiles,
-    pendingUploadsByConversationRef,
+    getPendingUploadsForConversation,
+    setPendingUploadsForConversation,
     pickReadableFiles,
     importReadableFilePaths,
     importReadableFiles,
@@ -1897,12 +1897,12 @@ export function ChatPage(props: ChatPageProps) {
       composerDraftCacheRef.current.delete(key);
       locallySyncedHistoryUpdatedAtRef.current.delete(key);
       gatewayBridgeHistorySummaryRef.current.delete(key);
-      pendingUploadsByConversationRef.current.delete(key);
+      setPendingUploadsForConversation(key, []);
       memoryExtraction.dispose(key);
       deleteConversationArtifacts(key);
       setQueuedChatTurnsState((current) => removeQueuedChatTurnsForConversation(current, key));
     },
-    [deleteConversationArtifacts, pendingUploadsByConversationRef, setQueuedChatTurnsState],
+    [deleteConversationArtifacts, setPendingUploadsForConversation, setQueuedChatTurnsState],
   );
 
   function resetVisibleTransientState(targetConversationId = currentConversationIdRef.current) {
@@ -1910,8 +1910,7 @@ export function ChatPage(props: ChatPageProps) {
       return;
     }
     composerRef.current?.clear();
-    pendingUploadsByConversationRef.current.delete(targetConversationId);
-    setPendingUploadedFiles([]);
+    setPendingUploadsForConversation(targetConversationId, []);
     setErrorMessage(null);
     setHookWarning(null);
     setCopiedMessageKey(null);
@@ -2125,8 +2124,7 @@ export function ChatPage(props: ChatPageProps) {
       return;
     }
     composerRef.current?.clear();
-    pendingUploadsByConversationRef.current.delete(targetConversationId);
-    setPendingUploadedFiles([]);
+    setPendingUploadsForConversation(targetConversationId, []);
     clearCachedComposerDraft(targetConversationId);
   }
 
@@ -2362,15 +2360,7 @@ export function ChatPage(props: ChatPageProps) {
     };
     setQueuedChatTurnsState((current) => removeQueuedChatTurn(current, key));
     composerRef.current?.setDraft(queuedTurn.draft);
-    if (queuedTurn.uploadedFiles.length > 0) {
-      pendingUploadsByConversationRef.current.set(
-        targetConversationId,
-        queuedTurn.uploadedFiles.slice(),
-      );
-    } else {
-      pendingUploadsByConversationRef.current.delete(targetConversationId);
-    }
-    setPendingUploadedFiles(queuedTurn.uploadedFiles.slice());
+    setPendingUploadsForConversation(targetConversationId, queuedTurn.uploadedFiles);
     clearCachedComposerDraft(targetConversationId);
     window.requestAnimationFrame(() => composerRef.current?.focus());
   }
@@ -3911,23 +3901,18 @@ export function ChatPage(props: ChatPageProps) {
       if (!composerClearedOnStart) {
         return;
       }
-      const hasStoredUploads =
-        (pendingUploadsByConversationRef.current.get(conversationId) ?? []).length > 0;
       if (isConversationVisible()) {
         if (clearedComposerDraft && composerRef.current && !composerRef.current.hasContent()) {
           composerRef.current.setDraft(clearedComposerDraft);
         }
-        if (clearedPendingUploads.length > 0 && !hasStoredUploads) {
-          pendingUploadsByConversationRef.current.set(conversationId, clearedPendingUploads);
-          setPendingUploadedFiles(clearedPendingUploads);
-        }
-        return;
-      }
-      if (clearedComposerDraft && !composerDraftCacheRef.current.has(conversationId)) {
+      } else if (clearedComposerDraft && !composerDraftCacheRef.current.has(conversationId)) {
         composerDraftCacheRef.current.set(conversationId, clearedComposerDraft);
       }
-      if (clearedPendingUploads.length > 0 && !hasStoredUploads) {
-        pendingUploadsByConversationRef.current.set(conversationId, clearedPendingUploads);
+      if (
+        clearedPendingUploads.length > 0 &&
+        getPendingUploadsForConversation(conversationId).length === 0
+      ) {
+        setPendingUploadsForConversation(conversationId, clearedPendingUploads);
       }
     };
     if (mirrorsLocalRunToGateway) {
@@ -4120,15 +4105,7 @@ export function ChatPage(props: ChatPageProps) {
         composerRef.current?.setText(snapshot.composerText);
         composerRef.current?.focus();
       }
-      const restoredUploads = snapshot.uploadedFiles ?? [];
-      if (restoredUploads.length > 0) {
-        pendingUploadsByConversationRef.current.set(conversationId, restoredUploads);
-      } else {
-        pendingUploadsByConversationRef.current.delete(conversationId);
-      }
-      if (isConversationVisible()) {
-        setPendingUploadedFiles(restoredUploads);
-      }
+      setPendingUploadsForConversation(conversationId, snapshot.uploadedFiles ?? []);
       if (snapshot.persistOnRollback) {
         abortedConversationCommitted = true;
         await persistConversationWithHistorySync({
@@ -5285,9 +5262,8 @@ export function ChatPage(props: ChatPageProps) {
     isConversationHydrating,
     isConversationHydrationFailed,
     currentConversationIdRef,
-    pendingUploadsByConversationRef,
     composerRef,
-    setPendingUploadedFiles,
+    setPendingUploadsForConversation,
     updateConversationRuntimeEntry,
     invalidateSubagentsForConversation: (conversationId) => {
       subagentStoresRef.current.invalidate(conversationId);

@@ -224,6 +224,7 @@ import {
   normalizeGatewayExecutionMode,
   normalizeGatewayWorkdir,
 } from "./chat/gateway/gatewayBridgeTypes";
+import type { ScrollFollowHandle } from "./chat/hooks/useScrollFollow";
 import {
   appendQueuedChatTurn,
   buildQueuedChatTurnPreview,
@@ -1257,8 +1258,7 @@ export function ChatPage(props: ChatPageProps) {
   );
   const chatRuntimeHost = useMemo(() => createChatRuntimeHost(), []);
 
-  const scrollAreaRef = useRef<HTMLDivElement | null>(null);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const scrollFollowRef = useRef<ScrollFollowHandle | null>(null);
   const composerBusyRef = useRef(false);
   const composerRef = useRef<MentionComposerHandle | null>(null);
   const composerDraftCacheRef = useRef<Map<string, MentionComposerDraft>>(new Map());
@@ -1320,20 +1320,16 @@ export function ChatPage(props: ChatPageProps) {
     getConversationLiveTranscriptStore,
     getCompactionThrottleState,
     deleteConversationArtifacts,
-    requestAutoScroll,
     clearAbortSnapshot,
     captureAbortSnapshot,
     getAbortSnapshot,
     resetLiveTranscript,
-    stickToBottom,
     updateLiveRounds,
     appendDraftAssistantText,
     batchLiveRoundsUpdate,
     updateToolStatus,
   } = useLiveTranscriptController({
     currentConversationId,
-    scrollAreaRef,
-    composerBusyRef,
   });
   const { queueGatewayBridgeEventForRequest } = useGatewayBridgeBatcher();
   const {
@@ -1919,7 +1915,7 @@ export function ChatPage(props: ChatPageProps) {
     setErrorMessage(null);
     setHookWarning(null);
     setCopiedMessageKey(null);
-    stickToBottom();
+    scrollFollowRef.current?.stickToBottom();
   }
 
   function cacheActiveComposerDraft(conversationId = currentConversationIdRef.current) {
@@ -2110,7 +2106,7 @@ export function ChatPage(props: ChatPageProps) {
     if (!controller) return false;
     const transcriptStore = getConversationLiveTranscriptStore(targetConversationId);
     captureAbortSnapshot(transcriptStore);
-    updateToolStatus("正在停止当前任务...", transcriptStore, true);
+    updateToolStatus("正在停止当前任务...", transcriptStore);
     controller.abort();
     return true;
   }
@@ -3461,44 +3457,6 @@ export function ChatPage(props: ChatPageProps) {
     setContext(currentRequestContext);
   }, [currentRequestContext, setContext]);
 
-  // Post-open pinning: when the open phase leaves "opening" for the visible
-  // conversation (overlay clears / initial paint landed), run two
-  // requestAnimationFrame stickToBottom passes so the transcript stays pinned
-  // across the layout swap (same behavior the old overlay effect provided).
-  const previousOpenPhaseRef = useRef<ConversationOpenState["phase"]>("idle");
-  useEffect(() => {
-    const previousPhase = previousOpenPhaseRef.current;
-    previousOpenPhaseRef.current = conversationOpenState.phase;
-    if (previousPhase !== "opening" || conversationOpenState.phase === "opening") {
-      return;
-    }
-    if (
-      conversationOpenState.phase === "failed" ||
-      conversationOpenState.conversationId !== currentConversationIdRef.current
-    ) {
-      return;
-    }
-
-    let secondRafId: number | null = null;
-    const firstRafId = requestAnimationFrame(() => {
-      stickToBottom();
-      secondRafId = requestAnimationFrame(() => {
-        stickToBottom();
-      });
-    });
-
-    return () => {
-      cancelAnimationFrame(firstRafId);
-      if (secondRafId !== null) {
-        cancelAnimationFrame(secondRafId);
-      }
-    };
-  }, [conversationOpenState, stickToBottom]);
-
-  useEffect(() => {
-    requestAutoScroll();
-  }, [historyRenderItems.length, requestAutoScroll]);
-
   useGatewayBridgeListeners({
     currentConversationIdRef,
     conversationRuntimeCacheRef,
@@ -3595,13 +3553,9 @@ export function ChatPage(props: ChatPageProps) {
       resolveErrorConversationId: () =>
         gatewayBridgeRequest?.conversationId ?? currentConversationIdRef.current,
     });
-    const updateGatewayBridgeToolStatus = (
-      status: string | null,
-      visible: boolean,
-      isCompaction = false,
-    ) => {
+    const updateGatewayBridgeToolStatus = (status: string | null, isCompaction = false) => {
       gatewayBridgeEvents.queueToolStatus(status, isCompaction);
-      updateToolStatus(status, transcriptStore, visible);
+      updateToolStatus(status, transcriptStore);
       const run = activeGatewayRuntimeRunsRef.current.get(conversationId);
       if (run) {
         run.toolStatusIsCompaction = Boolean(status?.trim()) && isCompaction;
@@ -3901,7 +3855,7 @@ export function ChatPage(props: ChatPageProps) {
       setConversationAbortController(conversationId, requestController);
       setConversationSendingState(conversationId, true);
       if (isConversationVisible()) {
-        stickToBottom();
+        scrollFollowRef.current?.stickToBottom();
       }
     }
     function markConversationRunStopped(state: GatewayRuntimeSnapshotState = "completed") {
@@ -4189,9 +4143,6 @@ export function ChatPage(props: ChatPageProps) {
           titlePromise,
         });
       }
-      if (isConversationVisible()) {
-        requestAutoScroll();
-      }
       return true;
     }
 
@@ -4402,7 +4353,7 @@ export function ChatPage(props: ChatPageProps) {
         persistOnRollback: true,
       });
       markCompactionRunning(conversationId, params.trigger, workingState.activeSegmentIndex);
-      updateGatewayBridgeToolStatus(params.statusText, isConversationVisible(), true);
+      updateGatewayBridgeToolStatus(params.statusText, true);
 
       try {
         const compacted = await runMidTurnCompaction({
@@ -4466,7 +4417,6 @@ export function ChatPage(props: ChatPageProps) {
           markCompactionFailed(conversationId, params.trigger, "压缩失败，已回退到 prune 降级");
           updateGatewayBridgeToolStatus(
             `上下文压缩失败，已裁剪 ${pruned.prunedMessageCount} 个旧工具输出后继续...`,
-            isConversationVisible(),
           );
           return buildPreparedContext(pruned.state, params.tools, {
             includeAbortedMessages: params.includeAbortedMessages,
@@ -4478,7 +4428,7 @@ export function ChatPage(props: ChatPageProps) {
         markCompactionFailed(conversationId, params.trigger, message || "压缩失败");
         return null;
       } finally {
-        updateGatewayBridgeToolStatus(null, isConversationVisible());
+        updateGatewayBridgeToolStatus(null);
       }
     }
 
@@ -4539,11 +4489,7 @@ export function ChatPage(props: ChatPageProps) {
         uploadedFiles,
       });
       markCompactionRunning(conversationId, "pre-send", workingState.activeSegmentIndex);
-      updateGatewayBridgeToolStatus(
-        buildPreCompactionStatus(decision),
-        isConversationVisible(),
-        true,
-      );
+      updateGatewayBridgeToolStatus(buildPreCompactionStatus(decision), true);
 
       try {
         const compacted = await runPreCompactConversation({
@@ -4606,7 +4552,6 @@ export function ChatPage(props: ChatPageProps) {
           markCompactionFailed(conversationId, "pre-send", "压缩失败，已回退到 prune 降级");
           updateGatewayBridgeToolStatus(
             `上下文压缩失败，已裁剪 ${pruned.prunedMessageCount} 个旧工具输出后继续...`,
-            isConversationVisible(),
           );
           return true;
         }
@@ -4618,7 +4563,7 @@ export function ChatPage(props: ChatPageProps) {
         );
         return false;
       } finally {
-        updateGatewayBridgeToolStatus(null, isConversationVisible());
+        updateGatewayBridgeToolStatus(null);
       }
     }
 
@@ -4700,7 +4645,6 @@ export function ChatPage(props: ChatPageProps) {
             batchLiveRoundsUpdate,
             updateToolStatus,
             updateGatewayBridgeToolStatus,
-            isConversationVisible,
             commitVisibleAbortedConversation,
             updateConversationRuntimeEntry,
             persistConversationWithHistorySync,
@@ -4751,7 +4695,6 @@ export function ChatPage(props: ChatPageProps) {
             appendDraftAssistantText,
             batchLiveRoundsUpdate,
             updateGatewayBridgeToolStatus,
-            isConversationVisible,
             commitVisibleAbortedConversation,
             updateConversationRuntimeEntry,
             persistConversationWithHistorySync,
@@ -5522,8 +5465,7 @@ export function ChatPage(props: ChatPageProps) {
                 conversationId={currentConversationId}
                 workspaceRoot={currentConversationWorkspaceRoot}
                 gitClient={tauriGitClient}
-                scrollAreaRef={scrollAreaRef}
-                bottomRef={bottomRef}
+                followRef={scrollFollowRef}
                 hasModels={hasModels}
                 historyItems={historyRenderItems}
                 isHistorySwitching={conversationOpenState.showOverlay}

@@ -9,11 +9,11 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 
-import { Copy } from "../../../components/icons";
+import { ChevronDown, Copy } from "../../../components/icons";
 import { ScrollArea } from "../../../components/ui/scroll-area";
 import { useLocale } from "../../../i18n";
-import { resolveScrollViewport } from "../utils/chatScrollViewport";
-import { BOTTOM_REATTACH_ZONE_PX } from "../utils/scrollFollowPolicy";
+import { useScrollFollow } from "../hooks/useScrollFollow";
+import { BOTTOM_REATTACH_ZONE_PX } from "../utils/scrollFollowCore";
 import { ChatEmptyState } from "./ChatEmptyState";
 import { TranscriptHistory } from "./TranscriptHistory";
 import { TranscriptLiveState } from "./TranscriptLiveState";
@@ -33,8 +33,7 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
     conversationId,
     workspaceRoot,
     gitClient,
-    scrollAreaRef,
-    bottomRef,
+    followRef,
     hasModels,
     historyItems,
     isHistorySwitching,
@@ -62,7 +61,11 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
   const transcriptBottomReservePx = shouldReserveTranscriptBottomSpace
     ? Math.max(BOTTOM_REATTACH_ZONE_PX, Math.ceil(bottomReservePx) + 12)
     : 0;
+  // Both elements arrive via callback refs → state so the scroll-follow hook
+  // re-binds on element identity change and can never keep listeners on a
+  // dead node (the old querySelector retry loop's silent failure mode).
   const [scrollViewport, setScrollViewport] = useState<HTMLDivElement | null>(null);
+  const [scrollAreaRoot, setScrollAreaRoot] = useState<HTMLDivElement | null>(null);
   const transcriptRootRef = useRef<HTMLDivElement | null>(null);
   const transcriptContextMenuRef = useRef<HTMLDivElement | null>(null);
   const [transcriptContextMenu, setTranscriptContextMenu] =
@@ -72,12 +75,26 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
     setTranscriptContextMenu(null);
   }, []);
 
+  const { handle: scrollFollowHandle, following } = useScrollFollow({
+    viewport: scrollViewport,
+    listenerRoot: scrollAreaRoot,
+    trackKeys: true,
+    config: { reattachZonePx: BOTTOM_REATTACH_ZONE_PX },
+  });
+
   useLayoutEffect(() => {
-    const nextViewport = resolveScrollViewport(scrollAreaRef.current);
-    if (scrollViewport !== nextViewport) {
-      setScrollViewport(nextViewport);
-    }
-  }, [scrollAreaRef, scrollViewport]);
+    followRef.current = scrollFollowHandle;
+    return () => {
+      if (followRef.current === scrollFollowHandle) {
+        followRef.current = null;
+      }
+    };
+  }, [followRef, scrollFollowHandle]);
+
+  // Conversation switches always land pinned to the latest message.
+  useLayoutEffect(() => {
+    scrollFollowHandle.stickToBottom();
+  }, [conversationId, scrollFollowHandle]);
 
   useEffect(() => {
     closeTranscriptContextMenu();
@@ -152,6 +169,7 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
     ? clampTranscriptContextMenuPosition(transcriptContextMenu.x, transcriptContextMenu.y)
     : null;
   const copySelectedTextLabel = locale === "en-US" ? "Copy selected text" : "复制选中文本";
+  const jumpToBottomLabel = locale === "en-US" ? "Scroll to bottom" : "回到底部";
 
   return (
     <div
@@ -159,7 +177,7 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
       className="relative min-h-0 flex-1"
       onContextMenu={handleTranscriptContextMenu}
     >
-      <ScrollArea ref={scrollAreaRef} className="h-full">
+      <ScrollArea ref={setScrollAreaRoot} viewportRef={setScrollViewport} className="h-full">
         <div className="mx-auto w-full max-w-[768px] px-5 py-4">
           {showNoModelsState || showStartChatState ? (
             <div className="flex min-h-[calc(100vh-220px)] flex-col items-center justify-center">
@@ -197,9 +215,21 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
             />
           </div>
 
-          <div ref={bottomRef} style={{ height: transcriptBottomReservePx }} />
+          <div style={{ height: transcriptBottomReservePx }} />
         </div>
       </ScrollArea>
+      {!following ? (
+        <button
+          type="button"
+          aria-label={jumpToBottomLabel}
+          title={jumpToBottomLabel}
+          onClick={() => scrollFollowHandle.jumpToBottom()}
+          className="chat-jump-to-bottom absolute left-1/2 z-10 flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-foreground"
+          style={{ bottom: Math.ceil(bottomReservePx) + 16 }}
+        >
+          <ChevronDown className="h-4 w-4" />
+        </button>
+      ) : null}
       {transcriptContextMenu && transcriptContextMenuPosition
         ? createPortal(
             <div

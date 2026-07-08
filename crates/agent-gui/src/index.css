@@ -794,6 +794,47 @@
     }
   }
 
+  /* Jump-to-bottom affordance: mounted only while scroll-follow is detached,
+   * so it only needs an entrance animation. Centering lives here because the
+   * animation transform would override a Tailwind translate utility.
+   * Frosted-glass treatment follows the .hub-frost-hero idiom (translucent
+   * theme tint + blur/saturate, white-tint override in dark). */
+  .chat-jump-to-bottom {
+    transform: translateX(-50%);
+    animation: chatJumpToBottomIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+    border: 1px solid hsl(var(--border) / 0.55);
+    background: hsl(var(--background) / 0.45);
+    -webkit-backdrop-filter: blur(18px) saturate(180%);
+    backdrop-filter: blur(18px) saturate(180%);
+    box-shadow:
+      0 1px 0 hsl(0 0% 100% / 0.45) inset,
+      0 8px 24px -14px hsl(0 0% 0% / 0.35);
+  }
+  .chat-jump-to-bottom:hover {
+    background: hsl(var(--background) / 0.65);
+  }
+  .dark .chat-jump-to-bottom {
+    border-color: hsl(0 0% 100% / 0.12);
+    background: hsl(0 0% 100% / 0.06);
+    box-shadow:
+      0 1px 0 hsl(0 0% 100% / 0.08) inset,
+      0 8px 24px -14px hsl(0 0% 0% / 0.6);
+  }
+  .dark .chat-jump-to-bottom:hover {
+    background: hsl(0 0% 100% / 0.11);
+  }
+
+  @keyframes chatJumpToBottomIn {
+    from {
+      opacity: 0;
+      transform: translateX(-50%) translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+  }
+
   /* Settings page section transitions */
   .settings-section-enter {
     animation: settingsSectionIn 0.28s cubic-bezier(0.16, 1, 0.3, 1);

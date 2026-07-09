@@ -3,7 +3,10 @@ import path from "node:path";
 import vm from "node:vm";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import ts from "typescript";
+// typescript 7 (native tsc) no longer ships the JS compiler API the loader
+// needs (transpileModule/ModuleKind), so the transpile step stays on the
+// aliased typescript 6 package.
+import ts from "typescript-transpile";
 
 const DEFAULT_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json"];
 

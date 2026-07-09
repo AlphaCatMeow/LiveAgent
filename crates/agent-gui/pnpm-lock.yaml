@@ -138,6 +138,9 @@ importers:
       typescript:
         specifier: ~7.0.2
         version: 7.0.2
+      typescript-transpile:
+        specifier: npm:typescript@~6.0.2
+        version: typescript@6.0.3
       unplugin-icons:
         specifier: ^23.0.1
         version: 23.0.1(@svgr/core@8.1.0(typescript@7.0.2))
@@ -2890,6 +2893,11 @@ packages:
 
   typebox@1.1.38:
     resolution: {integrity: sha512-pZ0aQPmMmXoUvSbeuWf/Hzsc+avNw/Zd6VeE8CFgkVGWyuHPJvqeJJDeJqLve+K70LvjYIoleGcoJHPT17cWoA==}
+
+  typescript@6.0.3:
+    resolution: {integrity: sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw==}
+    engines: {node: '>=14.17'}
+    hasBin: true
 
   typescript@7.0.2:
     resolution: {integrity: sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA==}
@@ -6441,6 +6449,8 @@ snapshots:
     optional: true
 
   typebox@1.1.38: {}
+
+  typescript@6.0.3: {}
 
   typescript@7.0.2:
     optionalDependencies:

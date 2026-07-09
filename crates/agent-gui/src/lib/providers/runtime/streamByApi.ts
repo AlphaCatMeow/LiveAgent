@@ -1,6 +1,9 @@
 import type { Context, Model } from "@earendil-works/pi-ai";
 import { stream as streamAnthropic } from "@earendil-works/pi-ai/api/anthropic-messages";
-import { type GoogleOptions, stream as streamGoogle } from "@earendil-works/pi-ai/api/google-generative-ai";
+import {
+  type GoogleOptions,
+  stream as streamGoogle,
+} from "@earendil-works/pi-ai/api/google-generative-ai";
 import {
   type OpenAICompletionsOptions,
   stream as streamOpenAICompletions,

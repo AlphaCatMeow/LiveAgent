@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 import { ChevronRight, Loader2, Sparkles } from "../../../../components/icons";
 import { Markdown } from "../../../../components/Markdown";
@@ -74,13 +74,16 @@ function ThinkingBlock({ text, open }: { text: string; open?: boolean }) {
   );
 }
 
-export function RoundContent(props: {
+export const RoundContent = memo(function RoundContent(props: {
   round: UiRound;
   showLabel: boolean;
   showUsage?: boolean;
   usageContextWindow?: number;
   isLive?: boolean;
   isActive?: boolean;
+  // Pinned per row (see AssistantBubble); falls back to the live flag for
+  // callers that render outside the transcript row model.
+  renderMode?: "streaming" | "static";
   toolStatus?: string | null;
   toolStatusVariant?: "default" | "compaction";
   runningToolCallIds?: string[];
@@ -93,6 +96,7 @@ export function RoundContent(props: {
     usageContextWindow,
     isLive,
     isActive,
+    renderMode,
     toolStatus,
     toolStatusVariant,
     runningToolCallIds,
@@ -197,7 +201,7 @@ export function RoundContent(props: {
             key={block.key}
             content={block.text}
             className="font-openai-chat"
-            renderMode={isLive ? "streaming" : "static"}
+            renderMode={renderMode ?? (isLive ? "streaming" : "static")}
             showCaret={Boolean(isLive && isActive)}
           />
         );
@@ -208,4 +212,4 @@ export function RoundContent(props: {
       ) : null}
     </div>
   );
-}
+});

@@ -27,8 +27,6 @@ export type ChatTranscriptProps = {
   liveTranscriptStore: LiveTranscriptStore;
   isCompactionRunning: boolean;
   bottomReservePx?: number;
-  copiedMessageKey: string | null;
-  setCopiedMessageKey: (key: string | null) => void;
   onResendFromEdit: (
     messageRef: HistoryMessageRef,
     text: string,
@@ -38,29 +36,3 @@ export type ChatTranscriptProps = {
   onSuggestionSelect?: (text: string) => void;
   suggestionsDisabled?: boolean;
 };
-
-export type TranscriptHistoryProps = Pick<
-  ChatTranscriptProps,
-  | "historyItems"
-  | "conversationId"
-  | "workspaceRoot"
-  | "gitClient"
-  | "showUsage"
-  | "usageContextWindow"
-  | "copiedMessageKey"
-  | "setCopiedMessageKey"
-  | "onResendFromEdit"
-> & {
-  isSending: boolean;
-  scrollViewport: HTMLDivElement | null;
-};
-
-export type TranscriptLiveStateProps = Pick<
-  ChatTranscriptProps,
-  | "isSending"
-  | "isAgentMode"
-  | "showUsage"
-  | "usageContextWindow"
-  | "liveTranscriptStore"
-  | "isCompactionRunning"
->;

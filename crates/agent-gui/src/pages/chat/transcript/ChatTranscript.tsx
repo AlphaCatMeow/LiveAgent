@@ -15,8 +15,7 @@ import { useLocale } from "../../../i18n";
 import { BOTTOM_REATTACH_ZONE_PX } from "../../../lib/chat-scroll/scrollFollowCore";
 import { useScrollFollow } from "../../../lib/chat-scroll/useScrollFollow";
 import { ChatEmptyState } from "./ChatEmptyState";
-import { TranscriptHistory } from "./TranscriptHistory";
-import { TranscriptLiveState } from "./TranscriptLiveState";
+import { TranscriptList } from "./TranscriptList";
 import { HistorySwitchLoadingOverlay } from "./TranscriptLoadingStates";
 import type { ChatTranscriptProps } from "./transcriptTypes";
 import {
@@ -44,8 +43,6 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
     liveTranscriptStore,
     isCompactionRunning,
     bottomReservePx = 0,
-    copiedMessageKey,
-    setCopiedMessageKey,
     onResendFromEdit,
     onOpenSettings,
     onSuggestionSelect,
@@ -190,28 +187,20 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
             </div>
           ) : null}
 
-          <div className="space-y-6 select-text">
-            <TranscriptHistory
+          <div className="select-text">
+            <TranscriptList
               conversationId={conversationId}
-              workspaceRoot={workspaceRoot}
-              gitClient={gitClient}
-              scrollViewport={scrollViewport}
               historyItems={historyItems}
-              showUsage={showUsage}
-              usageContextWindow={usageContextWindow}
-              copiedMessageKey={copiedMessageKey}
-              setCopiedMessageKey={setCopiedMessageKey}
-              onResendFromEdit={onResendFromEdit}
-              isSending={isSending}
-            />
-
-            <TranscriptLiveState
+              liveTranscriptStore={liveTranscriptStore}
+              scrollViewport={scrollViewport}
               isSending={isSending}
               isAgentMode={isAgentMode}
+              isCompactionRunning={isCompactionRunning}
               showUsage={showUsage}
               usageContextWindow={usageContextWindow}
-              liveTranscriptStore={liveTranscriptStore}
-              isCompactionRunning={isCompactionRunning}
+              workspaceRoot={workspaceRoot}
+              gitClient={gitClient}
+              onResendFromEdit={onResendFromEdit}
             />
           </div>
 

@@ -318,7 +318,7 @@ LiveAgent/
 <details>
 <summary><b>支持哪些模型?</b></summary>
 
-内置 Claude(Anthropic)与 Codex(OpenAI)双协议,并支持自定义 Base URL 接入任何兼容的第三方服务。
+内置 Claude(Anthropic) 与 Codex(OpenAI)、Gemini 三协议,并支持自定义 Base URL 接入任何兼容的第三方服务。
 
 </details>
 
@@ -378,7 +378,8 @@ LiveAgent/
 
 ## Star History
 
-<a href="https://star-history.com/#Stack-Cairn/LiveAgent&Date">
+<a href="https://www.star-history.com/?repos=Stack-Cairn%2FLiveAgent&type=date&legend=top-left">
+
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Stack-Cairn/LiveAgent&type=Date&theme=dark" />
     <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Stack-Cairn/LiveAgent&type=Date" />

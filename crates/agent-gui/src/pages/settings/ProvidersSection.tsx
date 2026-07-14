@@ -1,3 +1,4 @@
+import { Popover } from "@base-ui/react";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -12,6 +13,7 @@ import {
   GeminiIcon,
   Key,
   Loader2,
+  MoreHorizontal,
   OpenaiChatgptIcon,
   Pencil,
   Plus,
@@ -126,10 +128,6 @@ function readCherryDataPath() {
   } catch {
     return null;
   }
-}
-
-function cherryDataPathLabel(path: string) {
-  return path.split(/[\\/]/).filter(Boolean).at(-1) || path;
 }
 
 function normalizeModelDomId(modelId: string) {
@@ -1260,6 +1258,7 @@ function ProviderList(props: {
         : cherryMessage || "点击扫描本地配置";
   const thirdPartyLoading = ccsLoading || cherryLoading;
   const thirdPartyImporting = ccsImporting || cherryImporting;
+  const cherryResolvedDataPath = cherryDataPath ?? cherryProviders?.dataPath ?? "";
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
@@ -1347,59 +1346,108 @@ function ProviderList(props: {
                     <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
                   ) : null}
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  className="model-selector-item cursor-pointer items-start gap-3 rounded-lg px-2.5 py-2.5"
-                  disabled={cherryLoading || cherryImporting || !cherryAll.length}
-                  onSelect={onOpenCherryImport}
-                >
-                  <CherrySourceLogo className="h-9 w-9 text-[11px]" />
-                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span className="flex items-center gap-1.5 text-sm font-medium">
-                      Cherry Studio
-                      {cherryReady > 0 ? (
-                        <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
-                          {cherryReady}
-                        </span>
-                      ) : null}
-                    </span>
-                    <span
-                      className="line-clamp-2 text-xs text-muted-foreground"
-                      title={cherrySubtitle}
-                    >
-                      {cherrySubtitle}
-                    </span>
-                  </span>
-                  {cherryLoading || cherryImporting ? (
-                    <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-                  ) : null}
-                </DropdownMenuItem>
-                <DropdownMenuSeparator className="my-1 bg-border/40" />
-                <DropdownMenuItem
-                  className="model-selector-item cursor-pointer items-start gap-3 rounded-lg px-2.5 py-2.5"
-                  disabled={cherryLoading || cherryImporting}
-                  onSelect={onChooseCherryDataDirectory}
-                >
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                    <FolderOpen className="h-4 w-4" />
-                  </span>
-                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span className="text-sm font-medium">选择 Cherry Studio 数据目录…</span>
-                    <span className="line-clamp-2 text-xs text-muted-foreground">
-                      {cherryDataPath
-                        ? `当前：${cherryDataPathLabel(cherryDataPath)}`
-                        : "支持 Windows 便携版和自定义位置"}
-                    </span>
-                  </span>
-                </DropdownMenuItem>
-                {cherryDataPath ? (
+                <div className="flex items-stretch gap-1">
                   <DropdownMenuItem
-                    className="model-selector-item cursor-pointer rounded-lg px-2.5 py-2 text-xs text-muted-foreground"
-                    disabled={cherryLoading || cherryImporting}
-                    onSelect={onResetCherryDataDirectory}
+                    className="model-selector-item min-w-0 flex-1 cursor-pointer items-start gap-3 rounded-lg px-2.5 py-2.5"
+                    disabled={cherryLoading || cherryImporting || !cherryAll.length}
+                    onSelect={onOpenCherryImport}
                   >
-                    恢复自动检测
+                    <CherrySourceLogo className="h-9 w-9 text-[11px]" />
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className="flex items-center gap-1.5 text-sm font-medium">
+                        Cherry Studio
+                        {cherryReady > 0 ? (
+                          <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                            {cherryReady}
+                          </span>
+                        ) : null}
+                      </span>
+                      <span
+                        className="line-clamp-2 text-xs text-muted-foreground"
+                        title={cherrySubtitle}
+                      >
+                        {cherrySubtitle}
+                      </span>
+                    </span>
+                    {cherryLoading || cherryImporting ? (
+                      <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+                    ) : null}
                   </DropdownMenuItem>
-                ) : null}
+                  <Popover.Root>
+                    <Popover.Trigger
+                      render={
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-auto w-8 shrink-0 rounded-lg text-muted-foreground"
+                          disabled={cherryLoading || cherryImporting}
+                          aria-label="Cherry Studio 数据目录设置"
+                          title="Cherry Studio 数据目录设置"
+                        />
+                      }
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Popover.Trigger>
+                    <Popover.Portal>
+                      <Popover.Positioner
+                        side="bottom"
+                        align="end"
+                        sideOffset={6}
+                        collisionPadding={8}
+                        className="z-[10000]"
+                      >
+                        <Popover.Popup className="w-80 rounded-xl border border-border bg-popover p-3 text-popover-foreground shadow-xl outline-none">
+                          <div className="space-y-3">
+                            <div>
+                              <div className="text-sm font-medium">Cherry Studio 数据目录</div>
+                              <div className="mt-0.5 text-xs text-muted-foreground">
+                                {cherryDataPath
+                                  ? "正在使用手动指定的目录"
+                                  : "LiveAgent 会自动读取 Cherry Studio 的数据目录设置"}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Input
+                                readOnly
+                                value={cherryResolvedDataPath}
+                                placeholder={cherryLoading ? "正在检测…" : "未检测到数据目录"}
+                                className="h-9 min-w-0 flex-1 text-xs"
+                                title={cherryResolvedDataPath}
+                              />
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className="h-9 w-9 shrink-0"
+                                disabled={cherryLoading || cherryImporting}
+                                onClick={onChooseCherryDataDirectory}
+                                title="选择数据目录"
+                                aria-label="选择 Cherry Studio 数据目录"
+                              >
+                                <FolderOpen className="h-4 w-4" />
+                              </Button>
+                            </div>
+                            <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                              <span>{cherryDataPath ? "手动指定" : "自动检测"}</span>
+                              {cherryDataPath ? (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 px-2 text-xs"
+                                  onClick={onResetCherryDataDirectory}
+                                >
+                                  恢复自动检测
+                                </Button>
+                              ) : null}
+                            </div>
+                          </div>
+                        </Popover.Popup>
+                      </Popover.Positioner>
+                    </Popover.Portal>
+                  </Popover.Root>
+                </div>
               </div>
             </DropdownMenuContent>
           </DropdownMenu>

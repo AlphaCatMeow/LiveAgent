@@ -1525,7 +1525,7 @@ export function ProvidersSection(props: SettingsSectionProps) {
 
   async function chooseCherryDataDirectory() {
     const selected = await invoke<string | null>("system_pick_folder", {
-      initialWorkdir: cherryDataPath ?? cherryProviders?.dataPath ?? undefined,
+      initial_workdir: cherryDataPath ?? cherryProviders?.dataPath ?? undefined,
     });
     if (!selected) return;
 

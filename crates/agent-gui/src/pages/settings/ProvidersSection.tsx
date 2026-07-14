@@ -1,7 +1,8 @@
-import { Popover } from "@base-ui/react";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import ccswitchLogoUrl from "../../../src-tauri/icons/custom/ccswitch.png";
+import cherryStudioLogoUrl from "../../../src-tauri/icons/custom/cherrystudio.png";
 import {
   CheckCircle2,
   ChevronDown,
@@ -9,11 +10,9 @@ import {
   Download,
   Eye,
   EyeOff,
-  FolderOpen,
   GeminiIcon,
   Key,
   Loader2,
-  MoreHorizontal,
   OpenaiChatgptIcon,
   Pencil,
   Plus,
@@ -121,6 +120,18 @@ function ProviderBrandIcon({ type }: { type: ProviderId }) {
 
 const REDACTED_API_KEY_DISPLAY = "API Key";
 const CHERRY_DATA_PATH_STORAGE_KEY = "liveagent.cherryStudioDataPath";
+
+// A local rescan usually returns within a frame, which makes the refresh
+// feedback flash for a single frame. Hold the loading state for one full
+// spinner revolution so the rescan reads as motion instead of a flicker.
+const THIRD_PARTY_SCAN_FEEDBACK_MS = 1000;
+
+function withScanFeedback<T>(work: Promise<T>): Promise<T> {
+  return Promise.all([
+    work,
+    new Promise<void>((resolve) => setTimeout(resolve, THIRD_PARTY_SCAN_FEEDBACK_MS)),
+  ]).then(([result]) => result);
+}
 
 function readCherryDataPath() {
   try {
@@ -881,27 +892,23 @@ function ccsItemKey(item: CcsProviderImportItem) {
 
 function CcsSourceLogo({ className }: { className?: string }) {
   return (
-    <span
-      className={cn(
-        "flex shrink-0 select-none items-center justify-center rounded-lg bg-gradient-to-br from-sky-500 to-indigo-500 font-bold text-white shadow-sm",
-        className,
-      )}
-    >
-      CC
-    </span>
+    <img
+      src={ccswitchLogoUrl}
+      alt=""
+      draggable={false}
+      className={cn("shrink-0 select-none rounded-lg object-contain", className)}
+    />
   );
 }
 
 function CherrySourceLogo({ className }: { className?: string }) {
   return (
-    <span
-      className={cn(
-        "flex shrink-0 select-none items-center justify-center rounded-lg bg-gradient-to-br from-rose-500 to-orange-500 font-bold text-white shadow-sm",
-        className,
-      )}
-    >
-      CS
-    </span>
+    <img
+      src={cherryStudioLogoUrl}
+      alt=""
+      draggable={false}
+      className={cn("shrink-0 select-none rounded-lg object-contain", className)}
+    />
   );
 }
 
@@ -1005,7 +1012,7 @@ function CcsImportModal(props: {
 
       <div className="relative z-10 flex h-[min(35rem,85vh)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border bg-background shadow-2xl">
         <div className="flex items-center gap-3 border-b px-6 py-4">
-          <CcsSourceLogo className="h-9 w-9 text-[12px]" />
+          <CcsSourceLogo className="h-9 w-9" />
           <div className="min-w-0 flex-1">
             <div className="text-sm font-semibold">从 CC Switch 导入</div>
             <div className="mt-0.5 text-xs text-muted-foreground">
@@ -1189,13 +1196,10 @@ function ProviderList(props: {
   cherryLoading: boolean;
   cherryImporting: boolean;
   cherryMessage: string | null;
-  cherryDataPath: string | null;
   onEnsureThirdPartyScan: () => void;
   onRefreshThirdPartyProviders: () => void;
   onOpenCcsImport: () => void;
   onOpenCherryImport: () => void;
-  onChooseCherryDataDirectory: () => void;
-  onResetCherryDataDirectory: () => void;
 }) {
   const { t } = useLocale();
   const {
@@ -1213,13 +1217,10 @@ function ProviderList(props: {
     cherryLoading,
     cherryImporting,
     cherryMessage,
-    cherryDataPath,
     onEnsureThirdPartyScan,
     onRefreshThirdPartyProviders,
     onOpenCcsImport,
     onOpenCherryImport,
-    onChooseCherryDataDirectory,
-    onResetCherryDataDirectory,
   } = props;
   const [syncMenuOpen, setSyncMenuOpen] = useState(false);
   const filtered = providers.filter((provider) => provider.type === type);
@@ -1253,9 +1254,9 @@ function ProviderList(props: {
         : scanned
           ? ccsMessage || "未发现可导入的供应商"
           : "点击扫描本地配置";
-  const cherryReady = cherryAll.filter(
-    (provider) => provider.providerType === type && provider.importable,
-  ).length;
+  // The import modal shows every provider type, so the badge and fallback
+  // subtitle must count across all of them — not just the current tab.
+  const cherryReady = cherryAll.filter((provider) => provider.importable).length;
   const cherrySubtitle = cherryImporting
     ? "正在同步供应商、获取并激活模型…"
     : cherryLoading
@@ -1265,7 +1266,6 @@ function ProviderList(props: {
         : cherryMessage || "点击扫描本地配置";
   const thirdPartyLoading = ccsLoading || cherryLoading;
   const thirdPartyImporting = ccsImporting || cherryImporting;
-  const cherryResolvedDataPath = cherryDataPath ?? cherryProviders?.dataPath ?? "";
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
@@ -1332,7 +1332,7 @@ function ProviderList(props: {
                   disabled={ccsLoading || ccsImporting || !ccsAll.length}
                   onSelect={onOpenCcsImport}
                 >
-                  <CcsSourceLogo className="h-9 w-9 text-[11px]" />
+                  <CcsSourceLogo className="h-9 w-9" />
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span className="flex items-center gap-1.5 text-sm font-medium">
                       CC Switch
@@ -1353,108 +1353,32 @@ function ProviderList(props: {
                     <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
                   ) : null}
                 </DropdownMenuItem>
-                <div className="flex items-stretch gap-1">
-                  <DropdownMenuItem
-                    className="model-selector-item min-w-0 flex-1 cursor-pointer items-start gap-3 rounded-lg px-2.5 py-2.5"
-                    disabled={cherryLoading || cherryImporting || !cherryAll.length}
-                    onSelect={onOpenCherryImport}
-                  >
-                    <CherrySourceLogo className="h-9 w-9 text-[11px]" />
-                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <span className="flex items-center gap-1.5 text-sm font-medium">
-                        Cherry Studio
-                        {cherryReady > 0 ? (
-                          <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
-                            {cherryReady}
-                          </span>
-                        ) : null}
-                      </span>
-                      <span
-                        className="line-clamp-2 text-xs text-muted-foreground"
-                        title={cherrySubtitle}
-                      >
-                        {cherrySubtitle}
-                      </span>
+                <DropdownMenuItem
+                  className="model-selector-item cursor-pointer items-start gap-3 rounded-lg px-2.5 py-2.5"
+                  disabled={cherryLoading || cherryImporting || !cherryAll.length}
+                  onSelect={onOpenCherryImport}
+                >
+                  <CherrySourceLogo className="h-9 w-9" />
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="flex items-center gap-1.5 text-sm font-medium">
+                      Cherry Studio
+                      {cherryReady > 0 ? (
+                        <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                          {cherryReady}
+                        </span>
+                      ) : null}
                     </span>
-                    {cherryLoading || cherryImporting ? (
-                      <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-                    ) : null}
-                  </DropdownMenuItem>
-                  <Popover.Root>
-                    <Popover.Trigger
-                      render={
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-auto w-8 shrink-0 rounded-lg text-muted-foreground"
-                          disabled={cherryLoading || cherryImporting}
-                          aria-label="Cherry Studio 数据目录设置"
-                          title="Cherry Studio 数据目录设置"
-                        />
-                      }
+                    <span
+                      className="line-clamp-2 text-xs text-muted-foreground"
+                      title={cherrySubtitle}
                     >
-                      <MoreHorizontal className="h-4 w-4" />
-                    </Popover.Trigger>
-                    <Popover.Portal>
-                      <Popover.Positioner
-                        side="bottom"
-                        align="end"
-                        sideOffset={6}
-                        collisionPadding={8}
-                        className="z-[10000]"
-                      >
-                        <Popover.Popup className="w-80 rounded-xl border border-border bg-popover p-3 text-popover-foreground shadow-xl outline-none">
-                          <div className="space-y-3">
-                            <div>
-                              <div className="text-sm font-medium">Cherry Studio 数据目录</div>
-                              <div className="mt-0.5 text-xs text-muted-foreground">
-                                {cherryDataPath
-                                  ? "正在使用手动指定的目录"
-                                  : "LiveAgent 会自动读取 Cherry Studio 的数据目录设置"}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Input
-                                readOnly
-                                value={cherryResolvedDataPath}
-                                placeholder={cherryLoading ? "正在检测…" : "未检测到数据目录"}
-                                className="h-9 min-w-0 flex-1 text-xs"
-                                title={cherryResolvedDataPath}
-                              />
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="icon"
-                                className="h-9 w-9 shrink-0"
-                                disabled={cherryLoading || cherryImporting}
-                                onClick={onChooseCherryDataDirectory}
-                                title="选择数据目录"
-                                aria-label="选择 Cherry Studio 数据目录"
-                              >
-                                <FolderOpen className="h-4 w-4" />
-                              </Button>
-                            </div>
-                            <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
-                              <span>{cherryDataPath ? "手动指定" : "自动检测"}</span>
-                              {cherryDataPath ? (
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 px-2 text-xs"
-                                  onClick={onResetCherryDataDirectory}
-                                >
-                                  恢复自动检测
-                                </Button>
-                              ) : null}
-                            </div>
-                          </div>
-                        </Popover.Popup>
-                      </Popover.Positioner>
-                    </Popover.Portal>
-                  </Popover.Root>
-                </div>
+                      {cherrySubtitle}
+                    </span>
+                  </span>
+                  {cherryLoading || cherryImporting ? (
+                    <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+                  ) : null}
+                </DropdownMenuItem>
               </div>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -1546,14 +1470,16 @@ export function ProvidersSection(props: SettingsSectionProps) {
   async function refreshThirdPartyProviders() {
     setCcsLoading(true);
     setCherryLoading(true);
-    const [ccsResult, cherryResult] = await Promise.allSettled([
-      invoke<CcsProvidersResponse>("settings_list_ccswitch_providers"),
-      cherryDataPath
-        ? invoke<CherryProvidersResponse>("settings_list_cherry_studio_providers_from_path", {
-            dataPath: cherryDataPath,
-          })
-        : invoke<CherryProvidersResponse>("settings_list_cherry_studio_providers"),
-    ]);
+    const [ccsResult, cherryResult] = await withScanFeedback(
+      Promise.allSettled([
+        invoke<CcsProvidersResponse>("settings_list_ccswitch_providers"),
+        cherryDataPath
+          ? invoke<CherryProvidersResponse>("settings_list_cherry_studio_providers_from_path", {
+              dataPath: cherryDataPath,
+            })
+          : invoke<CherryProvidersResponse>("settings_list_cherry_studio_providers"),
+      ]),
+    );
     if (ccsResult.status === "fulfilled") {
       setCcsProviders(ccsResult.value);
       setCcsMessage(ccsResult.value.message);
@@ -1587,9 +1513,10 @@ export function ProvidersSection(props: SettingsSectionProps) {
     setCherryLoading(true);
     setCherryMessage("正在扫描选择的 Cherry Studio 数据目录…");
     try {
-      const response = await invoke<CherryProvidersResponse>(
-        "settings_list_cherry_studio_providers_from_path",
-        { dataPath: selected },
+      const response = await withScanFeedback(
+        invoke<CherryProvidersResponse>("settings_list_cherry_studio_providers_from_path", {
+          dataPath: selected,
+        }),
       );
       const resolvedPath = response.dataPath || selected;
       localStorage.setItem(CHERRY_DATA_PATH_STORAGE_KEY, resolvedPath);
@@ -1606,10 +1533,12 @@ export function ProvidersSection(props: SettingsSectionProps) {
   function resetCherryDataDirectory() {
     localStorage.removeItem(CHERRY_DATA_PATH_STORAGE_KEY);
     setCherryDataPath(null);
-    setCherryProviders(null);
+    // Keep the stale provider list while rescanning: the import modal renders
+    // only while cherryProviders is set, so nulling it here would unmount an
+    // open modal mid-interaction.
     setCherryMessage("已恢复自动检测，正在重新扫描…");
     setCherryLoading(true);
-    void invoke<CherryProvidersResponse>("settings_list_cherry_studio_providers")
+    void withScanFeedback(invoke<CherryProvidersResponse>("settings_list_cherry_studio_providers"))
       .then((response) => {
         setCherryProviders(response);
         setCherryMessage(response.message);
@@ -1961,13 +1890,10 @@ export function ProvidersSection(props: SettingsSectionProps) {
                 cherryLoading={cherryLoading}
                 cherryImporting={cherryImporting}
                 cherryMessage={cherryMessage}
-                cherryDataPath={cherryDataPath}
                 onEnsureThirdPartyScan={ensureThirdPartyScan}
                 onRefreshThirdPartyProviders={() => void refreshThirdPartyProviders()}
                 onOpenCcsImport={() => setCcsImportType(tab)}
                 onOpenCherryImport={() => setCherryImportType(tab)}
-                onChooseCherryDataDirectory={() => void chooseCherryDataDirectory()}
-                onResetCherryDataDirectory={resetCherryDataDirectory}
               />
             </div>
           ))}
@@ -1994,12 +1920,16 @@ export function ProvidersSection(props: SettingsSectionProps) {
       ) : null}
       {cherryImportType && cherryProviders ? (
         <CherryStudioImportModal
-          providerType={cherryImportType}
+          initialType={cherryImportType}
           response={cherryProviders}
           importing={cherryImporting}
+          scanning={cherryLoading}
+          dataPath={cherryDataPath}
           isExisting={(item) =>
             settings.customProviders.some((provider) => provider.id === cherryProviderId(item))
           }
+          onChooseDataDirectory={() => void chooseCherryDataDirectory()}
+          onResetDataDirectory={resetCherryDataDirectory}
           onConfirm={(items) => void importCherryProviders(items)}
           onClose={() => setCherryImportType(null)}
         />

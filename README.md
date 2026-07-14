@@ -380,11 +380,11 @@ LiveAgent/
 
 <a href="https://www.star-history.com/?repos=Stack-Cairn%2FLiveAgent&type=date&legend=top-left">
 
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=Stack-Cairn/LiveAgent&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=Stack-Cairn/LiveAgent&type=Date" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=Stack-Cairn/LiveAgent&type=Date" />
-  </picture>
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Stack-Cairn/LiveAgent&type=date&theme=dark&legend=top-left&sealed_token=AeN4ZF_Id_HB4BZkRDfcLF6gsnfdzOzfaLTNRsUhuBzDn1C3XGv0JTYhJ--FAlZKwvuVCl9E0T4_nB23JOqCNxmjpNSD6CuxHuDy1uNbqoFHrzyEa3yYvy_H-xhiBePNNLyOkW6ksKWnJeiTR1gwIz7Zi5gj4NhIs6zkZKsDZtEIR2FSvUlJRXFiL11r" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Stack-Cairn/LiveAgent&type=date&legend=top-left&sealed_token=AeN4ZF_Id_HB4BZkRDfcLF6gsnfdzOzfaLTNRsUhuBzDn1C3XGv0JTYhJ--FAlZKwvuVCl9E0T4_nB23JOqCNxmjpNSD6CuxHuDy1uNbqoFHrzyEa3yYvy_H-xhiBePNNLyOkW6ksKWnJeiTR1gwIz7Zi5gj4NhIs6zkZKsDZtEIR2FSvUlJRXFiL11r" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Stack-Cairn/LiveAgent&type=date&legend=top-left&sealed_token=AeN4ZF_Id_HB4BZkRDfcLF6gsnfdzOzfaLTNRsUhuBzDn1C3XGv0JTYhJ--FAlZKwvuVCl9E0T4_nB23JOqCNxmjpNSD6CuxHuDy1uNbqoFHrzyEa3yYvy_H-xhiBePNNLyOkW6ksKWnJeiTR1gwIz7Zi5gj4NhIs6zkZKsDZtEIR2FSvUlJRXFiL11r" />
+ </picture>
 </a>
 
 ---

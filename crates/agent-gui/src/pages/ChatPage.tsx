@@ -1309,6 +1309,19 @@ export function ChatPage(props: ChatPageProps) {
     () => conversationState.historyRenderItems,
     [conversationState],
   );
+  // Sent-prompt history for the composer's ↑/↓ recall. Read lazily through a
+  // ref so the memoized composer bar never re-renders on transcript growth.
+  const historyRenderItemsRef = useRef<RenderTimelineItem[]>(historyRenderItems);
+  useEffect(() => {
+    historyRenderItemsRef.current = historyRenderItems;
+  }, [historyRenderItems]);
+  const loadComposerHistoryPrompts = useCallback(() => {
+    const prompts: string[] = [];
+    for (const item of historyRenderItemsRef.current) {
+      if (item.kind === "user" && item.text.trim()) prompts.push(item.text);
+    }
+    return prompts;
+  }, []);
   const currentRequestContext = useMemo(
     () => buildRequestContext(conversationState),
     [conversationState],
@@ -5452,6 +5465,7 @@ export function ChatPage(props: ChatPageProps) {
                 onChatRuntimeControlsChange={handleChatRuntimeControlsChange}
                 onPickReadableFiles={pickReadableFiles}
                 onPasteFiles={importReadableFiles}
+                loadHistoryPrompts={loadComposerHistoryPrompts}
                 pendingUploadedFiles={pendingUploadedFiles}
                 onRemovePendingUpload={removePendingUpload}
                 queuedTurns={queuedChatTurnsForCurrentConversation}

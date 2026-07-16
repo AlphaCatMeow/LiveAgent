@@ -613,6 +613,19 @@ export default function GatewayApp() {
     return conversationIdValue !== "" && getDisplayedConversationId() === conversationIdValue;
   }
 
+  // Sent-prompt history for the composer's ↑/↓ recall. Read lazily from the
+  // displayed conversation's transcript snapshot at the moment recall starts,
+  // so transcript growth never re-renders the memoized composer bar.
+  const loadComposerHistoryPrompts = useCallback(() => {
+    const store = transcriptStoreRegistry.peek(getDisplayedConversationId());
+    if (!store) return [];
+    const prompts: string[] = [];
+    for (const row of store.getSnapshot().rows) {
+      if (row.kind === "user" && row.text.trim()) prompts.push(row.text);
+    }
+    return prompts;
+  }, [transcriptStoreRegistry]);
+
   const applyLiveConversationTitle = useCallback(
     (targetConversationId: string, nextTitle: string) => {
       const conversationIdValue = targetConversationId.trim();
@@ -4230,6 +4243,7 @@ export default function GatewayApp() {
                       onChatRuntimeControlsChange={handleChatRuntimeControlsChange}
                       onPickReadableFiles={() => fileInputRef.current?.click()}
                       onPasteFiles={handleImportReadableFiles}
+                      loadHistoryPrompts={loadComposerHistoryPrompts}
                       pendingUploadedFiles={pendingUploadedFiles}
                       onRemovePendingUpload={(relativePath) => {
                         updatePendingUploadsForConversation(

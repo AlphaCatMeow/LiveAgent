@@ -50,6 +50,7 @@ import {
   type CustomProvider,
   type ProviderId,
   type ProviderModelConfig,
+  normalizeProviderModelConfigs,
   updateCustomProviders,
   updateCustomSettings,
 } from "../../lib/settings";
@@ -64,7 +65,6 @@ import {
   fetchModelsFromApi,
   isGatewayWebuiRuntime,
   mergeFetchedModels,
-  normalizeFetchedModels,
   sortModelsBySelection,
 } from "./providerUtils";
 import { ConfirmDeletePopover } from "./shared";
@@ -244,7 +244,7 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
     initialUsesRedactedApiKey ? REDACTED_API_KEY_DISPLAY : initialApiKey,
   );
   const [models, setModels] = useState<ProviderModelConfig[]>(() =>
-    normalizeFetchedModels(initialData?.models ?? [], providerType),
+    normalizeProviderModelConfigs(initialData?.models ?? [], providerType),
   );
   const [activeModels, setActiveModels] = useState<Set<string>>(
     new Set(initialData?.activeModels ?? []),
@@ -288,7 +288,7 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
     setFetchError(null);
     try {
       const list = await fetchModelsFromApi(providerType, url, key);
-      setModels((prev) => mergeFetchedModels(list, prev));
+      setModels((prev) => mergeFetchedModels(list, prev, providerType));
     } catch (err) {
       setFetchError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1624,7 +1624,7 @@ export function ProvidersSection(props: SettingsSectionProps) {
           const result = resultsByIdentity.get(ccsImportIdentity(provider));
           if (!result) return provider;
           const models = result.fetched
-            ? mergeFetchedModels(result.models, provider.models)
+            ? mergeFetchedModels(result.models, provider.models, provider.type)
             : provider.models;
           const activeModels = models.map((model) => model.id);
           if (
@@ -1710,10 +1710,17 @@ export function ProvidersSection(props: SettingsSectionProps) {
               cherryEffectiveApiKey(item, existingById.get(identity)),
             );
             const models = fetchedModels.filter((model) => isLikelyCherryChatModel(model.id));
-            return { identity, models, fetched: true, failed: false };
+            return {
+              identity,
+              providerType: item.providerType,
+              models,
+              fetched: true,
+              failed: false,
+            };
           } catch {
             return {
               identity,
+              providerType: item.providerType,
               models: [] as ProviderModelConfig[],
               fetched: false,
               failed: true,
@@ -1733,7 +1740,8 @@ export function ProvidersSection(props: SettingsSectionProps) {
         }
         resultsByIdentity.set(result.identity, {
           identity: result.identity,
-          models: mergeFetchedModels(result.models, merged.models),
+          providerType: result.providerType,
+          models: mergeFetchedModels(result.models, merged.models, result.providerType),
           fetched: merged.fetched || result.fetched,
           failed: merged.failed || result.failed,
         });
@@ -1744,11 +1752,18 @@ export function ProvidersSection(props: SettingsSectionProps) {
           const result = resultsByIdentity.get(provider.id);
           if (!result?.fetched) return provider;
 
-          const models = mergeFetchedModels(result.models, provider.models);
+          const models = mergeFetchedModels(result.models, provider.models, provider.type);
           const activeModels = models.map((model) => model.id);
           if (
             models.length === provider.models.length &&
-            models.every((model, index) => model.id === provider.models[index]?.id) &&
+            models.every((model, index) => {
+              const previous = provider.models[index];
+              return (
+                model.id === previous?.id &&
+                model.contextWindow === previous.contextWindow &&
+                model.maxOutputToken === previous.maxOutputToken
+              );
+            }) &&
             activeModels.length === provider.activeModels.length &&
             activeModels.every((model, index) => model === provider.activeModels[index])
           ) {

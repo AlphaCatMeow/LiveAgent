@@ -1,8 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
+import {
+  getLiteLlmModelMetadata,
+  type LiteLlmModelMap,
+} from "../../lib/providers/litellmModelMetadata";
 import { prepareProxyRequest } from "../../lib/providers/proxy";
 import {
   createProviderModelConfig,
-  normalizeProviderModelConfigs,
   type ProviderId,
   type ProviderModelConfig,
 } from "../../lib/settings";
@@ -216,7 +219,7 @@ async function fetchModelsThroughGateway(
 
   const items = extractModelListItems(data);
   if (items !== null) {
-    return normalizeFetchedModels(items, type);
+    return normalizeFetchedModels(items, type, baseUrl);
   }
 
   const maybeError =
@@ -233,11 +236,46 @@ async function fetchModelsThroughGateway(
 export function normalizeFetchedModels(
   items: unknown,
   providerType: ProviderId,
+  baseUrl = "",
+  modelMap?: LiteLlmModelMap,
 ): ProviderModelConfig[] {
   if (providerType === "gemini") {
-    return normalizeGeminiFetchedModels(items);
+    return normalizeGeminiFetchedModels(items, baseUrl, modelMap);
   }
-  return normalizeProviderModelConfigs(items, providerType);
+  if (!Array.isArray(items)) return [];
+
+  const out: ProviderModelConfig[] = [];
+  const seen = new Set<string>();
+
+  for (const item of items) {
+    const obj = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
+    const id =
+      typeof item === "string"
+        ? item.trim()
+        : typeof obj.id === "string"
+          ? obj.id.trim()
+          : typeof obj.model === "string"
+            ? obj.model.trim()
+            : "";
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+
+    const draft = createProviderModelConfig(providerType, id);
+    const metadata = getLiteLlmModelMetadata(id, providerType, baseUrl, modelMap);
+    out.push({
+      id,
+      contextWindow:
+        normalizePositiveInteger(obj.contextWindow) ??
+        metadata?.contextWindow ??
+        draft.contextWindow,
+      maxOutputToken:
+        normalizePositiveInteger(obj.maxOutputToken ?? obj.maxTokens) ??
+        metadata?.maxOutputToken ??
+        draft.maxOutputToken,
+    });
+  }
+
+  return out;
 }
 
 function normalizePositiveInteger(value: unknown): number | undefined {
@@ -252,7 +290,11 @@ function normalizeGeminiModelId(value: unknown): string {
   return raw.startsWith("models/") ? raw.slice("models/".length) : raw;
 }
 
-function normalizeGeminiFetchedModels(items: unknown): ProviderModelConfig[] {
+function normalizeGeminiFetchedModels(
+  items: unknown,
+  baseUrl: string,
+  modelMap?: LiteLlmModelMap,
+): ProviderModelConfig[] {
   if (!Array.isArray(items)) return [];
 
   const out: ProviderModelConfig[] = [];
@@ -272,10 +314,17 @@ function normalizeGeminiFetchedModels(items: unknown): ProviderModelConfig[] {
     seen.add(id);
 
     const draft = createProviderModelConfig("gemini", id);
+    const metadata = getLiteLlmModelMetadata(id, "gemini", baseUrl, modelMap);
     out.push({
       id,
-      contextWindow: normalizePositiveInteger(obj.inputTokenLimit) ?? draft.contextWindow,
-      maxOutputToken: normalizePositiveInteger(obj.outputTokenLimit) ?? draft.maxOutputToken,
+      contextWindow:
+        normalizePositiveInteger(obj.inputTokenLimit) ??
+        metadata?.contextWindow ??
+        draft.contextWindow,
+      maxOutputToken:
+        normalizePositiveInteger(obj.outputTokenLimit) ??
+        metadata?.maxOutputToken ??
+        draft.maxOutputToken,
     });
   }
 
@@ -285,6 +334,7 @@ function normalizeGeminiFetchedModels(items: unknown): ProviderModelConfig[] {
 export function mergeFetchedModels(
   fetched: ProviderModelConfig[],
   existing: ProviderModelConfig[],
+  providerType: ProviderId,
 ): ProviderModelConfig[] {
   const merged: ProviderModelConfig[] = [];
   const existingById = new Map(existing.map((model) => [model.id, model]));
@@ -293,7 +343,17 @@ export function mergeFetchedModels(
   for (const model of fetched) {
     if (seen.has(model.id)) continue;
     seen.add(model.id);
-    merged.push(existingById.get(model.id) ?? model);
+    const saved = existingById.get(model.id);
+    if (!saved) {
+      merged.push(model);
+      continue;
+    }
+
+    const legacy = createProviderModelConfig(providerType, model.id);
+    const stillUsesLegacyDefaults =
+      saved.contextWindow === legacy.contextWindow &&
+      saved.maxOutputToken === legacy.maxOutputToken;
+    merged.push(stillUsesLegacyDefaults ? model : saved);
   }
 
   for (const model of existing) {
@@ -378,7 +438,7 @@ export async function fetchModelsFromApi(
       emptyResult ??= [];
       continue;
     }
-    const models = normalizeFetchedModels(items, type);
+    const models = normalizeFetchedModels(items, type, normalizedUrl);
     if (models.length > 0) return models;
     emptyResult = models;
   }

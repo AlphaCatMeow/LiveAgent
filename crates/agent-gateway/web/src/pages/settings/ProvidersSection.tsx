@@ -34,6 +34,7 @@ import {
   type CustomProvider,
   type ProviderId,
   type ProviderModelConfig,
+  normalizeProviderModelConfigs,
   updateCustomProviders,
   updateCustomSettings,
 } from "../../lib/settings";
@@ -43,7 +44,6 @@ import {
   fetchModelsFromApi,
   isGatewayWebuiRuntime,
   mergeFetchedModels,
-  normalizeFetchedModels,
   sortModelsBySelection,
 } from "./providerUtils";
 import { ConfirmDeletePopover } from "./shared";
@@ -190,7 +190,7 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
     initialUsesRedactedApiKey ? REDACTED_API_KEY_DISPLAY : initialApiKey,
   );
   const [models, setModels] = useState<ProviderModelConfig[]>(() =>
-    normalizeFetchedModels(initialData?.models ?? [], providerType),
+    normalizeProviderModelConfigs(initialData?.models ?? [], providerType),
   );
   const [activeModels, setActiveModels] = useState<Set<string>>(
     new Set(initialData?.activeModels ?? []),
@@ -235,7 +235,7 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
     setFetchError(null);
     try {
       const list = await fetchModelsFromApi(providerType, url, key);
-      setModels((prev) => mergeFetchedModels(list, prev));
+      setModels((prev) => mergeFetchedModels(list, prev, providerType));
     } catch (err) {
       setFetchError(err instanceof Error ? err.message : String(err));
     } finally {

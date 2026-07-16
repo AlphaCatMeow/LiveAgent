@@ -238,3 +238,102 @@ test("fetchModelsFromApi retries claude_code with official anthropic headers", a
     },
   );
 });
+
+test("normalizeFetchedModels applies provider, LiteLLM, and legacy precedence per field", () => {
+  const modelMap = {
+    "model-a": { contextWindow: 111, maxOutputToken: 11 },
+    "model-b": { contextWindow: 222, maxOutputToken: 22 },
+    "model-c": { contextWindow: 333 },
+    "gemini/gemini-test": { contextWindow: 444, maxOutputToken: 44 },
+    "openrouter/anthropic/claude-test": {
+      contextWindow: 555,
+      maxOutputToken: 55,
+    },
+  };
+
+  assert.deepEqual(
+    providerUtils.normalizeFetchedModels(
+      [
+        { id: "model-a", contextWindow: 900 },
+        { id: "model-b", maxOutputToken: 99 },
+        { id: "model-c" },
+        { id: "unknown-model" },
+      ],
+      "claude_code",
+      "https://api.anthropic.com",
+      modelMap,
+    ),
+    [
+      { id: "model-a", contextWindow: 900, maxOutputToken: 11 },
+      { id: "model-b", contextWindow: 222, maxOutputToken: 99 },
+      {
+        id: "model-c",
+        contextWindow: 333,
+        maxOutputToken: providerUtils.createDraftModelConfig("claude_code", "model-c")
+          .maxOutputToken,
+      },
+      providerUtils.createDraftModelConfig("claude_code", "unknown-model"),
+    ],
+  );
+
+  assert.deepEqual(
+    providerUtils.normalizeFetchedModels(
+      [
+        {
+          name: "models/gemini-test",
+          inputTokenLimit: 999,
+          supportedGenerationMethods: ["generateContent"],
+        },
+      ],
+      "gemini",
+      "https://generativelanguage.googleapis.com/v1beta",
+      modelMap,
+    ),
+    [{ id: "gemini-test", contextWindow: 999, maxOutputToken: 44 }],
+  );
+
+  assert.deepEqual(
+    providerUtils.normalizeFetchedModels(
+      [{ id: "anthropic/claude-test" }],
+      "claude_code",
+      "https://openrouter.ai/api/v1",
+      modelMap,
+    ),
+    [{ id: "anthropic/claude-test", contextWindow: 555, maxOutputToken: 55 }],
+  );
+});
+
+test("mergeFetchedModels repairs untouched defaults and preserves any manual override", () => {
+  const id = "legacy-model";
+  const legacy = providerUtils.createDraftModelConfig("claude_code", id);
+  const fetched = { id, contextWindow: 123456, maxOutputToken: 6543 };
+
+  assert.deepEqual(
+    providerUtils.mergeFetchedModels([fetched], [legacy], "claude_code"),
+    [fetched],
+  );
+
+  const editedContext = { ...legacy, contextWindow: legacy.contextWindow + 1 };
+  assert.deepEqual(
+    providerUtils.mergeFetchedModels([fetched], [editedContext], "claude_code"),
+    [editedContext],
+  );
+
+  const editedOutput = { ...legacy, maxOutputToken: legacy.maxOutputToken + 1 };
+  assert.deepEqual(
+    providerUtils.mergeFetchedModels([fetched], [editedOutput], "claude_code"),
+    [editedOutput],
+  );
+});
+
+test("mergeFetchedModels keeps fetched order, stale models, and duplicate suppression", () => {
+  const first = { id: "first", contextWindow: 100, maxOutputToken: 10 };
+  const duplicate = { id: "first", contextWindow: 200, maxOutputToken: 20 };
+  const second = { id: "second", contextWindow: 300, maxOutputToken: 30 };
+  const stale = { id: "stale", contextWindow: 400, maxOutputToken: 40 };
+
+  assert.deepEqual(
+    providerUtils.mergeFetchedModels([first, duplicate, second], [stale], "codex"),
+    [first, second, stale],
+  );
+});

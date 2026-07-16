@@ -1,0 +1,24 @@
+{
+  "z-direct": {
+    "max_input_tokens": 100.9,
+    "max_output_tokens": "20"
+  },
+  "a-fallback": {
+    "max_tokens": 64
+  },
+  "b-context-only": {
+    "max_input_tokens": 128
+  },
+  "c-null-fallback": {
+    "max_input_tokens": null,
+    "max_output_tokens": null,
+    "max_tokens": 256
+  },
+  "invalid-values": {
+    "max_input_tokens": 0,
+    "max_output_tokens": -5,
+    "max_tokens": 999
+  },
+  "not-an-object": "ignored",
+  "empty": {}
+}

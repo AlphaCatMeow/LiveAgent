@@ -37,6 +37,7 @@ RUN useradd --system --uid 10001 --user-group --home-dir /nonexistent --shell /u
     && install -d -o liveagent -g liveagent -m 0700 /var/lib/liveagent
 
 COPY --from=gateway-builder /out/liveagent-gateway /usr/local/bin/liveagent-gateway
+COPY THIRD_PARTY_NOTICES.md /usr/share/doc/liveagent/THIRD_PARTY_NOTICES.md
 
 USER liveagent
 

@@ -25,6 +25,7 @@ import {
   type StreamdownTranslations,
 } from "streamdown";
 import { useLocale } from "../i18n";
+import { normalizeLatexDelimiters } from "../lib/normalizeLatexDelimiters";
 import { cn } from "../lib/shared/utils";
 import { Check, ChevronDown, ChevronUp, Copy, ExternalLink, X } from "./icons";
 import { Button } from "./ui/button";
@@ -430,6 +431,10 @@ export const Markdown = memo(function Markdown(props: MarkdownProps) {
     preserveRelativeUrls = false,
   } = props;
   const streaming = renderMode === "streaming";
+  const normalizedContent = useMemo(
+    () => normalizeLatexDelimiters(content, streaming && showCaret),
+    [content, showCaret, streaming],
+  );
   const baseComponents = readOnly ? markdownReadOnlyComponents : markdownComponents;
   const components = useMemo(
     () => (componentOverrides ? { ...baseComponents, ...componentOverrides } : baseComponents),
@@ -473,7 +478,7 @@ export const Markdown = memo(function Markdown(props: MarkdownProps) {
         }}
         translations={streamdownTranslations}
       >
-        {content}
+        {normalizedContent}
       </Streamdown>
     </div>
   );

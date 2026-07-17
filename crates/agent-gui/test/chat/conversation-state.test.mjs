@@ -410,6 +410,39 @@ test("incremental append: compaction checkpoint compacts prior items and appends
   }
 });
 
+test("incremental append: first post-checkpoint batch does not duplicate the summary card", () => {
+  const base = conversationState.createConversationStateFromContext({
+    messages: [user("q1", 1), assistant("a1", 2)],
+  });
+  const checkpoint = assistant("Compressed", 3, {
+    api: "liveagent-compaction",
+    provider: "liveagent",
+    model: "summary",
+    responseId: "summary-empty-segment",
+  });
+  const compacted = conversationState.applyCompactionCheckpoint(base, checkpoint);
+  const continued = conversationState.appendMessagesToConversation(compacted, [
+    toolCallAssistant("call-after-checkpoint", 4),
+    toolResultMessage("call-after-checkpoint", 5),
+    assistant("continued", 6),
+  ]);
+
+  assertMatchesFullRebuild(continued);
+  const checkpointSummary = compacted.historyRenderItems.find((item) => item.kind === "summary");
+  const continuedSummaries = continued.historyRenderItems.filter((item) => item.kind === "summary");
+  assert.equal(continuedSummaries.length, 1);
+  assert.equal(continuedSummaries[0], checkpointSummary);
+  assert.equal(continuedSummaries[0].summaryId, "summary-empty-segment");
+
+  const extended = conversationState.appendMessagesToConversation(continued, [
+    assistant("continued again", 7),
+  ]);
+  assertMatchesFullRebuild(extended);
+  const extendedSummaries = extended.historyRenderItems.filter((item) => item.kind === "summary");
+  assert.equal(extendedSummaries.length, 1);
+  assert.equal(extendedSummaries[0], checkpointSummary);
+});
+
 test("incremental append: sequential turns equal a one-shot build", () => {
   const messages = [];
   for (let turn = 0; turn < 12; turn += 1) {

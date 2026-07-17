@@ -31,6 +31,7 @@
     "components/project-tools/file-tree/ContextMenu.tsx",
     "components/chat/promptHistory.ts",
     "components/Markdown.tsx",
+    "lib/normalizeLatexDelimiters.ts",
     "components/workspace-editor/workspaceMarkdownAssets.ts",
     "components/workspace-editor/WorkspaceMarkdownPreview.tsx",
     "lib/chat-scroll/scrollFollowCore.ts",

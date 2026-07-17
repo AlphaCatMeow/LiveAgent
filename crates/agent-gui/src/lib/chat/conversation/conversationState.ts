@@ -600,6 +600,7 @@ function buildTimelineItemsForSegment(
   segment: StoredContextSegment,
   isCompacted: boolean,
   startMessageIndex = 0,
+  options?: { includeSummary?: boolean },
 ): RenderTimelineItem[] {
   const items: RenderTimelineItem[] = [];
 
@@ -608,7 +609,7 @@ function buildTimelineItemsForSegment(
   // record keeps its true index, and index-based keys would remount every
   // row (and drop its measured height) when hydration lands — the visible
   // post-load jump. segmentIds are persisted and identical in both views.
-  if (startMessageIndex === 0 && segment.summary) {
+  if (options?.includeSummary !== false && startMessageIndex === 0 && segment.summary) {
     items.push({
       kind: "summary",
       key: `summary-${segment.segmentId}-${segment.summary.id}`,
@@ -736,7 +737,10 @@ function extendSegmentTimelineItems(
     }
   }
 
-  return [...reused, ...buildTimelineItemsForSegment(nextSegment, false, boundary)];
+  return [
+    ...reused,
+    ...buildTimelineItemsForSegment(nextSegment, false, boundary, { includeSummary: false }),
+  ];
 }
 
 // Timeline update for the append hot path (send twin, settle, checkpoint):

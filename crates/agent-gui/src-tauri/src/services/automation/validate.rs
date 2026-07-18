@@ -7,12 +7,18 @@ use uuid::Uuid;
 
 use super::types::{
     http_method_can_have_body, CronTask, HookDef, HttpRequestSpec, SelectedModelRef,
-    CRON_REASONING_LEVELS, CRON_TASK_KINDS, HOOK_EVENTS, HOOK_KINDS, HTTP_METHODS,
-    MASKED_HEADER_VALUE,
+    CRON_REASONING_LEVELS, CRON_TASK_KINDS, DEFAULT_CRON_TIMEOUT_SECONDS, HOOK_EVENTS, HOOK_KINDS,
+    HTTP_METHODS, MASKED_HEADER_VALUE,
 };
 
 pub const MIN_HOOK_TIMEOUT_MS: u64 = 1_000;
 pub const MAX_HOOK_TIMEOUT_MS: u64 = 10 * 60_000;
+
+/// Cron timeout bounds. The upper bound mirrors the shell runner's hard cap
+/// (MAX_SHELL_TIMEOUT_MS): a larger stored value would silently be cut to ten
+/// minutes for bash tasks, so validation refuses to store one.
+pub const MIN_CRON_TIMEOUT_SECONDS: u64 = 1;
+pub const MAX_CRON_TIMEOUT_SECONDS: u64 = 600;
 
 pub fn validate_cron_expression(expression: &str) -> Result<(), String> {
     let trimmed = expression.trim();
@@ -75,6 +81,24 @@ fn parse_remaining_executions(
             .map(Some)
             .ok_or_else(|| format!("{label}.remainingExecutions 必须是非负整数")),
         Some(_) => Err(format!("{label}.remainingExecutions 必须是非负整数")),
+    }
+}
+
+fn parse_timeout_seconds(map: &Map<String, Value>, label: &str) -> Result<u64, String> {
+    match map.get("timeoutSeconds") {
+        None | Some(Value::Null) => Ok(DEFAULT_CRON_TIMEOUT_SECONDS),
+        Some(Value::Number(number)) => {
+            let value = number
+                .as_u64()
+                .ok_or_else(|| format!("{label}.timeoutSeconds 必须是正整数（秒）"))?;
+            if !(MIN_CRON_TIMEOUT_SECONDS..=MAX_CRON_TIMEOUT_SECONDS).contains(&value) {
+                return Err(format!(
+                    "{label}.timeoutSeconds 必须在 {MIN_CRON_TIMEOUT_SECONDS}-{MAX_CRON_TIMEOUT_SECONDS} 秒之间"
+                ));
+            }
+            Ok(value)
+        }
+        Some(_) => Err(format!("{label}.timeoutSeconds 必须是正整数（秒）")),
     }
 }
 
@@ -191,6 +215,7 @@ pub fn validate_cron_task(value: Value, label: &str) -> Result<CronTask, String>
     let cron = required_string(&map, "cron", label)?;
     validate_cron_expression(&cron)?;
     let remaining_executions = parse_remaining_executions(&map, label)?;
+    let timeout_seconds = parse_timeout_seconds(&map, label)?;
     let enabled =
         bool_with_default(&map, "enabled", label, false)? && remaining_executions != Some(0);
     let kind = map
@@ -210,6 +235,7 @@ pub fn validate_cron_task(value: Value, label: &str) -> Result<CronTask, String>
         cron,
         enabled,
         remaining_executions,
+        timeout_seconds,
         kind: kind.clone(),
         script: None,
         requests: None,

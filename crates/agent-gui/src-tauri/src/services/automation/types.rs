@@ -17,6 +17,13 @@ pub const MASKED_HEADER_VALUE: &str = "__liveagent-masked__";
 pub const CRON_TASK_KINDS: &[&str] = &["bash", "http", "prompt"];
 pub const CRON_REASONING_LEVELS: &[&str] =
     &["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+/// Per-task execution timeout applied to bash scripts, each http request and
+/// the prompt run lease. Tasks stored before the field existed resolve to it.
+pub const DEFAULT_CRON_TIMEOUT_SECONDS: u64 = 300;
+
+pub fn default_cron_timeout_seconds() -> u64 {
+    DEFAULT_CRON_TIMEOUT_SECONDS
+}
 pub const HOOK_KINDS: &[&str] = &["command", "http"];
 pub const HOOK_EVENTS: &[&str] = &[
     "agent_start",
@@ -65,6 +72,10 @@ pub struct CronTask {
     pub enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remaining_executions: Option<u64>,
+    /// Execution timeout in seconds (bash script / each http request / prompt
+    /// run lease). Always serialized; missing input defaults to 300.
+    #[serde(default = "default_cron_timeout_seconds")]
+    pub timeout_seconds: u64,
     #[serde(rename = "type")]
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

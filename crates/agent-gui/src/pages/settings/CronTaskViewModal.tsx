@@ -13,6 +13,7 @@ import {
   Play,
   ScrollText,
   Terminal,
+  Timer,
   X,
   XCircle,
 } from "../../components/icons";
@@ -23,6 +24,7 @@ import {
   type CronTask,
   type CronTaskType,
   clearCronRuns,
+  DEFAULT_CRON_TIMEOUT_SECONDS,
   isManualCronRunFinished,
   listCronRuns,
   MANUAL_CRON_RUN_POLL_INTERVAL_MS,
@@ -191,6 +193,16 @@ function LeftPanel({
               {task.remainingExecutions == null ? null : (
                 <span>{t("settings.cronRemainingExecutionsUnitShort")}</span>
               )}
+            </div>
+            <div
+              className="inline-flex items-center gap-1 rounded-lg bg-muted px-2 py-1 text-[11px] font-medium text-muted-foreground"
+              title={t("settings.cronTimeoutSeconds")}
+            >
+              <Timer className="h-3 w-3" />
+              <span className="tabular-nums">
+                {task.timeoutSeconds ?? DEFAULT_CRON_TIMEOUT_SECONDS}
+                {t("settings.cronTimeoutSecondsUnitShort")}
+              </span>
             </div>
             {task.workdir ? (
               <div
@@ -670,6 +682,12 @@ export function CronTaskViewModal({ taskId, onClose }: CronTaskViewModalProps) {
   const [manualRunStartedAt, setManualRunStartedAt] = useState<number | null>(null);
   const [runNowError, setRunNowError] = useState<string | null>(null);
   const runNowLockRef = useRef(false);
+  // Manual runs are watched for at least the legacy six-minute window, and
+  // longer when the task timeout exceeds it (plus scheduler/completion slack).
+  const manualRunWatchTimeoutMs = Math.max(
+    MANUAL_CRON_RUN_TIMEOUT_MS,
+    ((task?.timeoutSeconds ?? DEFAULT_CRON_TIMEOUT_SECONDS) + 60) * 1_000,
+  );
 
   useEffect(() => {
     if (!task) {
@@ -714,14 +732,14 @@ export function CronTaskViewModal({ taskId, onClose }: CronTaskViewModalProps) {
       setManualRunStartedAt(null);
       setIsRunningNow(false);
       setRunNowError(t("settings.cronViewRunNowTimeout"));
-    }, MANUAL_CRON_RUN_TIMEOUT_MS);
+    }, manualRunWatchTimeoutMs);
 
     return () => {
       cancelled = true;
       window.clearInterval(pollTimer);
       window.clearTimeout(timeoutTimer);
     };
-  }, [manualRunStartedAt, taskId, t]);
+  }, [manualRunStartedAt, taskId, manualRunWatchTimeoutMs, t]);
 
   if (!task) {
     return null;

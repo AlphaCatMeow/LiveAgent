@@ -87,6 +87,14 @@ const MANAGE_CRON_TASK_PARAMETERS = Type.Object({
         "Remaining run count for this cron task. Omit or pass null for unlimited runs. Pass 0 only when the task should be exhausted and disabled.",
     }),
   ),
+  timeout_seconds: Type.Optional(
+    Type.Integer({
+      minimum: 1,
+      maximum: 600,
+      description:
+        "Execution timeout in seconds (1-600). Applies to the whole bash script, to each HTTP request, and to the prompt run for type=prompt. Omit on create for the 300s default; omit on update to keep the current value.",
+    }),
+  ),
   script: Type.Optional(
     Type.String({
       minLength: 1,
@@ -206,6 +214,9 @@ function collectTaskFields(
   if (Object.hasOwn(args, "remaining_executions")) {
     fields.remainingExecutions = args.remaining_executions;
   }
+  if (Object.hasOwn(args, "timeout_seconds")) {
+    fields.timeoutSeconds = args.timeout_seconds;
+  }
   if (Object.hasOwn(args, "requests") && Array.isArray(args.requests)) {
     fields.requests = (args.requests as unknown[]).map((entry) => {
       const request = asRecord(entry) ?? {};
@@ -260,8 +271,9 @@ function collectTaskFields(
 function formatTaskLine(task: CronTask, index?: number) {
   const prefix = index == null ? "" : `${index + 1}. `;
   const remaining = task.remainingExecutions ?? "unlimited";
+  const timeout = task.timeoutSeconds == null ? "" : ` | timeout_seconds=${task.timeoutSeconds}`;
   const error = task.lastError ? ` | last_error=${JSON.stringify(task.lastError)}` : "";
-  return `${prefix}task_id=${task.id} | name=${JSON.stringify(task.name)} | type=${task.type} | cron=${task.cron} | enabled=${task.enabled ? "true" : "false"} | remaining_executions=${remaining}${error}`;
+  return `${prefix}task_id=${task.id} | name=${JSON.stringify(task.name)} | type=${task.type} | cron=${task.cron} | enabled=${task.enabled ? "true" : "false"} | remaining_executions=${remaining}${timeout}${error}`;
 }
 
 function formatTaskDetails(task: CronTask) {
@@ -364,7 +376,7 @@ export function createCronTools(params: {
   const toolCronTaskManager: Tool = {
     name: "CronTaskManager",
     description:
-      "Manage persistent scheduled tasks in Settings -> Cron. This is the built-in tool for scheduled automation in LiveAgent and is always available. Use action=create to create a new recurring task, action=read to list tasks or inspect one task, action=update to edit an existing task by task_id, action=delete to remove an existing task by task_id, and action=list_logs with task_id to view recent execution logs. If the user asks to modify, remove, or inspect logs for an existing scheduled task and you do not know the task_id or current configuration, call action=read first. Scheduled jobs must be represented with this cron tool rather than only described in text or faked with one-off execution. Supports bash, http, and prompt task types. Use remaining_executions for a finite remaining run count; omit it or pass null for unlimited runs. For bash tasks, provide a non-empty script string, not a JSON argv array. Prompt tasks configure their execution model and thinking level internally — creation always inherits the current runtime model and starts at a medium thinking level (the user can change both later in Settings -> Cron); there are no parameters for them, so never try to pass one. Newly created bash/prompt tasks are pinned to the workspace the agent is currently running in unless workdir explicitly names another path (an empty workdir also resolves to the current workspace).",
+      "Manage persistent scheduled tasks in Settings -> Cron. This is the built-in tool for scheduled automation in LiveAgent and is always available. Use action=create to create a new recurring task, action=read to list tasks or inspect one task, action=update to edit an existing task by task_id, action=delete to remove an existing task by task_id, and action=list_logs with task_id to view recent execution logs. If the user asks to modify, remove, or inspect logs for an existing scheduled task and you do not know the task_id or current configuration, call action=read first. Scheduled jobs must be represented with this cron tool rather than only described in text or faked with one-off execution. Supports bash, http, and prompt task types. Use remaining_executions for a finite remaining run count; omit it or pass null for unlimited runs. Use timeout_seconds (1-600, default 300) to bound each run: it kills the bash script, each HTTP request, or the prompt run once exceeded. For bash tasks, provide a non-empty script string, not a JSON argv array. Prompt tasks configure their execution model and thinking level internally — creation always inherits the current runtime model and starts at a medium thinking level (the user can change both later in Settings -> Cron); there are no parameters for them, so never try to pass one. Newly created bash/prompt tasks are pinned to the workspace the agent is currently running in unless workdir explicitly names another path (an empty workdir also resolves to the current workspace).",
     parameters: MANAGE_CRON_TASK_PARAMETERS,
   };
 

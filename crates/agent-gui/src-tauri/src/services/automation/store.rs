@@ -12,8 +12,6 @@ use super::scheduler::AutomationScheduler;
 use super::types::*;
 use super::validate;
 
-pub const PROMPT_RUN_TIMEOUT_MS: i64 = 5 * 60_000;
-
 /// Fan-out target for store mutations. All change notifications originate
 /// here so every writer (UI apply, LLM tool, gateway relay, executor
 /// decrement) produces exactly the same broadcast.
@@ -359,7 +357,8 @@ impl AutomationStore {
                 provider_id,
                 model,
                 started_at,
-                lease_expires_at: started_at + PROMPT_RUN_TIMEOUT_MS,
+                lease_expires_at: started_at
+                    + (task.timeout_seconds.max(1) as i64).saturating_mul(1_000),
                 counted,
                 workdir: workdir.to_string(),
                 reasoning: task.reasoning.clone().unwrap_or_default(),

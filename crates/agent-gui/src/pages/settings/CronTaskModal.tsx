@@ -26,7 +26,14 @@ import {
 } from "../../components/ui/select";
 import { Textarea } from "../../components/ui/textarea";
 import { useLocale } from "../../i18n";
-import { type CronTask, type CronTaskType, validateCronExpression } from "../../lib/automation";
+import {
+  type CronTask,
+  type CronTaskType,
+  DEFAULT_CRON_TIMEOUT_SECONDS,
+  MAX_CRON_TIMEOUT_SECONDS,
+  MIN_CRON_TIMEOUT_SECONDS,
+  validateCronExpression,
+} from "../../lib/automation";
 import { parseModelValue, toModelValue } from "../../lib/providers/llm";
 import { type ExecutionMode, isAgentExecutionMode, type ProviderId } from "../../lib/settings";
 import { useModalMotion } from "../../lib/shared/modalMotion";
@@ -127,6 +134,12 @@ export function CronTaskModal({
   const [remainingExecutions, setRemainingExecutions] = useState(
     initialData?.remainingExecutions == null ? "" : String(initialData.remainingExecutions),
   );
+  // Prefilled with the effective value: tasks saved before the field existed
+  // run with the default, so showing it is truthful — and clearing the input
+  // simply falls back to the same default on save.
+  const [timeoutSeconds, setTimeoutSeconds] = useState(
+    String(initialData?.timeoutSeconds ?? DEFAULT_CRON_TIMEOUT_SECONDS),
+  );
   const [type, setType] = useState<CronTaskType>(initialData?.type ?? "bash");
   const [scriptText, setScriptText] = useState(initialData?.script ?? "");
   const [requests, setRequests] = useState<HttpRequestDraft[]>(() => {
@@ -200,6 +213,17 @@ export function CronTaskModal({
       ) {
         throw new Error(t("settings.cronRemainingExecutionsInvalid"));
       }
+      const trimmedTimeoutSeconds = timeoutSeconds.trim();
+      const parsedTimeoutSeconds = trimmedTimeoutSeconds
+        ? Number(trimmedTimeoutSeconds)
+        : DEFAULT_CRON_TIMEOUT_SECONDS;
+      if (
+        !Number.isSafeInteger(parsedTimeoutSeconds) ||
+        parsedTimeoutSeconds < MIN_CRON_TIMEOUT_SECONDS ||
+        parsedTimeoutSeconds > MAX_CRON_TIMEOUT_SECONDS
+      ) {
+        throw new Error(t("settings.cronTimeoutSecondsInvalid"));
+      }
 
       await validateCronExpression(cron.trim());
 
@@ -230,6 +254,7 @@ export function CronTaskModal({
         description: description.trim(),
         cron: cron.trim(),
         remainingExecutions: parsedRemainingExecutions,
+        timeoutSeconds: parsedTimeoutSeconds,
         type,
         script: type === "bash" ? trimmedScript : undefined,
         requests: type === "http" ? parseHttpRequestDrafts(requests, t) : undefined,
@@ -344,18 +369,36 @@ export function CronTaskModal({
                   />
                 </div>
               </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs font-medium text-muted-foreground">
-                  {t("settings.cronTaskDesc")}
-                </Label>
-                <Input
-                  value={description}
-                  placeholder={t("settings.cronTaskDescPlaceholder")}
-                  onChange={(e) => {
-                    setFormError(null);
-                    setDescription(e.currentTarget.value);
-                  }}
-                />
+              <div className="settings-form-grid grid gap-4 sm:grid-cols-[minmax(0,1fr)_9rem]">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">
+                    {t("settings.cronTaskDesc")}
+                  </Label>
+                  <Input
+                    value={description}
+                    placeholder={t("settings.cronTaskDescPlaceholder")}
+                    onChange={(e) => {
+                      setFormError(null);
+                      setDescription(e.currentTarget.value);
+                    }}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium text-muted-foreground">
+                    {t("settings.cronTimeoutSeconds")}
+                  </Label>
+                  <Input
+                    value={timeoutSeconds}
+                    inputMode="numeric"
+                    placeholder={String(DEFAULT_CRON_TIMEOUT_SECONDS)}
+                    onChange={(e) => {
+                      const next = e.currentTarget.value.trim();
+                      if (next && !/^\d+$/.test(next)) return;
+                      setFormError(null);
+                      setTimeoutSeconds(next);
+                    }}
+                  />
+                </div>
               </div>
             </div>
           </div>

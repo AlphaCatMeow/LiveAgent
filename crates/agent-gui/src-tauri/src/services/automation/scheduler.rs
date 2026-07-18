@@ -18,7 +18,6 @@ use super::db::now_ms;
 use super::store::{AutomationStore, PromptQueueOutcome};
 use super::types::{CompletedRun, CronRunNowResponse, CronTask, HttpRequestSpec};
 
-const CRON_SCRIPT_TIMEOUT_MS: u64 = 60_000;
 const SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone)]
@@ -525,7 +524,7 @@ fn execute_bash(task: &CronTask, workdir: String) -> CompletedRun {
         cwd.display().to_string(),
         script.clone(),
         None,
-        Some(CRON_SCRIPT_TIMEOUT_MS),
+        Some(task.timeout_seconds.saturating_mul(1_000)),
         None,
         None,
         None,
@@ -552,7 +551,7 @@ fn execute_http(task: &CronTask) -> CompletedRun {
     if requests.is_empty() {
         return failed_run(&task.id, "No HTTP requests configured for this Cron task.".to_string(), true);
     }
-    let client = match build_http_client() {
+    let client = match build_http_client(Some(task.timeout_seconds.saturating_mul(1_000))) {
         Ok(client) => client,
         Err(error) => return failed_run(&task.id, error, true),
     };

@@ -5,7 +5,7 @@ use serde_json::{Map, Value};
 
 use super::types::{
     CronRunRecord, CronSnapshot, CronTask, HookDef, HooksSnapshot, HttpRequestSpec, RunState,
-    SelectedModelRef,
+    SelectedModelRef, DEFAULT_CRON_TIMEOUT_SECONDS,
 };
 
 pub const RUN_RETENTION_PER_TASK: u32 = 200;
@@ -174,6 +174,10 @@ fn task_config_json(task: &CronTask) -> Result<String, String> {
     if let Some(workdir) = &task.workdir {
         config.insert("workdir".to_string(), Value::String(workdir.clone()));
     }
+    config.insert(
+        "timeoutSeconds".to_string(),
+        Value::Number(task.timeout_seconds.into()),
+    );
     serde_json::to_string(&Value::Object(config))
         .map_err(|e| format!("序列化 cron config 失败：{e}"))
 }
@@ -291,6 +295,7 @@ struct TaskConfig {
     selected_model: Option<SelectedModelRef>,
     reasoning: Option<String>,
     workdir: Option<String>,
+    timeout_seconds: Option<u64>,
 }
 
 fn parse_task_config(config_json: &str) -> TaskConfig {
@@ -326,6 +331,7 @@ fn parse_task_config(config_json: &str) -> TaskConfig {
             .get("workdir")
             .and_then(Value::as_str)
             .map(ToString::to_string),
+        timeout_seconds: map.get("timeoutSeconds").and_then(Value::as_u64),
     }
 }
 
@@ -341,6 +347,9 @@ fn cron_task_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CronTask> {
         remaining_executions: row
             .get::<_, Option<i64>>("remaining_runs")?
             .map(|value| value.max(0) as u64),
+        timeout_seconds: config
+            .timeout_seconds
+            .unwrap_or(DEFAULT_CRON_TIMEOUT_SECONDS),
         kind: row.get("kind")?,
         script: config.script,
         requests: config.requests,

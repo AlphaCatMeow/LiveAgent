@@ -95,9 +95,13 @@ fn build_header_map(headers: &Option<BTreeMap<String, String>>) -> Result<Header
     Ok(map)
 }
 
-pub(crate) fn build_http_client() -> Result<Client, String> {
+/// `timeout_ms` bounds every request made by the returned client; `None`
+/// keeps the legacy 10s default used by hooks.
+pub(crate) fn build_http_client(timeout_ms: Option<u64>) -> Result<Client, String> {
     Client::builder()
-        .timeout(Duration::from_millis(DEFAULT_HTTP_TIMEOUT_MS))
+        .timeout(Duration::from_millis(
+            timeout_ms.unwrap_or(DEFAULT_HTTP_TIMEOUT_MS).max(1),
+        ))
         .build()
         .map_err(|e| format!("创建 Hook HTTP client 失败：{e}"))
 }

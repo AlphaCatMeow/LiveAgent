@@ -772,3 +772,76 @@ fn disable_task_with_error_flips_enabled_and_bumps_revision() {
     let unchanged = store.snapshot().expect("snapshot unchanged").cron;
     assert_eq!(unchanged.revision, after.revision);
 }
+
+#[test]
+fn cron_apply_defaults_and_validates_timeout_seconds() {
+    // Creates without the field resolve to the default and always serialize it.
+    let (store, task) = store_with_task(create_bash_task_op("a", "First"));
+    assert_eq!(task.timeout_seconds, DEFAULT_CRON_TIMEOUT_SECONDS);
+    let wire = serde_json::to_value(&task).expect("serialize task");
+    assert_eq!(wire.get("timeoutSeconds"), Some(&json!(300)));
+
+    let revision = store.snapshot().expect("snapshot").cron.revision;
+    let response = store
+        .cron_apply(apply_input(
+            revision,
+            vec![AutomationOp::Update {
+                id: task.id.clone(),
+                patch: json!({ "timeoutSeconds": 45 }),
+            }],
+        ))
+        .expect("apply timeout update");
+    assert_eq!(response.status, ApplyStatus::Ok);
+    assert_eq!(response.cron.tasks[0].timeout_seconds, 45);
+
+    // Patches that do not name the field keep the stored value.
+    let response = store
+        .cron_apply(apply_input(
+            response.cron.revision,
+            vec![AutomationOp::Update {
+                id: task.id.clone(),
+                patch: json!({ "name": "Renamed" }),
+            }],
+        ))
+        .expect("apply unrelated update");
+    assert_eq!(response.cron.tasks[0].timeout_seconds, 45);
+
+    // Out-of-range and non-integer values are rejected, not silently clamped.
+    let revision = response.cron.revision;
+    for bad in [json!(0), json!(601), json!("300"), json!(-5)] {
+        let error = store
+            .cron_apply(apply_input(
+                revision,
+                vec![AutomationOp::Update {
+                    id: task.id.clone(),
+                    patch: json!({ "timeoutSeconds": bad }),
+                }],
+            ))
+            .expect_err("reject invalid timeout");
+        assert!(error.contains("timeoutSeconds"), "error: {error}");
+    }
+}
+
+#[test]
+fn queue_prompt_run_lease_uses_task_timeout() {
+    let (store, task) = store_with_task(create_prompt_task_op("p1"));
+    let revision = store.snapshot().expect("snapshot").cron.revision;
+    let response = store
+        .cron_apply(apply_input(
+            revision,
+            vec![AutomationOp::Update {
+                id: task.id.clone(),
+                patch: json!({ "timeoutSeconds": 30 }),
+            }],
+        ))
+        .expect("apply timeout update");
+    let task = response.cron.tasks[0].clone();
+
+    assert!(matches!(
+        store.queue_prompt_run(&task, "", true).expect("queue prompt run"),
+        super::store::PromptQueueOutcome::Queued
+    ));
+    let claims = store.claim_prompt_runs().expect("claim");
+    assert_eq!(claims.len(), 1);
+    assert_eq!(claims[0].lease_expires_at - claims[0].started_at, 30_000);
+}

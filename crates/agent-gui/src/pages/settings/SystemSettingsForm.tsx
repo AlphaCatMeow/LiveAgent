@@ -91,21 +91,26 @@ export function SystemSettingsForm(props: SettingsSectionProps) {
   }
 
   const systemProxy = settings.system.systemProxy;
-  // 护栏 A：host + port 有效才算配置可用（端口在启用时必填有效）。
-  const proxyConfigValid =
-    isValidSystemProxyHost(systemProxy.host) &&
-    Number.isInteger(systemProxy.port) &&
-    systemProxy.port >= 1 &&
-    systemProxy.port <= 65535;
-  const systemProxyInvalid = systemProxy.enabled && !proxyConfigValid;
-  // 配置无效且当前未启用时禁止开启开关（护栏 A）；已启用时始终允许关闭。
-  const proxyToggleDisabled = !systemProxy.enabled && !proxyConfigValid;
   // host/port/username/password 走"本地草稿 + blur 提交"：失焦才写入 settings，
   // 避免逐字符触发同步；且 WebUI 设置 state 持久前会脱敏密码，草稿避免输入即被清空。
   const [proxyHostDraft, setProxyHostDraft] = useState<string | null>(null);
   const [proxyPortDraft, setProxyPortDraft] = useState<string | null>(null);
   const [proxyUsernameDraft, setProxyUsernameDraft] = useState<string | null>(null);
   const [proxyPasswordDraft, setProxyPasswordDraft] = useState<string | null>(null);
+  // 护栏 A：host + port 有效才算配置可用（端口在启用时必填有效）。
+  // 用"草稿优先"的生效值计算：blur 提交前开关若仍禁用，点击开关触发的 blur
+  // 会先把按钮变回可用，但落在禁用按钮上的这次 click 已被浏览器吞掉，需点两次。
+  const effectiveProxyHost = (proxyHostDraft ?? systemProxy.host).trim();
+  const effectiveProxyPort =
+    proxyPortDraft !== null ? Number.parseInt(proxyPortDraft, 10) : systemProxy.port;
+  const proxyConfigValid =
+    isValidSystemProxyHost(effectiveProxyHost) &&
+    Number.isInteger(effectiveProxyPort) &&
+    effectiveProxyPort >= 1 &&
+    effectiveProxyPort <= 65535;
+  const systemProxyInvalid = systemProxy.enabled && !proxyConfigValid;
+  // 配置无效且当前未启用时禁止开启开关（护栏 A）；已启用时始终允许关闭。
+  const proxyToggleDisabled = !systemProxy.enabled && !proxyConfigValid;
 
   function patchSystemProxy(patch: Partial<SystemProxyConfig>) {
     setSettings((prev) =>

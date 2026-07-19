@@ -131,8 +131,21 @@ export type GitLogOptions = {
   skip?: number;
 };
 
+export type GitDiscoveredRepository = {
+  root: string;
+  name: string;
+  relativePath: string;
+  isWorkspaceRoot: boolean;
+};
+
+export type GitRepositoryDiscovery = {
+  workdir: string;
+  repositories: GitDiscoveredRepository[];
+};
+
 export type GitClient = {
   status(workdir: string): Promise<GitRepositoryState>;
+  discoverRepositories?(workdir: string): Promise<GitRepositoryDiscovery>;
   branches(workdir: string): Promise<GitBranchesResponse>;
   init(workdir: string, options?: GitInitOptions): Promise<GitOperationResponse>;
   switchBranch(workdir: string, branch: string, kind?: string): Promise<GitOperationResponse>;
@@ -228,6 +241,29 @@ export function normalizeGitStatusEntry(input: unknown): GitStatusEntry {
     staged: asBoolean(source.staged),
     conflicted: asBoolean(source.conflicted),
     untracked: asBoolean(source.untracked),
+  };
+}
+
+export function normalizeGitDiscoveredRepository(input: unknown): GitDiscoveredRepository {
+  const source = asObject(input);
+  return {
+    root: asString(source.root),
+    name: asString(source.name),
+    relativePath: asString(source.relativePath ?? source.relative_path),
+    isWorkspaceRoot: asBoolean(source.isWorkspaceRoot ?? source.is_workspace_root),
+  };
+}
+
+export function normalizeGitRepositoryDiscovery(
+  input: unknown,
+  fallbackWorkdir = "",
+): GitRepositoryDiscovery {
+  const source = asObject(input);
+  return {
+    workdir: asString(source.workdir) || fallbackWorkdir,
+    repositories: Array.isArray(source.repositories)
+      ? source.repositories.map(normalizeGitDiscoveredRepository).filter((repo) => repo.root)
+      : [],
   };
 }
 

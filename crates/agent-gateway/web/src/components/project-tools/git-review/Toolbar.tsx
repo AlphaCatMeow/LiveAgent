@@ -402,13 +402,17 @@ export function GitReviewToolbar(props: {
     canWrite,
     cwd,
     disabledMessage,
+    discoverRepositories,
     gitClient,
     historyLoading,
     loadHistory,
     loading,
     refresh,
+    repositories,
     reviewMode,
     runOperation,
+    selectRepository,
+    selectedRepoRoot,
     setReviewMode,
     state,
   } = data;
@@ -424,9 +428,26 @@ export function GitReviewToolbar(props: {
           <div className="truncate text-sm font-semibold">
             {state.head || t("projectTools.gitReviewTitle")}
           </div>
-          <div className="truncate text-[calc(11px*var(--zone-font-scale,1))] text-muted-foreground">
-            {state.repoRoot || disabledMessage || t("projectTools.gitReview.noRepository")}
-          </div>
+          {repositories.length > 1 ? (
+            <select
+              value={selectedRepoRoot}
+              onChange={(event) => selectRepository(event.target.value)}
+              disabled={operationBusy}
+              className="mt-0.5 block w-full max-w-full cursor-pointer truncate rounded border border-border bg-background px-1 py-px text-[calc(11px*var(--zone-font-scale,1))] text-muted-foreground outline-none transition-colors hover:text-foreground focus:border-ring"
+              title={t("projectTools.gitReview.repositoryPicker")}
+              aria-label={t("projectTools.gitReview.repositoryPicker")}
+            >
+              {repositories.map((repo) => (
+                <option key={repo.root} value={repo.isWorkspaceRoot ? "" : repo.root}>
+                  {repo.isWorkspaceRoot ? repo.name : repo.relativePath || repo.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div className="truncate text-[calc(11px*var(--zone-font-scale,1))] text-muted-foreground">
+              {state.repoRoot || disabledMessage || t("projectTools.gitReview.noRepository")}
+            </div>
+          )}
         </div>
         <Button
           size="sm"
@@ -454,6 +475,9 @@ export function GitReviewToolbar(props: {
           aria-label={t("projectTools.gitReview.refresh")}
           onClick={() => {
             if (data.isBusy()) return;
+            // Manual refresh also re-scans for repositories so ones created
+            // mid-session (e.g. a fresh clone in a subdirectory) show up.
+            void discoverRepositories();
             if (reviewMode === "history") {
               void loadHistory();
             } else {

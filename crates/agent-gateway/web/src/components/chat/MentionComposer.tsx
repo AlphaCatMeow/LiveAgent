@@ -230,7 +230,6 @@ const LARGE_PASTE_CHAR_THRESHOLD = 8_000;
 const LARGE_PASTE_LINE_THRESHOLD = 200;
 const LARGE_PASTE_PREVIEW_CHARS = 160;
 const CARET_ANCHOR_TEXT = "\u200B";
-const CARET_SPACER_TEXT = "\u00A0";
 const IME_ENTER_SUPPRESS_WINDOW_MS = 300;
 const IME_COMPOSITION_END_ENTER_TAIL_MS = 80;
 // Must match the .composer-typewriter-char animation duration in index.css.
@@ -304,6 +303,38 @@ function serializeChildrenToSegments(
   parent: Node,
   largePastes: Map<string, MentionComposerLargePaste>,
 ): MentionComposerDraftSegment[] {
+  return injectMentionBoundarySpaces(collectDraftSegments(parent, largePastes));
+}
+
+/** A chip's visual gap is CSS margin with no character behind it; re-insert
+ *  the word boundary at serialization time so a token never glues onto the
+ *  content on either side of it. */
+function injectMentionBoundarySpaces(
+  segments: MentionComposerDraftSegment[],
+): MentionComposerDraftSegment[] {
+  const out: MentionComposerDraftSegment[] = [];
+  for (const segment of segments) {
+    const prev = out[out.length - 1];
+    if (prev != null && prev.type !== "text") {
+      if (segment.type !== "text" || !/^\s/.test(segment.text)) {
+        pushTextSegment(out, " ");
+      }
+    } else if (prev?.type === "text" && segment.type !== "text" && !/\s$/.test(prev.text)) {
+      prev.text += " ";
+    }
+    if (segment.type === "text") {
+      pushTextSegment(out, segment.text);
+    } else {
+      out.push(segment);
+    }
+  }
+  return out;
+}
+
+function collectDraftSegments(
+  parent: Node,
+  largePastes: Map<string, MentionComposerLargePaste>,
+): MentionComposerDraftSegment[] {
   const parts: MentionComposerDraftSegment[] = [];
   parent.childNodes.forEach((child) => {
     if (child.nodeType === Node.TEXT_NODE) {
@@ -361,7 +392,7 @@ function serializeChildrenToSegments(
           if (el.tagName === "DIV" || el.tagName === "P") {
             if (parts.length > 0) pushTextSegment(parts, "\n");
           }
-          for (const segment of serializeChildrenToSegments(el, largePastes)) {
+          for (const segment of collectDraftSegments(el, largePastes)) {
             if (segment.type === "text") {
               pushTextSegment(parts, segment.text);
             } else {
@@ -615,20 +646,19 @@ function closestComposerChipFromNode(root: HTMLElement, node: Node | null) {
   return null;
 }
 
-function createCaretAnchorText(afterRaw: string, options?: { ensureLeadingSpace?: boolean }) {
+/** The caret's rest position in the text right after a chip: at the end of an
+ *  existing leading-whitespace run (the run and the chip form one atomic unit
+ *  for caret purposes), otherwise after a zero-width anchor. The visual gap
+ *  after a chip is pure CSS margin — never a spacer character; serialization
+ *  re-adds the word boundary (injectMentionBoundarySpaces). */
+function createCaretAnchorText(afterRaw: string) {
   const cleaned = removeCaretAnchors(afterRaw);
   const matchedWhitespace = cleaned.match(/^\s+/)?.[0] ?? "";
-  const leadingWhitespace =
-    matchedWhitespace || (options?.ensureLeadingSpace === true ? CARET_SPACER_TEXT : "");
-  const rest = cleaned.slice(matchedWhitespace.length);
-  if (leadingWhitespace.length > 0) {
-    return {
-      text: `${leadingWhitespace}${rest}`,
-      caretOffset: leadingWhitespace.length,
-    };
+  if (matchedWhitespace.length > 0) {
+    return { text: cleaned, caretOffset: matchedWhitespace.length };
   }
   return {
-    text: `${CARET_ANCHOR_TEXT}${rest}`,
+    text: `${CARET_ANCHOR_TEXT}${cleaned}`,
     caretOffset: CARET_ANCHOR_TEXT.length,
   };
 }
@@ -672,14 +702,14 @@ function ensureCaretAnchorAfterChip(chip: HTMLElement): { textNode: Text; offset
   const next = chip.nextSibling;
   if (next?.nodeType === Node.TEXT_NODE) {
     const textNode = next as Text;
-    const anchor = createCaretAnchorText(textNode.data, { ensureLeadingSpace: true });
+    const anchor = createCaretAnchorText(textNode.data);
     if (textNode.data !== anchor.text) {
       textNode.data = anchor.text;
     }
     return { textNode, offset: anchor.caretOffset };
   }
 
-  const anchor = createCaretAnchorText("", { ensureLeadingSpace: true });
+  const anchor = createCaretAnchorText("");
   const textNode = document.createTextNode(anchor.text);
   parent.insertBefore(textNode, next);
   return { textNode, offset: anchor.caretOffset };
@@ -896,20 +926,14 @@ function createFileMentionChip(path: string, kind: FileMentionKind) {
   return chip;
 }
 
-function insertMentionChipElement(
-  ctx: MentionContext,
-  chip: HTMLElement,
-  options?: { ensureSpaceAfterChip?: boolean },
-) {
+function insertMentionChipElement(ctx: MentionContext, chip: HTMLElement) {
   const { textNode, triggerOffset, query } = ctx;
   const text = textNode.textContent || "";
   const parent = textNode.parentNode!;
 
   const beforeText = text.slice(0, triggerOffset);
   const afterRaw = text.slice(triggerOffset + 1 + query.length);
-  const anchor = createCaretAnchorText(afterRaw, {
-    ensureLeadingSpace: options?.ensureSpaceAfterChip === true,
-  });
+  const anchor = createCaretAnchorText(afterRaw);
   const afterNode = document.createTextNode(anchor.text);
 
   if (beforeText) {
@@ -926,7 +950,7 @@ function insertMentionChipElement(
 function insertMentionChip(ctx: MentionContext, path: string, kind: "file" | "dir") {
   const chip = createFileMentionChip(path, kind);
   if (!chip) return;
-  insertMentionChipElement(ctx, chip, { ensureSpaceAfterChip: true });
+  insertMentionChipElement(ctx, chip);
 }
 
 function createSkillMentionChip(skill: MentionComposerSkillMention) {
@@ -1060,14 +1084,8 @@ function createLargePasteChip(paste: MentionComposerLargePaste) {
   return chip;
 }
 
-function insertNodeAtCursor(
-  root: HTMLElement,
-  node: Node,
-  options?: { ensureSpaceAfterNode?: boolean },
-) {
-  const anchor = createCaretAnchorText("", {
-    ensureLeadingSpace: options?.ensureSpaceAfterNode === true,
-  });
+function insertNodeAtCursor(root: HTMLElement, node: Node) {
+  const anchor = createCaretAnchorText("");
   const afterNode = document.createTextNode(anchor.text);
   const sel = window.getSelection();
   if (sel && sel.rangeCount > 0) {
@@ -2212,7 +2230,7 @@ export const MentionComposer = memo(
           el.focus();
           const chip = createFileMentionChip(path, kind);
           if (!chip) return;
-          insertNodeAtCursor(el, chip, { ensureSpaceAfterNode: true });
+          insertNodeAtCursor(el, chip);
           closeMentionSession();
           refreshEmptyState();
         },
@@ -2222,7 +2240,7 @@ export const MentionComposer = memo(
           finishTypewriter();
           resetPromptHistoryRecall();
           el.focus();
-          insertNodeAtCursor(el, createSkillMentionChip(skill), { ensureSpaceAfterNode: true });
+          insertNodeAtCursor(el, createSkillMentionChip(skill));
           closeMentionSession();
           refreshEmptyState();
         },
@@ -2232,7 +2250,7 @@ export const MentionComposer = memo(
           finishTypewriter();
           resetPromptHistoryRecall();
           el.focus();
-          insertNodeAtCursor(el, createCommitMentionChip(commit), { ensureSpaceAfterNode: true });
+          insertNodeAtCursor(el, createCommitMentionChip(commit));
           closeMentionSession();
           refreshEmptyState();
         },
@@ -2242,7 +2260,7 @@ export const MentionComposer = memo(
           finishTypewriter();
           resetPromptHistoryRecall();
           el.focus();
-          insertNodeAtCursor(el, createGitFileMentionChip(file), { ensureSpaceAfterNode: true });
+          insertNodeAtCursor(el, createGitFileMentionChip(file));
           closeMentionSession();
           refreshEmptyState();
         },
@@ -2254,7 +2272,7 @@ export const MentionComposer = memo(
           el.focus();
           const chip = createCodeMentionChip(reference);
           if (!chip) return;
-          insertNodeAtCursor(el, chip, { ensureSpaceAfterNode: true });
+          insertNodeAtCursor(el, chip);
           closeMentionSession();
           refreshEmptyState();
         },

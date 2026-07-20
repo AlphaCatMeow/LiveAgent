@@ -234,6 +234,9 @@ export type WriteResultDetails = {
   preview: string;
 };
 
+/** Matching pass that located old_string, strictest first. */
+export type EditMatchStrategy = "exact" | "line-endings" | "trailing-whitespace" | "indentation";
+
 export type EditResultDetails = {
   kind: "edit";
   path: string;
@@ -244,8 +247,7 @@ export type EditResultDetails = {
   fileId?: string;
   replacements: number;
   replaceAll: boolean;
-  /** Matching pass that located old_string: exact | line-endings | trailing-whitespace | indentation. */
-  matchStrategy?: string;
+  matchStrategy?: EditMatchStrategy;
   expectedReplacements?: number;
   mtimeMs: number;
   contentHash: string;

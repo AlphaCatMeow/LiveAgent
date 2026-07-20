@@ -14,6 +14,7 @@ import {
   type DeleteResultDetails,
   type DisplayImageItemDetails,
   type DisplayImageResultDetails,
+  type EditMatchStrategy,
   type EditResultDetails,
   type GlobResultDetails,
   type GrepResultDetails,
@@ -199,11 +200,26 @@ function formatLineWindow(startLine: number, numLines: number, totalLines: numbe
   return `${startLine}-${endLine} / ${totalLines}`;
 }
 
+/** Narrow the wire value to the strategies the Rust cascade can emit. */
+function parseEditMatchStrategy(value: string | null | undefined): EditMatchStrategy | undefined {
+  switch (value) {
+    case "exact":
+    case "line-endings":
+    case "trailing-whitespace":
+    case "indentation":
+      return value;
+    default:
+      return undefined;
+  }
+}
+
 /**
  * Teach the model when its old_string only matched through a lenient pass, so
  * it can copy content more precisely next time instead of drifting further.
+ * The exhaustive switch (no default, `string` return type) fails to compile
+ * when EditMatchStrategy gains a member without a note here.
  */
-function buildEditMatchStrategyNote(matchStrategy: string | undefined) {
+function buildEditMatchStrategyNote(matchStrategy: EditMatchStrategy | undefined): string {
   switch (matchStrategy) {
     case undefined:
     case "exact":
@@ -214,8 +230,6 @@ function buildEditMatchStrategyNote(matchStrategy: string | undefined) {
       return "\nmatchStrategy=trailing-whitespace (old_string matched after ignoring per-line trailing whitespace)";
     case "indentation":
       return "\nmatchStrategy=indentation (old_string matched after a uniform indentation shift; the replacement was re-indented to the file's actual indentation)";
-    default:
-      return `\nmatchStrategy=${matchStrategy}`;
   }
 }
 
@@ -1510,7 +1524,7 @@ export function createFsTools(params: {
       throw error;
     }
 
-    const matchStrategy = typeof res.matchStrategy === "string" ? res.matchStrategy : undefined;
+    const matchStrategy = parseEditMatchStrategy(res.matchStrategy);
     const details: EditResultDetails = {
       kind: "edit",
       ...pathDetails(resolved, res.fileId),

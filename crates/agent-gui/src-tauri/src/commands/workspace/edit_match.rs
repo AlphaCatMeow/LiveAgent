@@ -152,6 +152,11 @@ pub fn find_edit_matches(
 }
 
 /// Splice sorted, non-overlapping replacements into `text`.
+///
+/// The ranges must be ascending and non-overlapping, exactly as produced by
+/// [`find_edit_matches`]. This contract is only verified by `debug_assert!`;
+/// in release builds a violating range panics on the inverted slice below
+/// instead of writing corrupted output.
 pub fn apply_edit_replacements(text: &str, replacements: &[EditReplacement]) -> String {
     let mut out = String::with_capacity(text.len());
     let mut cursor = 0usize;
@@ -259,13 +264,27 @@ fn find_line_ending_matches(
     Some(
         ranges
             .into_iter()
-            .map(|(start, end)| EditReplacement {
+            .map(|(start, end)| {
                 // Every normalized byte maps 1:1 onto an original byte, so the
                 // end boundary is the byte after the last matched byte. Skipped
                 // `\r` bytes inside the range are covered automatically.
-                start: view.map[start],
-                end: view.map[end - 1] + 1,
-                text: rendered.clone(),
+                let mut start = view.map[start];
+                let end = view.map[end - 1] + 1;
+                // A match that begins at the `\n` of a CRLF pair must also
+                // consume the preceding `\r`: the replacement is re-rendered
+                // from scratch (`\r\n` in a CRLF file), so leaving that lone
+                // `\r` behind would corrupt the file with `\r\r\n`.
+                if text.as_bytes()[start] == b'\n'
+                    && start > 0
+                    && text.as_bytes()[start - 1] == b'\r'
+                {
+                    start -= 1;
+                }
+                EditReplacement {
+                    start,
+                    end,
+                    text: rendered.clone(),
+                }
             })
             .collect(),
     )
@@ -580,6 +599,38 @@ mod tests {
         let (next, strategy, _) = apply_first(text, "\u{feff}first\r\n", "FIRST\n");
         assert_eq!(strategy, EditMatchStrategy::LineEndings);
         assert_eq!(next, "FIRST\nsecond\n");
+    }
+
+    #[test]
+    fn leading_newline_old_string_consumes_full_crlf_pair() {
+        // The match starts at the `\n` of a CRLF pair; the preceding `\r`
+        // must be absorbed into the replaced range or the re-rendered
+        // replacement would produce a corrupt `\r\r\n` sequence.
+        let text = "foo()\r\nbar()\r\nbaz()\r\n";
+        let (next, strategy, _) = apply_first(text, "\nbar()\n", "\nBAR()\n");
+        assert_eq!(strategy, EditMatchStrategy::LineEndings);
+        assert_eq!(
+            next, "foo()\r\nBAR()\r\nbaz()\r\n",
+            "no orphan \\r may remain before the replacement"
+        );
+    }
+
+    #[test]
+    fn leading_newline_removed_by_replacement_joins_crlf_lines() {
+        // Replacing a leading newline with a space must remove the whole
+        // CRLF pair, not just its `\n` half.
+        let text = "a\r\nb\r\nc\r\n";
+        let (next, strategy, _) = apply_first(text, "\nb\n", " b\n");
+        assert_eq!(strategy, EditMatchStrategy::LineEndings);
+        assert_eq!(next, "a b\r\nc\r\n");
+    }
+
+    #[test]
+    fn leading_newline_after_bom_consumes_crlf_pair() {
+        let text = "\u{feff}\r\nbody\r\n";
+        let (next, strategy, _) = apply_first(text, "\nbody\n", "\nBODY\n");
+        assert_eq!(strategy, EditMatchStrategy::LineEndings);
+        assert_eq!(next, "\u{feff}\r\nBODY\r\n");
     }
 
     #[test]

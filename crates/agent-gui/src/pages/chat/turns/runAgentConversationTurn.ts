@@ -401,6 +401,7 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
     runtimePlatform,
     fileState,
     todoState,
+    askUserQuestionConversationId: conversationId,
     skillsEnabled: effectiveSkillsEnabled,
     skillsRootDir,
     skillAccessPolicy,

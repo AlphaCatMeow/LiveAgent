@@ -237,6 +237,16 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.tool.viewReturn": "查看返回内容",
     "chat.tool.todoTitle": "任务清单",
     "chat.tool.todoEmpty": "暂无任务",
+    "chat.tool.askUserTitle": "向你提问",
+    "chat.askUser.waiting": "等待你的选择",
+    "chat.askUser.tabFallback": "问题",
+    "chat.askUser.recommended": "推荐",
+    "chat.askUser.progress": "已选择",
+    "chat.askUser.submit": "提交回答",
+    "chat.askUser.submitting": "提交中…",
+    "chat.askUser.answered": "已提交回答",
+    "chat.askUser.cancelled": "本次提问已取消，未提交任何选择",
+    "chat.askUser.submitFailed": "提交失败，请重试",
     "chat.tool.expandActivity": "展开工具活动",
     "chat.tool.collapseActivity": "收起工具活动",
     "chat.hookWarningTitle": "Hooks 告警",
@@ -1164,6 +1174,10 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.builtinTool.todo_write.desc": "创建与更新当前会话的任务清单",
     "settings.builtinTool.todo_write.detail":
       "让模型在处理多步骤任务时列出任务清单并逐项推进状态，进度以清单卡片实时展示在对话中。清单仅保存在当前对话内，不跨对话保留；仅在对话场景注册。",
+    "settings.builtinTool.ask_user_question.name": "用户提问",
+    "settings.builtinTool.ask_user_question.desc": "以选项卡片向你提问并等待选择",
+    "settings.builtinTool.ask_user_question.detail":
+      "模型在需要你决策时发起选择题（一次最多 4 个问题，每题 2-6 个选项，可标注推荐项），以卡片形式展示并暂停执行等待作答；桌面端与 WebUI 均可作答，点击停止可跳过。仅在对话场景注册。",
     "settings.builtinTool.cron_task_manager.name": "定时任务",
     "settings.builtinTool.cron_task_manager.desc": "创建与管理定时自动任务",
     "settings.builtinTool.cron_task_manager.detail":
@@ -2111,6 +2125,16 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.tool.viewReturn": "View Return",
     "chat.tool.todoTitle": "Task list",
     "chat.tool.todoEmpty": "No tasks yet",
+    "chat.tool.askUserTitle": "Question for you",
+    "chat.askUser.waiting": "Waiting for your choice",
+    "chat.askUser.tabFallback": "Q",
+    "chat.askUser.recommended": "Recommended",
+    "chat.askUser.progress": "selected",
+    "chat.askUser.submit": "Submit answers",
+    "chat.askUser.submitting": "Submitting…",
+    "chat.askUser.answered": "Answers submitted",
+    "chat.askUser.cancelled": "This question was cancelled without an answer.",
+    "chat.askUser.submitFailed": "Submit failed. Please retry.",
     "chat.tool.expandActivity": "Expand tool activity",
     "chat.tool.collapseActivity": "Collapse tool activity",
     "chat.hookWarningTitle": "Hooks Warning",
@@ -3074,6 +3098,11 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.builtinTool.todo_write.desc": "Create and update a task list for the current session",
     "settings.builtinTool.todo_write.detail":
       "Lets the model plan multi-step work as a task list and advance each item's status as it goes, shown as a live checklist card in the conversation. The list lives only in the current conversation and is not carried across conversations; chat sessions only.",
+    "settings.builtinTool.ask_user_question.name": "Ask User",
+    "settings.builtinTool.ask_user_question.desc":
+      "Ask you multiple-choice questions in a card and wait for your selections",
+    "settings.builtinTool.ask_user_question.detail":
+      "Lets the model ask you multiple-choice questions when a decision is yours to make (up to 4 questions per call, 2-6 options each, with an optional recommended option). Execution pauses on an interactive card until you answer — from the desktop or the WebUI — and pressing Stop skips the question. Chat sessions only.",
     "settings.builtinTool.cron_task_manager.name": "Scheduled Tasks",
     "settings.builtinTool.cron_task_manager.desc": "Create and manage scheduled automations",
     "settings.builtinTool.cron_task_manager.detail":

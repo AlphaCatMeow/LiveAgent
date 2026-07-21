@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { getUploadedFileTypeIcon } from "../../../components/chat/fileTypeIcons";
 import {
   MentionComposer,
   type MentionComposerHandle,
@@ -516,35 +517,38 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
         {/* Pending uploaded files — above the composer card */}
         {pendingUploadedFiles.length > 0 && (
           <div className="upload-file-list mb-2.5 flex gap-2 overflow-x-auto px-0.5 pb-1">
-            {pendingUploadedFiles.map((file) => (
-              <div
-                key={file.relativePath}
-                title={file.relativePath}
-                className="group flex w-[calc(25%-6px)] min-w-[calc(25%-6px)] items-center gap-2 rounded-xl border border-white/45 bg-white/55 px-2.5 py-1.5 text-[calc(11px*var(--zone-font-scale,1))] shadow-[0_2px_8px_-2px_rgba(15,23,42,0.06)] backdrop-blur-2xl backdrop-saturate-150 transition-all hover:bg-white/75 hover:shadow-[0_4px_14px_-4px_rgba(15,23,42,0.10)] dark:border-white/10 dark:bg-white/[0.06] dark:hover:bg-white/[0.10]"
-              >
-                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-sky-500/12 dark:bg-sky-400/15">
-                  <Paperclip className="h-3 w-3 text-sky-600 dark:text-sky-400" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[calc(12px*var(--zone-font-scale,1))] font-medium tracking-tight text-foreground/90">
-                    {file.fileName}
-                  </div>
-                  <div className="truncate text-[calc(10px*var(--zone-font-scale,1))] text-muted-foreground">
-                    {formatUploadedFileSize(file.sizeBytes)}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  disabled={isInputDisabled}
-                  onClick={() => onRemovePendingUpload(file.relativePath)}
-                  className="shrink-0 rounded-full p-1 text-muted-foreground/70 opacity-0 transition-all hover:bg-foreground/5 hover:text-foreground group-hover:opacity-100 disabled:pointer-events-none"
-                  aria-label={`${t("chat.upload.removeFile")} ${file.fileName}`}
-                  title={t("chat.upload.removeFile")}
+            {pendingUploadedFiles.map((file) => {
+              const TypeIcon = getUploadedFileTypeIcon(file);
+              return (
+                <div
+                  key={file.relativePath}
+                  title={file.relativePath}
+                  className="group flex w-[calc(25%-6px)] min-w-[calc(25%-6px)] items-center gap-2 rounded-xl border border-white/45 bg-white/55 px-2.5 py-1.5 text-[calc(11px*var(--zone-font-scale,1))] shadow-[0_2px_8px_-2px_rgba(15,23,42,0.06)] backdrop-blur-2xl backdrop-saturate-150 transition-all hover:bg-white/75 hover:shadow-[0_4px_14px_-4px_rgba(15,23,42,0.10)] dark:border-white/10 dark:bg-white/[0.06] dark:hover:bg-white/[0.10]"
                 >
-                  <X className="h-3 w-3" />
-                </button>
-              </div>
-            ))}
+                  <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-black/[0.04] dark:bg-white/[0.10]">
+                    <TypeIcon className="h-3.5 w-3.5" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[calc(12px*var(--zone-font-scale,1))] font-medium tracking-tight text-foreground/90">
+                      {file.fileName}
+                    </div>
+                    <div className="truncate text-[calc(10px*var(--zone-font-scale,1))] text-muted-foreground">
+                      {formatUploadedFileSize(file.sizeBytes)}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isInputDisabled}
+                    onClick={() => onRemovePendingUpload(file.relativePath)}
+                    className="shrink-0 rounded-full p-1 text-muted-foreground/70 opacity-0 transition-all hover:bg-foreground/5 hover:text-foreground group-hover:opacity-100 disabled:pointer-events-none"
+                    aria-label={`${t("chat.upload.removeFile")} ${file.fileName}`}
+                    title={t("chat.upload.removeFile")}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
 

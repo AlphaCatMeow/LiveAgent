@@ -1274,6 +1274,7 @@
 
     .composer-reasoning-trigger,
     .composer-reasoning-trigger > svg:last-child,
+    .model-selector-dropdown,
     .model-selector-trigger,
     .model-selector-trigger svg {
       transition: none !important;

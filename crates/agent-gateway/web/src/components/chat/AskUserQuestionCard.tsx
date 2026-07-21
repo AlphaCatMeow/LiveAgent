@@ -1,15 +1,45 @@
-// AskUserQuestion 的聊天卡片：顶部 tabs 切换多个问题，每题单选、可带“推荐”
-// 标记；纯展示组件，提交动作由调用方注入（GUI 直连工具挂起表，WebUI 走网关）。
+// AskUserQuestion 的聊天卡片：顶部 tabs 切换多个问题，每题单选、推荐项
+// 排在首位；纯展示组件，提交动作由调用方注入（GUI 直连工具挂起表，WebUI 走网关）。
 // 本文件在 agent-gui 与 agent-gateway/web 之间逐字节镜像
 // （见 scripts/mirror-manifest.json），端差异一律留在各端的 ToolCallItem。
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { useLocale } from "../../i18n";
-import type { AskUserQuestionAnswer, AskUserQuestionItem } from "../../lib/chat/askUserQuestion";
+import {
+  ASK_USER_QUESTION_TIMEOUT_MS,
+  type AskUserQuestionAnswer,
+  type AskUserQuestionItem,
+} from "../../lib/chat/askUserQuestion";
 import { cn } from "../../lib/shared/utils";
 import { Check, Sparkles } from "../icons";
 
 export type AskUserQuestionSubmitOutcome = { ok: boolean; message?: string };
+
+function formatCountdown(remainingMs: number) {
+  const totalSeconds = Math.max(0, Math.ceil(remainingMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+/**
+ * 倒计时提示：以卡片挂载时刻近似应答窗口起点。权威计时在桌面端工具侧，
+ * 超时后 tool_result 会把卡片切到只读态，因此这里仅作展示、无需精确对齐。
+ */
+function useAnswerCountdown(active: boolean) {
+  const [deadline] = useState(() => Date.now() + ASK_USER_QUESTION_TIMEOUT_MS);
+  const [remainingMs, setRemainingMs] = useState(ASK_USER_QUESTION_TIMEOUT_MS);
+
+  useEffect(() => {
+    if (!active) return;
+    const tick = () => setRemainingMs(deadline - Date.now());
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [active, deadline]);
+
+  return remainingMs;
+}
 
 function RecommendedTag({ label }: { label: string }) {
   return (
@@ -24,6 +54,7 @@ export function AskUserQuestionCard({
   questions,
   answers,
   cancelled = false,
+  timedOut = false,
   interactive,
   onSubmit,
 }: {
@@ -31,6 +62,8 @@ export function AskUserQuestionCard({
   /** 已落定的应答（工具结果）；提供后卡片只读展示选择结果。 */
   answers?: AskUserQuestionAnswer[];
   cancelled?: boolean;
+  /** 应答窗口超时、按推荐项自动落定。 */
+  timedOut?: boolean;
   /** 工具执行中且当前端可应答时为 true。 */
   interactive: boolean;
   onSubmit?: (answers: AskUserQuestionAnswer[]) => Promise<AskUserQuestionSubmitOutcome>;
@@ -52,6 +85,7 @@ export function AskUserQuestionCard({
   const isSettled = (answers?.length ?? 0) > 0;
   const selections = isSettled ? settledSelections : draftSelections;
   const canInteract = interactive && !isSettled && !cancelled && !submitting;
+  const remainingMs = useAnswerCountdown(interactive && !isSettled && !cancelled);
 
   if (questions.length === 0) return null;
 
@@ -187,20 +221,29 @@ export function AskUserQuestionCard({
             {t("chat.askUser.cancelled")}
           </div>
         ) : isSettled ? (
-          <div className="flex items-center gap-1.5 text-[calc(11px*var(--zone-font-scale,1))] leading-none text-emerald-600 dark:text-emerald-400">
-            <Check className="h-3 w-3" />
-            {t("chat.askUser.answered")}
-          </div>
+          timedOut ? (
+            <div className="text-[calc(11px*var(--zone-font-scale,1))] leading-[1.5] text-amber-600 dark:text-amber-400">
+              {t("chat.askUser.timedOut")}
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 text-[calc(11px*var(--zone-font-scale,1))] leading-none text-emerald-600 dark:text-emerald-400">
+              <Check className="h-3 w-3" />
+              {t("chat.askUser.answered")}
+            </div>
+          )
         ) : interactive ? (
           <div className="flex items-center justify-between gap-2 pt-0.5">
-            <span className="text-[calc(11px*var(--zone-font-scale,1))] tabular-nums leading-none text-muted-foreground/70">
+            <span className="min-w-0 truncate text-[calc(11px*var(--zone-font-scale,1))] tabular-nums leading-none text-muted-foreground/70">
               {answeredCount}/{questions.length} {t("chat.askUser.progress")}
+              <span className="ml-2 text-muted-foreground/55">
+                {formatCountdown(remainingMs)} {t("chat.askUser.timeoutHint")}
+              </span>
             </span>
             <button
               type="button"
               disabled={!allAnswered || submitting}
               onClick={() => void submit()}
-              className="rounded-lg bg-primary px-3 py-1.5 text-[calc(11px*var(--zone-font-scale,1))] font-medium leading-none text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-40"
+              className="shrink-0 rounded-lg bg-primary px-3 py-1.5 text-[calc(11px*var(--zone-font-scale,1))] font-medium leading-none text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-40"
             >
               {submitting ? t("chat.askUser.submitting") : t("chat.askUser.submit")}
             </button>

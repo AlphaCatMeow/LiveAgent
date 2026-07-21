@@ -251,6 +251,7 @@ function ToolCallItem({
               questions={askQuestions}
               answers={askDetails?.answers}
               cancelled={askDetails?.cancelled === true}
+              timedOut={askDetails?.timedOut === true}
               interactive={Boolean(isRunning) && !result && !readOnly}
               onSubmit={submitAskAnswers}
             />

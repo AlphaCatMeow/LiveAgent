@@ -4,20 +4,27 @@ import {
   ASK_USER_QUESTION_MAX_OPTIONS,
   ASK_USER_QUESTION_MAX_QUESTIONS,
   ASK_USER_QUESTION_MIN_OPTIONS,
+  ASK_USER_QUESTION_TIMEOUT_MS,
   ASK_USER_QUESTION_TOOL_NAME,
   type AskUserQuestionAnswer,
   type AskUserQuestionItem,
   type AskUserQuestionResultDetails,
   buildAskUserQuestionResultText,
+  buildDefaultAskUserQuestionAnswers,
   parseAskUserQuestionItems,
   resolveAskUserQuestionAnswers,
 } from "../chat/askUserQuestion";
 import { type BuiltinToolBundle, createBuiltinMetadataMap } from "./builtinTypes";
 
+type AskUserQuestionSettlement =
+  | { kind: "answered"; answers: AskUserQuestionAnswer[] }
+  | { kind: "timeout"; answers: AskUserQuestionAnswer[] }
+  | { kind: "cancelled" };
+
 type PendingAskUserQuestion = {
   conversationId: string;
   questions: AskUserQuestionItem[];
-  settle: (answers: AskUserQuestionAnswer[]) => void;
+  settle: (settlement: AskUserQuestionSettlement) => void;
 };
 
 // 全局 pending 表（toolCallId 全局唯一）：本地卡片直接应答，WebUI 应答经
@@ -39,7 +46,7 @@ export function answerAskUserQuestion(
   if (!answers) {
     return { ok: false, message: "Every question needs one of its listed options selected." };
   }
-  pending.settle(answers);
+  pending.settle({ kind: "answered", answers });
   return { ok: true };
 }
 
@@ -52,18 +59,20 @@ export function cancelPendingAskUserQuestionsForConversation(conversationId: str
   for (const [toolCallId, pending] of pendingByToolCallId) {
     if (pending.conversationId === conversationId) {
       pendingByToolCallId.delete(toolCallId);
-      pending.settle([]);
+      pending.settle({ kind: "cancelled" });
     }
   }
 }
 
+const ASK_USER_QUESTION_TIMEOUT_MINUTES = Math.round(ASK_USER_QUESTION_TIMEOUT_MS / 60_000);
+
 const ASK_USER_QUESTION_TOOL_DESCRIPTION = `Ask the user up to ${ASK_USER_QUESTION_MAX_QUESTIONS} multiple-choice questions and wait for their selections. Use this whenever you need a decision only the user can make: ambiguous requirements, mutually exclusive approaches, or trade-offs you cannot resolve from the conversation and the workspace.
 
-The questions render as an interactive card; execution pauses until the user answers every question, then the selections come back as the tool result.
+The questions render as an interactive card; execution pauses until the user answers every question, then the selections come back as the tool result. If the user does not answer within ${ASK_USER_QUESTION_TIMEOUT_MINUTES} minutes, the recommended (or first) option of every question is auto-selected and execution continues — the result text tells you which happened.
 
 Rules:
-- Ask 1-${ASK_USER_QUESTION_MAX_QUESTIONS} focused questions per call; each question needs ${ASK_USER_QUESTION_MIN_OPTIONS}-${ASK_USER_QUESTION_MAX_OPTIONS} options (3-4 is ideal).
-- Options must be short, concrete, and mutually exclusive. Put your suggested choice first and set recommended=true on it (at most one per question).
+- Ask 1-${ASK_USER_QUESTION_MAX_QUESTIONS} focused questions per call; each question needs ${ASK_USER_QUESTION_MIN_OPTIONS}-${ASK_USER_QUESTION_MAX_OPTIONS} options (3-4 is ideal), and every question in one call must have the SAME number of options.
+- Options must be short, concrete, and mutually exclusive. Set recommended=true on your suggested choice (at most one per question) — it is shown first and becomes the timeout fallback.
 - Give each question a short header (2-6 chars works best) — it becomes the tab label when several questions show at once.
 - Do not use this for questions answerable from the code or the conversation, and never ask for confirmation of work you can safely do.`;
 
@@ -85,12 +94,13 @@ const askUserQuestionParameters = Type.Object({
           ),
           recommended: Type.Optional(
             Type.Boolean({
-              description: "Mark exactly one option per question as your recommendation.",
+              description:
+                "Mark exactly one option per question as your recommendation; it is shown first and auto-selected on timeout.",
             }),
           ),
         }),
         {
-          description: `${ASK_USER_QUESTION_MIN_OPTIONS}-${ASK_USER_QUESTION_MAX_OPTIONS} mutually exclusive options (3-4 is ideal).`,
+          description: `${ASK_USER_QUESTION_MIN_OPTIONS}-${ASK_USER_QUESTION_MAX_OPTIONS} mutually exclusive options (3-4 is ideal). Every question in one call must have the same number of options.`,
         },
       ),
     }),
@@ -110,7 +120,12 @@ function buildErrorResult(toolCall: ToolCall, text: string): ToolResultMessage {
   };
 }
 
-export function createAskUserQuestionTools(params: { conversationId: string }): BuiltinToolBundle {
+export function createAskUserQuestionTools(params: {
+  conversationId: string;
+  /** 应答窗口毫秒数；仅测试注入，生产始终用默认值。 */
+  timeoutMs?: number;
+}): BuiltinToolBundle {
+  const timeoutMs = params.timeoutMs ?? ASK_USER_QUESTION_TIMEOUT_MS;
   const toolAskUserQuestion: Tool = {
     name: ASK_USER_QUESTION_TOOL_NAME,
     description: ASK_USER_QUESTION_TOOL_DESCRIPTION,
@@ -139,14 +154,20 @@ export function createAskUserQuestionTools(params: { conversationId: string }): 
       );
     }
 
-    // 挂起等待用户在聊天卡片里作答；停止按钮（AbortSignal）以“未应答”落定。
-    const answers = await new Promise<AskUserQuestionAnswer[]>((resolve) => {
-      const settle = (value: AskUserQuestionAnswer[]) => {
+    // 挂起等待用户在聊天卡片里作答；停止按钮（AbortSignal）以“未应答”落定，
+    // 超过应答窗口则按推荐项（缺省第一项）自动落定继续执行。
+    const settlement = await new Promise<AskUserQuestionSettlement>((resolve) => {
+      const settle = (value: AskUserQuestionSettlement) => {
         pendingByToolCallId.delete(toolCall.id);
         signal?.removeEventListener("abort", onAbort);
+        clearTimeout(timeoutId);
         resolve(value);
       };
-      const onAbort = () => settle([]);
+      const onAbort = () => settle({ kind: "cancelled" });
+      const timeoutId = setTimeout(
+        () => settle({ kind: "timeout", answers: buildDefaultAskUserQuestionAnswers(questions) }),
+        timeoutMs,
+      );
       pendingByToolCallId.set(toolCall.id, {
         conversationId: params.conversationId,
         questions,
@@ -155,7 +176,7 @@ export function createAskUserQuestionTools(params: { conversationId: string }): 
       signal?.addEventListener("abort", onAbort, { once: true });
     });
 
-    if (answers.length === 0) {
+    if (settlement.kind === "cancelled") {
       const details: AskUserQuestionResultDetails = {
         kind: "ask_user_question",
         questions,
@@ -178,16 +199,20 @@ export function createAskUserQuestionTools(params: { conversationId: string }): 
       };
     }
 
+    const timedOut = settlement.kind === "timeout";
     const details: AskUserQuestionResultDetails = {
       kind: "ask_user_question",
       questions,
-      answers,
+      answers: settlement.answers,
+      ...(timedOut ? { timedOut: true } : {}),
     };
     return {
       role: "toolResult",
       toolCallId: toolCall.id,
       toolName: toolCall.name,
-      content: [{ type: "text", text: buildAskUserQuestionResultText(answers) }],
+      content: [
+        { type: "text", text: buildAskUserQuestionResultText(settlement.answers, { timedOut }) },
+      ],
       details,
       isError: false,
       timestamp: Date.now(),

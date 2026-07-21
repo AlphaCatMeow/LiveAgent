@@ -513,6 +513,7 @@ function ToolCallItem({ item, isRunning }: { item: ToolTraceItem; isRunning?: bo
                 questions={askQuestions}
                 answers={askDetails?.answers}
                 cancelled={askDetails?.cancelled === true}
+                timedOut={askDetails?.timedOut === true}
                 interactive={Boolean(isRunning) && !result}
                 onSubmit={submitAskAnswers}
               />

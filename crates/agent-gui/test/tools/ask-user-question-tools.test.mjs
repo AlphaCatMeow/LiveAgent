@@ -27,7 +27,7 @@ function buildQuestionsArgs() {
       },
       {
         prompt: "是否需要迁移旧数据？",
-        options: [{ label: "迁移" }, { label: "不迁移", recommended: true }],
+        options: [{ label: "迁移" }, { label: "不迁移", recommended: true }, { label: "稍后再说" }],
       },
     ],
   };
@@ -94,12 +94,51 @@ test("parseAskUserQuestionItems enforces limits, ids, and single recommendation"
     /duplicate question id/,
   );
 
+  // 同一轮各题选项数必须一致。
+  assert.throws(
+    () =>
+      shared.parseAskUserQuestionItems([
+        { prompt: "三个选项", options: [{ label: "a" }, { label: "b" }, { label: "c" }] },
+        { prompt: "两个选项", options: [{ label: "x" }, { label: "y" }] },
+      ]),
+    /same number of options/,
+  );
+
   const parsed = shared.parseAskUserQuestionItems(buildQuestionsArgs().questions);
   assert.deepEqual(
     parsed.map((question) => question.id),
     ["storage", "q2"],
   );
   assert.equal(parsed[0].options[0].recommended, true);
+  // 推荐项固定排在第一位，其余保持原顺序。
+  assert.deepEqual(
+    parsed[1].options.map((option) => option.label),
+    ["不迁移", "迁移", "稍后再说"],
+  );
+  assert.equal(parsed[1].options[0].recommended, true);
+});
+
+test("buildDefaultAskUserQuestionAnswers picks the recommended (or first) option", () => {
+  const { shared } = loadModules();
+  const questions = shared.parseAskUserQuestionItems([
+    {
+      prompt: "有推荐项",
+      options: [{ label: "a" }, { label: "b", recommended: true }],
+    },
+    {
+      prompt: "无推荐项",
+      options: [{ label: "x" }, { label: "y" }],
+    },
+  ]);
+  const defaults = shared.buildDefaultAskUserQuestionAnswers(questions);
+  assert.deepEqual(
+    defaults.map((answer) => answer.selectedLabel),
+    ["b", "x"],
+  );
+  assert.match(
+    shared.buildAskUserQuestionResultText(defaults, { timedOut: true }),
+    /did not answer within the time limit/,
+  );
 });
 
 test("sanitizeAskUserQuestionItems tolerates streaming partial arguments", () => {
@@ -158,6 +197,29 @@ test("execute suspends until the user answers, then returns the selections", asy
 
   // 已落定的提问不能再次应答。
   const late = tools.answerAskUserQuestion("call-ask-answer", []);
+  assert.equal(late.ok, false);
+});
+
+test("timeout auto-selects the recommended options and continues", async () => {
+  const { tools } = loadModules();
+  const bundle = tools.createAskUserQuestionTools({ conversationId: "conv-1", timeoutMs: 50 });
+  const toolCall = createToolCall(buildQuestionsArgs(), "call-ask-timeout");
+
+  const result = await bundle.executeToolCall(toolCall);
+  assert.equal(result.isError, false);
+  assert.equal(result.details.timedOut, true);
+  assert.deepEqual(
+    result.details.answers.map((answer) => answer.selectedLabel),
+    ["应用数据目录", "不迁移"],
+  );
+  assert.match(result.content[0].text, /did not answer within the time limit/);
+  assert.equal(tools.hasPendingAskUserQuestion("call-ask-timeout"), false);
+
+  // 超时落定后不能再应答。
+  const late = tools.answerAskUserQuestion("call-ask-timeout", [
+    { questionId: "storage", selectedLabel: "工作区根目录" },
+    { questionId: "q2", selectedLabel: "迁移" },
+  ]);
   assert.equal(late.ok, false);
 });
 

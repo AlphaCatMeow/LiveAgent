@@ -268,6 +268,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.askUser.answered": "已提交回答",
     "chat.askUser.cancelled": "本次提问已取消，未提交任何选择",
     "chat.askUser.submitFailed": "提交失败，请重试",
+    "chat.askUser.timedOut": "应答超时，已按推荐项继续执行",
+    "chat.askUser.timeoutHint": "后自动选择推荐项",
     "chat.tool.expandActivity": "展开工具活动",
     "chat.tool.collapseActivity": "收起工具活动",
     "chat.hookWarningTitle": "Hooks 告警",
@@ -1240,7 +1242,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.builtinTool.ask_user_question.name": "用户提问",
     "settings.builtinTool.ask_user_question.desc": "以选项卡片向你提问并等待选择",
     "settings.builtinTool.ask_user_question.detail":
-      "模型在需要你决策时发起选择题（一次最多 4 个问题，每题 2-6 个选项，可标注推荐项），以卡片形式展示并暂停执行等待作答；桌面端与 WebUI 均可作答，点击停止可跳过。仅在对话场景注册。",
+      "模型在需要你决策时发起选择题（一次最多 4 个问题，每题 2-6 个选项且各题数量一致，推荐项排在首位）。卡片暂停执行等待作答，3 分钟内未作答自动按推荐项继续执行；桌面端与 WebUI 均可作答，点击停止可跳过。仅在对话场景注册。",
     "settings.builtinTool.cron_task_manager.name": "定时任务",
     "settings.builtinTool.cron_task_manager.desc": "创建与管理定时自动任务",
     "settings.builtinTool.cron_task_manager.detail":
@@ -2237,6 +2239,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.askUser.answered": "Answers submitted",
     "chat.askUser.cancelled": "This question was cancelled without an answer.",
     "chat.askUser.submitFailed": "Submit failed. Please retry.",
+    "chat.askUser.timedOut": "Timed out — continued with the recommended options",
+    "chat.askUser.timeoutHint": "until the recommended options are auto-selected",
     "chat.tool.expandActivity": "Expand tool activity",
     "chat.tool.collapseActivity": "Collapse tool activity",
     "chat.hookWarningTitle": "Hooks Warning",
@@ -3253,7 +3257,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.builtinTool.ask_user_question.desc":
       "Ask you multiple-choice questions in a card and wait for your selections",
     "settings.builtinTool.ask_user_question.detail":
-      "Lets the model ask you multiple-choice questions when a decision is yours to make (up to 4 questions per call, 2-6 options each, with an optional recommended option). Execution pauses on an interactive card until you answer — from the desktop or the WebUI — and pressing Stop skips the question. Chat sessions only.",
+      "Lets the model ask you multiple-choice questions when a decision is yours to make (up to 4 questions per call, 2-6 options each with the same count across questions, recommended option shown first). Execution pauses on an interactive card until you answer — from the desktop or the WebUI; after 3 minutes without an answer the recommended options are auto-selected, and pressing Stop skips the question. Chat sessions only.",
     "settings.builtinTool.cron_task_manager.name": "Scheduled Tasks",
     "settings.builtinTool.cron_task_manager.desc": "Create and manage scheduled automations",
     "settings.builtinTool.cron_task_manager.detail":

@@ -7,6 +7,8 @@ export const ASK_USER_QUESTION_TOOL_NAME = "AskUserQuestion";
 export const ASK_USER_QUESTION_MAX_QUESTIONS = 4;
 export const ASK_USER_QUESTION_MIN_OPTIONS = 2;
 export const ASK_USER_QUESTION_MAX_OPTIONS = 6;
+/** 每轮提问的应答窗口：超时后按推荐项（缺省第一项）自动落定继续执行。 */
+export const ASK_USER_QUESTION_TIMEOUT_MS = 3 * 60 * 1000;
 
 export type AskUserQuestionOption = {
   label: string;
@@ -34,10 +36,20 @@ export type AskUserQuestionResultDetails = {
   questions: AskUserQuestionItem[];
   answers: AskUserQuestionAnswer[];
   cancelled?: boolean;
+  /** 应答窗口超时、按推荐项自动落定时为 true。 */
+  timedOut?: boolean;
 };
 
 function normalizeText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+/** 推荐项固定排在第一位展示；其余选项保持模型给出的顺序。 */
+function orderAskUserQuestionOptions(options: AskUserQuestionOption[]) {
+  const index = options.findIndex((option) => option.recommended === true);
+  if (index <= 0) return options;
+  const recommended = options[index];
+  return [recommended, ...options.slice(0, index), ...options.slice(index + 1)];
 }
 
 /**
@@ -74,7 +86,7 @@ export function sanitizeAskUserQuestionItems(raw: unknown): AskUserQuestionItem[
     const item: AskUserQuestionItem = {
       id: normalizeText(record.id) || `q${index + 1}`,
       prompt,
-      options,
+      options: orderAskUserQuestionOptions(options),
     };
     const header = normalizeText(record.header);
     if (header) item.header = header;
@@ -97,6 +109,7 @@ export function parseAskUserQuestionItems(raw: unknown): AskUserQuestionItem[] {
     );
   }
   const seenIds = new Set<string>();
+  let expectedOptionCount = 0;
   return raw.map((value, index) => {
     if (!value || typeof value !== "object") {
       throw new Error(`AskUserQuestion questions[${index}] must be an object.`);
@@ -115,6 +128,14 @@ export function parseAskUserQuestionItems(raw: unknown): AskUserQuestionItem[] {
     ) {
       throw new Error(
         `AskUserQuestion questions[${index}] needs ${ASK_USER_QUESTION_MIN_OPTIONS}-${ASK_USER_QUESTION_MAX_OPTIONS} options; got ${record.options.length}.`,
+      );
+    }
+    // 同一轮里各问题的选项数必须一致，保证卡片切 tab 时布局稳定。
+    if (index === 0) {
+      expectedOptionCount = record.options.length;
+    } else if (record.options.length !== expectedOptionCount) {
+      throw new Error(
+        `AskUserQuestion requires every question in one call to have the same number of options; questions[0] has ${expectedOptionCount} while questions[${index}] has ${record.options.length}.`,
       );
     }
 
@@ -160,10 +181,29 @@ export function parseAskUserQuestionItems(raw: unknown): AskUserQuestionItem[] {
     }
     seenIds.add(id);
 
-    const item: AskUserQuestionItem = { id, prompt, options };
+    const item: AskUserQuestionItem = {
+      id,
+      prompt,
+      options: orderAskUserQuestionOptions(options),
+    };
     const header = normalizeText(record.header);
     if (header) item.header = header;
     return item;
+  });
+}
+
+/** 超时兜底：每题取推荐项，无推荐项时取第一项。 */
+export function buildDefaultAskUserQuestionAnswers(
+  questions: AskUserQuestionItem[],
+): AskUserQuestionAnswer[] {
+  return questions.map((question) => {
+    const fallback =
+      question.options.find((option) => option.recommended === true) ?? question.options[0];
+    return {
+      questionId: question.id,
+      prompt: question.prompt,
+      selectedLabel: fallback?.label ?? "",
+    };
   });
 }
 
@@ -221,12 +261,19 @@ export function parseAskUserQuestionResultDetails(
     questions,
     answers,
     cancelled: record.cancelled === true,
+    timedOut: record.timedOut === true,
   };
 }
 
-export function buildAskUserQuestionResultText(answers: AskUserQuestionAnswer[]) {
+export function buildAskUserQuestionResultText(
+  answers: AskUserQuestionAnswer[],
+  options?: { timedOut?: boolean },
+) {
+  const heading = options?.timedOut
+    ? "The user did not answer within the time limit; the recommended (or first) option was auto-selected for every question. Proceed accordingly:"
+    : "The user answered every question. Their selections are final — proceed accordingly:";
   return [
-    "The user answered every question. Their selections are final — proceed accordingly:",
+    heading,
     ...answers.map(
       (answer, index) => `${index + 1}. ${answer.prompt}\n   → ${answer.selectedLabel}`,
     ),

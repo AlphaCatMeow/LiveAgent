@@ -3141,7 +3141,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.globalShortcutsDesc":
       "Trigger actions from any app with a key combo. Click an entry to record, press your combo, then hit Enter or click anywhere else to confirm (Enter itself is never captured). Esc cancels.",
     "settings.shortcutSummon": "Quick Summon",
-    "settings.shortcutSummonDesc": "Instantly bring up and focus the LiveAgent window from anywhere",
+    "settings.shortcutSummonDesc":
+      "Instantly bring up and focus the LiveAgent window from anywhere",
     "settings.shortcutToggle": "Show / Hide Window",
     "settings.shortcutToggleDesc": "Toggle the main window between foreground and hidden",
     "settings.shortcutNewChat": "New Chat",

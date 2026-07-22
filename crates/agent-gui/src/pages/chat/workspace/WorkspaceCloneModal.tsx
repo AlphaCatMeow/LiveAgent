@@ -58,6 +58,7 @@ export function WorkspaceCloneModal({
   const [nameIsAutomatic, setNameIsAutomatic] = useState(true);
   const [branch, setBranch] = useState("");
   const [branches, setBranches] = useState<string[]>([]);
+  const [defaultBranch, setDefaultBranch] = useState("");
   const [branchesLoading, setBranchesLoading] = useState(false);
   const branchRequestId = useRef(0);
 
@@ -96,11 +97,22 @@ export function WorkspaceCloneModal({
         const nextBranches = [
           ...new Set(response.branches.map((value) => value.trim()).filter(Boolean)),
         ];
+        const nextDefault =
+          (response.defaultBranch.trim() && nextBranches.includes(response.defaultBranch.trim())
+            ? response.defaultBranch.trim()
+            : nextBranches[0]) || "";
+        // Keep the remote HEAD first so the menu opens on the default branch.
+        if (nextDefault) {
+          nextBranches.sort((left, right) => {
+            if (left === nextDefault) return -1;
+            if (right === nextDefault) return 1;
+            return left.localeCompare(right);
+          });
+        }
         setBranches(nextBranches);
+        setDefaultBranch(nextDefault);
         setBranch((current) =>
-          current && nextBranches.includes(current)
-            ? current
-            : response.defaultBranch || nextBranches[0] || "",
+          current && nextBranches.includes(current) ? current : nextDefault,
         );
       } catch (reason) {
         if (requestId === branchRequestId.current) setError(errorMessage(reason));
@@ -117,6 +129,7 @@ export function WorkspaceCloneModal({
     if (!url) {
       setBranches([]);
       setBranch("");
+      setDefaultBranch("");
       setBranchesLoading(false);
       return;
     }
@@ -224,6 +237,7 @@ export function WorkspaceCloneModal({
                     setRemoteUrl(nextUrl);
                     setBranches([]);
                     setBranch("");
+                    setDefaultBranch("");
                     setBranchesLoading(Boolean(nextUrl.trim()));
                     setError("");
                     if (nameIsAutomatic) setName(workspaceNameFromRemoteUrl(nextUrl));
@@ -279,7 +293,7 @@ export function WorkspaceCloneModal({
                     onValueChange={setBranch}
                     disabled={!branches.length || branchesLoading}
                   >
-                    <SelectTrigger id="workspace-clone-branch" className="h-10">
+                    <SelectTrigger id="workspace-clone-branch" className="h-10 font-mono text-[13px]">
                       <SelectValue
                         placeholder={
                           branchesLoading
@@ -290,7 +304,16 @@ export function WorkspaceCloneModal({
                     </SelectTrigger>
                     <SelectContent className="max-h-60">
                       {branches.map((value) => (
-                        <SelectItem key={value} value={value}>
+                        <SelectItem
+                          key={value}
+                          value={value}
+                          className="font-mono text-[13px]"
+                          description={
+                            value === defaultBranch
+                              ? t("chat.workspaceCloneDefaultBranch")
+                              : undefined
+                          }
+                        >
                           {value}
                         </SelectItem>
                       ))}

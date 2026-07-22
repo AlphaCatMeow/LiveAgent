@@ -1,5 +1,10 @@
 import type { CacheRetention, SimpleStreamOptions } from "@earendil-works/pi-ai";
-import type { CodexRequestFormat, CustomProvider, ProviderId, ReasoningLevel } from "../../settings";
+import type {
+  CodexRequestFormat,
+  CustomProvider,
+  ProviderId,
+  ReasoningLevel,
+} from "../../settings";
 import { createUuid } from "../../shared/id";
 import {
   ANTHROPIC_DEFAULT_REQUEST_HEADERS,

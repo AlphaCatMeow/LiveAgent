@@ -148,6 +148,10 @@ import {
 import { findWorkspaceProject, mergeWorkspaceProjectsWithHistory } from "@/lib/workspaceProjects";
 import { FloorNavRail } from "@/pages/chat/transcript/FloorNavRail";
 import { WorkspaceCloneModal } from "@/pages/chat/WorkspaceCloneModal";
+import {
+  type WorkspaceCloneTask,
+  WorkspaceCloneTaskOverlay,
+} from "@/pages/chat/WorkspaceCloneTaskOverlay";
 import { LoginPage } from "@/pages/LoginPage";
 import { SettingsSyncLoading } from "@/pages/SettingsSyncLoading";
 import { SharedHistoryPage } from "@/pages/SharedHistoryPage";
@@ -232,6 +236,8 @@ export default function GatewayApp() {
     clearSession,
   } = useGatewaySession(historyShareToken);
   const { api, terminalClient, sftpClient, gitClient } = useGatewayClients(token);
+  const [workspaceCloneTasks, setWorkspaceCloneTasks] = useState<WorkspaceCloneTask[]>([]);
+  const dismissedWorkspaceCloneTaskIds = useRef(new Set<string>());
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   // True only after an authenticated gateway connection has been established
@@ -1164,19 +1170,73 @@ export default function GatewayApp() {
       if (!api) {
         throw new Error("网关未连接。");
       }
-      const response = await api.gitRequest<{ state?: { workdir?: string } }>("clone", parent, {
+      const task = await api.gitRequest<WorkspaceCloneTask>("clone_start", parent, {
         name,
         remoteUrl,
         branch: branch || undefined,
       });
-      const path = response.state?.workdir?.trim();
-      if (!path) {
-        throw new Error("克隆完成后未返回工作空间路径。");
-      }
+      dismissedWorkspaceCloneTaskIds.current.delete(task.id);
+      setWorkspaceCloneTasks((tasks) => [task, ...tasks.filter((item) => item.id !== task.id)]);
+    },
+    [api],
+  );
+
+  const refreshWorkspaceCloneTasks = useCallback(async () => {
+    if (!api) return;
+    const tasks = await api.gitRequest<WorkspaceCloneTask[]>("clone_tasks", "");
+    setWorkspaceCloneTasks(
+      tasks.filter((task) => !dismissedWorkspaceCloneTaskIds.current.has(task.id)),
+    );
+  }, [api]);
+
+  useEffect(() => {
+    void refreshWorkspaceCloneTasks().catch(() => {
+      // The next clone operation or connection change retries.
+    });
+  }, [refreshWorkspaceCloneTasks]);
+
+  const hasActiveWorkspaceCloneTask = workspaceCloneTasks.some(
+    (task) => task.status === "running" || task.status === "cancelling",
+  );
+
+  useEffect(() => {
+    if (!hasActiveWorkspaceCloneTask) return;
+    const timer = window.setInterval(() => {
+      void refreshWorkspaceCloneTasks().catch(() => {
+        // Keep the last task snapshot visible while transport reconnects.
+      });
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [hasActiveWorkspaceCloneTask, refreshWorkspaceCloneTasks]);
+
+  const handleCancelWorkspaceCloneTask = useCallback(
+    (taskId: string) => {
+      if (!api) return;
+      void api
+        .gitRequest<WorkspaceCloneTask>("clone_cancel", "", { taskId })
+        .then((task) =>
+          setWorkspaceCloneTasks((tasks) =>
+            tasks.map((item) => (item.id === task.id ? task : item)),
+          ),
+        )
+        .catch(() => {
+          // Keep the running task visible so the next poll can reconcile it.
+        });
+    },
+    [api],
+  );
+
+  const handleDismissWorkspaceCloneTask = useCallback((taskId: string) => {
+    dismissedWorkspaceCloneTaskIds.current.add(taskId);
+    setWorkspaceCloneTasks((tasks) => tasks.filter((task) => task.id !== taskId));
+  }, []);
+
+  const handleOpenClonedWorkspace = useCallback(
+    (path: string) => {
       activateWorkspaceProject(createWorkspaceProjectFromPath(path, "managed"));
       void sidebarStore.refreshWorkdirs("new-workdir");
     },
-    [activateWorkspaceProject, api, sidebarStore],
+    [activateWorkspaceProject, sidebarStore],
   );
 
   const handleLoadWorkspaceRemoteBranches = useCallback(
@@ -4224,6 +4284,12 @@ export default function GatewayApp() {
                 onClose={() => setWorkspaceCreateModalOpen(false)}
               />
             ) : null}
+            <WorkspaceCloneTaskOverlay
+              tasks={workspaceCloneTasks}
+              onCancel={handleCancelWorkspaceCloneTask}
+              onDismiss={handleDismissWorkspaceCloneTask}
+              onOpenWorkspace={handleOpenClonedWorkspace}
+            />
 
             {confirmDialog}
 

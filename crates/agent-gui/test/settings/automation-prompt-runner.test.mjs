@@ -248,9 +248,10 @@ test("Cron reasoning levels follow the selected model across GUI and WebUI", () 
     assert.match(source, /isThinkingAlwaysOnForModel\(/);
     assert.match(source, /return thinkingAlwaysOn \? supportedLevels : \["off", \.\.\.supportedLevels\]/);
     assert.match(source, /\{cronReasoningLevels\.map\(\(level\) => \(/);
+    assert.match(source, /coerceCronReasoningLevel\(nextReasoningLevels, current\)/);
     assert.match(
       source,
-      /nextReasoningLevels\.includes\(current\) \? current : DEFAULT_CRON_REASONING/,
+      /if \(levels\.includes\(DEFAULT_CRON_REASONING\)\) return DEFAULT_CRON_REASONING;\s*return levels\[0\] \?\? DEFAULT_CRON_REASONING;/,
     );
   }
 });

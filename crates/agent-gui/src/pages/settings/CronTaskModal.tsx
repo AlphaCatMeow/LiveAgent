@@ -143,6 +143,19 @@ function getCronReasoningLevels(
 }
 
 /**
+ * Non-reasoning models expose only `off`, so the default (`medium`) may itself
+ * be unsupported — fall back to the first offered level in that case.
+ */
+function coerceCronReasoningLevel(
+  levels: CronReasoningLevel[],
+  current: CronReasoningLevel,
+): CronReasoningLevel {
+  if (levels.includes(current)) return current;
+  if (levels.includes(DEFAULT_CRON_REASONING)) return DEFAULT_CRON_REASONING;
+  return levels[0] ?? DEFAULT_CRON_REASONING;
+}
+
+/**
  * Fields the modal edits. `enabled` is deliberately not part of the payload:
  * toggling is its own operation, so saving an edit can never write back a
  * stale enabled flag captured when the modal opened.
@@ -821,7 +834,7 @@ export function CronTaskModal({
                         setSelectedModelValue(value);
                         const nextReasoningLevels = getCronReasoningLevels(value, providers);
                         setReasoning((current) =>
-                          nextReasoningLevels.includes(current) ? current : DEFAULT_CRON_REASONING,
+                          coerceCronReasoningLevel(nextReasoningLevels, current),
                         );
                       }}
                     />

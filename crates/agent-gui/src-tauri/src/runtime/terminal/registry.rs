@@ -367,6 +367,7 @@ impl TerminalSessionRegistry {
     pub fn close(&self, session_id: String) -> Result<TerminalSessionRecord, String> {
         let entry = self.entry(&session_id)?;
         terminate_terminal_entry(&entry);
+        self.stop_ssh_local_forwards_for_session(&session_id, true);
         let (session, tab_snapshots) = {
             let _tabs_tx = self.lock_ssh_terminal_tabs_tx()?;
             self.mark_finished(&session_id);

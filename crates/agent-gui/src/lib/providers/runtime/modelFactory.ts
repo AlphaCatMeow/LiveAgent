@@ -19,6 +19,17 @@ import {
   isDeepSeekCodexTarget,
   resolveDeepSeekOpenAICompletionsOverrides,
 } from "../deepSeekProviderAdapter";
+import { isXaiProviderTarget } from "./xaiResponsesPayload";
+
+/** Grok / xAI 思考档：UI 标准档 → 官方 effort；max 不暴露，off 对多数模型不可用。 */
+const XAI_THINKING_LEVEL_MAP: NonNullable<Model<"openai-responses">["thinkingLevelMap"]> = {
+  off: null,
+  minimal: "low",
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "xhigh",
+};
 
 const CODEX_RESPONSES_SUFFIX = "/responses";
 const CODEX_RESPONSE_SUFFIX = "/response";
@@ -310,15 +321,26 @@ export function createModelFromConfig(
   const zeroCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
   const customModelCost = configuredCost ?? zeroCost;
 
-  if (providerId === "codex") {
+  if (providerId === "codex" || providerId === "xai") {
     const { baseUrl: normalizedBaseUrl, preferredApi } = normalizeCodexBaseUrl(baseUrl);
-    const isDeepSeekCodex = isDeepSeekCodexTarget({
+    const isDeepSeekCodex =
+      providerId === "codex" &&
+      isDeepSeekCodexTarget({
+        providerId,
+        baseUrl: normalizedBaseUrl,
+        upstreamBaseUrl,
+        modelId,
+      });
+    // 正式 xai 供应商，或 Codex 直连 api.x.ai：固定 Responses（agentic 搜索等）。
+    const isXaiTarget = isXaiProviderTarget({
       providerId,
-      baseUrl: normalizedBaseUrl,
-      upstreamBaseUrl,
-      modelId,
+      baseUrl: upstreamBaseUrl?.trim() || baseUrl,
     });
-    const api = isDeepSeekCodex ? "openai-completions" : inferCodexApi(requestFormat, preferredApi);
+    const api = isDeepSeekCodex
+      ? "openai-completions"
+      : isXaiTarget
+        ? "openai-responses"
+        : inferCodexApi(requestFormat, preferredApi);
     const responsesCompat =
       api === "openai-responses"
         ? resolveCodexOpenAIResponsesCompat({
@@ -334,6 +356,7 @@ export function createModelFromConfig(
           contextWindow,
           maxTokens,
           ...(configuredCost ? { cost: configuredCost } : {}),
+          ...(isXaiTarget ? { thinkingLevelMap: { ...XAI_THINKING_LEVEL_MAP } } : {}),
           ...(responsesCompat
             ? {
                 compat: {
@@ -367,6 +390,9 @@ export function createModelFromConfig(
       contextWindow,
       maxTokens,
     };
+    if (isXaiTarget) {
+      custom.thinkingLevelMap = { ...XAI_THINKING_LEVEL_MAP };
+    }
     if (api === "openai-responses" && responsesCompat) {
       custom.compat = responsesCompat;
     } else if (api === "openai-completions") {

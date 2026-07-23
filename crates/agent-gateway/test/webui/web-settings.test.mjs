@@ -293,6 +293,7 @@ test("web chat runtime controls default and follow model-aware reasoning support
       codex_openai_responses: "high",
       codex_openai_completions: "high",
       gemini: "high",
+      xai: "high",
     },
   });
 
@@ -425,6 +426,7 @@ test("web chat runtime controls default and follow model-aware reasoning support
         codex_openai_responses: "xhigh",
         codex_openai_completions: "xhigh",
         gemini: "high",
+        xai: "xhigh",
       },
     },
   );
@@ -448,7 +450,10 @@ test("web chat runtime controls default and follow model-aware reasoning support
         claude_code: "xhigh",
         codex_openai_responses: "xhigh",
         codex_openai_completions: "xhigh",
+        // gemini / xai 未在 reasoningByProvider 输入里显式给出，也未参与本次调用
+        // 的当前 provider key，因此只继承顶层 reasoning 原值，不做钳制。
         gemini: "xhigh",
+        xai: "xhigh",
       },
     },
   );
@@ -468,6 +473,7 @@ test("web chat runtime controls default and follow model-aware reasoning support
         codex_openai_responses: "xhigh",
         codex_openai_completions: "high",
         gemini: "high",
+        xai: "high",
       },
     },
   );
@@ -1568,4 +1574,30 @@ test("web right dock migrates the legacy tabs shape", () => {
   assert.equal(project.tools.fileTree.uiState.query, "q");
   assert.deepEqual(project.tabOrder, ["sess-1", RIGHT_DOCK_TAB_IDS.fileTree]);
   assert.equal(project.activeTabId, "sess-1");
+});
+
+test("xai model limits use the pi-ai xai catalog without changing thinking detection", () => {
+  assert.equal(settings.getProviderModelDefaults("xai", "grok-4.5").contextWindow, 500_000);
+  assert.equal(settings.getProviderModelDefaults("xai", "grok-3").contextWindow, 131_072);
+  assert.equal(settings.getProviderModelDefaults("xai", "grok-unknown").contextWindow, 258_000);
+  // 思考档位检测刻意不吃 xai 目录（其 compat 反映 pi-ai completions 路径），
+  // 而是无条件应用与桌面端同步的 XAI 档位映射。
+  assert.ok(settings.getKnownModelThinkingLevels("xai", "grok-4.5").includes("high"));
+});
+
+test("xai thinking levels mirror the desktop XAI thinking map", () => {
+  // 与桌面端 modelFactory XAI_THINKING_LEVEL_MAP 对齐：档位含 xhigh、思考恒开。
+  // 否则 normalizeChatRuntimeControlsForProvider 的钳制会把桌面端设置的
+  // xhigh 在 web 侧压回 high，跨端行为分叉。
+  const levels = settings.getKnownModelThinkingLevels("xai", "grok-4.5");
+  assert.ok(levels.includes("xhigh"));
+  assert.ok(!levels.includes("off"));
+  assert.ok(!levels.includes("max"));
+  assert.equal(settings.isThinkingAlwaysOnForModel("xai", "grok-4.5"), true);
+  // 钳制路径：当前供应商为 xai 时 xhigh 不再被压回 high。
+  const clamped = settings.normalizeChatRuntimeControlsForProvider(
+    { reasoning: "xhigh", reasoningByProvider: { xai: "xhigh" } },
+    { providerId: "xai", modelId: "grok-4.5" },
+  );
+  assert.equal(clamped.reasoning, "xhigh");
 });

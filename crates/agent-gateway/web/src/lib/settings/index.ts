@@ -9,7 +9,7 @@ import { normalizeApiKey, normalizeBaseUrl, normalizeModels } from "./normalize"
 
 export type { SystemToolId } from "../tools/systemToolOptions";
 
-export type ProviderId = "codex" | "claude_code" | "gemini";
+export type ProviderId = "codex" | "claude_code" | "gemini" | "xai";
 
 export type ExecutionMode = "text" | "tools" | "agent-dev";
 
@@ -205,7 +205,8 @@ export type ChatRuntimeReasoningProviderKey =
   | "claude_code"
   | "codex_openai_responses"
   | "codex_openai_completions"
-  | "gemini";
+  | "gemini"
+  | "xai";
 
 export type AgentPromptTemplate = {
   id: string;
@@ -331,6 +332,7 @@ export const DEFAULT_CHAT_RUNTIME_CONTROLS: ChatRuntimeControls = {
     codex_openai_responses: "high",
     codex_openai_completions: "high",
     gemini: "high",
+    xai: "high",
   },
 };
 
@@ -416,6 +418,21 @@ export function getBuiltinCustomProviders(): CustomProvider[] {
       models: [],
       activeModels: [],
       reasoning: "off",
+      promptCachingEnabled: false,
+      nativeWebSearchEnabled: true,
+      useSystemProxy: false,
+    },
+    {
+      id: "builtin-xai",
+      name: "Grok",
+      type: "xai",
+      baseUrl: "https://api.x.ai/v1",
+      apiKey: "",
+      customHeaders: [],
+      models: [],
+      activeModels: [],
+      requestFormat: "openai-responses",
+      reasoning: "high",
       promptCachingEnabled: false,
       nativeWebSearchEnabled: true,
       useSystemProxy: false,
@@ -760,6 +777,7 @@ const CHAT_RUNTIME_REASONING_PROVIDER_KEYS: ChatRuntimeReasoningProviderKey[] = 
   "codex_openai_responses",
   "codex_openai_completions",
   "gemini",
+  "xai",
 ];
 
 export function getChatRuntimeReasoningProviderKey(params: {
@@ -771,6 +789,9 @@ export function getChatRuntimeReasoningProviderKey(params: {
   }
   if (params.providerId === "gemini") {
     return "gemini";
+  }
+  if (params.providerId === "xai") {
+    return "xai";
   }
   if (params.providerId === "codex" && params.requestFormat === "openai-completions") {
     return "codex_openai_completions";
@@ -989,15 +1010,32 @@ export function normalizeRemoteSettings(input: unknown): RemoteSettings {
 }
 
 function toKnownProvider(providerId: ProviderId): KnownProvider {
-  if (providerId === "codex") return "openai";
+  if (providerId === "codex" || providerId === "xai") return "openai";
   if (providerId === "gemini") return "google";
   return "anthropic";
+}
+
+// 仅限限额（contextWindow/maxOutputToken）回查的目录：xai 走 pi-ai 的 xai
+// 目录拿 grok 真实窗口（grok-4.5=500K、grok-3=131K、grok-code-fast-1=32K），
+// 不能落到 openai 目录查不到后吃统一兜底值。思考档位检测
+// （findKnownModelForThinking）刻意不用该目录——其 compat/reasoning 反映的是
+// pi-ai completions 路径，与 LiveAgent 强制 Responses + thinkingLevelMap 不符。
+function toLimitsCatalogProvider(providerId: ProviderId): KnownProvider {
+  return providerId === "xai" ? "xai" : toKnownProvider(providerId);
 }
 
 function findKnownModel(providerId: ProviderId, modelId: string | undefined) {
   const trimmedId = modelId?.trim();
   if (!trimmedId) return undefined;
   return getBuiltinModels(toKnownProvider(providerId)).find((model) => model.id === trimmedId);
+}
+
+function findKnownModelLimitsEntry(providerId: ProviderId, modelId: string | undefined) {
+  const trimmedId = modelId?.trim();
+  if (!trimmedId) return undefined;
+  return getBuiltinModels(toLimitsCatalogProvider(providerId)).find(
+    (model) => model.id === trimmedId,
+  );
 }
 
 // —— 以下 Anthropic id 规范化与启发式与桌面端 anthropicModels.ts/modelFactory.ts
@@ -1121,18 +1159,32 @@ function getKnownModelLimits(
           : Math.min(known.contextWindow, ANTHROPIC_STANDARD_CONTEXT_WINDOW);
     return { contextWindow, maxOutputToken: known.maxTokens };
   }
-  const known = findKnownModel(providerId, modelId);
+  const known = findKnownModelLimitsEntry(providerId, modelId);
   if (!known) return undefined;
   return { contextWindow: known.contextWindow, maxOutputToken: known.maxTokens };
 }
 
-export function getKnownModelThinkingLevels(
-  providerId: ProviderId,
-  modelId: string | undefined,
-): ReasoningLevel[] {
-  const trimmedId = modelId?.trim();
-  if (!trimmedId) return [];
+// Grok / xAI 思考档：与桌面端 modelFactory 的 XAI_THINKING_LEVEL_MAP 手动同步
+// （off:null=思考恒开，max 不暴露）。桌面端对 xai 的所有模型（目录内外）一律
+// 盖这份映射，web 侧同样无条件应用，否则跨端钳制会把桌面设置的 xhigh 压回 high。
+const XAI_THINKING_LEVEL_MAP = {
+  off: null,
+  minimal: "low",
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "xhigh",
+} as const;
+
+function resolveThinkingModel(providerId: ProviderId, trimmedId: string) {
+  if (providerId === "xai") {
+    return {
+      reasoning: true,
+      thinkingLevelMap: XAI_THINKING_LEVEL_MAP,
+    } as Parameters<typeof getSupportedThinkingLevels>[0];
+  }
   const known = findKnownModelForThinking(providerId, trimmedId);
+  if (known) return known;
   // 目录之外的自定义模型（deepseek/glm 等三方聚合）无法从 id 判断推理能力，
   // 与桌面端 modelFactory 自定义分支一致按可推理处理：标准档位，xhigh/max
   // 仍需目录 opt-in；deepseek 走 codex 时镜像桌面端 DeepSeek 适配层的 xhigh 档，
@@ -1143,12 +1195,19 @@ export function getKnownModelThinkingLevels(
       : toKnownProvider(providerId) === "anthropic"
         ? deriveAnthropicThinkingLevelMapForCustomModel(trimmedId)
         : undefined;
-  const model =
-    known ??
-    ({
-      reasoning: true,
-      ...(customThinkingLevelMap ? { thinkingLevelMap: customThinkingLevelMap } : {}),
-    } as Parameters<typeof getSupportedThinkingLevels>[0]);
+  return {
+    reasoning: true,
+    ...(customThinkingLevelMap ? { thinkingLevelMap: customThinkingLevelMap } : {}),
+  } as Parameters<typeof getSupportedThinkingLevels>[0];
+}
+
+export function getKnownModelThinkingLevels(
+  providerId: ProviderId,
+  modelId: string | undefined,
+): ReasoningLevel[] {
+  const trimmedId = modelId?.trim();
+  if (!trimmedId) return [];
+  const model = resolveThinkingModel(providerId, trimmedId);
   return getSupportedThinkingLevels(model).filter((level) => level !== "off");
 }
 
@@ -1161,6 +1220,11 @@ export function isThinkingAlwaysOnForModel(
 ): boolean {
   const trimmedId = modelId?.trim();
   if (!trimmedId) return false;
+  // xai 的映射 off:null 意味着思考恒开（与桌面端一致）；其余供应商目录
+  // 未命中时保持可关闭的兜底判定。
+  if (providerId === "xai") {
+    return !getSupportedThinkingLevels(resolveThinkingModel(providerId, trimmedId)).includes("off");
+  }
   const known = findKnownModelForThinking(providerId, trimmedId);
   return known ? !getSupportedThinkingLevels(known).includes("off") : false;
 }
@@ -1173,7 +1237,7 @@ export function getProviderModelDefaults(
   const known = getKnownModelLimits(providerId, modelId, baseUrl);
   if (known) return known;
 
-  if (providerId === "codex") {
+  if (providerId === "codex" || providerId === "xai") {
     return {
       contextWindow: DEFAULT_CODEX_CONTEXT_WINDOW,
       maxOutputToken: DEFAULT_CODEX_MAX_OUTPUT_TOKEN,
@@ -1339,6 +1403,7 @@ function normalizeProviderId(input: unknown): ProviderId {
   switch (input) {
     case "codex":
     case "gemini":
+    case "xai":
       return input;
     default:
       return "claude_code";
@@ -1349,6 +1414,7 @@ function normalizeProviderName(id: string, input: unknown): string {
   const name = typeof input === "string" && input.trim() ? input.trim() : "未命名供应商";
   if (id === "builtin-claude_code" && name === "Claude Code") return "Anthropic";
   if (id === "builtin-codex" && name === "Codex") return "OpenAI";
+  if (id === "builtin-xai" && (name === "xAI" || name === "XAI")) return "Grok";
   return name;
 }
 
@@ -1388,7 +1454,9 @@ export function normalizeCustomProvider(input: unknown): CustomProvider {
   const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
   const type = normalizeProviderId(obj.type);
   const codexRouting =
-    type === "codex" ? normalizeCodexRouting(obj.baseUrl, obj.requestFormat) : undefined;
+    type === "codex" || type === "xai"
+      ? normalizeCodexRouting(obj.baseUrl, type === "xai" ? "openai-responses" : obj.requestFormat)
+      : undefined;
   const models = normalizeProviderModelConfigs(obj.models, type);
   const modelOrder = normalizeProviderModelOrder(obj.modelOrder, models);
   const validModelIds = new Set(models.map((model) => model.id));
@@ -1410,11 +1478,12 @@ export function normalizeCustomProvider(input: unknown): CustomProvider {
     activeModels: normalizeModels(normalizeStringArray(obj.activeModels)).filter((modelId) =>
       validModelIds.has(modelId),
     ),
-    requestFormat: codexRouting?.requestFormat,
+    requestFormat: type === "xai" ? "openai-responses" : codexRouting?.requestFormat,
     reasoning: normalizeReasoningLevel(obj.reasoning),
     // Anthropic/OpenAI 默认开启提示词缓存（OpenAI 侧体现为稳定的
-    // prompt_cache_key 路由提示）；Gemini 的隐式缓存由服务端自动处理。
-    promptCachingEnabled: type === "gemini" ? false : obj.promptCachingEnabled !== false,
+    // prompt_cache_key 路由提示）；Gemini / xAI 不使用 OpenAI 风格 prompt cache。
+    promptCachingEnabled:
+      type === "gemini" || type === "xai" ? false : obj.promptCachingEnabled !== false,
     ...(type === "claude_code" && obj.promptCacheRetention === "long"
       ? { promptCacheRetention: "long" as const }
       : {}),

@@ -19,6 +19,7 @@ import {
   isDeepSeekCodexTarget,
   resolveDeepSeekOpenAICompletionsOverrides,
 } from "../deepSeekProviderAdapter";
+import { isXaiDirectBaseUrl } from "./xaiResponsesPayload";
 
 const CODEX_RESPONSES_SUFFIX = "/responses";
 const CODEX_RESPONSE_SUFFIX = "/response";
@@ -318,7 +319,14 @@ export function createModelFromConfig(
       upstreamBaseUrl,
       modelId,
     });
-    const api = isDeepSeekCodex ? "openai-completions" : inferCodexApi(requestFormat, preferredApi);
+    // xAI 直连仅在 Responses 端点提供服务端 agentic 搜索等原生工具，
+    // 无论请求格式配置为何一律按 openai-responses 发送。
+    const isXaiDirect = isXaiDirectBaseUrl(upstreamBaseUrl?.trim() || baseUrl);
+    const api = isDeepSeekCodex
+      ? "openai-completions"
+      : isXaiDirect
+        ? "openai-responses"
+        : inferCodexApi(requestFormat, preferredApi);
     const responsesCompat =
       api === "openai-responses"
         ? resolveCodexOpenAIResponsesCompat({

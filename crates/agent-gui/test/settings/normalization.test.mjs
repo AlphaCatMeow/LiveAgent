@@ -209,6 +209,34 @@ test("settings normalization drops stale selected models and preserves valid sel
   assert.deepEqual(valid.selectedModel, { customProviderId: "provider-1", model: "gpt-5" });
 });
 
+test("custom settings migrate the legacy font family and normalize each typography role", () => {
+  const defaults = settings.normalizeSettings({}).customSettings;
+  assert.equal(defaults.interfaceFontFamily, "");
+  assert.equal(defaults.chatFontFamily, "");
+  assert.equal(defaults.codeFontFamily, "");
+
+  const migrated = settings.normalizeSettings({ customSettings: { fontFamily: "Inter" } });
+  assert.equal(migrated.customSettings.interfaceFontFamily, "Inter");
+  assert.equal(Object.hasOwn(migrated.customSettings, "fontFamily"), false);
+
+  const normalized = settings.normalizeSettings({
+    customSettings: {
+      interfaceFontFamily: 'Inter, "PingFang SC", sans-serif',
+      chatFontFamily: "serif",
+      codeFontFamily: "Menlo",
+    },
+  });
+  assert.equal(normalized.customSettings.interfaceFontFamily, 'Inter, "PingFang SC", sans-serif');
+  assert.equal(normalized.customSettings.chatFontFamily, "serif");
+  assert.equal(normalized.customSettings.codeFontFamily, "Menlo");
+  assert.equal(
+    settings.normalizeSettings({
+      customSettings: { codeFontFamily: "url(https://evil.example/font.woff2)" },
+    }).customSettings.codeFontFamily,
+    "",
+  );
+});
+
 test("settings normalization canonicalizes project keyed maps with Windows path compatibility", () => {
   const normalized = settings.normalizeSettings({
     ssh: {
@@ -2339,4 +2367,31 @@ test("xai provider model defaults come from the pi-ai xai catalog", () => {
   assert.equal(settings.getProviderModelDefaults("xai", "grok-code-fast-1").contextWindow, 32_768);
   // 目录未收录的模型仍吃 Codex 系兜底窗口。
   assert.equal(settings.getProviderModelDefaults("xai", "grok-unknown").contextWindow, 258_000);
+});
+
+test("gateway sync keeps all desktop font families local", () => {
+  const current = settings.normalizeSettings({
+    customSettings: {
+      interfaceFontFamily: "Inter",
+      chatFontFamily: "Charter",
+      codeFontFamily: "Menlo",
+    },
+  });
+  const incoming = sync.buildGatewaySettingsSyncPayload(
+    settings.normalizeSettings({
+      customSettings: {
+        interfaceFontFamily: "Arial",
+        chatFontFamily: "Georgia",
+        codeFontFamily: "Monaco",
+      },
+    }),
+  );
+
+  assert.equal(incoming.customSettings.interfaceFontFamily, "");
+  assert.equal(incoming.customSettings.chatFontFamily, "");
+  assert.equal(incoming.customSettings.codeFontFamily, "");
+  const merged = sync.applyGatewaySettingsSyncPayload(current, incoming).customSettings;
+  assert.equal(merged.interfaceFontFamily, "Inter");
+  assert.equal(merged.chatFontFamily, "Charter");
+  assert.equal(merged.codeFontFamily, "Menlo");
 });

@@ -118,8 +118,12 @@
 }
 
 @layer utilities {
-  .font-openai-chat {
-    font-family: "OpenAI Sans Semibold", "PingFang SC", "Microsoft YaHei", sans-serif;
+  .font-chat {
+    font-family: var(--chat-font-family);
+  }
+
+  .font-mono {
+    font-family: var(--code-font-family);
   }
 
   /*
@@ -140,6 +144,11 @@
 @layer base {
   :root {
     color-scheme: light;
+    --app-font-family: ui-sans-serif, system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+    --chat-font-family: "OpenAI Sans Semibold", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --code-font-family:
+      "SF Mono", SFMono-Regular, Menlo, Monaco, "Cascadia Code", Consolas, "Liberation Mono",
+      monospace;
 
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
@@ -309,8 +318,16 @@
 
   body {
     @apply bg-background text-foreground;
+    font-family: var(--app-font-family);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
   }
 
   input,

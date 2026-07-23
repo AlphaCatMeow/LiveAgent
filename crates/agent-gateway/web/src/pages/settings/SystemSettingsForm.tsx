@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   CheckCircle2,
   Cpu,
@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "../../components/ui/select";
 import { SUPPORTED_LOCALES, useLocale } from "../../i18n";
+import { listLocalFontFamilies, quoteFontFamilyName } from "../../lib/fontFamily";
 import {
   type ExecutionMode,
   type FontScaleSettings,
@@ -36,6 +37,13 @@ import { AgentActivationSwitch } from "./shared";
 import type { SettingsSectionProps } from "./types";
 
 const FONT_SCALE_OPTIONS = [0.9, 1, 1.1, 1.2] as const;
+type FontFamilySettingKey = "interfaceFontFamily" | "chatFontFamily" | "codeFontFamily";
+
+const FONT_FAMILY_FIELDS: ReadonlyArray<{ key: FontFamilySettingKey; labelKey: string }> = [
+  { key: "interfaceFontFamily", labelKey: "settings.interfaceFontFamily" },
+  { key: "chatFontFamily", labelKey: "settings.chatFontFamily" },
+  { key: "codeFontFamily", labelKey: "settings.codeFontFamily" },
+];
 
 export function SystemSettingsForm(props: SettingsSectionProps) {
   const { settings, setSettings } = props;
@@ -77,6 +85,39 @@ export function SystemSettingsForm(props: SettingsSectionProps) {
     if (value === 1.1) return t("settings.fontSizeLarge");
     if (value === 1.2) return t("settings.fontSizeXLarge");
     return t("settings.fontSizeStandard");
+  }
+
+  const [fontFamilyDrafts, setFontFamilyDrafts] = useState<Record<FontFamilySettingKey, string>>({
+    interfaceFontFamily: settings.customSettings.interfaceFontFamily,
+    chatFontFamily: settings.customSettings.chatFontFamily,
+    codeFontFamily: settings.customSettings.codeFontFamily,
+  });
+  const [localFontFamilies, setLocalFontFamilies] = useState<string[]>([]);
+
+  useEffect(() => {
+    setFontFamilyDrafts({
+      interfaceFontFamily: settings.customSettings.interfaceFontFamily,
+      chatFontFamily: settings.customSettings.chatFontFamily,
+      codeFontFamily: settings.customSettings.codeFontFamily,
+    });
+  }, [
+    settings.customSettings.interfaceFontFamily,
+    settings.customSettings.chatFontFamily,
+    settings.customSettings.codeFontFamily,
+  ]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void listLocalFontFamilies().then((families) => {
+      if (!cancelled) setLocalFontFamilies(families);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  function commitFontFamily(key: FontFamilySettingKey, value: string) {
+    setSettings((prev) => updateCustomSettings(prev, { [key]: value }));
   }
 
   function setZoneFontScale(zone: keyof FontScaleSettings, value: number) {
@@ -473,6 +514,51 @@ export function SystemSettingsForm(props: SettingsSectionProps) {
             ) : null}
           </div>
         </div>
+      </section>
+
+      <section className="space-y-3 rounded-2xl border border-border/60 bg-card p-4">
+        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+          <ScanText className="h-4 w-4 text-muted-foreground" />
+          {t("settings.fontFamily")}
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-3">
+          {FONT_FAMILY_FIELDS.map(({ key, labelKey }) => (
+            <div key={key} className="space-y-1.5">
+              <Label
+                htmlFor={`${key}-font-family`}
+                className="text-xs font-medium text-muted-foreground"
+              >
+                {t(labelKey)}
+              </Label>
+              <Input
+                id={`${key}-font-family`}
+                value={fontFamilyDrafts[key]}
+                list="font-family-suggestions"
+                spellCheck={false}
+                autoComplete="off"
+                placeholder={t("settings.fontFamilyPlaceholder")}
+                onChange={(event) =>
+                  setFontFamilyDrafts((current) => ({
+                    ...current,
+                    [key]: event.currentTarget.value,
+                  }))
+                }
+                onBlur={() => commitFontFamily(key, fontFamilyDrafts[key])}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.currentTarget.blur();
+                  }
+                }}
+              />
+            </div>
+          ))}
+        </div>
+        <datalist id="font-family-suggestions">
+          {localFontFamilies.map((family) => (
+            <option key={family} value={quoteFontFamilyName(family)} />
+          ))}
+        </datalist>
       </section>
 
       <section className="space-y-3 rounded-2xl border border-border/60 bg-card p-4">

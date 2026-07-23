@@ -15,8 +15,11 @@ import {
 } from "../providers/runtime/modelFactory";
 import { createUuid } from "../shared/id";
 import { mergeAlwaysEnabledSkillNames } from "../skills/builtin";
+import { normalizeFontFamily } from "../system/fontFamily";
 import { SYSTEM_TOOL_OPTIONS, type SystemToolId } from "../tools/systemToolOptions";
 import { normalizeApiKey, normalizeBaseUrl, normalizeModels } from "./normalize";
+
+export { normalizeFontFamily } from "../system/fontFamily";
 
 export type { SystemToolId } from "../tools/systemToolOptions";
 export { isThinkingAlwaysOnForModel };
@@ -138,6 +141,10 @@ export type CustomSettings = {
   conversationTitleModel?: SelectedModel;
   chatSidebar: ChatSidebarSettings;
   rightDock: RightDockSettings;
+  // Empty strings select the built-in stacks for each typography role.
+  interfaceFontFamily: string;
+  chatFontFamily: string;
+  codeFontFamily: string;
   fontScale: FontScaleSettings;
 };
 
@@ -2032,6 +2039,11 @@ export function normalizeCustomSettings(
       recentCollapsed: chatSidebar.recentCollapsed === true,
     },
     rightDock: normalizeRightDockSettings(obj.rightDock),
+    // fontFamily was the single pre-split preference. Read it only to migrate
+    // saved local settings into the new interface-specific field.
+    interfaceFontFamily: normalizeFontFamily(obj.interfaceFontFamily ?? obj.fontFamily),
+    chatFontFamily: normalizeFontFamily(obj.chatFontFamily),
+    codeFontFamily: normalizeFontFamily(obj.codeFontFamily),
     fontScale: normalizeFontScaleSettings(obj.fontScale),
   };
 }

@@ -194,6 +194,28 @@ test("getWebDefaultSettings enables remote settings from the gateway token", () 
   assert.equal(settings.remote.token, "token");
 });
 
+test("web settings normalize independent font families and migrate the retired interface field", () => {
+  const migrated = settings.normalizeSettings({ customSettings: { fontFamily: "Inter" } });
+  assert.equal(migrated.customSettings.interfaceFontFamily, "Inter");
+  assert.equal(Object.hasOwn(migrated.customSettings, "fontFamily"), false);
+
+  const normalized = settings.normalizeSettings({
+    customSettings: {
+      interfaceFontFamily: 'Inter, "PingFang SC", sans-serif',
+      chatFontFamily: "rounded",
+      codeFontFamily: "Menlo",
+    },
+  });
+  assert.equal(normalized.customSettings.interfaceFontFamily, 'Inter, "PingFang SC", sans-serif');
+  assert.equal(normalized.customSettings.chatFontFamily, "rounded");
+  assert.equal(normalized.customSettings.codeFontFamily, "Menlo");
+  assert.equal(
+    settings.normalizeSettings({ customSettings: { codeFontFamily: "invalid;}" } }).customSettings
+      .codeFontFamily,
+    "",
+  );
+});
+
 test("web settings normalization canonicalizes project keyed maps with Windows path compatibility", () => {
   const normalized = settings.normalizeSettings({
     ssh: {
@@ -1600,4 +1622,36 @@ test("xai thinking levels mirror the desktop XAI thinking map", () => {
     { providerId: "xai", modelId: "grok-4.5" },
   );
   assert.equal(clamped.reasoning, "xhigh");
+});
+
+test("gateway sync keeps all web font families local", () => {
+  const current = settings.normalizeSettings({
+    customSettings: {
+      interfaceFontFamily: "Inter",
+      chatFontFamily: "Noto Sans",
+      codeFontFamily: "Menlo",
+    },
+  });
+  const incoming = settingsSync.buildGatewaySettingsSyncPayload(
+    settings.normalizeSettings({
+      customSettings: {
+        interfaceFontFamily: "Arial",
+        chatFontFamily: "Open Sans",
+        codeFontFamily: "Monaco",
+      },
+    }),
+  );
+
+  assert.deepEqual(
+    {
+      interfaceFontFamily: incoming.customSettings.interfaceFontFamily,
+      chatFontFamily: incoming.customSettings.chatFontFamily,
+      codeFontFamily: incoming.customSettings.codeFontFamily,
+    },
+    { interfaceFontFamily: "", chatFontFamily: "", codeFontFamily: "" },
+  );
+  assert.deepEqual(
+    settingsSync.applyGatewaySettingsSyncPayload(current, incoming).customSettings,
+    current.customSettings,
+  );
 });

@@ -82,7 +82,36 @@ func NewStore(database *db.DB) (*Store, error) {
 	`); err != nil {
 		return nil, fmt.Errorf("init agent schema: %w", err)
 	}
-	return &Store{pool: pool, credentialEpochs: make(map[string]uint64)}, nil
+	store := &Store{pool: pool, credentialEpochs: make(map[string]uint64)}
+	if err := store.loadKnownAgents(); err != nil {
+		return nil, err
+	}
+	return store, nil
+}
+
+// loadKnownAgents 在 Gateway 开始监听前一次性恢复已登记 ID 缓存。只读取主键，
+// 不缓存凭证；独立 Token 的轮换和撤销仍由每次连接时的数据库校验保证。
+func (s *Store) loadKnownAgents() error {
+	rows, err := s.pool.Query(`SELECT agent_id FROM agents`)
+	if err != nil {
+		return fmt.Errorf("load known agents: %w", err)
+	}
+	for rows.Next() {
+		var agentID string
+		if err := rows.Scan(&agentID); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("load known agents: %w", err)
+		}
+		s.knownAgents.Store(agentID, struct{}{})
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("load known agents: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("load known agents: %w", err)
+	}
+	return nil
 }
 
 // NormalizeAgentID 接受桌面端自动生成的规范 agent-UUIDv4 标识。

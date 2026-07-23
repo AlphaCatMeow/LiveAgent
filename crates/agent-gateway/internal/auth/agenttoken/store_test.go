@@ -346,6 +346,49 @@ func TestTokensSurviveReopen(t *testing.T) {
 	}
 }
 
+func TestNewStorePreloadsKnownAgentsAfterReopen(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "agents.db")
+	database, store := openTestDB(t, path)
+	if err := store.Register("shared-token-agent"); err != nil {
+		t.Fatalf("register shared-token agent: %v", err)
+	}
+	agentToken, err := store.Issue("independent-token-agent", "")
+	if err != nil {
+		t.Fatalf("issue independent agent token: %v", err)
+	}
+	if err := database.Close(); err != nil {
+		t.Fatalf("close database: %v", err)
+	}
+
+	// 模拟 Gateway 重启。把重开的单连接切为只读，确保已有 Agent 重连完全依赖
+	// 启动预加载缓存；如果仍执行 INSERT OR IGNORE，此处会因只读而失败。
+	reopenedDB, reopened := openTestDB(t, path)
+	reopenedDB.Pool().SetMaxOpenConns(1)
+	reopenedDB.Pool().SetMaxIdleConns(1)
+	if _, err := reopenedDB.Pool().Exec(`PRAGMA query_only = ON`); err != nil {
+		t.Fatalf("enable query-only mode: %v", err)
+	}
+	if _, ok := reopened.knownAgents.Load("shared-token-agent"); !ok {
+		t.Fatal("shared-token agent was not preloaded")
+	}
+	if _, ok := reopened.knownAgents.Load("independent-token-agent"); !ok {
+		t.Fatal("independent-token agent was not preloaded")
+	}
+	if _, err := reopened.AuthenticateAndRegister("shared-token-agent", "", true); err != nil {
+		t.Fatalf("reconnect preloaded shared-token agent: %v", err)
+	}
+	if _, err := reopened.AuthenticateAndRegister(
+		"independent-token-agent", agentToken, false,
+	); err != nil {
+		t.Fatalf("reconnect preloaded independent-token agent: %v", err)
+	}
+	if _, err := reopened.AuthenticateAndRegister("new-agent", "", true); err == nil {
+		t.Fatal("new shared-token agent unexpectedly registered in query-only mode")
+	}
+}
+
 func TestDBFilePermissionsAndNoPlaintext(t *testing.T) {
 	t.Parallel()
 

@@ -205,6 +205,7 @@ export function XTermViewport({
         // xterm fit can throw while the panel is hidden or measuring at zero size.
       }
     };
+    fitAndResizeRef.current = fitAndResize;
 
     const handleCodeFontFamilyChange = (event: Event) => {
       const codeFontFamily = (event as CustomEvent<string>).detail;

@@ -95,6 +95,53 @@ export function findCatalogModel(
   return undefined;
 }
 
+// 中转聚合常把 A 家模型挂在 B 家供应商类型下（如 Anthropic 兼容中转供 grok），
+// 供应商作用域查不到时按 id 跨供应商回查，避免真实限额被本供应商兜底值顶掉。
+// 目录 id 无跨供应商重名（目录不变量测试锁死）；候选链放外层——更精确的 id
+// 形态优先于供应商声明序。
+const CATALOG_PROVIDER_IDS = Object.keys(MODEL_CATALOG) as CatalogProviderId[];
+
+export function findCatalogModelAcrossProviders(
+  modelId: string | undefined,
+): CatalogModelEntry | undefined {
+  const trimmedId = modelId?.trim();
+  if (!trimmedId) return undefined;
+  for (const candidate of normalizeModelIdCandidates(trimmedId)) {
+    for (const catalogProvider of CATALOG_PROVIDER_IDS) {
+      const entry = getCatalogIndex(catalogProvider).get(candidate);
+      if (entry) return entry;
+    }
+  }
+  return undefined;
+}
+
+export function resolveModelLimitsAcrossProviders(
+  modelId: string | undefined,
+): ModelLimits | undefined {
+  const entry = findCatalogModelAcrossProviders(modelId);
+  if (!entry) return undefined;
+  return { contextWindow: entry.contextWindow, maxOutputToken: entry.maxOutputToken };
+}
+
+// 跨供应商回查上线前，别家模型挂在本供应商下会以本供应商兜底值落库。存量
+// 恰为兜底对、且模型只在其他供应商目录命中时视为坏默认值替换为目录真实限额；
+// 两值有一处偏离兜底对即视为用户显式配置，原样保留。
+export function repairStaleCrossProviderLimits(
+  providerId: CatalogAppProviderId,
+  modelId: string,
+  limits: ModelLimits,
+): ModelLimits {
+  const fallback = PROVIDER_FALLBACK_LIMITS[providerId];
+  if (
+    limits.contextWindow !== fallback.contextWindow ||
+    limits.maxOutputToken !== fallback.maxOutputToken
+  ) {
+    return limits;
+  }
+  if (findCatalogModel(providerId, modelId)) return limits;
+  return resolveModelLimitsAcrossProviders(modelId) ?? limits;
+}
+
 export function resolveModelLimits(
   providerId: CatalogAppProviderId,
   modelId: string | undefined,

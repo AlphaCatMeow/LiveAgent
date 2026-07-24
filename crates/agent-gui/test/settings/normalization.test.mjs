@@ -2401,6 +2401,66 @@ test("degenerate catalog limits (output == context window) are clamped in the sn
   assert.equal(grok43.maxOutputToken, 30_000);
 });
 
+test("cross-provider models resolve real catalog limits instead of provider fallback", () => {
+  // 中转聚合把别家模型挂在本供应商类型下：grok-4.5 配在 anthropic 下也要
+  // 显示真实限额（500K/32K），而不是 claude_code 兜底 200K/32K。
+  const grokUnderAnthropic = settings.getProviderModelDefaults("claude_code", "grok-4.5");
+  assert.equal(grokUnderAnthropic.contextWindow, 500_000);
+  assert.equal(grokUnderAnthropic.maxOutputToken, 32_000);
+  // 反向同理：claude 模型挂在 OpenAI 兼容供应商下读 anthropic 目录。
+  const claudeUnderCodex = settings.getProviderModelDefaults("codex", "claude-opus-4-5");
+  assert.equal(claudeUnderCodex.contextWindow, 200_000);
+  assert.equal(claudeUnderCodex.maxOutputToken, 64_000);
+  const geminiUnderXai = settings.getProviderModelDefaults("xai", "gemini-2.5-pro");
+  assert.equal(geminiUnderXai.contextWindow, 1_048_576);
+  assert.equal(geminiUnderXai.maxOutputToken, 65_536);
+  // 装饰 id 的候选链对跨供应商回查同样生效。
+  assert.equal(
+    settings.getProviderModelDefaults("claude_code", "GROK-4.5@prod").contextWindow,
+    500_000,
+  );
+  // 全目录未收录的模型仍吃本供应商兜底值。
+  assert.equal(
+    settings.getProviderModelDefaults("claude_code", "some-custom-model").contextWindow,
+    200_000,
+  );
+  // Anthropic 形态的未知 id（[1m]/adaptive 启发式）优先级高于跨供应商回查：
+  // [1m] 是用户对部署窗口的显式声明。
+  assert.equal(
+    settings.getProviderModelDefaults("claude_code", "grok-4.5[1m]").contextWindow,
+    1_000_000,
+  );
+});
+
+test("stale fallback limits persisted for cross-provider models are repaired on read", () => {
+  // 跨供应商回查上线前，grok-4.5 挂 anthropic 下会以 200K/32K 兜底对落库：
+  // 读侧识别并替换为目录真实限额，不需要用户删除重加。
+  const repaired = settings.normalizeProviderModelConfig(
+    { id: "grok-4.5", contextWindow: 200_000, maxOutputToken: 32_000 },
+    "claude_code",
+  );
+  assert.equal(repaired.contextWindow, 500_000);
+  assert.equal(repaired.maxOutputToken, 32_000);
+  // 任一值偏离兜底对 = 用户显式配置，原样保留。
+  const custom = settings.normalizeProviderModelConfig(
+    { id: "grok-4.5", contextWindow: 200_000, maxOutputToken: 30_000 },
+    "claude_code",
+  );
+  assert.equal(custom.contextWindow, 200_000);
+  assert.equal(custom.maxOutputToken, 30_000);
+  // 本供应商目录内的模型不受存量修复影响（claude-opus-4-1 真实限额恰为兜底对）。
+  const native = settings.normalizeProviderModelConfig(
+    { id: "claude-opus-4-1", contextWindow: 200_000, maxOutputToken: 32_000 },
+    "claude_code",
+  );
+  assert.equal(native.contextWindow, 200_000);
+  assert.equal(native.maxOutputToken, 32_000);
+  // 新增（无存量限额）直接拿跨供应商默认值。
+  const fresh = settings.normalizeProviderModelConfig("grok-4.5", "claude_code");
+  assert.equal(fresh.contextWindow, 500_000);
+  assert.equal(fresh.maxOutputToken, 32_000);
+});
+
 test("persisted degenerate limits are repaired at normalize time for every provider", () => {
   // 坏目录数据落库期间加入的模型：读侧修复，不需要用户重新添加。
   const repaired = settings.normalizeProviderModelConfig(

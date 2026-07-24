@@ -59,6 +59,7 @@ import { parseModelValue, toModelValue } from "../../lib/providers/llm";
 import { sortModelsByActiveStateAndVendor } from "../../lib/providers/modelVendor";
 import {
   CODEX_REQUEST_FORMAT_LABELS,
+  getDefaultUsageQueryConfig,
   type CodexRequestFormat,
   type CustomProvider,
   type ProviderId,
@@ -589,6 +590,7 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
           : undefined,
       nativeWebSearchEnabled: initialData?.nativeWebSearchEnabled ?? true,
       useSystemProxy,
+      usageQuery: initialData?.usageQuery ?? getDefaultUsageQueryConfig(),
     });
   }
 
@@ -1734,6 +1736,7 @@ function providerFromCcs(item: CcsProviderImportItem, existingIds: Set<string>):
     promptCachingEnabled: providerType !== "gemini" && providerType !== "xai",
     nativeWebSearchEnabled: true,
     useSystemProxy: false,
+    usageQuery: getDefaultUsageQueryConfig(),
   };
 }
 
@@ -1803,6 +1806,7 @@ function providerFromCherry(
       existing?.promptCachingEnabled ?? (providerType !== "gemini" && providerType !== "xai"),
     nativeWebSearchEnabled: existing?.nativeWebSearchEnabled ?? true,
     useSystemProxy: existing?.useSystemProxy ?? false,
+    usageQuery: existing?.usageQuery ?? getDefaultUsageQueryConfig(),
   };
 }
 

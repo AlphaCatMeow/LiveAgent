@@ -2499,3 +2499,24 @@ test("persisted degenerate limits are repaired at normalize time for every provi
   );
   assert.equal(codex.maxOutputToken, 32_000);
 });
+
+test("usage query defaults disabled and redacts query credentials", () => {
+  const provider = settings.normalizeCustomProvider({
+    usageQuery: {
+      mode: "newapi",
+      accessToken: "access-token",
+      secretAccessKey: "secret-access-key",
+      autoRefreshMinutes: 9_999,
+    },
+  });
+
+  assert.equal(provider.usageQuery.enabled, false);
+  assert.equal(provider.usageQuery.mode, "newapi");
+  assert.equal(provider.usageQuery.autoRefreshMinutes, 1_440);
+
+  const redacted = sync.redactCustomProvidersForGateway([provider])[0];
+  assert.equal(redacted.usageQuery.accessToken, "");
+  assert.equal(redacted.usageQuery.secretAccessKey, "");
+  assert.equal(redacted.usageQuery.accessTokenConfigured, true);
+  assert.equal(redacted.usageQuery.secretAccessKeyConfigured, true);
+});

@@ -271,6 +271,40 @@ export type SshSettings = {
   projectHostAssociations: Record<string, string[]>;
 };
 
+export type UsageQueryMode = "balance" | "coding-plan" | "general" | "newapi" | "custom";
+
+export type UsageQueryConfig = {
+  enabled: boolean;
+  mode: UsageQueryMode;
+  script: string;
+  baseUrl: string;
+  accessToken: string;
+  accessTokenConfigured?: boolean;
+  userId: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  secretAccessKeyConfigured?: boolean;
+  autoRefreshMinutes: number;
+  allowLocalNetwork: boolean;
+};
+
+export function getDefaultUsageQueryConfig(): UsageQueryConfig {
+  return {
+    enabled: false,
+    mode: "balance",
+    script: "",
+    baseUrl: "",
+    accessToken: "",
+    accessTokenConfigured: false,
+    userId: "",
+    accessKeyId: "",
+    secretAccessKey: "",
+    secretAccessKeyConfigured: false,
+    autoRefreshMinutes: 0,
+    allowLocalNetwork: false,
+  };
+}
+
 export type CustomProvider = {
   id: string;
   name: string;
@@ -289,6 +323,7 @@ export type CustomProvider = {
   promptCacheRetention?: "short" | "long";
   nativeWebSearchEnabled: boolean;
   useSystemProxy: boolean;
+  usageQuery: UsageQueryConfig;
 };
 
 export type EffectiveTheme = "light" | "dark";
@@ -414,6 +449,7 @@ export function getBuiltinCustomProviders(): CustomProvider[] {
       promptCachingEnabled: true,
       nativeWebSearchEnabled: true,
       useSystemProxy: false,
+      usageQuery: getDefaultUsageQueryConfig(),
     },
     {
       id: "builtin-codex",
@@ -429,6 +465,7 @@ export function getBuiltinCustomProviders(): CustomProvider[] {
       promptCachingEnabled: true,
       nativeWebSearchEnabled: true,
       useSystemProxy: false,
+      usageQuery: getDefaultUsageQueryConfig(),
     },
     {
       id: "builtin-gemini",
@@ -443,6 +480,7 @@ export function getBuiltinCustomProviders(): CustomProvider[] {
       promptCachingEnabled: false,
       nativeWebSearchEnabled: true,
       useSystemProxy: false,
+      usageQuery: getDefaultUsageQueryConfig(),
     },
     {
       id: "builtin-xai",
@@ -458,6 +496,7 @@ export function getBuiltinCustomProviders(): CustomProvider[] {
       promptCachingEnabled: false,
       nativeWebSearchEnabled: true,
       useSystemProxy: false,
+      usageQuery: getDefaultUsageQueryConfig(),
     },
   ];
 }
@@ -1238,6 +1277,47 @@ function normalizeProviderModelOrder(
   return order;
 }
 
+function normalizeUsageQueryMode(input: unknown): UsageQueryMode {
+  switch (input) {
+    case "coding-plan":
+    case "general":
+    case "newapi":
+    case "custom":
+      return input;
+    default:
+      return "balance";
+  }
+}
+
+function normalizeUsageQueryAutoRefreshMinutes(input: unknown): number {
+  const value = typeof input === "number" || typeof input === "string" ? Number(input) : 0;
+  if (!Number.isFinite(value)) return 0;
+  return Math.min(1_440, Math.max(0, Math.floor(value)));
+}
+
+function normalizeUsageQueryConfig(input: unknown): UsageQueryConfig {
+  const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const accessToken = normalizeApiKey(typeof obj.accessToken === "string" ? obj.accessToken : "");
+  const secretAccessKey = normalizeApiKey(
+    typeof obj.secretAccessKey === "string" ? obj.secretAccessKey : "",
+  );
+
+  return {
+    enabled: obj.enabled === true,
+    mode: normalizeUsageQueryMode(obj.mode),
+    script: typeof obj.script === "string" ? obj.script.trim() : "",
+    baseUrl: normalizeBaseUrl(typeof obj.baseUrl === "string" ? obj.baseUrl : ""),
+    accessToken,
+    accessTokenConfigured: accessToken.length > 0 || obj.accessTokenConfigured === true,
+    userId: typeof obj.userId === "string" ? obj.userId.trim() : "",
+    accessKeyId: typeof obj.accessKeyId === "string" ? obj.accessKeyId.trim() : "",
+    secretAccessKey,
+    secretAccessKeyConfigured: secretAccessKey.length > 0 || obj.secretAccessKeyConfigured === true,
+    autoRefreshMinutes: normalizeUsageQueryAutoRefreshMinutes(obj.autoRefreshMinutes),
+    allowLocalNetwork: obj.allowLocalNetwork === true,
+  };
+}
+
 export function normalizeCustomProvider(input: unknown): CustomProvider {
   const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
   const type = normalizeProviderId(obj.type);
@@ -1281,6 +1361,7 @@ export function normalizeCustomProvider(input: unknown): CustomProvider {
       : {}),
     nativeWebSearchEnabled: obj.nativeWebSearchEnabled !== false,
     useSystemProxy: obj.useSystemProxy === true,
+    usageQuery: normalizeUsageQueryConfig(obj.usageQuery),
   };
 }
 

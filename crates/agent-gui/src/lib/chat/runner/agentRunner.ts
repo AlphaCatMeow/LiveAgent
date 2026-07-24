@@ -29,8 +29,11 @@ import {
   toSimpleStreamReasoning,
 } from "../../providers/llm";
 import {
+  buildProviderNativeWebFetchBridgeResult,
   buildProviderNativeWebSearchBridgeResult,
+  HIDDEN_PROVIDER_NATIVE_WEB_FETCH_TOOL_NAMES,
   HIDDEN_PROVIDER_NATIVE_WEB_SEARCH_TOOL_NAMES,
+  isProviderNativeWebFetchToolName,
   isProviderNativeWebSearchToolName,
 } from "../../providers/nativeWebSearch";
 import { prepareProxyRequest } from "../../providers/proxy";
@@ -63,7 +66,7 @@ import {
   resolveProviderNativeWebSearchStatus,
 } from "../search/providerNativeSearchStatus";
 import { comparableToolCall } from "./flattenedToolCallText";
-import { recoverAssistantSeedToolCalls } from "./seedToolCalls";
+import { recoverAssistantSeedToolCalls, stripSeedToolCallMarkup } from "./seedToolCalls";
 import { wrapStreamWithToolCallArgumentGuard } from "./toolCallArgumentGuard";
 
 function createLinkedAbortSignal(signals: Array<AbortSignal | undefined>): {
@@ -783,6 +786,15 @@ export async function runAssistantWithTools(params: {
               "No local web_search executor is available. Continue from existing context, or request provider-native web search through the model/tool protocol instead of printing raw tool-call markup.",
             extraInstructions: ["Do not repeat raw tool-call markup in the final answer."],
           });
+        } else if (shouldSilenceProviderNativeWebFetchToolCall(effectiveToolCall)) {
+          toolResult = buildProviderNativeWebFetchBridgeResult({
+            toolCall: effectiveToolCall,
+            hostedSearchBlocks: hostedSearchBlocksByRound.get(currentRound) ?? [],
+            sourcesIntro: "Hosted search sources already captured in this round:",
+            fallbackText:
+              "No hosted search sources were captured in this round. Continue from existing context.",
+            extraInstructions: ["Do not repeat raw tool-call markup in the final answer."],
+          });
         } else {
           const execute = () =>
             params.executeToolCall(effectiveToolCall, linkedSignal.signal, {
@@ -882,16 +894,76 @@ export async function runAssistantWithTools(params: {
         ? HIDDEN_PROVIDER_NATIVE_WEB_SEARCH_TOOL_NAMES.filter((name) => !localToolNames.has(name))
         : [],
     );
+    const hiddenProviderNativeWebFetchToolNames = new Set<string>(
+      nativeWebSearchStatus
+        ? HIDDEN_PROVIDER_NATIVE_WEB_FETCH_TOOL_NAMES.filter((name) => !localToolNames.has(name))
+        : [],
+    );
     const shouldSilenceProviderNativeWebSearchToolCall = (toolCall: ToolCall) =>
       Boolean(
         nativeWebSearchStatus &&
           !localToolNames.has(toolCall.name) &&
           isProviderNativeWebSearchToolName(toolCall.name),
       );
+    const shouldSilenceProviderNativeWebFetchToolCall = (toolCall: ToolCall) =>
+      Boolean(
+        nativeWebSearchStatus &&
+          !localToolNames.has(toolCall.name) &&
+          isProviderNativeWebFetchToolName(toolCall.name),
+      );
+    // Single gate for every tool-event suppression site: bridged web_search and
+    // web_fetch calls must never surface as tool rows/status lines in the UI.
+    const shouldSilenceProviderNativeToolCall = (toolCall: ToolCall) =>
+      shouldSilenceProviderNativeWebSearchToolCall(toolCall) ||
+      shouldSilenceProviderNativeWebFetchToolCall(toolCall);
     const filterRequestTools = (
       tools: Context["tools"] | undefined,
     ): Context["tools"] | undefined =>
-      tools?.filter((tool) => !hiddenProviderNativeWebSearchToolNames.has(tool.name));
+      tools?.filter(
+        (tool) =>
+          !hiddenProviderNativeWebSearchToolNames.has(tool.name) &&
+          !hiddenProviderNativeWebFetchToolNames.has(tool.name),
+      );
+
+    const assistantVisibleAnswerText = (assistant: AssistantMessage) =>
+      stripSeedToolCallMarkup(
+        assistant.content
+          .flatMap((block) => (block.type === "text" ? [block.text] : []))
+          .join("\n"),
+        { recoverFlattenedText: true },
+      ).trim();
+
+    // Relays that execute Anthropic server tools in-band can leak the original
+    // tool_use blocks with stop_reason end_turn *after* the model has already
+    // written its final answer (the server results streamed mid-generation, so
+    // the answer text follows them in the same message). Bridging those calls
+    // and letting pi-agent-core run another model turn makes Claude answer the
+    // same question again — duplicate output after every web search. Marking
+    // every bridged call of such a batch as terminate keeps the bridge results
+    // in history (the next request stays protocol-consistent) but ends the run
+    // on the answer the user already has. Guards: the model must have finished
+    // normally with visible answer text, and a leaked search call additionally
+    // needs completed in-round hosted-search sources — a model that is still
+    // waiting for results (raw-markup recovery, relays that execute nothing)
+    // keeps its follow-up turn.
+    const shouldTerminateBridgedProviderNativeToolCall = async (
+      assistant: AssistantMessage,
+      toolCall: ToolCall,
+    ) => {
+      if (!shouldSilenceProviderNativeToolCall(toolCall)) return false;
+      if (assistant.stopReason !== "stop") return false;
+      if (assistantVisibleAnswerText(assistant).length === 0) return false;
+      if (isProviderNativeWebSearchToolName(toolCall.name)) {
+        // Await the round's probe finalization (message_end already queued this
+        // exact promise) so the coverage decision reads the complete in-band
+        // search metadata instead of racing the response-clone parser.
+        const blocks = await finishHostedSearchRound(currentRound, "completed");
+        return blocks.some((block) => block.status === "completed" && block.sources.length > 0);
+      }
+      // web_fetch bridges never add new information; once the model has
+      // delivered its answer there is nothing for a follow-up turn to do.
+      return true;
+    };
     const toolsSuffix = buildToolsSuffix(
       params.workdir,
       llmTools.map((tool) => tool.name),
@@ -1166,7 +1238,37 @@ export async function runAssistantWithTools(params: {
         return executeSingleToolCall(toolCall, signal);
       },
     }));
-    agentTools = [...visibleAgentTools, ...hiddenProviderNativeWebSearchAgentTools];
+    // Registered so pi-agent-core resolves leaked provider-native web_fetch
+    // calls instead of erroring with "Tool web_fetch not found"; execution
+    // routes into the silent bridge above.
+    const hiddenProviderNativeWebFetchAgentTools: AgentTool<any>[] = [
+      ...hiddenProviderNativeWebFetchToolNames,
+    ].map((name) => ({
+      name,
+      label: name,
+      description: "Internal provider-native web fetch bridge.",
+      parameters: {
+        type: "object",
+        properties: {
+          url: { type: "string" },
+        },
+        additionalProperties: true,
+      },
+      async execute(toolCallId, toolArgs, signal) {
+        const toolCall = toSyntheticToolCall({
+          id: toolCallId,
+          name,
+          arguments: (toolArgs ?? {}) as Record<string, unknown>,
+        });
+        toolCallsById.set(toolCall.id, toolCall);
+        return executeSingleToolCall(toolCall, signal);
+      },
+    }));
+    agentTools = [
+      ...visibleAgentTools,
+      ...hiddenProviderNativeWebSearchAgentTools,
+      ...hiddenProviderNativeWebFetchAgentTools,
+    ];
 
     let streamRound = 0;
     const streamFn = (streamModel: typeof model, streamContext: Context, options?: any) => {
@@ -1326,8 +1428,11 @@ export async function runAssistantWithTools(params: {
       sessionId: params.sessionId,
       streamFn,
       toolExecution: "sequential",
-      afterToolCall: async ({ toolCall }) => ({
+      afterToolCall: async ({ assistantMessage, toolCall }) => ({
         isError: toolResultErrorFlags.get(toolCall.id) ?? false,
+        // The batch only terminates when *every* call terminates, so a real
+        // local tool call mixed into the same message keeps the loop running.
+        terminate: await shouldTerminateBridgedProviderNativeToolCall(assistantMessage, toolCall),
       }),
       beforeToolCall: async ({ assistantMessage, toolCall }) => {
         const effectiveToolCall = normalizeToolCallNameForExecution(toolCall);
@@ -1433,7 +1538,7 @@ export async function runAssistantWithTools(params: {
                 streamEvent.partial.content[streamEvent.contentIndex] = effectiveToolCall;
               }
               toolCallsById.set(effectiveToolCall.id, effectiveToolCall);
-              if (!shouldSilenceProviderNativeWebSearchToolCall(effectiveToolCall)) {
+              if (!shouldSilenceProviderNativeToolCall(effectiveToolCall)) {
                 params.onToolCall?.(effectiveToolCall, currentRound);
               }
             }
@@ -1446,7 +1551,7 @@ export async function runAssistantWithTools(params: {
                 streamEvent.partial.content[streamEvent.contentIndex] = effectiveToolCall;
               }
               toolCallsById.set(effectiveToolCall.id, effectiveToolCall);
-              if (!shouldSilenceProviderNativeWebSearchToolCall(effectiveToolCall)) {
+              if (!shouldSilenceProviderNativeToolCall(effectiveToolCall)) {
                 params.onToolCallDelta?.(effectiveToolCall, currentRound);
               }
             }
@@ -1454,7 +1559,7 @@ export async function runAssistantWithTools(params: {
             nativeWebSearchStatusController.pause();
             const effectiveToolCall = normalizeToolCallNameForExecution(streamEvent.toolCall);
             toolCallsById.set(effectiveToolCall.id, effectiveToolCall);
-            if (!shouldSilenceProviderNativeWebSearchToolCall(effectiveToolCall)) {
+            if (!shouldSilenceProviderNativeToolCall(effectiveToolCall)) {
               params.onToolCall?.(effectiveToolCall, currentRound);
             }
           }
@@ -1531,7 +1636,7 @@ export async function runAssistantWithTools(params: {
               assistant: assistantMessage,
             });
             const toolCallCount = getAssistantToolCalls(assistantMessage).filter(
-              (toolCall) => !shouldSilenceProviderNativeWebSearchToolCall(toolCall),
+              (toolCall) => !shouldSilenceProviderNativeToolCall(toolCall),
             ).length;
             if (toolCallCount > 0) {
               nativeWebSearchStatusController.pause();
@@ -1545,7 +1650,7 @@ export async function runAssistantWithTools(params: {
                 id: event.message.toolCallId,
                 name: event.message.toolName,
               });
-            if (!shouldSilenceProviderNativeWebSearchToolCall(toolCall)) {
+            if (!shouldSilenceProviderNativeToolCall(toolCall)) {
               params.onToolResult?.(toolCall, event.message, currentRound);
             }
           }
@@ -1589,7 +1694,7 @@ export async function runAssistantWithTools(params: {
               arguments: event.args ?? {},
             });
           toolCallsById.set(toolCall.id, toolCall);
-          if (shouldSilenceProviderNativeWebSearchToolCall(toolCall)) {
+          if (shouldSilenceProviderNativeToolCall(toolCall)) {
             break;
           }
           const parallelBatch = getParallelToolBatch(
@@ -1655,7 +1760,7 @@ export async function runAssistantWithTools(params: {
         }
 
         const visibleRecoveredSeedToolCalls = recoveredSeedToolCalls.filter(
-          (toolCall) => !shouldSilenceProviderNativeWebSearchToolCall(toolCall),
+          (toolCall) => !shouldSilenceProviderNativeToolCall(toolCall),
         );
         if (visibleRecoveredSeedToolCalls.length > 0) {
           params.onToolStatus?.(
@@ -1666,7 +1771,7 @@ export async function runAssistantWithTools(params: {
         const syntheticToolResults: ToolResultMessage[] = [];
         for (const toolCall of recoveredSeedToolCalls) {
           toolCallsById.set(toolCall.id, toolCall);
-          const shouldSilenceToolCall = shouldSilenceProviderNativeWebSearchToolCall(toolCall);
+          const shouldSilenceToolCall = shouldSilenceProviderNativeToolCall(toolCall);
           if (!shouldSilenceToolCall) {
             params.onToolCall?.(toolCall, recoveredSeedRound);
             params.onToolStatus?.(`正在执行：${summarizeToolCall(toolCall)}`);

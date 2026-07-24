@@ -465,24 +465,43 @@ function createOpenAIResponsesSearchEventParser(): SearchEventParser {
 }
 
 // ---------------------------------------------------------------------------
-// Anthropic Messages: server_tool_use (web_search) content blocks are stateful —
-// the query is either given whole on content_block_start, or streamed in as
-// input_json_delta.partial_json fragments keyed by content_block.index that
-// only become valid JSON once fully accumulated. Web search results arrive
-// whole on content_block_start; citations arrive via citations_delta on text
-// blocks and are associated with the most recently active search by the
-// aggregator's own last-id fallback (they carry no search id of their own).
+// Anthropic Messages: server_tool_use (web_search / web_fetch) content blocks
+// are stateful — the query/url is either given whole on content_block_start,
+// or streamed in as input_json_delta.partial_json fragments keyed by
+// content_block.index that only become valid JSON once fully accumulated.
+// Search results arrive whole on content_block_start (web_search_tool_result);
+// so do fetch results (web_fetch_tool_result, whose content is a single
+// web_fetch_result record, not a list). Citations arrive via citations_delta
+// on text blocks and are associated with the most recently active search by
+// the aggregator's own last-id fallback (they carry no search id of their own).
 // ---------------------------------------------------------------------------
 
 type AnthropicSearchBlockState = {
+  kind: "search" | "fetch";
   toolId: string;
   jsonBuffer: string;
   lastQuery: string;
+  lastUrl: string;
 };
 
 function tryExtractAnthropicQuery(jsonBuffer: string): string {
   const parsed = maybeParseJson(jsonBuffer);
   return isRecord(parsed) ? readString(parsed.query) : "";
+}
+
+function tryExtractAnthropicFetchUrl(jsonBuffer: string): string {
+  const parsed = maybeParseJson(jsonBuffer);
+  const url = isRecord(parsed) ? readString(parsed.url) : "";
+  return url && isHttpUrl(url) ? url : "";
+}
+
+function extractAnthropicFetchResultSource(content: unknown): HostedSearchSource | null {
+  if (!isRecord(content) || readString(content.type) !== "web_fetch_result") return null;
+  const url = readString(content.url);
+  if (!url || !isHttpUrl(url)) return null;
+  const document = isRecord(content.content) ? content.content : {};
+  const title = readString(document.title);
+  return { url, ...(title ? { title } : {}), sourceType: "source" };
 }
 
 function extractAnthropicResultSources(content: unknown): HostedSearchSource[] {
@@ -509,7 +528,13 @@ function createAnthropicSearchEventParser(): SearchEventParser {
 
     if (blockType === "server_tool_use" && name === "web_search") {
       const toolId = readString(block.id);
-      const state: AnthropicSearchBlockState = { toolId, jsonBuffer: "", lastQuery: "" };
+      const state: AnthropicSearchBlockState = {
+        kind: "search",
+        toolId,
+        jsonBuffer: "",
+        lastQuery: "",
+        lastUrl: "",
+      };
       searchBlocksByIndex.set(index, state);
 
       const query = isRecord(block.input) ? readString(block.input.query) : "";
@@ -522,6 +547,31 @@ function createAnthropicSearchEventParser(): SearchEventParser {
           status: "searching",
           queries: [query],
           sources: [],
+        },
+      ];
+    }
+
+    if (blockType === "server_tool_use" && name === "web_fetch") {
+      const toolId = readString(block.id);
+      const state: AnthropicSearchBlockState = {
+        kind: "fetch",
+        toolId,
+        jsonBuffer: "",
+        lastQuery: "",
+        lastUrl: "",
+      };
+      searchBlocksByIndex.set(index, state);
+
+      const url = isRecord(block.input) ? readString(block.input.url) : "";
+      if (!url || !isHttpUrl(url)) return [];
+      state.lastUrl = url;
+      return [
+        {
+          ...(toolId ? { id: toolId } : {}),
+          provider: "claude_code",
+          status: "searching",
+          queries: [],
+          sources: [{ url, sourceType: "source" }],
         },
       ];
     }
@@ -539,6 +589,24 @@ function createAnthropicSearchEventParser(): SearchEventParser {
       ];
     }
 
+    if (blockType === "web_fetch_tool_result" || blockType === "web_fetch_tool_result_error") {
+      const toolUseId = readString(block.tool_use_id);
+      const source = extractAnthropicFetchResultSource(block.content);
+      const failed =
+        blockType === "web_fetch_tool_result_error" ||
+        (isRecord(block.content) &&
+          readString(block.content.type) === "web_fetch_tool_result_error");
+      return [
+        {
+          ...(toolUseId ? { id: toolUseId } : {}),
+          provider: "claude_code",
+          status: failed ? "failed" : "completed",
+          queries: [],
+          sources: source ? [source] : [],
+        },
+      ];
+    }
+
     return [];
   }
 
@@ -551,6 +619,22 @@ function createAnthropicSearchEventParser(): SearchEventParser {
       const state = searchBlocksByIndex.get(index);
       if (!state) return [];
       state.jsonBuffer += readRawString(delta.partial_json);
+
+      if (state.kind === "fetch") {
+        const url = tryExtractAnthropicFetchUrl(state.jsonBuffer);
+        if (!url || url === state.lastUrl) return [];
+        state.lastUrl = url;
+        return [
+          {
+            ...(state.toolId ? { id: state.toolId } : {}),
+            provider: "claude_code",
+            status: "searching",
+            queries: [],
+            sources: [{ url, sourceType: "source" }],
+          },
+        ];
+      }
+
       const query = tryExtractAnthropicQuery(state.jsonBuffer);
       if (!query || query === state.lastQuery) return [];
       state.lastQuery = query;

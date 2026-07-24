@@ -956,6 +956,27 @@ test("provider payload finalization enables native web search for hosted search 
     { type: "web_search_20250305", name: "web_search" },
   ]);
 
+  // Modern Anthropic models get the paired web_fetch server tool alongside
+  // web_search; legacy/unknown catalog entries (above) keep search-only.
+  const anthropicModernPayload = await anthropicOptions.onPayload(
+    { messages: [{ role: "user", content: "hello" }] },
+    {
+      api: "anthropic-messages",
+      provider: "anthropic",
+      id: "claude-sonnet-5",
+      compat: { forceAdaptiveThinking: true },
+    },
+  );
+  assert.deepEqual(anthropicModernPayload.tools, [
+    { type: "web_search_20260318", name: "web_search" },
+    {
+      type: "web_fetch_20260318",
+      name: "web_fetch",
+      max_uses: 10,
+      max_content_tokens: 50_000,
+    },
+  ]);
+
   const geminiOptions = providers.finalizeProviderStreamOptions({
     providerId: "gemini",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta",

@@ -2341,3 +2341,69 @@ test("chat page helpers keep same-name provider instances in separate model grou
     ],
   );
 });
+
+test("shouldDisplayToolTraceItem hides provider-native web_fetch rows like web_search rows", () => {
+  const fetchCall = {
+    type: "toolCall",
+    id: "toolu_fetch",
+    name: "web_fetch",
+    arguments: { url: "https://example.com/article" },
+  };
+
+  // Bridged (non-executing endpoint) results carry the recovered marker.
+  assert.equal(
+    uiMessages.shouldDisplayToolTraceItem({
+      toolCall: fetchCall,
+      toolResult: {
+        role: "toolResult",
+        toolCallId: "toolu_fetch",
+        toolName: "web_fetch",
+        content: [{ type: "text", text: "This endpoint did not execute..." }],
+        details: { recoveredProviderNativeWebFetch: true },
+        isError: false,
+        timestamp: 0,
+      },
+    }),
+    false,
+  );
+
+  // History written before the bridge existed ("Tool web_fetch not found").
+  assert.equal(
+    uiMessages.shouldDisplayToolTraceItem({
+      toolCall: fetchCall,
+      toolResult: {
+        role: "toolResult",
+        toolCallId: "toolu_fetch",
+        toolName: "web_fetch",
+        content: [{ type: "text", text: "Tool web_fetch not found" }],
+        details: {},
+        isError: true,
+        timestamp: 0,
+      },
+    }),
+    false,
+  );
+
+  // Any web_fetch row disappears once the round has a hosted search card.
+  assert.equal(
+    uiMessages.shouldDisplayToolTraceItem({ toolCall: fetchCall }, { hasHostedSearch: true }),
+    false,
+  );
+
+  // A genuinely failed local tool with a different name keeps its row.
+  assert.equal(
+    uiMessages.shouldDisplayToolTraceItem({
+      toolCall: { type: "toolCall", id: "toolu_other", name: "Read", arguments: {} },
+      toolResult: {
+        role: "toolResult",
+        toolCallId: "toolu_other",
+        toolName: "Read",
+        content: [{ type: "text", text: "Tool Read not found" }],
+        details: {},
+        isError: true,
+        timestamp: 0,
+      },
+    }),
+    true,
+  );
+});

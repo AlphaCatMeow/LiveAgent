@@ -125,7 +125,8 @@ test("claude provider normalization keeps the long cache retention preference", 
   assert.equal(codex.promptCacheRetention, undefined, "retention is Anthropic-only");
 });
 
-test("model config normalization keeps user pricing and drops invalid values", () => {
+test("model config normalization drops legacy persisted pricing", () => {
+  // 计费功能已移除：旧设置里持久化的 cost 键在读侧归一时被丢弃。
   const provider = settings.normalizeCustomProvider({
     id: "relay-1",
     type: "codex",
@@ -135,26 +136,16 @@ test("model config normalization keeps user pricing and drops invalid values", (
         id: "relay-model",
         contextWindow: 128_000,
         maxOutputToken: 8_192,
-        cost: { input: 1.5, output: "6", cacheRead: 0.15, cacheWrite: -3 },
+        cost: { input: 1.5, output: 6, cacheRead: 0.15, cacheWrite: 3 },
       },
       { id: "no-cost-model", contextWindow: 128_000, maxOutputToken: 8_192 },
-      {
-        id: "zero-cost-model",
-        contextWindow: 128_000,
-        maxOutputToken: 8_192,
-        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      },
     ],
   });
 
-  assert.deepEqual(provider.models[0].cost, {
-    input: 1.5,
-    output: 6,
-    cacheRead: 0.15,
-    cacheWrite: 0,
-  });
-  assert.equal(provider.models[1].cost, undefined);
-  assert.equal(provider.models[2].cost, undefined, "all-zero pricing stays unset");
+  assert.equal("cost" in provider.models[0], false);
+  assert.equal("cost" in provider.models[1], false);
+  assert.equal(provider.models[0].contextWindow, 128_000);
+  assert.equal(provider.models[0].maxOutputToken, 8_192);
 });
 
 test("gemini provider normalization keeps native routing and model limits", () => {

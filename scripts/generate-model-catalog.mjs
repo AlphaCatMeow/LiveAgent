@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Generates the model metadata catalog (context window / max output / cost)
+// Generates the model metadata catalog (context window / max output)
 // consumed by both frontends, from the models.dev open database. The output
 // is written byte-identically to:
 //   crates/agent-gui/src/lib/models/catalog.generated.ts
@@ -91,72 +91,6 @@ async function loadUpstream(source) {
   return undefined;
 }
 
-function toCostRates(providerId, modelId, rawRates, label) {
-  const fields = [
-    ["input", rawRates.input],
-    ["output", rawRates.output],
-    ["cacheRead", rawRates.cache_read],
-    ["cacheWrite", rawRates.cache_write],
-  ];
-  const rates = {};
-  for (const [key, raw] of fields) {
-    if (raw === undefined || raw === null) {
-      rates[key] = 0;
-      continue;
-    }
-    if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) {
-      fail(`${providerId}/${modelId}: invalid ${label}.${key}: ${JSON.stringify(raw)}`);
-    }
-    rates[key] = raw;
-  }
-  return rates;
-}
-
-// Request-wide pricing tiers (long-context surcharges). Field names follow
-// pi-ai's runtime shape (calculateCost reads cost.tiers[].inputTokensAbove),
-// missing per-tier rates fill with 0 like the base cost — dropping tiers here
-// would silently under-bill long-context usage on tiered models.
-function toCostTiers(providerId, modelId, rawTiers) {
-  if (rawTiers === undefined || rawTiers === null) return undefined;
-  if (!Array.isArray(rawTiers)) {
-    fail(`${providerId}/${modelId}: invalid cost.tiers: ${JSON.stringify(rawTiers)}`);
-  }
-  const tiers = [];
-  for (const rawTier of rawTiers) {
-    const threshold = rawTier?.tier;
-    if (threshold?.type !== "context" || !Number.isInteger(threshold.size) || threshold.size <= 0) {
-      fail(
-        `${providerId}/${modelId}: unsupported cost tier ${JSON.stringify(threshold)}; ` +
-          "upstream tier schema may have changed",
-      );
-    }
-    tiers.push({
-      inputTokensAbove: threshold.size,
-      ...toCostRates(providerId, modelId, rawTier, "cost.tiers[]"),
-    });
-  }
-  tiers.sort((a, b) => a.inputTokensAbove - b.inputTokensAbove);
-  return tiers.length > 0 ? tiers : undefined;
-}
-
-function toCost(providerId, modelId, rawCost) {
-  if (!rawCost || typeof rawCost !== "object") return undefined;
-  const cost = toCostRates(providerId, modelId, rawCost, "cost");
-  const tiers = toCostTiers(providerId, modelId, rawCost.tiers);
-  // All-zero without tiers means "unpriced" downstream
-  // (normalizeProviderModelCost semantics).
-  if (
-    !tiers &&
-    cost.input <= 0 &&
-    cost.output <= 0 &&
-    cost.cacheRead <= 0 &&
-    cost.cacheWrite <= 0
-  ) {
-    return undefined;
-  }
-  return tiers ? { ...cost, tiers } : cost;
-}
-
 function extractModels(providerId, providerData) {
   const rawModels = providerData?.models;
   if (!rawModels || typeof rawModels !== "object") {
@@ -185,32 +119,14 @@ function extractModels(providerId, providerData) {
       id,
       contextWindow,
       maxOutputToken: normalizeMaxOutputToken(contextWindow, rawOutput),
-      cost: toCost(providerId, id, model.cost),
     });
   }
   entries.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   return entries;
 }
 
-function renderRates(rates) {
-  return `input: ${rates.input}, output: ${rates.output}, cacheRead: ${rates.cacheRead}, cacheWrite: ${rates.cacheWrite}`;
-}
-
 function renderEntry(entry) {
-  const parts = [
-    `id: ${JSON.stringify(entry.id)}`,
-    `contextWindow: ${entry.contextWindow}`,
-    `maxOutputToken: ${entry.maxOutputToken}`,
-  ];
-  if (entry.cost) {
-    const tiers = entry.cost.tiers
-      ?.map((tier) => `{ inputTokensAbove: ${tier.inputTokensAbove}, ${renderRates(tier)} }`)
-      .join(", ");
-    parts.push(
-      `cost: { ${renderRates(entry.cost)}${tiers ? `, tiers: [${tiers}]` : ""} }`,
-    );
-  }
-  return `    { ${parts.join(", ")} },`;
+  return `    { id: ${JSON.stringify(entry.id)}, contextWindow: ${entry.contextWindow}, maxOutputToken: ${entry.maxOutputToken} },`;
 }
 
 function renderCatalog(catalog, snapshotDate) {
@@ -219,27 +135,10 @@ function renderCatalog(catalog, snapshotDate) {
     "// Source: https://models.dev/api.json (providers: anthropic, google, openai, xai)",
     "// Refresh: make update-model-catalog",
     "",
-    "export type CatalogModelCostTier = {",
-    "  inputTokensAbove: number;",
-    "  input: number;",
-    "  output: number;",
-    "  cacheRead: number;",
-    "  cacheWrite: number;",
-    "};",
-    "",
-    "export type CatalogModelCost = {",
-    "  input: number;",
-    "  output: number;",
-    "  cacheRead: number;",
-    "  cacheWrite: number;",
-    "  tiers?: readonly CatalogModelCostTier[];",
-    "};",
-    "",
     "export type CatalogModelEntry = {",
     "  id: string;",
     "  contextWindow: number;",
     "  maxOutputToken: number;",
-    "  cost?: CatalogModelCost;",
     "};",
     "",
     `export type CatalogProviderId = ${PROVIDERS.map((p) => JSON.stringify(p)).join(" | ")};`,

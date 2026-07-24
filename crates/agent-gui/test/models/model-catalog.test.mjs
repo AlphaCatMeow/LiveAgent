@@ -28,33 +28,8 @@ test("generated catalog upholds the data invariants", () => {
       assert.ok(entry.maxOutputToken < entry.contextWindow, `${label}: output must be < context`);
       const limits = { contextWindow: entry.contextWindow, maxOutputToken: entry.maxOutputToken };
       assert.deepEqual(catalog.normalizeModelLimits(limits), limits, label);
-      if (entry.cost) {
-        for (const key of ["input", "output", "cacheRead", "cacheWrite"]) {
-          const value = entry.cost[key];
-          assert.ok(Number.isFinite(value) && value >= 0, `${label}: cost.${key}`);
-        }
-        assert.ok(
-          [entry.cost.input, entry.cost.output, entry.cost.cacheRead, entry.cost.cacheWrite].some(
-            (value) => value > 0,
-          ) || (entry.cost.tiers?.length ?? 0) > 0,
-          `${label}: present cost must not be all-zero`,
-        );
-        if (entry.cost.tiers) {
-          assert.ok(entry.cost.tiers.length > 0, `${label}: empty tiers must be omitted`);
-          let previousThreshold = 0;
-          for (const tier of entry.cost.tiers) {
-            assert.ok(
-              Number.isInteger(tier.inputTokensAbove) && tier.inputTokensAbove > previousThreshold,
-              `${label}: tiers must have ascending positive thresholds`,
-            );
-            previousThreshold = tier.inputTokensAbove;
-            for (const key of ["input", "output", "cacheRead", "cacheWrite"]) {
-              const value = tier[key];
-              assert.ok(Number.isFinite(value) && value >= 0, `${label}: tier.${key}`);
-            }
-          }
-        }
-      }
+      // 计费功能已移除：目录条目只承载限额。
+      assert.deepEqual(Object.keys(entry).sort(), ["contextWindow", "id", "maxOutputToken"], label);
     }
   }
 });
@@ -115,26 +90,6 @@ test("resolveModelLimits returns repaired catalog limits and undefined on miss",
     maxOutputToken: 32_000,
   });
   assert.equal(catalog.resolveModelLimits("xai", "grok-unknown"), undefined);
-});
-
-test("resolveModelCost exposes catalog pricing when present", () => {
-  const cost = catalog.resolveModelCost("xai", "grok-4.5");
-  assert.ok(cost && cost.input > 0 && cost.output > 0);
-  assert.equal(catalog.resolveModelCost("codex", "model-not-in-catalog"), undefined);
-});
-
-test("catalog cost carries long-context pricing tiers in the pi-ai runtime shape", () => {
-  // 阶梯定价被丢弃会导致长上下文用量少计费（审查发现的回归）：目录必须
-  // 以 pi-ai calculateCost 消费的形状（inputTokensAbove）透传 tiers。
-  const grok45 = catalog.resolveModelCost("xai", "grok-4.5");
-  assert.deepEqual(grok45?.tiers, [
-    { inputTokensAbove: 200_000, input: 4, output: 12, cacheRead: 1, cacheWrite: 0 },
-  ]);
-  const gpt54 = catalog.resolveModelCost("codex", "gpt-5.4");
-  assert.equal(gpt54?.tiers?.[0]?.inputTokensAbove, 272_000);
-  assert.ok(gpt54.tiers[0].input > gpt54.input, "tier rate must exceed base rate");
-  // 无阶梯的模型不带 tiers 键。
-  assert.equal(catalog.resolveModelCost("claude_code", "claude-sonnet-4-6")?.tiers, undefined);
 });
 
 test("provider fallback limits keep the historical defaults and return copies", () => {

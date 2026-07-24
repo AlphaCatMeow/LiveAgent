@@ -1,7 +1,6 @@
 import type { Model, ModelThinkingLevel, OpenAICompletionsCompat } from "@earendil-works/pi-ai";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
-import { resolveModelCost } from "../../models/modelCatalog";
 import {
   type CodexRequestFormat,
   getProviderModelDefaults,
@@ -317,13 +316,9 @@ export function createModelFromConfig(
         )
       : configuredContextWindow;
   const maxTokens = modelConfig?.maxOutputToken ?? defaults.maxOutputToken;
-  // 单价优先级：用户自填 > 生成目录（models.dev 快照）> 流式库目录条目 > 零价。
-  // 中转/自定义模型的实际计费经常与官方目录不同，故自填永远最高。
-  const configuredCost = modelConfig?.cost;
-  const catalogCost = resolveModelCost(providerId, modelId);
-  const resolvedCost = configuredCost ?? catalogCost;
+  // 计费功能已整体移除：pi-ai 的 Model.cost 是结构必填字段，统一喂零价，
+  // 流式侧算出的 usage.cost 恒为 0（known 分支同样覆盖，防止目录单价复活计费）。
   const zeroCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-  const customModelCost = resolvedCost ?? zeroCost;
 
   if (providerId === "codex" || providerId === "xai") {
     const { baseUrl: normalizedBaseUrl, preferredApi } = normalizeCodexBaseUrl(baseUrl);
@@ -359,7 +354,7 @@ export function createModelFromConfig(
           ...known,
           contextWindow,
           maxTokens,
-          ...(resolvedCost ? { cost: resolvedCost } : {}),
+          cost: zeroCost,
           ...(isXaiTarget ? { thinkingLevelMap: { ...XAI_THINKING_LEVEL_MAP } } : {}),
           ...(responsesCompat
             ? {
@@ -390,7 +385,7 @@ export function createModelFromConfig(
       // 是否真的下发思考由用户的开关决定。
       reasoning: true,
       input: resolveCodexModelInput(api, modelId),
-      cost: customModelCost,
+      cost: zeroCost,
       contextWindow,
       maxTokens,
     };
@@ -428,7 +423,7 @@ export function createModelFromConfig(
         ...known,
         contextWindow,
         maxTokens,
-        ...(resolvedCost ? { cost: resolvedCost } : {}),
+        cost: zeroCost,
       };
     }
 
@@ -440,7 +435,7 @@ export function createModelFromConfig(
       baseUrl: normalizedBaseUrl,
       reasoning: true,
       input: ["text", "image"],
-      cost: customModelCost,
+      cost: zeroCost,
       contextWindow,
       maxTokens,
     };
@@ -454,7 +449,7 @@ export function createModelFromConfig(
         ...known,
         contextWindow,
         maxTokens,
-        ...(resolvedCost ? { cost: resolvedCost } : {}),
+        cost: zeroCost,
       },
       {
         providerId,
@@ -474,7 +469,7 @@ export function createModelFromConfig(
     baseUrl,
     reasoning: true,
     input: ["text"],
-    cost: customModelCost,
+    cost: zeroCost,
     contextWindow,
     maxTokens,
     ...(thinkingOverrides.compat ? { compat: thinkingOverrides.compat } : {}),

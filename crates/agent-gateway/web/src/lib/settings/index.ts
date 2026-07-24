@@ -183,22 +183,12 @@ export type SelectedModel = {
   model: string;
 };
 
-/** 单价均为 USD / 百万 token，与 pi-ai 模型目录的 cost 字段同单位。 */
-export type ProviderModelCost = {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-};
-
 export type ProviderModelConfig = {
   id: string;
   /** /models 元数据；缺失时保持旧设置格式兼容。 */
   ownedBy?: string;
   contextWindow: number;
   maxOutputToken: number;
-  /** 用户自填单价：目录外模型（中转/改名）没有官方定价时用于成本展示。 */
-  cost?: ProviderModelCost;
 };
 
 export type ChatRuntimeControls = {
@@ -1249,28 +1239,6 @@ export function createProviderModelConfig(
   };
 }
 
-function normalizeNonNegativeNumber(input: unknown): number {
-  const numeric =
-    typeof input === "number" ? input : typeof input === "string" ? Number(input) : NaN;
-  return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
-}
-
-function normalizeProviderModelCost(input: unknown): ProviderModelCost | undefined {
-  if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
-  const obj = input as Record<string, unknown>;
-  const cost: ProviderModelCost = {
-    input: normalizeNonNegativeNumber(obj.input),
-    output: normalizeNonNegativeNumber(obj.output),
-    cacheRead: normalizeNonNegativeNumber(obj.cacheRead),
-    cacheWrite: normalizeNonNegativeNumber(obj.cacheWrite),
-  };
-  // 全零视为未配置，避免把"没填"持久化成显式的零单价。
-  if (cost.input <= 0 && cost.output <= 0 && cost.cacheRead <= 0 && cost.cacheWrite <= 0) {
-    return undefined;
-  }
-  return cost;
-}
-
 export function normalizeProviderModelConfig(
   input: unknown,
   providerId: ProviderId,
@@ -1290,7 +1258,6 @@ export function normalizeProviderModelConfig(
   if (!id) return null;
 
   const defaults = getProviderModelDefaults(providerId, id);
-  const cost = normalizeProviderModelCost(obj.cost);
   const ownedBy =
     (typeof obj.ownedBy === "string" ? obj.ownedBy.trim() : "") ||
     (typeof obj.owned_by === "string" ? obj.owned_by.trim() : "");
@@ -1309,7 +1276,6 @@ export function normalizeProviderModelConfig(
     ...(ownedBy ? { ownedBy } : {}),
     contextWindow: limits.contextWindow,
     maxOutputToken: limits.maxOutputToken,
-    ...(cost !== undefined ? { cost } : {}),
   };
 }
 export function normalizeProviderModelConfigs(

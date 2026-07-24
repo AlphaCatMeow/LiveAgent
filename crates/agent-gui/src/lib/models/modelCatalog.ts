@@ -1,22 +1,16 @@
-import {
-  type CatalogModelCost,
-  type CatalogModelCostTier,
-  type CatalogModelEntry,
-  type CatalogProviderId,
-  MODEL_CATALOG,
-} from "./catalog.generated";
+import { type CatalogModelEntry, type CatalogProviderId, MODEL_CATALOG } from "./catalog.generated";
 
 // ---------------------------------------------------------------------------
-// 模型元信息目录（限额/单价的单一真源）
+// 模型元信息目录（限额的单一真源）
 // ---------------------------------------------------------------------------
 // 数据来自 catalog.generated.ts（构建期由 scripts/generate-model-catalog.mjs
 // 从 models.dev 生成，刷新走 make update-model-catalog）。本文件与生成文件
 // 均在 scripts/mirror-manifest.json 中，两端逐字节镜像。
 // 思考档位/API 选择/compat 等请求路径行为不归这里管——那些是流式运行时
-// （pi-ai）的领域；这里只回答"这个模型的窗口、输出上限、单价是多少"。
+// （pi-ai）的领域；这里只回答"这个模型的窗口和输出上限是多少"。
 
 export { MODEL_CATALOG, MODEL_CATALOG_SNAPSHOT_DATE } from "./catalog.generated";
-export type { CatalogModelCost, CatalogModelCostTier, CatalogModelEntry, CatalogProviderId };
+export type { CatalogModelEntry, CatalogProviderId };
 
 // 与 settings 的 ProviderId 结构相同；本模块不 import settings（避免环）。
 export type CatalogAppProviderId = "claude_code" | "codex" | "gemini" | "xai";
@@ -109,13 +103,6 @@ export function resolveModelLimits(
   if (!entry) return undefined;
   // 目录数据在生成期已过 normalizeModelLimits，直接透传。
   return { contextWindow: entry.contextWindow, maxOutputToken: entry.maxOutputToken };
-}
-
-export function resolveModelCost(
-  providerId: CatalogAppProviderId,
-  modelId: string | undefined,
-): CatalogModelCost | undefined {
-  return findCatalogModel(providerId, modelId)?.cost;
 }
 
 export function getProviderFallbackLimits(providerId: CatalogAppProviderId): ModelLimits {

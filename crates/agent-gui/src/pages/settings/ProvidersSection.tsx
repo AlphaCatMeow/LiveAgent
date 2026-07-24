@@ -112,12 +112,6 @@ type ModelEditDraft = {
 
 type NewModelPhase = "visible" | "fading";
 
-type ModelCopyToast = {
-  message: string;
-  tone: "success" | "error";
-  phase: "visible" | "fading";
-};
-
 type PendingModelLayout = {
   topById: Map<string, number>;
   scrollContainer: HTMLDivElement | null;
@@ -129,8 +123,6 @@ const NEW_MODEL_SORT_DELAY_MS = 1_200;
 const NEW_MODEL_BADGE_DURATION_MS = 3_200;
 const NEW_MODEL_BADGE_FADE_MS = 500;
 const MODEL_FLIP_DURATION_MS = 420;
-const MODEL_COPY_TOAST_DURATION_MS = 1_800;
-const MODEL_COPY_TOAST_FADE_MS = 200;
 
 type CcsProviderImportItem = {
   sourceId: string;
@@ -249,36 +241,6 @@ function DialogSwitch(props: {
   );
 }
 
-async function writeTextToClipboard(text: string): Promise<boolean> {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch {
-      return fallbackWriteTextToClipboard(text);
-    }
-  }
-  return fallbackWriteTextToClipboard(text);
-}
-
-function fallbackWriteTextToClipboard(text: string): boolean {
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.setAttribute("readonly", "");
-  textarea.style.position = "fixed";
-  textarea.style.left = "-9999px";
-  textarea.style.top = "0";
-  document.body.appendChild(textarea);
-  textarea.select();
-  try {
-    return document.execCommand("copy");
-  } catch {
-    return false;
-  } finally {
-    document.body.removeChild(textarea);
-  }
-}
-
 function reconcileModelOrder(
   order: readonly string[] | undefined,
   models: readonly ProviderModelConfig[],
@@ -334,7 +296,6 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
   const [newModelPhases, setNewModelPhases] = useState<ReadonlyMap<string, NewModelPhase>>(
     () => new Map(),
   );
-  const [modelCopyToast, setModelCopyToast] = useState<ModelCopyToast | null>(null);
   const [requestFormat, setRequestFormat] = useState<CodexRequestFormat>(
     initialData?.requestFormat ?? "openai-responses",
   );
@@ -373,8 +334,6 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
   const pendingModelLayoutRef = useRef<PendingModelLayout | null>(null);
   const modelSortTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const modelBadgeTimersRef = useRef(new Map<string, Array<ReturnType<typeof setTimeout>>>());
-  const modelCopyToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const modelCopyToastRemoveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const modelsRef = useRef(models);
   const modelOrderRef = useRef(modelOrder);
   const activeModelsRef = useRef(activeModels);
@@ -447,10 +406,6 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
   useEffect(
     () => () => {
       if (modelSortTimerRef.current) clearTimeout(modelSortTimerRef.current);
-      if (modelCopyToastTimerRef.current) clearTimeout(modelCopyToastTimerRef.current);
-      if (modelCopyToastRemoveTimerRef.current) {
-        clearTimeout(modelCopyToastRemoveTimerRef.current);
-      }
       for (const timers of modelBadgeTimersRef.current.values()) {
         for (const timer of timers) clearTimeout(timer);
       }
@@ -539,30 +494,6 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
     scheduleNewModelSettlement();
   }
   commitModelsWithNewRowsRef.current = commitModelsWithNewRows;
-
-  function showModelCopyToast(message: string, tone: ModelCopyToast["tone"]) {
-    if (modelCopyToastTimerRef.current) clearTimeout(modelCopyToastTimerRef.current);
-    if (modelCopyToastRemoveTimerRef.current) {
-      clearTimeout(modelCopyToastRemoveTimerRef.current);
-    }
-    setModelCopyToast({ message, tone, phase: "visible" });
-    modelCopyToastTimerRef.current = setTimeout(() => {
-      setModelCopyToast((current) => (current ? { ...current, phase: "fading" } : current));
-    }, MODEL_COPY_TOAST_DURATION_MS);
-    modelCopyToastRemoveTimerRef.current = setTimeout(() => {
-      setModelCopyToast(null);
-      modelCopyToastTimerRef.current = null;
-      modelCopyToastRemoveTimerRef.current = null;
-    }, MODEL_COPY_TOAST_DURATION_MS + MODEL_COPY_TOAST_FADE_MS);
-  }
-
-  async function copyModelName(modelId: string) {
-    const copied = await writeTextToClipboard(modelId);
-    showModelCopyToast(
-      t(copied ? "settings.modelNameCopied" : "settings.modelNameCopyFailed"),
-      copied ? "success" : "error",
-    );
-  }
 
   function handleRefresh() {
     const trimUrl = baseUrl.trim();
@@ -1314,19 +1245,7 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
                               </div>
                               <div className="min-w-0 flex-1 max-[720px]:col-[2/5] max-[720px]:row-start-1">
                                 <div className="flex min-w-0 items-center gap-2">
-                                  <button
-                                    type="button"
-                                    className="min-w-0 flex-1 cursor-copy truncate rounded-sm text-left text-sm font-medium underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                    title={t("settings.copyModelName")}
-                                    aria-label={`${t("settings.copyModelName")}: ${model.id}`}
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      void copyModelName(model.id);
-                                    }}
-                                    onKeyDown={(event) => event.stopPropagation()}
-                                  >
-                                    {model.id}
-                                  </button>
+                                  <span className="truncate text-sm font-medium">{model.id}</span>
                                   {newModelPhase ? (
                                     <span
                                       className={cn(
@@ -1868,29 +1787,6 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
               <X className="h-3.5 w-3.5" />
               {t("settings.skillsBulkDone")}
             </Button>
-          </div>
-        ) : null}
-
-        {modelCopyToast ? (
-          <div
-            role="status"
-            aria-live="polite"
-            aria-atomic="true"
-            className={cn(
-              "pointer-events-none absolute left-1/2 z-20 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-lg border bg-background px-3 py-2 text-xs font-medium shadow-lg transition-all duration-200",
-              modelBulkMode ? "bottom-32" : "bottom-20",
-              modelCopyToast.tone === "success"
-                ? "border-emerald-500/30 text-emerald-700 dark:text-emerald-300"
-                : "border-destructive/30 text-destructive",
-              modelCopyToast.phase === "fading" && "translate-y-1 opacity-0",
-            )}
-          >
-            {modelCopyToast.tone === "success" ? (
-              <Check className="h-3.5 w-3.5 shrink-0" />
-            ) : (
-              <X className="h-3.5 w-3.5 shrink-0" />
-            )}
-            <span className="truncate">{modelCopyToast.message}</span>
           </div>
         ) : null}
 

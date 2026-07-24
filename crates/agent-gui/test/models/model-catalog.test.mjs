@@ -11,6 +11,12 @@ const PROVIDERS = ["anthropic", "google", "openai", "xai"];
 const MIN_MODELS_PER_PROVIDER = { anthropic: 8, google: 15, openai: 20, xai: 3 };
 
 test("generated catalog upholds the data invariants", () => {
+  // 跨供应商回查（findCatalogModelAcrossProviders）依赖 id 全目录唯一，
+  // 否则同名模型在不同供应商下会产生歧义命中。
+  const allIds = PROVIDERS.flatMap((providerId) =>
+    catalog.MODEL_CATALOG[providerId].map((entry) => entry.id),
+  );
+  assert.equal(new Set(allIds).size, allIds.length, "ids must be unique across providers");
   for (const providerId of PROVIDERS) {
     const entries = catalog.MODEL_CATALOG[providerId];
     assert.ok(
@@ -81,6 +87,57 @@ test("findCatalogModel resolves exact and decorated ids across providers", () =>
   assert.equal(catalog.findCatalogModel("codex", "model-not-in-catalog"), undefined);
   assert.equal(catalog.findCatalogModel("gemini", ""), undefined);
   assert.equal(catalog.findCatalogModel("gemini", undefined), undefined);
+});
+
+test("cross-provider lookup resolves models configured under a foreign provider", () => {
+  // 中转聚合场景：别家模型挂在本供应商类型下时按 id 全目录回查。
+  assert.equal(catalog.findCatalogModelAcrossProviders("grok-4.5")?.id, "grok-4.5");
+  // 候选链（大小写、@版本、[1m]、日期后缀）对跨供应商回查同样生效。
+  assert.equal(catalog.findCatalogModelAcrossProviders("GROK-4.5@prod")?.id, "grok-4.5");
+  assert.equal(catalog.findCatalogModelAcrossProviders("model-not-in-catalog"), undefined);
+  assert.equal(catalog.findCatalogModelAcrossProviders(""), undefined);
+  assert.equal(catalog.findCatalogModelAcrossProviders(undefined), undefined);
+  assert.deepEqual(catalog.resolveModelLimitsAcrossProviders("grok-4.5"), {
+    contextWindow: 500_000,
+    maxOutputToken: 32_000,
+  });
+  assert.equal(catalog.resolveModelLimitsAcrossProviders("model-not-in-catalog"), undefined);
+});
+
+test("repairStaleCrossProviderLimits replaces only stale provider-fallback pairs", () => {
+  // grok-4.5 挂在 anthropic 类型下、存量恰为 claude_code 兜底对：判为跨供应商
+  // 回查上线前落库的坏默认值，替换为目录真实限额。
+  assert.deepEqual(
+    catalog.repairStaleCrossProviderLimits("claude_code", "grok-4.5", {
+      contextWindow: 200_000,
+      maxOutputToken: 32_000,
+    }),
+    { contextWindow: 500_000, maxOutputToken: 32_000 },
+  );
+  // 任一值偏离兜底对 = 用户显式配置，原样保留。
+  assert.deepEqual(
+    catalog.repairStaleCrossProviderLimits("claude_code", "grok-4.5", {
+      contextWindow: 200_000,
+      maxOutputToken: 31_000,
+    }),
+    { contextWindow: 200_000, maxOutputToken: 31_000 },
+  );
+  // 本供应商目录可命中的模型绝不跨供应商替换（claude-opus-4-1 真实限额恰为兜底对）。
+  assert.deepEqual(
+    catalog.repairStaleCrossProviderLimits("claude_code", "claude-opus-4-1", {
+      contextWindow: 200_000,
+      maxOutputToken: 32_000,
+    }),
+    { contextWindow: 200_000, maxOutputToken: 32_000 },
+  );
+  // 全目录未收录：兜底对本来就是正确默认值，保持不动。
+  assert.deepEqual(
+    catalog.repairStaleCrossProviderLimits("xai", "relay-custom-model", {
+      contextWindow: 258_000,
+      maxOutputToken: 142_000,
+    }),
+    { contextWindow: 258_000, maxOutputToken: 142_000 },
+  );
 });
 
 test("resolveModelLimits returns repaired catalog limits and undefined on miss", () => {

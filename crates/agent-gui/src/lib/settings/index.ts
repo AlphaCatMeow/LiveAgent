@@ -3,7 +3,9 @@ import { DEFAULT_LOCALE, type Locale, normalizeLocale } from "../../i18n/config"
 import {
   getProviderFallbackLimits,
   normalizeModelLimits,
+  repairStaleCrossProviderLimits,
   resolveModelLimits,
+  resolveModelLimitsAcrossProviders,
 } from "../models/modelCatalog";
 import {
   ANTHROPIC_LONG_CONTEXT_WINDOW,
@@ -1078,6 +1080,12 @@ export function getProviderModelDefaults(
     };
   }
 
+  // 中转聚合把别家模型挂在本供应商下（如 Anthropic 兼容中转供 grok）：按 id
+  // 跨供应商回查真实限额，避免吃错本供应商兜底值。Anthropic 的 1M/adaptive
+  // 窗口策略只约束目录内的 Anthropic 模型，跨供应商命中直接透传目录值。
+  const crossProvider = resolveModelLimitsAcrossProviders(modelId);
+  if (crossProvider) return crossProvider;
+
   return getProviderFallbackLimits(providerId);
 }
 
@@ -1125,7 +1133,9 @@ export function normalizeProviderModelConfig(
   };
   // 退化限额（输出吃满窗口）可能来自坏目录数据落库期或手工配置，读侧统一修复；
   // 规则与目录生成期同源（normalizeModelLimits），对所有供应商一视同仁。
-  const limits = normalizeModelLimits(storedLimits);
+  // 跨供应商回查上线前落库的别家模型吃过本供应商兜底值，同样读侧修复，
+  // 不需要用户删除重加（识别与替换规则见 repairStaleCrossProviderLimits）。
+  const limits = repairStaleCrossProviderLimits(providerId, id, normalizeModelLimits(storedLimits));
   return {
     id,
     ...(ownedBy ? { ownedBy } : {}),

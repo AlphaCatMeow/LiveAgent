@@ -2,6 +2,7 @@ import type { KnownProvider, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import { DEFAULT_LOCALE, type Locale, normalizeLocale } from "../../i18n/config";
+import { normalizeFontFamily } from "../fontFamily";
 import {
   findCatalogModel,
   getProviderFallbackLimits,
@@ -13,6 +14,8 @@ import { createUuid } from "../shared/id";
 import { mergeAlwaysEnabledSkillNames } from "../skills/builtin";
 import { SYSTEM_TOOL_OPTIONS, type SystemToolId } from "../tools/systemToolOptions";
 import { normalizeApiKey, normalizeBaseUrl, normalizeModels } from "./normalize";
+
+export { normalizeFontFamily } from "../fontFamily";
 
 export type { SystemToolId } from "../tools/systemToolOptions";
 
@@ -133,6 +136,10 @@ export type CustomSettings = {
   conversationTitleModel?: SelectedModel;
   chatSidebar: ChatSidebarSettings;
   rightDock: RightDockSettings;
+  // Empty strings select the built-in font stacks for their respective UI zones.
+  interfaceFontFamily: string;
+  chatFontFamily: string;
+  codeFontFamily: string;
   fontScale: FontScaleSettings;
 };
 
@@ -2135,6 +2142,12 @@ export function normalizeCustomSettings(
       recentCollapsed: chatSidebar.recentCollapsed === true,
     },
     rightDock: normalizeRightDockSettings(obj.rightDock),
+    // Read the retired field only to migrate persisted settings; normalization never emits it.
+    interfaceFontFamily: normalizeFontFamily(
+      Object.hasOwn(obj, "interfaceFontFamily") ? obj.interfaceFontFamily : obj.fontFamily,
+    ),
+    chatFontFamily: normalizeFontFamily(obj.chatFontFamily),
+    codeFontFamily: normalizeFontFamily(obj.codeFontFamily),
     fontScale: normalizeFontScaleSettings(obj.fontScale),
   };
 }

@@ -63,6 +63,7 @@ import {
   MemoryManageRequestSchema,
   ProviderListRequestSchema,
   ProviderModelsRequestSchema,
+  ProviderUsageRequestSchema,
   SettingsGetRequestSchema,
   SettingsResetSshKnownHostRequestSchema,
   SettingsUpdateRequestSchema,
@@ -566,6 +567,14 @@ function agentRequestPayload(type: string, body: J): GatewayEnvelope["payload"] 
           useSystemProxy: bool(body.use_system_proxy),
         }),
       };
+    case "provider.usage.query":
+      return {
+        case: "providerUsage",
+        value: create(ProviderUsageRequestSchema, {
+          providerId: trimStr(body.provider_id),
+          refresh: bool(body.refresh),
+        }),
+      };
     case "settings.get":
       return { case: "settingsGet", value: create(SettingsGetRequestSchema, {}) };
     case "settings.update":
@@ -1011,6 +1020,13 @@ function decodeAgentResponse(envelope: AgentEnvelope, options: { agentOnline: bo
         return parseJson(payload.value.modelsJson);
       } catch {
         frameError("provider model response is not valid JSON");
+      }
+      break;
+    case "providerUsageResp":
+      try {
+        return parseJson(payload.value.resultJson);
+      } catch {
+        frameError("provider usage response is not valid JSON");
       }
       break;
     case "settingsGetResp": {

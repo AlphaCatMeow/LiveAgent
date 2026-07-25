@@ -2607,6 +2607,13 @@ export class GatewayWebSocketClient {
     });
   }
 
+  async providerUsageQuery<T = unknown>(providerId: string, refresh: boolean): Promise<T> {
+    return this.requestWithRecovery<T>("provider.usage.query", {
+      provider_id: providerId,
+      refresh,
+    });
+  }
+
   dispose() {
     this.disposed = true;
     this.terminalStream.dispose();
@@ -3697,6 +3704,7 @@ export type GatewayWebSocketClientLike = {
     apiKey: string,
     useSystemProxy?: boolean,
   ): Promise<unknown>;
+  providerUsageQuery<T = unknown>(providerId: string, refresh: boolean): Promise<T>;
   dispose(): void;
 };
 

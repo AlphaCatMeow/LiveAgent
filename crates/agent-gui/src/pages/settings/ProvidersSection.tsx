@@ -57,11 +57,12 @@ import {
 } from "../../lib/providers/customHeaders";
 import { parseModelValue, toModelValue } from "../../lib/providers/llm";
 import { sortModelsByActiveStateAndVendor } from "../../lib/providers/modelVendor";
+import { type ProviderUsageState, useProviderUsage } from "../../lib/providers/usageQuery";
 import {
   CODEX_REQUEST_FORMAT_LABELS,
-  getDefaultUsageQueryConfig,
   type CodexRequestFormat,
   type CustomProvider,
+  getDefaultUsageQueryConfig,
   type ProviderId,
   type ProviderModelConfig,
   updateCustomProviders,
@@ -2156,6 +2157,9 @@ function ProviderList(props: {
   onRefreshThirdPartyProviders: () => void;
   onOpenCcsImport: () => void;
   onOpenCherryImport: () => void;
+  usageByProvider: ProviderUsageState;
+  refreshingProviderIds: ReadonlySet<string>;
+  onRefreshUsage: (providerId: string) => void;
 }) {
   const { t } = useLocale();
   const {
@@ -2177,6 +2181,9 @@ function ProviderList(props: {
     onRefreshThirdPartyProviders,
     onOpenCcsImport,
     onOpenCherryImport,
+    usageByProvider,
+    refreshingProviderIds,
+    onRefreshUsage,
   } = props;
   const [syncMenuOpen, setSyncMenuOpen] = useState(false);
   const filtered = providers.filter((provider) => provider.type === type);
@@ -2363,65 +2370,104 @@ function ProviderList(props: {
           </div>
         ) : (
           <div className="space-y-2 pb-1">
-            {filtered.map((provider) => (
-              <div
-                key={provider.id}
-                {...getProviderReorderProps(provider.id)}
-                className={cn(
-                  "group flex items-center gap-3 rounded-xl border bg-card px-4 py-3 transition-colors hover:bg-accent/30",
-                  draggingProviderId === provider.id && "bg-accent shadow-lg",
-                )}
-              >
-                {renderProviderDragHandle(provider.id, provider.name)}
-                <div className="flex w-5 shrink-0 items-center justify-center text-lg text-foreground">
-                  <ProviderBrandIcon type={type} />
-                </div>
-                <div className="min-w-0 flex-1 max-[720px]:basis-[calc(100%-3rem)]">
-                  <div className="flex items-center gap-1.5">
-                    <span className="truncate text-sm font-medium">{provider.name}</span>
-                    {provider.useSystemProxy ? (
-                      <span
-                        className="shrink-0 text-blue-500 dark:text-blue-400"
-                        title={t("settings.providerUseSystemProxy")}
-                      >
-                        <Waypoints className="h-3 w-3" />
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="truncate text-xs text-muted-foreground">
-                    {provider.baseUrl || t("settings.noBaseUrl")} {" · "}
-                    {provider.activeModels.length} {t("settings.activeModels")}
-                  </div>
-                </div>
-                <div className="settings-hover-actions flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                    onClick={() => onEdit(provider)}
-                    title={t("settings.edit")}
+            {filtered.map((provider) =>
+              (() => {
+                const usage = usageByProvider[provider.id];
+                const showUsage = provider.usageQuery.enabled || usage;
+                const refreshing = refreshingProviderIds.has(provider.id);
+                return (
+                  <div
+                    key={provider.id}
+                    {...getProviderReorderProps(provider.id)}
+                    className={cn(
+                      "group flex items-center gap-3 rounded-xl border bg-card px-4 py-3 transition-colors hover:bg-accent/30",
+                      draggingProviderId === provider.id && "bg-accent shadow-lg",
+                    )}
                   >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                  <ConfirmDeletePopover
-                    name={provider.name}
-                    onConfirm={() => onDelete(provider.id)}
-                  >
-                    {(open) => (
+                    {renderProviderDragHandle(provider.id, provider.name)}
+                    <div className="flex w-5 shrink-0 items-center justify-center text-lg text-foreground">
+                      <ProviderBrandIcon type={type} />
+                    </div>
+                    <div className="min-w-0 flex-1 max-[720px]:basis-[calc(100%-3rem)]">
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate text-sm font-medium">{provider.name}</span>
+                        {provider.useSystemProxy ? (
+                          <span
+                            className="shrink-0 text-blue-500 dark:text-blue-400"
+                            title={t("settings.providerUseSystemProxy")}
+                          >
+                            <Waypoints className="h-3 w-3" />
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="truncate text-xs text-muted-foreground">
+                        {provider.baseUrl || t("settings.noBaseUrl")} {" · "}
+                        {provider.activeModels.length} {t("settings.activeModels")}
+                      </div>
+                      {showUsage ? (
+                        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                          {usage?.entries.map((entry) => (
+                            <span key={entry.label} className="truncate">
+                              {entry.label}: {entry.value}
+                              {entry.unit ? ` ${entry.unit}` : ""}
+                            </span>
+                          ))}
+                          {usage?.isStale ? <span title="Stale usage data">Stale</span> : null}
+                          {usage?.error ? (
+                            <span className="text-destructive">{usage.error}</span>
+                          ) : null}
+                          {usage?.queriedAt ? (
+                            <time dateTime={new Date(usage.queriedAt).toISOString()}>
+                              {new Date(usage.queriedAt).toLocaleString()}
+                            </time>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="settings-hover-actions flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                      {showUsage ? (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                          disabled={refreshing}
+                          onClick={() => onRefreshUsage(provider.id)}
+                          title="Refresh usage"
+                          aria-label="Refresh usage"
+                        >
+                          <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
+                        </Button>
+                      ) : null}
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                        onClick={open}
-                        title={t("settings.delete")}
+                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                        onClick={() => onEdit(provider)}
+                        title={t("settings.edit")}
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <Pencil className="h-3.5 w-3.5" />
                       </Button>
-                    )}
-                  </ConfirmDeletePopover>
-                </div>
-              </div>
-            ))}
+                      <ConfirmDeletePopover
+                        name={provider.name}
+                        onConfirm={() => onDelete(provider.id)}
+                      >
+                        {(open) => (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                            onClick={open}
+                            title={t("settings.delete")}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </ConfirmDeletePopover>
+                    </div>
+                  </div>
+                );
+              })(),
+            )}
           </div>
         )}
       </div>
@@ -2447,6 +2493,10 @@ export function ProvidersSection(props: SettingsSectionProps) {
   const [cherryImporting, setCherryImporting] = useState(false);
   const [cherryMessage, setCherryMessage] = useState<string | null>(null);
   const [cherryDataPath, setCherryDataPath] = useState<string | null>(readCherryDataPath);
+  const { usageByProvider, refreshingProviderIds, refreshProvider } = useProviderUsage(
+    settings.customProviders,
+    settings.selectedModel,
+  );
 
   async function refreshThirdPartyProviders() {
     setCcsLoading(true);
@@ -2897,6 +2947,9 @@ export function ProvidersSection(props: SettingsSectionProps) {
                 onRefreshThirdPartyProviders={() => void refreshThirdPartyProviders()}
                 onOpenCcsImport={() => setCcsImportType(tab)}
                 onOpenCherryImport={() => setCherryImportType(tab)}
+                usageByProvider={usageByProvider}
+                refreshingProviderIds={refreshingProviderIds}
+                onRefreshUsage={(providerId) => void refreshProvider(providerId)}
               />
             </div>
           ))}

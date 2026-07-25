@@ -474,29 +474,19 @@ impl GatewayController {
                 }
             }
             Some(proto::gateway_envelope::Payload::ProviderUsage(request)) => {
-                let controller = Arc::clone(self);
+                let sender = self.current_outbound_sender()?;
+                let provider_usage_service = Arc::clone(&self.provider_usage_service);
                 tauri::async_runtime::spawn(async move {
-                    let result = match gateway_bridge::handle_provider_usage(
-                        Arc::clone(&controller.provider_usage_service),
+                    let envelope = match gateway_bridge::handle_provider_usage(
+                        provider_usage_service,
                         request,
                     )
                     .await
                     {
-                        Ok(response) => {
-                            controller
-                                .send_agent_envelope(provider_usage_agent_envelope(
-                                    request_id.clone(),
-                                    response,
-                                ))
-                                .await
-                        }
-                        Err(error) => {
-                            controller
-                                .send_error_response(request_id.clone(), 500, error)
-                                .await
-                        }
+                        Ok(response) => provider_usage_agent_envelope(request_id, response),
+                        Err(error) => build_error_response_envelope(request_id, 500, error),
                     };
-                    if let Err(error) = result {
+                    if let Err(error) = send_agent_envelope_to(sender, envelope).await {
                         eprintln!("gateway provider usage handler failed: {error}");
                     }
                 });

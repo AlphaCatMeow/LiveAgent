@@ -112,61 +112,33 @@ impl TerminalSessionRegistry {
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
 
+        // Cheap preflight before binding a socket. The authoritative check
+        // happens under the sessions + forwards locks below.
         let (_, runtime) =
             self.ssh_local_forward_session(&session_id, requested_project_key.as_deref(), true)?;
-        if runtime.handle.lock().await.is_none() {
+        if runtime.current_handle().await.is_none() {
             return Err("SSH connection is not connected".to_string());
         }
 
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, local_port))
             .await
             .map_err(|error| {
-                format!("SSH local forward could not bind {SSH_LOCAL_FORWARD_HOST}:{local_port}: {error}")
+                format!(
+                    "SSH local forward could not bind {SSH_LOCAL_FORWARD_HOST}:{local_port}: {error}"
+                )
             })?;
         let local_port = listener
             .local_addr()
             .map_err(|error| format!("SSH local forward local address failed: {error}"))?
             .port();
 
-        let (project_path_key, runtime) = {
-            let sessions = self
-                .sessions
-                .lock()
-                .map_err(|_| "terminal session registry poisoned".to_string())?;
-            let entry = sessions
-                .get(&session_id)
-                .cloned()
-                .ok_or_else(|| format!("terminal session not found: {session_id}"))?;
-            let (project_path_key, runtime) =
-                ssh_local_forward_session_entry(&entry, requested_project_key.as_deref(), true)?;
-            if runtime.is_closing() {
-                return Err("SSH session is closing".to_string());
-            }
-            (project_path_key, runtime)
-        };
-
-        let now = now_ms();
-        let record = SshLocalForwardRecord {
-            id: uuid::Uuid::new_v4().to_string(),
-            session_id: session_id.clone(),
-            project_path_key,
-            local_host: SSH_LOCAL_FORWARD_HOST.to_string(),
-            local_port,
-            address: format!("{SSH_LOCAL_FORWARD_HOST}:{local_port}"),
-            remote_host: remote_host.clone(),
-            remote_port,
-            status: "active".to_string(),
-            created_at: now,
-            updated_at: now,
-            error: None,
-        };
+        // Publish the registry entry and capture the runtime under the same
+        // critical section that close() uses for cleanup. Spawning happens
+        // after the locks are released, then we re-check cancellation so a
+        // concurrent close cannot leave an orphan listener.
         let (cancel_tx, cancel_rx) = watch::channel(false);
-        let entry = Arc::new(SshLocalForwardEntry {
-            record: record.clone(),
-            cancel_tx,
-            task: Mutex::new(None),
-        });
-        let revision = {
+        let forward_id = uuid::Uuid::new_v4().to_string();
+        let (record, entry, revision, runtime) = {
             let sessions = self
                 .sessions
                 .lock()
@@ -174,9 +146,9 @@ impl TerminalSessionRegistry {
             let current = sessions
                 .get(&session_id)
                 .ok_or_else(|| format!("terminal session not found: {session_id}"))?;
-            let (_, current_runtime) =
+            let (project_path_key, runtime) =
                 ssh_local_forward_session_entry(current, requested_project_key.as_deref(), true)?;
-            if current_runtime.is_closing() {
+            if runtime.is_closing() {
                 return Err("SSH session is closing".to_string());
             }
 
@@ -195,18 +167,38 @@ impl TerminalSessionRegistry {
                     "SSH local forward limit reached for this session ({SSH_LOCAL_FORWARD_MAX_PER_SESSION})"
                 ));
             }
+
+            let now = now_ms();
+            let record = SshLocalForwardRecord {
+                id: forward_id.clone(),
+                session_id: session_id.clone(),
+                project_path_key,
+                local_host: SSH_LOCAL_FORWARD_HOST.to_string(),
+                local_port,
+                address: format!("{SSH_LOCAL_FORWARD_HOST}:{local_port}"),
+                remote_host: remote_host.clone(),
+                remote_port,
+                status: "active".to_string(),
+                created_at: now,
+                updated_at: now,
+                error: None,
+            };
+            let entry = Arc::new(SshLocalForwardEntry {
+                record: record.clone(),
+                cancel_tx,
+                task: Mutex::new(None),
+            });
             state.entries.insert(record.id.clone(), Arc::clone(&entry));
             state.revision = state.revision.saturating_add(1);
-            state.revision
+            (record, entry, state.revision, runtime)
         };
 
         let weak_registry = Arc::downgrade(self);
         let global_connections = Arc::clone(&self.ssh_local_forwards.global_connections);
         let forward_connections = Arc::new(Semaphore::new(SSH_LOCAL_FORWARD_MAX_CONNECTIONS));
-        let forward_id = record.id.clone();
         let task = tauri::async_runtime::spawn(run_ssh_local_forward_listener(
             weak_registry,
-            forward_id,
+            forward_id.clone(),
             listener,
             runtime,
             remote_host,
@@ -217,6 +209,33 @@ impl TerminalSessionRegistry {
         ));
         if let Ok(mut slot) = entry.task.lock() {
             *slot = Some(task);
+        }
+
+        // close()/stop() may have cancelled this entry while the listener was
+        // being spawned. Re-check under the registry lock before advertising
+        // the forward so a concurrent cleanup cannot be followed by a stale
+        // "started" event for an already-removed entry.
+        {
+            let registered = self
+                .ssh_local_forwards
+                .state
+                .lock()
+                .map(|state| state.entries.contains_key(&forward_id))
+                .unwrap_or(false);
+            if *entry.cancel_tx.borrow() || !registered {
+                if let Ok(mut slot) = entry.task.lock() {
+                    if let Some(task) = slot.take() {
+                        task.abort();
+                    }
+                }
+                let _ = self
+                    .ssh_local_forwards
+                    .state
+                    .lock()
+                    .ok()
+                    .and_then(|mut state| state.entries.remove(&forward_id));
+                return Err("SSH session is closing".to_string());
+            }
         }
 
         self.emit_ssh_local_forward("started", record.clone(), revision);
@@ -268,11 +287,14 @@ impl TerminalSessionRegistry {
         let _ = entry.cancel_tx.send(true);
         let task = entry.task.lock().ok().and_then(|mut slot| slot.take());
         if let Some(mut task) = task {
+            // Wait for a cooperative exit first so the TcpListener is dropped
+            // before the stop RPC returns; only then abort and await the abort.
             if timeout(SSH_LOCAL_FORWARD_STOP_TIMEOUT, &mut task)
                 .await
                 .is_err()
             {
                 task.abort();
+                let _ = timeout(SSH_LOCAL_FORWARD_STOP_TIMEOUT, task).await;
             }
         }
         self.emit_ssh_local_forward("stopped", record.clone(), revision);
@@ -382,9 +404,7 @@ impl TerminalSessionRegistry {
 
 pub(crate) fn normalize_ssh_local_forward_host(host: &str) -> Result<String, String> {
     let host = host.trim();
-    if host.is_empty() {
-        return Err("SSH local forward remote host is required".to_string());
-    }
+    let host = if host.is_empty() { "127.0.0.1" } else { host };
     if host.len() > SSH_LOCAL_FORWARD_MAX_HOST_BYTES {
         return Err(format!(
             "SSH local forward remote host must be at most {SSH_LOCAL_FORWARD_MAX_HOST_BYTES} bytes"
@@ -532,21 +552,20 @@ async fn run_ssh_local_forward_connection(
         return;
     }
 
-    let channel = match timeout(SSH_LOCAL_FORWARD_CHANNEL_OPEN_TIMEOUT, async {
-        let handle = runtime.handle.lock().await;
-        let Some(handle) = handle.as_ref() else {
-            return Err("SSH connection is not connected".to_string());
-        };
-        handle
-            .channel_open_direct_tcpip(
-                remote_host,
-                u32::from(remote_port),
-                peer_addr.ip().to_string(),
-                u32::from(peer_addr.port()),
-            )
-            .await
-            .map_err(|error| format!("SSH local forward channel open failed: {error}"))
-    })
+    // Clone the Arc handle so channel open does not hold the mutex for the full
+    // dial timeout. Concurrent reconnect/latency/exec can still access the slot.
+    let Some(handle) = runtime.current_handle().await else {
+        return;
+    };
+    let channel = match timeout(
+        SSH_LOCAL_FORWARD_CHANNEL_OPEN_TIMEOUT,
+        handle.channel_open_direct_tcpip(
+            remote_host,
+            u32::from(remote_port),
+            peer_addr.ip().to_string(),
+            u32::from(peer_addr.port()),
+        ),
+    )
     .await
     {
         Ok(Ok(channel)) => channel,
@@ -584,7 +603,7 @@ mod tests {
             normalize_ssh_local_forward_host("  db.internal  ").unwrap(),
             "db.internal"
         );
-        assert!(normalize_ssh_local_forward_host("  ").is_err());
+        assert_eq!(normalize_ssh_local_forward_host("  ").unwrap(), "127.0.0.1");
         assert!(normalize_ssh_local_forward_host("db\ninternal").is_err());
         assert_eq!(normalize_ssh_local_forward_remote_port(1).unwrap(), 1);
         assert_eq!(

@@ -5,6 +5,7 @@ import { workspaceProjectPathKey } from "../../lib/settings";
 import { cn } from "../../lib/shared/utils";
 import type { SshLocalForwardState } from "../../lib/terminal/sshLocalForwardTypes";
 import {
+  isSshLocalForwardPortDraft,
   reduceSshLocalForwardState,
   validateSshLocalForwardTarget,
 } from "../../lib/terminal/sshLocalForwardTypes";
@@ -263,6 +264,9 @@ export function SshTunnelPanel(props: SshTunnelPanelProps) {
   });
   const [forwardHostBySessionId, setForwardHostBySessionId] = useState<Record<string, string>>({});
   const [forwardPortBySessionId, setForwardPortBySessionId] = useState<Record<string, string>>({});
+  const [forwardLocalPortBySessionId, setForwardLocalPortBySessionId] = useState<
+    Record<string, string>
+  >({});
   const [startingForwardSessionIds, setStartingForwardSessionIds] = useState<ReadonlySet<string>>(
     new Set(),
   );
@@ -435,12 +439,20 @@ export function SshTunnelPanel(props: SshTunnelPanelProps) {
     });
   }, [visibleSessions]);
 
+  const clearForwardError = useCallback((sessionId: string) => {
+    setForwardErrorsBySessionId((current) => {
+      if (!current[sessionId]) return current;
+      return { ...current, [sessionId]: "" };
+    });
+  }, []);
+
   const handleStartForward = useCallback(
     (session: TerminalSession) => {
       if (startingForwardSessionIds.has(session.id)) return;
       const target = validateSshLocalForwardTarget(
         forwardHostBySessionId[session.id] ?? "",
         forwardPortBySessionId[session.id] ?? "",
+        forwardLocalPortBySessionId[session.id] ?? "",
       );
       if (!target) {
         setForwardErrorsBySessionId((current) => ({
@@ -457,11 +469,15 @@ export function SshTunnelPanel(props: SshTunnelPanelProps) {
           projectPathKey: session.projectPathKey,
           remoteHost: target.remoteHost,
           remotePort: target.remotePort,
-          localPort: 0,
+          localPort: target.localPort,
         })
         .then((response) => {
           setLocalForwards((current) => reduceSshLocalForwardState(current, response));
+          // Keep the remote host for rapid follow-up forwards to the same
+          // target; clear both ports so a stale explicit port can't leak into
+          // the next forward.
           setForwardPortBySessionId((current) => ({ ...current, [session.id]: "" }));
+          setForwardLocalPortBySessionId((current) => ({ ...current, [session.id]: "" }));
         })
         .catch((error) => {
           setForwardErrorsBySessionId((current) => ({
@@ -477,7 +493,13 @@ export function SshTunnelPanel(props: SshTunnelPanelProps) {
           });
         });
     },
-    [forwardHostBySessionId, forwardPortBySessionId, startingForwardSessionIds, t],
+    [
+      forwardHostBySessionId,
+      forwardPortBySessionId,
+      forwardLocalPortBySessionId,
+      startingForwardSessionIds,
+      t,
+    ],
   );
 
   const handleStopForward = useCallback((forwardId: string, sessionId: string) => {
@@ -1433,43 +1455,77 @@ export function SshTunnelPanel(props: SshTunnelPanelProps) {
                         <span className="text-[calc(11px*var(--zone-font-scale,1))] font-semibold text-foreground">
                           {t("projectTools.sshLocalForwardTitle")}
                         </span>
-                        <span className="font-mono text-[calc(10px*var(--zone-font-scale,1))] text-muted-foreground">
-                          127.0.0.1:{t("projectTools.sshLocalForwardAutoPort")}
-                        </span>
                       </div>
-                      <div className="mt-2 grid grid-cols-[minmax(0,1fr)_5.5rem_auto] gap-1.5">
+                      <div className="mt-1 text-[calc(10px*var(--zone-font-scale,1))] text-muted-foreground">
+                        {t("projectTools.sshLocalForwardHelp")}
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        <span className="shrink-0 font-mono text-[calc(10.5px*var(--zone-font-scale,1))] text-muted-foreground">
+                          127.0.0.1:
+                        </span>
                         <input
+                          type="text"
+                          inputMode="numeric"
+                          aria-label={t("projectTools.sshLocalForwardLocalPortLabel")}
+                          title={t("projectTools.sshLocalForwardLocalPortLabel")}
+                          value={forwardLocalPortBySessionId[session.id] ?? ""}
+                          onChange={(event) => {
+                            const value = event.currentTarget.value;
+                            if (!isSshLocalForwardPortDraft(value)) return;
+                            setForwardLocalPortBySessionId((current) => ({
+                              ...current,
+                              [session.id]: value,
+                            }));
+                            clearForwardError(session.id);
+                          }}
+                          className="h-8 w-16 min-w-0 rounded-lg border border-border/70 bg-background/80 px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:border-emerald-500/50 focus-visible:ring-1 focus-visible:ring-emerald-500/20"
+                          placeholder={t("projectTools.sshLocalForwardAutoPort")}
+                          disabled={startingForward}
+                        />
+                        <span className="shrink-0 text-[calc(11px*var(--zone-font-scale,1))] text-muted-foreground">
+                          →
+                        </span>
+                        <input
+                          type="text"
+                          aria-label={t("projectTools.sshLocalForwardHostPlaceholder")}
                           value={forwardHostBySessionId[session.id] ?? ""}
-                          onChange={(event) =>
+                          onChange={(event) => {
+                            const value = event.currentTarget.value;
                             setForwardHostBySessionId((current) => ({
                               ...current,
-                              [session.id]: event.currentTarget.value,
-                            }))
-                          }
-                          className="h-8 min-w-0 rounded-lg border border-border/70 bg-background/80 px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:border-emerald-500/50 focus-visible:ring-1 focus-visible:ring-emerald-500/20"
+                              [session.id]: value,
+                            }));
+                            clearForwardError(session.id);
+                          }}
+                          className="h-8 min-w-0 flex-1 basis-28 rounded-lg border border-border/70 bg-background/80 px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:border-emerald-500/50 focus-visible:ring-1 focus-visible:ring-emerald-500/20"
                           placeholder={t("projectTools.sshLocalForwardHostPlaceholder")}
                           disabled={startingForward}
                         />
+                        <span className="shrink-0 font-mono text-[calc(11px*var(--zone-font-scale,1))] text-muted-foreground">
+                          :
+                        </span>
                         <input
-                          type="number"
-                          min={1}
-                          max={65535}
+                          type="text"
                           inputMode="numeric"
+                          aria-label={t("projectTools.sshLocalForwardPortPlaceholder")}
                           value={forwardPortBySessionId[session.id] ?? ""}
-                          onChange={(event) =>
+                          onChange={(event) => {
+                            const value = event.currentTarget.value;
+                            if (!isSshLocalForwardPortDraft(value)) return;
                             setForwardPortBySessionId((current) => ({
                               ...current,
-                              [session.id]: event.currentTarget.value,
-                            }))
-                          }
-                          className="h-8 min-w-0 rounded-lg border border-border/70 bg-background/80 px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:border-emerald-500/50 focus-visible:ring-1 focus-visible:ring-emerald-500/20"
+                              [session.id]: value,
+                            }));
+                            clearForwardError(session.id);
+                          }}
+                          className="h-8 w-16 min-w-0 rounded-lg border border-border/70 bg-background/80 px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:border-emerald-500/50 focus-visible:ring-1 focus-visible:ring-emerald-500/20"
                           placeholder={t("projectTools.sshLocalForwardPortPlaceholder")}
                           disabled={startingForward}
                         />
                         <Button
                           type="button"
                           size="sm"
-                          className="h-8 rounded-lg px-2.5 text-xs"
+                          className="h-8 shrink-0 rounded-lg px-2.5 text-xs"
                           disabled={!connected || startingForward || closing}
                           onClick={() => handleStartForward(session)}
                         >

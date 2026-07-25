@@ -61,16 +61,63 @@ test("SSH tunnel panel does not disable hosts only because proxy is configured",
   assert.equal(panel.hostStatusMessage(proxyHost, (key) => key), "");
 });
 
-test("SSH local forwarding validates remote host and port", () => {
+test("SSH local forwarding validates remote host and ports", () => {
   assert.deepEqual(forwarding.validateSshLocalForwardTarget(" db.internal ", "5432"), {
     remoteHost: "db.internal",
     remotePort: 5432,
+    localPort: 0,
   });
-  assert.equal(forwarding.validateSshLocalForwardTarget("", "5432"), null);
+  assert.deepEqual(forwarding.validateSshLocalForwardTarget("", "5432"), {
+    remoteHost: "127.0.0.1",
+    remotePort: 5432,
+    localPort: 0,
+  });
+  assert.deepEqual(forwarding.validateSshLocalForwardTarget("   ", "5432", "15432"), {
+    remoteHost: "127.0.0.1",
+    remotePort: 5432,
+    localPort: 15432,
+  });
   assert.equal(forwarding.validateSshLocalForwardTarget("db\ninternal", "5432"), null);
   assert.equal(forwarding.validateSshLocalForwardTarget("db.internal", "0"), null);
+  assert.equal(forwarding.validateSshLocalForwardTarget("db.internal", ""), null);
   assert.equal(forwarding.validateSshLocalForwardTarget("db.internal", "65536"), null);
   assert.equal(forwarding.validateSshLocalForwardTarget("db.internal", "not-a-port"), null);
+});
+
+test("SSH local forwarding treats empty or zero local port as auto", () => {
+  assert.deepEqual(forwarding.validateSshLocalForwardTarget("db.internal", "5432", ""), {
+    remoteHost: "db.internal",
+    remotePort: 5432,
+    localPort: 0,
+  });
+  assert.deepEqual(forwarding.validateSshLocalForwardTarget("db.internal", "5432", "0"), {
+    remoteHost: "db.internal",
+    remotePort: 5432,
+    localPort: 0,
+  });
+  assert.deepEqual(forwarding.validateSshLocalForwardTarget("db.internal", "5432", " 15432 "), {
+    remoteHost: "db.internal",
+    remotePort: 5432,
+    localPort: 15432,
+  });
+  assert.deepEqual(forwarding.validateSshLocalForwardTarget("db.internal", "5432", "65535"), {
+    remoteHost: "db.internal",
+    remotePort: 5432,
+    localPort: 65535,
+  });
+  assert.equal(forwarding.validateSshLocalForwardTarget("db.internal", "5432", "65536"), null);
+  assert.equal(forwarding.validateSshLocalForwardTarget("db.internal", "5432", "-1"), null);
+  assert.equal(forwarding.validateSshLocalForwardTarget("db.internal", "5432", "abc"), null);
+});
+
+test("SSH local forwarding port drafts stay editable while typing", () => {
+  assert.equal(forwarding.isSshLocalForwardPortDraft(""), true);
+  assert.equal(forwarding.isSshLocalForwardPortDraft("0"), true);
+  assert.equal(forwarding.isSshLocalForwardPortDraft("65535"), true);
+  assert.equal(forwarding.isSshLocalForwardPortDraft("655356"), false);
+  assert.equal(forwarding.isSshLocalForwardPortDraft("12a"), false);
+  assert.equal(forwarding.isSshLocalForwardPortDraft("-1"), false);
+  assert.equal(forwarding.isSshLocalForwardPortDraft("1.5"), false);
 });
 
 test("SSH local forwarding normalizes Tauri responses", async () => {
@@ -166,4 +213,63 @@ test("SSH local forwarding ignores stale revisions and applies stop once", () =>
     }),
     stopped,
   );
+});
+
+test("SSH local forwarding start passes explicit local port and defaults to auto", async () => {
+  const calls = [];
+  const clientLoader = createTsModuleLoader({
+    mocks: {
+      "@tauri-apps/api/core": {
+        async invoke(command, args) {
+          calls.push({ command, args });
+          return {
+            forward: {
+              id: "forward-1",
+              session_id: args.session_id,
+              project_path_key: args.project_path_key ?? "",
+              local_host: "127.0.0.1",
+              local_port: args.local_port,
+              address: `127.0.0.1:${args.local_port}`,
+              remote_host: args.remote_host,
+              remote_port: args.remote_port,
+              status: "active",
+              created_at: 1,
+              updated_at: 1,
+            },
+            revision: calls.length,
+          };
+        },
+      },
+      "@tauri-apps/api/event": {
+        async listen() {
+          return () => undefined;
+        },
+      },
+    },
+  });
+  const tauriForwarding = clientLoader.loadModule(
+    "src/lib/terminal/tauriSshLocalForwardClient.ts",
+  );
+
+  await tauriForwarding.tauriSshLocalForwardClient.start({
+    sessionId: "ssh-1",
+    projectPathKey: "/project",
+    remoteHost: "db.internal",
+    remotePort: 5432,
+    localPort: 15432,
+  });
+  await tauriForwarding.tauriSshLocalForwardClient.start({
+    sessionId: "ssh-1",
+    projectPathKey: "/project",
+    remoteHost: "db.internal",
+    remotePort: 5432,
+  });
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].command, "terminal_ssh_local_forward_start");
+  assert.equal(calls[0].args.session_id, "ssh-1");
+  assert.equal(calls[0].args.remote_host, "db.internal");
+  assert.equal(calls[0].args.remote_port, 5432);
+  assert.equal(calls[0].args.local_port, 15432);
+  assert.equal(calls[1].args.local_port, 0);
 });

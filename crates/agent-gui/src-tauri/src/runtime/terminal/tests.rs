@@ -274,6 +274,44 @@ fn ssh_local_forward_session_close_removes_registered_forwards() {
     assert!(*cancel_rx.borrow_and_update());
 }
 
+#[test]
+fn ssh_local_forward_session_close_trims_session_id() {
+    let registry = TerminalSessionRegistry::default();
+    insert_test_ssh_session(
+        &registry,
+        "ssh-forward",
+        "/tmp/project",
+        false,
+        SSH_STATUS_CONNECTED,
+    );
+    let record = SshLocalForwardRecord {
+        id: "forward-padded".to_string(),
+        session_id: "ssh-forward".to_string(),
+        project_path_key: normalize_project_path_key("/tmp/project"),
+        local_host: "127.0.0.1".to_string(),
+        local_port: 43211,
+        address: "127.0.0.1:43211".to_string(),
+        remote_host: "127.0.0.1".to_string(),
+        remote_port: 5432,
+        status: "active".to_string(),
+        created_at: now_ms(),
+        updated_at: now_ms(),
+        error: None,
+    };
+    let mut cancel_rx = registry.insert_test_ssh_local_forward(record);
+
+    registry
+        .close("  ssh-forward  ".to_string())
+        .expect("padded session close should succeed");
+
+    assert!(registry
+        .ssh_local_forward_list(None, None)
+        .unwrap()
+        .forwards
+        .is_empty());
+    assert!(*cancel_rx.borrow_and_update());
+}
+
 fn test_ssh_runtime(registry: &TerminalSessionRegistry, id: &str) -> Arc<SshSessionRuntime> {
     let entry = registry.entry(id).expect("terminal session entry");
     let TerminalSessionBackend::Ssh { runtime } = &entry.backend else {

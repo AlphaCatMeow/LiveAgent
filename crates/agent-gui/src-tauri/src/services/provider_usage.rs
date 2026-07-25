@@ -76,25 +76,45 @@ pub struct ProviderUsageService {
 
 impl ProviderUsageService {
     pub async fn query(&self, provider_id: &str, force: bool) -> ProviderUsageResult {
+        let provider = match load_provider(provider_id) {
+            Ok(provider) => provider,
+            Err(error) => {
+                self.cache().invalidate(provider_id);
+                return failed_result(error);
+            }
+        };
+        let prepared = match prepare_query(&provider) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.cache().invalidate(provider_id);
+                return failed_result(error);
+            }
+        };
+        let identity = provider_query_identity(&provider);
         if !force {
-            if let Some(cached) = self.cache().get(provider_id).cloned() {
+            if let Some(cached) = self.cache().get(provider_id, &identity).cloned() {
                 return cached;
             }
         }
 
-        match self.query_uncached(provider_id).await {
-            Ok(result) => {
-                self.cache().record_success(provider_id, result.clone());
+        match execute_prepared_query(&prepared).await {
+            Ok(entries) if entries.is_empty() => self.cache().record_failure(
+                provider_id,
+                identity,
+                "Usage query returned no entries",
+            ),
+            Ok(entries) => {
+                let result = ProviderUsageResult {
+                    entries,
+                    queried_at: Some(now_millis()),
+                    error: None,
+                    is_stale: false,
+                };
+                self.cache()
+                    .record_success(provider_id, identity, result.clone());
                 result
             }
-            Err(error) => {
-                let mut cache = self.cache();
-                cache.record_failure(provider_id, &error);
-                cache
-                    .get(provider_id)
-                    .cloned()
-                    .unwrap_or_else(|| failed_result(error))
-            }
+            Err(error) => self.cache().record_failure(provider_id, identity, &error),
         }
     }
 
@@ -103,46 +123,65 @@ impl ProviderUsageService {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
+}
 
-    async fn query_uncached(&self, provider_id: &str) -> Result<ProviderUsageResult, String> {
-        let provider = load_provider(provider_id)?;
-        let prepared = prepare_query(&provider)?;
-        let entries = execute_prepared_query(&prepared).await?;
-        if entries.is_empty() {
-            return Err("Usage query returned no entries".to_string());
-        }
-        Ok(ProviderUsageResult {
-            entries,
-            queried_at: Some(now_millis()),
-            error: None,
-            is_stale: false,
-        })
-    }
+type ProviderQueryIdentity = [u8; 32];
+
+struct CachedUsage {
+    identity: ProviderQueryIdentity,
+    result: ProviderUsageResult,
 }
 
 #[derive(Default)]
 struct UsageCache {
-    values: HashMap<String, ProviderUsageResult>,
+    values: HashMap<String, CachedUsage>,
 }
 
 impl UsageCache {
-    fn get(&self, provider_id: &str) -> Option<&ProviderUsageResult> {
-        self.values.get(provider_id)
+    fn get(
+        &self,
+        provider_id: &str,
+        identity: &ProviderQueryIdentity,
+    ) -> Option<&ProviderUsageResult> {
+        self.values
+            .get(provider_id)
+            .filter(|cached| &cached.identity == identity && !cached.result.entries.is_empty())
+            .map(|cached| &cached.result)
     }
 
-    fn record_success(&mut self, provider_id: &str, mut result: ProviderUsageResult) {
+    fn record_success(
+        &mut self,
+        provider_id: &str,
+        identity: ProviderQueryIdentity,
+        mut result: ProviderUsageResult,
+    ) {
         result.error = None;
         result.is_stale = false;
-        self.values.insert(provider_id.to_string(), result);
+        self.values
+            .insert(provider_id.to_string(), CachedUsage { identity, result });
     }
 
-    fn record_failure(&mut self, provider_id: &str, error: &str) {
-        let value = self
+    fn record_failure(
+        &mut self,
+        provider_id: &str,
+        identity: ProviderQueryIdentity,
+        error: &str,
+    ) -> ProviderUsageResult {
+        if let Some(cached) = self
             .values
-            .entry(provider_id.to_string())
-            .or_insert_with(|| failed_result(error.to_string()));
-        value.error = Some(error.to_string());
-        value.is_stale = !value.entries.is_empty();
+            .get_mut(provider_id)
+            .filter(|cached| cached.identity == identity && !cached.result.entries.is_empty())
+        {
+            cached.result.error = Some(error.to_string());
+            cached.result.is_stale = true;
+            return cached.result.clone();
+        }
+        self.invalidate(provider_id);
+        failed_result(error.to_string())
+    }
+
+    fn invalidate(&mut self, provider_id: &str) {
+        self.values.remove(provider_id);
     }
 }
 
@@ -177,6 +216,30 @@ struct UsageQueryConfig {
     access_key_id: String,
     secret_access_key: String,
     allow_local_network: bool,
+}
+
+fn provider_query_identity(provider: &StoredProvider) -> ProviderQueryIdentity {
+    let mut digest = Sha256::new();
+    for value in [
+        provider.provider_type.as_str(),
+        provider.base_url.as_str(),
+        provider.api_key.as_str(),
+        provider.usage_query.mode.as_str(),
+        provider.usage_query.script.as_str(),
+        provider.usage_query.base_url.as_str(),
+        provider.usage_query.access_token.as_str(),
+        provider.usage_query.user_id.as_str(),
+        provider.usage_query.access_key_id.as_str(),
+        provider.usage_query.secret_access_key.as_str(),
+    ] {
+        digest.update((value.len() as u64).to_be_bytes());
+        digest.update(value.as_bytes());
+    }
+    digest.update([
+        provider.usage_query.enabled as u8,
+        provider.usage_query.allow_local_network as u8,
+    ]);
+    digest.finalize().into()
 }
 
 #[derive(Clone, Default)]
@@ -455,7 +518,7 @@ fn prepare_coding_plan_query(provider: &StoredProvider) -> Result<PreparedQuery,
                 &provider.api_key,
             )?,
         ),
-        _ if host.contains("zenmux") => (
+        "api.zenmux.com" => (
             ProviderAdapter::ZenMux,
             bearer_request(base.as_str(), &provider.api_key)?,
         ),
@@ -672,6 +735,7 @@ fn classify_volcengine_error(body: &Value) -> Option<QueryFailureKind> {
         "unauthorized",
         "forbidden",
         "credential",
+        "accesskey",
         "token",
     ]
     .iter()
@@ -1056,10 +1120,10 @@ fn build_volcengine_request(
     let x_date = now.format("%Y%m%dT%H%M%SZ").to_string();
     let short_date = now.format("%Y%m%d").to_string();
     let content_hash = sha256_hex(body);
-    let signed_headers = "host;x-date;x-content-sha256;content-type";
+    let signed_headers = "content-type;host;x-content-sha256;x-date";
     let content_type = "application/json; charset=utf-8";
     let canonical_headers = format!(
-        "host:open.volcengineapi.com\nx-date:{x_date}\nx-content-sha256:{content_hash}\ncontent-type:{content_type}\n"
+        "content-type:{content_type}\nhost:open.volcengineapi.com\nx-content-sha256:{content_hash}\nx-date:{x_date}\n"
     );
     let canonical_request = format!(
         "POST\n/\n{canonical_query}\n{canonical_headers}\n{signed_headers}\n{content_hash}"
@@ -1509,8 +1573,10 @@ mod tests {
     #[test]
     fn cache_keeps_last_successful_result_after_refresh_failure() {
         let mut cache = UsageCache::default();
+        let identity = [7_u8; 32];
         cache.record_success(
             "provider-a",
+            identity,
             ProviderUsageResult {
                 entries: vec![ProviderUsageEntry {
                     label: "Balance".to_string(),
@@ -1522,9 +1588,9 @@ mod tests {
                 is_stale: false,
             },
         );
-        cache.record_failure("provider-a", "request timed out");
+        cache.record_failure("provider-a", identity, "request timed out");
 
-        let result = cache.get("provider-a").expect("cached result");
+        let result = cache.get("provider-a", &identity).expect("cached result");
         assert_eq!(result.entries[0].value, "4.20");
         assert_eq!(result.error.as_deref(), Some("request timed out"));
         assert!(result.is_stale);
@@ -1533,12 +1599,64 @@ mod tests {
     #[test]
     fn cache_returns_an_error_without_inventing_stale_values() {
         let mut cache = UsageCache::default();
-        cache.record_failure("provider-a", "request failed");
+        let identity = [7_u8; 32];
+        let result = cache.record_failure("provider-a", identity, "request failed");
 
-        let result = cache.get("provider-a").expect("cached error");
         assert!(result.entries.is_empty());
         assert_eq!(result.error.as_deref(), Some("request failed"));
         assert!(!result.is_stale);
+        assert!(cache.get("provider-a", &identity).is_none());
+    }
+
+    #[test]
+    fn cache_requires_current_provider_identity_and_supports_invalidation() {
+        let mut cache = UsageCache::default();
+        let original = test_provider("balance", "https://api.deepseek.com/v1");
+        let original_identity = provider_query_identity(&original);
+        cache.record_success(
+            "provider-a",
+            original_identity,
+            ProviderUsageResult {
+                entries: vec![ProviderUsageEntry {
+                    label: "Balance".to_string(),
+                    value: "4.20".to_string(),
+                    unit: Some("USD".to_string()),
+                }],
+                queried_at: Some(123),
+                error: None,
+                is_stale: false,
+            },
+        );
+
+        assert!(cache.get("provider-a", &original_identity).is_some());
+        let mut edited = original.clone();
+        edited.api_key = "different-account-secret".to_string();
+        assert!(cache
+            .get("provider-a", &provider_query_identity(&edited))
+            .is_none());
+
+        cache.invalidate("provider-a");
+        assert!(cache.get("provider-a", &original_identity).is_none());
+
+        let mut disabled = original.clone();
+        disabled.usage_query.enabled = false;
+        assert!(prepare_query(&disabled).is_err());
+        let mut retyped = original;
+        retyped.provider_type = "unsupported".to_string();
+        assert!(prepare_query(&retyped).is_err());
+    }
+
+    #[test]
+    fn failure_only_results_are_not_reusable_cache_entries() {
+        let mut cache = UsageCache::default();
+        let provider = test_provider("balance", "https://api.deepseek.com/v1");
+        let identity = provider_query_identity(&provider);
+
+        let result = cache.record_failure("provider-a", identity, "request failed");
+
+        assert!(result.entries.is_empty());
+        assert_eq!(result.error.as_deref(), Some("request failed"));
+        assert!(cache.get("provider-a", &identity).is_none());
     }
 
     #[test]
@@ -1613,9 +1731,9 @@ mod tests {
                 "/v1/api/openplatform/coding_plan/remains",
             ),
             (
-                "https://zenmux.ai/api/usage",
+                "https://api.zenmux.com/v1/usage",
                 ProviderAdapter::ZenMux,
-                "/api/usage",
+                "/v1/usage",
             ),
         ];
 
@@ -1625,6 +1743,22 @@ mod tests {
             assert_eq!(prepared.primary.adapter, expected_adapter);
             assert_eq!(prepared.primary.request.url.path(), expected_path);
         }
+    }
+
+    #[test]
+    fn coding_plan_rejects_zenmux_lookalike_hosts() {
+        for base_url in [
+            "https://evil-zenmux.example/api/usage",
+            "https://api.zenmux.com.attacker.example/usage",
+            "https://zenmux.ai/api/usage",
+        ] {
+            assert!(prepare_query(&test_provider("coding-plan", base_url)).is_err());
+        }
+        assert!(prepare_query(&test_provider(
+            "coding-plan",
+            "https://API.ZENMUX.COM/v1/usage",
+        ))
+        .is_ok());
     }
 
     #[test]
@@ -1857,6 +1991,25 @@ mod tests {
     }
 
     #[test]
+    fn volcengine_access_key_errors_are_auth_failures() {
+        for code in [
+            "InvalidAccessKey",
+            "InvalidAccessKeyId",
+            "AccessKeyNotFound",
+            "AccessKeyDisabled",
+        ] {
+            let response = json!({
+                "ResponseMetadata": {"Error": {"Code": code, "Message": "bad key"}}
+            });
+            assert_eq!(
+                classify_volcengine_error(&response),
+                Some(QueryFailureKind::Auth),
+                "{code} must hard-stop without fallback",
+            );
+        }
+    }
+
+    #[test]
     fn script_interrupts_unbounded_execution() {
         let started = Instant::now();
         assert!(evaluate_script_request("for (;;) {}", &ScriptVariables::default()).is_err());
@@ -1879,8 +2032,10 @@ mod tests {
             .headers
             .get("Authorization")
             .expect("authorization header");
-        assert!(authorization
-            .starts_with("HMAC-SHA256 Credential=AKLTtest/20240621/cn-beijing/ark/request,",));
+        assert_eq!(
+            authorization,
+            "HMAC-SHA256 Credential=AKLTtest/20240621/cn-beijing/ark/request, SignedHeaders=content-type;host;x-content-sha256;x-date, Signature=de0429a233a6c3e228ec511c8387f09c73654683e5e7ff44dac08f514af28e03",
+        );
         assert!(!authorization.contains("secretkey"));
         assert_eq!(
             signed.headers.get("X-Content-Sha256").map(String::as_str),

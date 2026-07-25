@@ -434,32 +434,16 @@
     background: hsl(var(--muted-foreground) / 0.36);
   }
 
-  /* Upload file list scrollbar */
+  /* Upload file list: scrollable without a visible scrollbar */
   .upload-file-list {
-    scrollbar-width: thin;
-    scrollbar-color: transparent transparent;
-    transition: scrollbar-color 0.3s;
-  }
-  .upload-file-list:hover {
-    scrollbar-color: hsl(var(--muted-foreground) / 0.25) transparent;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
   }
   .upload-file-list::-webkit-scrollbar {
-    height: 4px;
-  }
-  .upload-file-list::-webkit-scrollbar-track {
-    background: transparent;
-    margin: 0 8px;
-  }
-  .upload-file-list::-webkit-scrollbar-thumb {
-    background: transparent;
-    border-radius: 2px;
-    transition: background 0.3s;
-  }
-  .upload-file-list:hover::-webkit-scrollbar-thumb {
-    background: hsl(var(--muted-foreground) / 0.25);
-  }
-  .upload-file-list:hover::-webkit-scrollbar-thumb:hover {
-    background: hsl(var(--muted-foreground) / 0.4);
+    display: none;
+    width: 0;
+    height: 0;
   }
 
   .chat-queue-scroll {

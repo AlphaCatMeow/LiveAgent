@@ -2285,10 +2285,36 @@ test("chat page helpers keep model options stable and normalize status/title edg
   );
   assert.equal(chatHelpers.normalizeConversationTitle("  one two \n three  "), "one two three");
   assert.equal(chatHelpers.normalizeConversationTitle("one two three four five six seven eight nine ten eleven"), "one two three four five six seven eight nine ten");
+  // Rename box shares this normalizer: a long CJK title the user typed must survive intact.
   assert.equal(
-    chatHelpers.normalizeConversationTitle("侧边栏会话标题改成中文简要总结并写入全局记忆偏好"),
-    "侧边栏会话标题改成中文简要总结并写入全局记忆偏好".slice(0, 24),
+    chatHelpers.normalizeConversationTitle("关于侧边栏会话标题生成逻辑的重构与国际化适配讨论记录第二版"),
+    "关于侧边栏会话标题生成逻辑的重构与国际化适配讨论记录第二版",
   );
+  assert.equal(
+    chatHelpers.normalizeConversationTitle("Fix 中文 encoding in the parser module and add regression tests"),
+    "Fix 中文 encoding in the parser module and add regression",
+  );
+  // Generated titles additionally get a CJK character cap.
+  assert.equal(
+    chatHelpers.normalizeGeneratedConversationTitle("关于侧边栏会话标题生成逻辑的重构与国际化适配讨论记录第二版"),
+    "关于侧边栏会话标题生成逻辑的重构与国际化适配讨论",
+  );
+  // Latin-dominant titles keep the word cap even when they contain a CJK token.
+  assert.equal(
+    chatHelpers.normalizeGeneratedConversationTitle("Fix 中文 encoding in the parser module and add regression tests"),
+    "Fix 中文 encoding in the parser module and add regression",
+  );
+  assert.equal(
+    chatHelpers.normalizeGeneratedConversationTitle("one two three four five six seven eight nine ten eleven"),
+    "one two three four five six seven eight nine ten",
+  );
+  // The CJK cap counts code points, so an astral char at the boundary is not split in half.
+  const cappedAstralTitle = chatHelpers.normalizeGeneratedConversationTitle(
+    `${"中".repeat(23)}😀尾`,
+  );
+  assert.equal(cappedAstralTitle, `${"中".repeat(23)}😀`);
+  assert.equal(/[\uD800-\uDBFF]$/.test(cappedAstralTitle), false);
+  assert.equal(chatHelpers.normalizeGeneratedConversationTitle("  "), "");
   assert.match(chatHelpers.buildConversationTitleSystemPrompt("zh-CN"), /简体中文/);
   assert.match(chatHelpers.buildConversationTitleSystemPrompt("en-US"), /concise conversation titles/i);
   assert.match(chatHelpers.buildConversationTitlePrompt("hello", "zh-CN"), /简体中文标题/);

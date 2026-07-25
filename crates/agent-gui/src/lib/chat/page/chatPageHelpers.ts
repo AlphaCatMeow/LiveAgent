@@ -1,5 +1,5 @@
 import type { Context } from "@earendil-works/pi-ai";
-import { DEFAULT_LOCALE, type Locale } from "../../../i18n/config";
+import type { Locale } from "../../../i18n/config";
 import { type ModelOption, toModelValue } from "../../providers/llm";
 import type { AppSettings } from "../../settings";
 import { createUuid } from "../../shared/id";
@@ -11,7 +11,9 @@ const TITLE_LOOKAHEAD_TIMEOUT_MS = 1_200;
 const TITLE_MAX_LATIN_WORDS = 10;
 const TITLE_MAX_CJK_CHARS = 24;
 const TITLE_MAX_CHARS = 80;
-const CJK_CHAR_PATTERN = /[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]/;
+// Global on purpose: only ever used with String#match below, never with #test
+// (a sticky lastIndex would make alternating calls disagree).
+const CJK_CHAR_PATTERN = /[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]/g;
 const MODEL_GENERATING_STATUS_PATTERN = /^第\s*\d+\s*轮：模型生成中\.\.\.$/;
 
 export const VIBING_STATUS = "Vibing...";
@@ -119,7 +121,7 @@ export function buildModelOptions(
 }
 
 /** System prompt for the lightweight first-turn title job. Follows UI locale. */
-export function buildConversationTitleSystemPrompt(locale: Locale = DEFAULT_LOCALE) {
+export function buildConversationTitleSystemPrompt(locale: Locale) {
   if (locale === "zh-CN") {
     return "你负责生成简洁的会话标题。只输出标题本身，不要解释、不要引号。标题必须使用简体中文；专有名词（如 Grok、API）可保留原文。";
   }
@@ -130,13 +132,18 @@ export function buildConversationTitleSystemPrompt(locale: Locale = DEFAULT_LOCA
  * User prompt for the title job. Language follows the app UI locale so Chinese
  * installs no longer get English titles by default.
  */
-export function buildConversationTitlePrompt(content: string, locale: Locale = DEFAULT_LOCALE) {
+export function buildConversationTitlePrompt(content: string, locale: Locale) {
   if (locale === "zh-CN") {
     return `根据以下内容，为本次会话生成一个简练的简体中文标题（约 8～18 个字，概括主题，不要照抄整句问话），直接输出标题，不要其他内容：\n${content}`;
   }
   return `Based on the following content, generate a title within 10 words for this conversation and output it directly without any other content:\n${content}`;
 }
 
+/**
+ * Shared title normalizer: also used to sanitize titles the user types in the
+ * sidebar rename box, so it must never shorten a title more than the historical
+ * latin word/char caps did.
+ */
 export function normalizeConversationTitle(raw: string) {
   const singleLine = raw
     .replace(/[\r\n]+/g, " ")
@@ -146,17 +153,34 @@ export function normalizeConversationTitle(raw: string) {
 
   if (!singleLine) return "";
 
-  // CJK titles are character-dense and usually unspaced; word caps would keep them whole.
-  if (CJK_CHAR_PATTERN.test(singleLine)) {
-    return singleLine.slice(0, TITLE_MAX_CJK_CHARS).trim();
-  }
-
   const words = singleLine.split(" ").filter(Boolean);
   const limitedWords =
     words.length > TITLE_MAX_LATIN_WORDS
       ? words.slice(0, TITLE_MAX_LATIN_WORDS).join(" ")
       : singleLine;
   return limitedWords.slice(0, TITLE_MAX_CHARS).trim();
+}
+
+/**
+ * Normalizer for model-generated titles only. CJK titles are character-dense
+ * and usually unspaced, so the latin word cap would let them run the full 80
+ * chars; cap those by character count instead. Applies only when the title is
+ * predominantly CJK, so a latin title containing a stray CJK token keeps the
+ * word cap. Never used on user-typed renames.
+ */
+export function normalizeGeneratedConversationTitle(raw: string) {
+  const title = normalizeConversationTitle(raw);
+  if (!title) return "";
+
+  // Code points, not UTF-16 units: slicing mid-surrogate would leave a lone
+  // half that renders as U+FFFD.
+  const chars = Array.from(title);
+  const cjkCount = title.match(CJK_CHAR_PATTERN)?.length ?? 0;
+  if (cjkCount * 2 < chars.length) return title;
+
+  return chars.length > TITLE_MAX_CJK_CHARS
+    ? chars.slice(0, TITLE_MAX_CJK_CHARS).join("").trim()
+    : title;
 }
 
 export function buildFallbackConversationTitle(content: string) {

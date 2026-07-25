@@ -1,11 +1,10 @@
 import type { MutableRefObject } from "react";
 import type { Locale } from "../../../i18n/config";
-import { DEFAULT_LOCALE } from "../../../i18n/config";
 import type { GatewayBridgeEventController } from "../../../lib/chat/conversation/run";
 import {
   buildConversationTitlePrompt,
   buildConversationTitleSystemPrompt,
-  normalizeConversationTitle,
+  normalizeGeneratedConversationTitle,
 } from "../../../lib/chat/page/chatPageHelpers";
 import { assistantMessageToText, streamAssistantMessage } from "../../../lib/providers/llm";
 import type { ProviderId } from "../../../lib/settings";
@@ -24,8 +23,11 @@ type StartConversationTitleJobParams = {
   conversationId: string;
   titleSourceText: string;
   content: string;
-  /** UI locale; title language follows this (default zh-CN). */
-  locale?: Locale;
+  /**
+   * UI locale; the generated title language follows it. Required so a new
+   * caller cannot silently fall back to Chinese titles in an English UI.
+   */
+  locale: Locale;
   // Only the pending row's title is streamed into the sidebar; persisted rows
   // are renamed through the history IPC by the caller.
   sidebarStore: Pick<SidebarStore, "peek" | "upsertLocal">;
@@ -55,7 +57,7 @@ export function startConversationTitleJob(params: StartConversationTitleJobParam
     conversationId,
     titleSourceText,
     content,
-    locale = DEFAULT_LOCALE,
+    locale,
     sidebarStore,
     titleJobRef,
     gatewayBridgeEvents,
@@ -114,7 +116,7 @@ export function startConversationTitleJob(params: StartConversationTitleJobParam
       });
     },
   })
-    .then((assistant) => normalizeConversationTitle(assistantMessageToText(assistant)))
+    .then((assistant) => normalizeGeneratedConversationTitle(assistantMessageToText(assistant)))
     .then((title) => title || null)
     .catch(() => null);
 

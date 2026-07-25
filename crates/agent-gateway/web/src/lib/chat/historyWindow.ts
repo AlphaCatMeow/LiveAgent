@@ -8,7 +8,9 @@
 //
 //   oldestOffset — number of persisted messages ABOVE the loaded window
 //                  (0 means the window starts at the very first message)
-//   lastTotal    — total_message_count reported by the latest applied fetch
+//   lastTotal    — the freshest total_message_count this client observed:
+//                  the latest applied fetch, bumped forward by history-upsert
+//                  summary counts (noteHistoryWindowTotal)
 //
 // Requests are EDGE-ANCHORED: a quiet refresh asks for
 // `lastTotal - oldestOffset` messages, so the window always spans everything
@@ -27,11 +29,19 @@
 // corrected size from the response's authoritative total, and skips the
 // cycle when the edge slipped again (the app's quiet-refresh loops converge
 // on a later pass).
+//
+// The slip retry is the SAFETY NET, not the steady state: the desktop
+// persists a run's messages before it reports completion, and the history
+// upsert it publishes at that flush carries the new total. Folding that
+// total into `lastTotal` (noteHistoryWindowTotal) before the busy→idle
+// refresh plans its span makes the common post-turn refresh a single
+// request; only a lossy/dropped upsert (they are best-effort broadcasts)
+// leaves a stale span behind for the retry to correct.
 
 export type HistoryWindowState = {
   /** Persisted messages above the loaded window (0 = window starts at message 0). */
   oldestOffset: number;
-  /** total_message_count from the latest applied response. */
+  /** Freshest observed total: latest applied response, bumped by upsert counts. */
   lastTotal: number;
 };
 
@@ -101,6 +111,28 @@ export function adoptHistoryWindowState(counts: HistoryWindowCounts): HistoryWin
     ? Math.max(0, counts.totalMessageCount - counts.returnedMessageCount)
     : 0;
   return { oldestOffset: edge, lastTotal: counts.totalMessageCount };
+}
+
+// Folds an out-of-band total — a history upsert's summary message_count, the
+// same total_message_count authority the fetch responses report — into the
+// bookkeeping, so the next planned span already covers messages appended
+// since the last applied fetch. Without this, every post-turn quiet refresh
+// under-requests by exactly the flushed message count and burns a slipped-
+// edge retry (two full window fetches per turn instead of one).
+//
+// Totals only move forward: a stale/invalid count returns the state
+// untouched (identity — callers can skip the write), and truncations
+// (edit-resend) converge through the fetch path, whose complete responses
+// re-establish both fields authoritatively.
+export function noteHistoryWindowTotal(
+  state: HistoryWindowState,
+  totalMessageCount: unknown,
+): HistoryWindowState {
+  const total = asNonNegativeInt(totalMessageCount);
+  if (total === null || total <= state.lastTotal) {
+    return state;
+  }
+  return { oldestOffset: state.oldestOffset, lastTotal: total };
 }
 
 // Decides whether a windowed response is safe to apply. See the module

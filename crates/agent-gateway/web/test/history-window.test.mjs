@@ -11,6 +11,7 @@ const loader = createWebModuleLoader({
 const {
   adoptHistoryWindowState,
   evaluateHistoryWindowResponse,
+  noteHistoryWindowTotal,
   planHistoryWindowRequest,
   readHistoryWindowCounts,
   trimLeadingHeadlessEntries,
@@ -160,6 +161,45 @@ test("first observation always applies (no established edge)", () => {
   });
   assert.equal(verdict.action, "apply");
   assert.deepEqual(verdict.nextState, { oldestOffset: 640, lastTotal: 1000 });
+});
+
+test("noteHistoryWindowTotal folds a fresher upsert total forward", () => {
+  const state = { oldestOffset: 640, lastTotal: 1000 };
+  const noted = noteHistoryWindowTotal(state, 1002);
+  assert.deepEqual(noted, { oldestOffset: 640, lastTotal: 1002 });
+});
+
+test("noteHistoryWindowTotal is identity for stale or invalid totals", () => {
+  const state = { oldestOffset: 640, lastTotal: 1000 };
+  assert.equal(noteHistoryWindowTotal(state, 1000), state);
+  assert.equal(noteHistoryWindowTotal(state, 998), state);
+  assert.equal(noteHistoryWindowTotal(state, -1), state);
+  assert.equal(noteHistoryWindowTotal(state, Number.NaN), state);
+  assert.equal(noteHistoryWindowTotal(state, undefined), state);
+  assert.equal(noteHistoryWindowTotal(state, "1002"), state);
+});
+
+test("upsert-bumped post-turn refresh applies in a single request", () => {
+  // Regression: without folding the upsert total into the bookkeeping, every
+  // post-turn quiet refresh planned from the previous fetch's total, came up
+  // short by exactly the flushed message count, and burned the slipped-edge
+  // retry — two full window fetches per turn in the steady state.
+  let state = adoptHistoryWindowState({
+    totalMessageCount: 1000,
+    returnedMessageCount: 360,
+    hasMore: true,
+  });
+  // The desktop flushes a 2-message turn and publishes the upsert before the
+  // conversation flips idle.
+  state = noteHistoryWindowTotal(state, 1002);
+  const planned = planHistoryWindowRequest(state, { initialWindowMessages: INITIAL });
+  assert.equal(planned, 1002 - 640);
+  const verdict = evaluateHistoryWindowResponse({
+    previous: state,
+    counts: { totalMessageCount: 1002, returnedMessageCount: 362, hasMore: true },
+  });
+  assert.equal(verdict.action, "apply");
+  assert.deepEqual(verdict.nextState, { oldestOffset: 640, lastTotal: 1002 });
 });
 
 test("trimLeadingHeadlessEntries drops assistant-side entries before the first user turn", () => {

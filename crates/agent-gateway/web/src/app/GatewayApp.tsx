@@ -33,6 +33,7 @@ import {
   adoptHistoryWindowState,
   evaluateHistoryWindowResponse,
   type HistoryWindowState,
+  noteHistoryWindowTotal,
   planHistoryWindowRequest,
   readHistoryWindowCounts,
   trimLeadingHeadlessEntries,
@@ -1946,6 +1947,12 @@ export default function GatewayApp() {
   // a history upsert — re-run the quiet enrich for the displayed conversation
   // so a turn holding stale or adopted-nothing content converges without a
   // re-open. The refresh itself re-checks displayed + idle around the fetch.
+  //
+  // The upsert also carries the conversation's authoritative message_count:
+  // fold it into the window bookkeeping FIRST (for every tracked conversation
+  // — revisits plan from the same state), so the next planned span covers the
+  // flushed messages and the post-turn refresh applies in a single request
+  // instead of tripping the slipped-edge retry.
   useEffect(() => {
     if (!api) {
       return;
@@ -1955,10 +1962,20 @@ export default function GatewayApp() {
         return;
       }
       const conversationIdValue = event.conversation_id.trim();
+      if (!conversationIdValue) {
+        return;
+      }
+      const windowStates = historyWindowStatesRef.current;
+      const windowState = windowStates.get(conversationIdValue);
+      if (windowState) {
+        const noted = noteHistoryWindowTotal(windowState, event.conversation.message_count);
+        if (noted !== windowState) {
+          windowStates.set(conversationIdValue, noted);
+        }
+      }
       if (
-        !conversationIdValue ||
         resolveVisibleConversationId(selectedHistoryIdRef.current, conversationIdRef.current) !==
-          conversationIdValue
+        conversationIdValue
       ) {
         return;
       }

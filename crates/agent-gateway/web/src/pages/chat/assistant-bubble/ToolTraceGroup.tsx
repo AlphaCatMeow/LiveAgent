@@ -62,7 +62,13 @@ function ToolTraceGroupInner(props: {
   redactToolContent?: boolean;
   isAborted?: boolean;
 }) {
-  const { items, runningToolCallIds = [], readOnly = false, redactToolContent = false, isAborted = false } = props;
+  const {
+    items,
+    runningToolCallIds = [],
+    readOnly = false,
+    redactToolContent = false,
+    isAborted = false,
+  } = props;
   const { t } = useLocale();
   const counts = useMemo(
     () => getToolGroupCounts(items, runningToolCallIds),

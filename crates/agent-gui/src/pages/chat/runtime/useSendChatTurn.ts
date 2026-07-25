@@ -899,7 +899,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     // Persist the user turn immediately so WebUI/GUI sidebars can surface the
     // latest conversation before the assistant round finishes. The live runtime
     // itself is mirrored through ChatRuntimeSnapshot, not history_sync.
-    const initialPersist = (initialPersistPromise = persistConversationWithHistorySync({
+    initialPersistPromise = persistConversationWithHistorySync({
       conversationId,
       sessionId,
       providerId,
@@ -911,7 +911,8 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       createdAt,
       titlePromise,
       titleLookahead: true,
-    }));
+    });
+    const initialPersist = initialPersistPromise;
     if (overrides?.afterInitialHistoryPersist && !overrides.beforeRuntimeStart) {
       const persisted = await initialPersist;
       if (await finishRequestedStopBeforeRuntime()) {

@@ -78,6 +78,11 @@ function hasSettingsSyncChanged(prev: AppSettings, next: AppSettings) {
 function hasSensitiveSettingsUpdates(settings: AppSettings) {
   return (
     settings.customProviders.some((provider) => provider.apiKey.trim().length > 0) ||
+    settings.customProviders.some(
+      (provider) =>
+        provider.usageQuery.accessToken.trim().length > 0 ||
+        provider.usageQuery.secretAccessKey.trim().length > 0,
+    ) ||
     settings.ssh.hosts.some(
       (host) => host.password.trim().length > 0 || host.privateKey.trim().length > 0,
     )
@@ -87,7 +92,11 @@ function hasSensitiveSettingsUpdates(settings: AppSettings) {
 function hasSensitiveSettingsUpdatesPayload(payload: unknown) {
   const source =
     payload && typeof payload === "object" && !Array.isArray(payload)
-      ? (payload as { providerApiKeyUpdates?: unknown; sshSecretUpdates?: unknown })
+      ? (payload as {
+          providerApiKeyUpdates?: unknown;
+          providerUsageQuerySecretUpdates?: unknown;
+          sshSecretUpdates?: unknown;
+        })
       : {};
   const providerUpdates = source.providerApiKeyUpdates;
   if (
@@ -97,6 +106,22 @@ function hasSensitiveSettingsUpdatesPayload(payload: unknown) {
     Object.values(providerUpdates).some(
       (value) => typeof value === "string" && value.trim().length > 0,
     )
+  ) {
+    return true;
+  }
+  const usageQueryUpdates = source.providerUsageQuerySecretUpdates;
+  if (
+    usageQueryUpdates &&
+    typeof usageQueryUpdates === "object" &&
+    !Array.isArray(usageQueryUpdates) &&
+    Object.values(usageQueryUpdates).some((value) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+      const update = value as { accessToken?: unknown; secretAccessKey?: unknown };
+      return (
+        (typeof update.accessToken === "string" && update.accessToken.trim().length > 0) ||
+        (typeof update.secretAccessKey === "string" && update.secretAccessKey.trim().length > 0)
+      );
+    })
   ) {
     return true;
   }

@@ -490,6 +490,12 @@ fn local_settings_update_event_keeps_private_api_key_updates_only_at_root() {
         },
         "providerApiKeyUpdates": {
             "provider-a": "new-key"
+        },
+        "providerUsageQuerySecretUpdates": {
+            "provider-a": {
+                "accessToken": "usage-token",
+                "secretAccessKey": "usage-secret"
+            }
         }
     });
 
@@ -504,6 +510,14 @@ fn local_settings_update_event_keeps_private_api_key_updates_only_at_root() {
     assert_eq!(
         event_payload["providerApiKeyUpdates"]["provider-a"],
         "new-key"
+    );
+    assert_eq!(
+        event_payload["providerUsageQuerySecretUpdates"]["provider-a"]["accessToken"],
+        "usage-token"
+    );
+    assert_eq!(
+        event_payload["providerUsageQuerySecretUpdates"]["provider-a"]["secretAccessKey"],
+        "usage-secret"
     );
 }
 

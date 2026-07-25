@@ -30,6 +30,7 @@ import {
 } from "../../components/icons";
 
 import { Button } from "../../components/ui/button";
+import { useConfirmDialog } from "../../components/ui/confirm-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,6 +48,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../components/ui/select";
+import { Textarea } from "../../components/ui/textarea";
 import { useVerticalListReorder } from "../../components/ui/useVerticalListReorder";
 import { useLocale } from "../../i18n";
 import { buildModelOptions } from "../../lib/chat/page/chatPageHelpers";
@@ -84,12 +86,16 @@ import {
   applyModelBulkActiveState,
   buildProviderModelsFetchKey,
   createDraftModelConfig,
+  createUsageQueryDraft,
   fetchModelsFromApi,
   formatTokenCount,
   getModelBulkActionCounts,
+  getPersistedUsageQueryProviderId,
   isGatewayWebuiRuntime,
   mergeFetchedModels,
   normalizeFetchedModels,
+  requiresCustomUsageQueryConfirmation,
+  serializeUsageQueryDraft,
 } from "./providerUtils";
 import { ConfirmDeletePopover } from "./shared";
 import type { SettingsSectionProps } from "./types";
@@ -98,10 +104,11 @@ type ModalProps = {
   providerType: ProviderId;
   initialData?: CustomProvider;
   onSave: (data: Omit<CustomProvider, "id">) => void;
+  onTestUsage?: (providerId: string) => void;
   onClose: () => void;
 };
 
-type ProviderDialogPanel = "general" | "request";
+type ProviderDialogPanel = "general" | "request" | "usage";
 
 type ModelEditDraft = {
   model: ProviderModelConfig;
@@ -257,7 +264,7 @@ function orderModels(
   ];
 }
 
-function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProps) {
+function ProviderModal({ providerType, initialData, onSave, onTestUsage, onClose }: ModalProps) {
   const { t } = useLocale();
   const isGatewayWebui = isGatewayWebuiRuntime();
   const initialApiKey = initialData?.apiKey ?? "";
@@ -290,6 +297,12 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
   const [promptCacheRetention, setPromptCacheRetention] = useState<"short" | "long">(
     initialData?.promptCacheRetention === "long" ? "long" : "short",
   );
+  const [usageQuery, setUsageQuery] = useState(() =>
+    createUsageQueryDraft(initialData?.usageQuery ?? getDefaultUsageQueryConfig(), isGatewayWebui),
+  );
+  const [customUsageQueryConfirmed, setCustomUsageQueryConfirmed] = useState(
+    () => initialData?.usageQuery?.enabled === true && initialData.usageQuery.mode === "custom",
+  );
   const [fetchingModels, setFetchingModels] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [addingModel, setAddingModel] = useState(false);
@@ -317,6 +330,8 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
   const apiKeyIsRedactedDisplay = initialUsesRedactedApiKey && apiKey === REDACTED_API_KEY_DISPLAY;
   const apiKeyForRequest = apiKeyIsRedactedDisplay ? "" : apiKey.trim();
   const canFetchModels = baseUrl.trim().length > 0 && apiKeyForRequest.length > 0;
+  const persistedUsageQueryProviderId = getPersistedUsageQueryProviderId(initialData);
+  const { confirm: requestUsageQueryConfirm, dialog: usageQueryConfirmDialog } = useConfirmDialog();
 
   const doFetch = useCallback(
     async (url: string, key: string) => {
@@ -551,7 +566,7 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
     focusCustomHeader(headerSuggest.index, "value");
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!name.trim()) return;
     const invalidHeaderIndex = customHeaders.findIndex(
       (header) => getCustomHeaderKeyIssue(header.key, true) !== null,
@@ -562,6 +577,18 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
       setActivePanel("request");
       focusCustomHeader(invalidHeaderIndex, "key");
       return;
+    }
+    if (requiresCustomUsageQueryConfirmation(usageQuery, customUsageQueryConfirmed)) {
+      const confirmed = await requestUsageQueryConfirm({
+        title: t("settings.providerUsageCustomConfirmTitle"),
+        description: t("settings.providerUsageCustomConfirmDescription"),
+        detail: t("settings.providerUsageCustomConfirmDetail"),
+        confirmLabel: t("settings.providerUsageCustomConfirmAction"),
+        cancelLabel: t("settings.cancel"),
+        tone: "warning",
+      });
+      if (!confirmed) return;
+      setCustomUsageQueryConfirmed(true);
     }
     const nextApiKey = apiKeyIsRedactedDisplay ? "" : apiKey.trim();
     onSave({
@@ -595,8 +622,12 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
           : undefined,
       nativeWebSearchEnabled: initialData?.nativeWebSearchEnabled ?? true,
       useSystemProxy,
-      usageQuery: initialData?.usageQuery ?? getDefaultUsageQueryConfig(),
+      usageQuery: serializeUsageQueryDraft(usageQuery, isGatewayWebui),
     });
+  }
+
+  function handleTestUsageQuery() {
+    if (persistedUsageQueryProviderId) onTestUsage?.(persistedUsageQueryProviderId);
   }
 
   const isEditing = Boolean(initialData);
@@ -753,6 +784,21 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
                   {customHeaders.length}
                 </span>
               ) : null}
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "flex h-10 items-center gap-2 rounded-lg px-3 text-left text-sm text-muted-foreground max-[720px]:min-w-max max-[720px]:flex-1 max-[720px]:justify-center max-[720px]:px-2 max-[720px]:text-xs transition-colors hover:bg-accent/50 hover:text-foreground",
+                activePanel === "usage" && "bg-primary/10 font-medium text-primary",
+              )}
+              onClick={() => {
+                exitModelBulkMode();
+                setActivePanel("usage");
+              }}
+              aria-current={activePanel === "usage" ? "page" : undefined}
+            >
+              <Key className="h-4 w-4 shrink-0 max-[720px]:h-3.5 max-[720px]:w-3.5" />
+              {t("settings.providerUsageQuery")}
             </button>
           </nav>
 
@@ -1168,7 +1214,7 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
                   </div>
                 </div>
               </section>
-            ) : (
+            ) : activePanel === "request" ? (
               <section key="request" className="provider-panel-enter">
                 <div className="text-sm font-semibold">{t("settings.providerDialogRequest")}</div>
 
@@ -1488,6 +1534,243 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
                     )
                   : null}
               </section>
+            ) : (
+              <section key="usage" className="provider-panel-enter">
+                <div className="flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold">{t("settings.providerUsageQuery")}</div>
+                  </div>
+                  <DialogSwitch
+                    checked={usageQuery.enabled}
+                    onCheckedChange={(enabled) =>
+                      setUsageQuery((previous) => ({ ...previous, enabled }))
+                    }
+                    ariaLabel={t("settings.providerUsageEnabled")}
+                  />
+                </div>
+
+                <div className="mt-4 space-y-1.5">
+                  <Label>{t("settings.providerUsageMode")}</Label>
+                  <Select
+                    value={usageQuery.mode}
+                    onValueChange={(mode) =>
+                      setUsageQuery((previous) => ({
+                        ...previous,
+                        mode: mode as typeof previous.mode,
+                      }))
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="balance">
+                        {t("settings.providerUsageMode.balance")}
+                      </SelectItem>
+                      <SelectItem value="coding-plan">
+                        {t("settings.providerUsageMode.codingPlan")}
+                      </SelectItem>
+                      <SelectItem value="general">
+                        {t("settings.providerUsageMode.general")}
+                      </SelectItem>
+                      <SelectItem value="newapi">
+                        {t("settings.providerUsageMode.newapi")}
+                      </SelectItem>
+                      <SelectItem value="custom">
+                        {t("settings.providerUsageMode.custom")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {usageQuery.mode === "general" || usageQuery.mode === "newapi" ? (
+                  <p className="mt-3 rounded-lg border bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                    {usageQuery.mode === "general"
+                      ? t("settings.providerUsageTemplate.general")
+                      : t("settings.providerUsageTemplate.newapi")}
+                  </p>
+                ) : null}
+
+                {usageQuery.mode === "custom" ? (
+                  <div className="mt-4 space-y-1.5">
+                    <Label htmlFor="usage-query-script">{t("settings.providerUsageScript")}</Label>
+                    <Textarea
+                      id="usage-query-script"
+                      value={usageQuery.script}
+                      className="min-h-36 font-mono text-xs"
+                      placeholder={t("settings.providerUsageScriptPlaceholder")}
+                      spellCheck={false}
+                      onChange={(event) =>
+                        setUsageQuery((previous) => ({
+                          ...previous,
+                          script: event.currentTarget.value,
+                        }))
+                      }
+                    />
+                  </div>
+                ) : null}
+
+                {usageQuery.mode === "general" ||
+                usageQuery.mode === "newapi" ||
+                usageQuery.mode === "custom" ? (
+                  <div className="mt-4 space-y-1.5">
+                    <Label htmlFor="usage-query-base-url">
+                      {t("settings.providerUsageBaseUrl")}
+                    </Label>
+                    <Input
+                      id="usage-query-base-url"
+                      value={usageQuery.baseUrl}
+                      onChange={(event) =>
+                        setUsageQuery((previous) => ({
+                          ...previous,
+                          baseUrl: event.currentTarget.value,
+                        }))
+                      }
+                    />
+                  </div>
+                ) : null}
+
+                {usageQuery.mode === "newapi" ? (
+                  <div className="mt-4 grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="usage-query-access-token">
+                        {t("settings.providerUsageAccessToken")}
+                      </Label>
+                      <Input
+                        id="usage-query-access-token"
+                        type="password"
+                        value={usageQuery.accessToken}
+                        autoComplete="off"
+                        onFocus={(event) => event.currentTarget.select()}
+                        onChange={(event) =>
+                          setUsageQuery((previous) => ({
+                            ...previous,
+                            accessToken: event.currentTarget.value,
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="usage-query-user-id">
+                        {t("settings.providerUsageUserId")}
+                      </Label>
+                      <Input
+                        id="usage-query-user-id"
+                        value={usageQuery.userId}
+                        onChange={(event) =>
+                          setUsageQuery((previous) => ({
+                            ...previous,
+                            userId: event.currentTarget.value,
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
+                ) : null}
+
+                {usageQuery.mode === "coding-plan" ? (
+                  <div className="mt-4 grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="usage-query-access-key-id">
+                        {t("settings.providerUsageAccessKeyId")}
+                      </Label>
+                      <Input
+                        id="usage-query-access-key-id"
+                        value={usageQuery.accessKeyId}
+                        onChange={(event) =>
+                          setUsageQuery((previous) => ({
+                            ...previous,
+                            accessKeyId: event.currentTarget.value,
+                          }))
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="usage-query-secret-access-key">
+                        {t("settings.providerUsageSecretAccessKey")}
+                      </Label>
+                      <Input
+                        id="usage-query-secret-access-key"
+                        type="password"
+                        value={usageQuery.secretAccessKey}
+                        autoComplete="off"
+                        onFocus={(event) => event.currentTarget.select()}
+                        onChange={(event) =>
+                          setUsageQuery((previous) => ({
+                            ...previous,
+                            secretAccessKey: event.currentTarget.value,
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="mt-4 rounded-xl border bg-card px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium">
+                        {t("settings.providerUsageAllowLocalNetwork")}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {t("settings.providerUsageAllowLocalNetworkHint")}
+                      </div>
+                    </div>
+                    <DialogSwitch
+                      checked={usageQuery.allowLocalNetwork}
+                      onCheckedChange={(allowLocalNetwork) =>
+                        setUsageQuery((previous) => ({ ...previous, allowLocalNetwork }))
+                      }
+                      ariaLabel={t("settings.providerUsageAllowLocalNetwork")}
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-4 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3 max-[720px]:grid-cols-1">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="usage-query-auto-refresh">
+                      {t("settings.providerUsageAutoRefresh")}
+                    </Label>
+                    <Input
+                      id="usage-query-auto-refresh"
+                      type="number"
+                      min="0"
+                      max="1440"
+                      value={usageQuery.autoRefreshMinutes}
+                      onChange={(event) => {
+                        const value = Number.parseInt(event.currentTarget.value, 10);
+                        setUsageQuery((previous) => ({
+                          ...previous,
+                          autoRefreshMinutes: Number.isFinite(value) ? Math.max(0, value) : 0,
+                        }));
+                      }}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <span className="block text-xs text-muted-foreground max-[720px]:hidden">
+                      &nbsp;
+                    </span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-10 gap-1.5"
+                      disabled={!persistedUsageQueryProviderId}
+                      onClick={handleTestUsageQuery}
+                      title={t("settings.providerUsageTest")}
+                      aria-label={t("settings.providerUsageTest")}
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      {t("settings.providerUsageTest")}
+                    </Button>
+                  </div>
+                </div>
+                {!persistedUsageQueryProviderId ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {t("settings.providerUsageTestSavedHint")}
+                  </p>
+                ) : null}
+              </section>
             )}
           </div>
         </div>
@@ -1558,6 +1841,7 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
             {t("settings.save")}
           </Button>
         </div>
+        {usageQueryConfirmDialog}
       </div>
     </div>,
     document.body,
@@ -2963,6 +3247,7 @@ export function ProvidersSection(props: SettingsSectionProps) {
           providerType={activeTab}
           initialData={editingProvider ?? undefined}
           onSave={handleSave}
+          onTestUsage={(providerId) => void refreshProvider(providerId)}
           onClose={closeModal}
         />
       ) : null}

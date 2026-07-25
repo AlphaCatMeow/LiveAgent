@@ -201,6 +201,7 @@ struct StoredProvider {
     provider_type: String,
     base_url: String,
     api_key: String,
+    #[serde(default)]
     usage_query: UsageQueryConfig,
 }
 
@@ -2106,6 +2107,19 @@ mod tests {
                 allow_local_network: false,
             },
         }
+    }
+
+    #[test]
+    fn stored_provider_without_usage_query_uses_disabled_defaults() {
+        let provider: StoredProvider = serde_json::from_value(serde_json::json!({
+            "type": "codex",
+            "baseUrl": "https://api.example.test/v1",
+            "apiKey": "provider-secret"
+        }))
+        .expect("legacy provider should deserialize");
+
+        assert!(!provider.usage_query.enabled);
+        assert!(provider.usage_query.mode.is_empty());
     }
 
     async fn serve_once(

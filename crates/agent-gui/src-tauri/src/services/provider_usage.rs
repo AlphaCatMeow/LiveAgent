@@ -1236,11 +1236,11 @@ fn evaluate_script_request(
 
 fn extract_script_entries(
     script: &str,
-    variables: &ScriptVariables,
+    _variables: &ScriptVariables,
     response: &Value,
 ) -> Result<Vec<ProviderUsageEntry>, String> {
     validate_script_size(script)?;
-    let rendered = render_script(script, variables)?;
+    let rendered = render_script(script, &ScriptVariables::default())?;
     let response_json = serde_json::to_vec(response)
         .map_err(|_| "Usage response could not be prepared for the script".to_string())?;
     if response_json.len() > MAX_RESPONSE_BYTES {
@@ -1928,6 +1928,44 @@ mod tests {
             &json!({"unit": "USD"}),
         )
         .is_err());
+    }
+
+    #[test]
+    fn script_extractor_cannot_access_request_credentials() {
+        let variables = ScriptVariables {
+            api_key: "api-secret".to_string(),
+            base_url: "https://private.example.test".to_string(),
+            access_token: "access-secret".to_string(),
+            user_id: "user-secret".to_string(),
+        };
+        let script = r#"({
+          request: {
+            url: "{{baseUrl}}/usage",
+            method: "GET",
+            headers: {
+              "Authorization": "Bearer {{apiKey}}",
+              "x-access-token": "{{accessToken}}",
+              "x-user-id": "{{userId}}"
+            }
+          },
+          extractor: (response) => ({
+            remaining: response.remaining,
+            label: "sanitized:{{apiKey}}:{{userId}}:{{baseUrl}}",
+            unit: "token:{{accessToken}}"
+          })
+        })"#;
+
+        let request = evaluate_script_request(script, &variables).expect("evaluate request");
+        assert_eq!(request.url.as_str(), "https://private.example.test/usage");
+        assert_eq!(
+            request.headers.get("Authorization").map(String::as_str),
+            Some("Bearer api-secret")
+        );
+
+        let entries = extract_script_entries(script, &variables, &json!({"remaining": 4.2}))
+            .expect("extract response");
+        assert_eq!(entries[0].label, "sanitized:::");
+        assert_eq!(entries[0].unit.as_deref(), Some("token:"));
     }
 
     #[test]

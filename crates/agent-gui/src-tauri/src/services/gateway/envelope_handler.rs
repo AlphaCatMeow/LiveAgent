@@ -13,6 +13,17 @@ use crate::services::workspace_watch::WatchSource;
 
 use super::*;
 
+pub(super) fn provider_usage_agent_envelope(
+    request_id: String,
+    response: proto::ProviderUsageResponse,
+) -> proto::AgentEnvelope {
+    proto::AgentEnvelope {
+        request_id,
+        timestamp: now_unix_seconds(),
+        payload: Some(proto::agent_envelope::Payload::ProviderUsageResp(response)),
+    }
+}
+
 impl GatewayController {
     pub(crate) async fn handle_gateway_envelope(
         self: &Arc<Self>,
@@ -463,24 +474,33 @@ impl GatewayController {
                 }
             }
             Some(proto::gateway_envelope::Payload::ProviderUsage(request)) => {
-                match gateway_bridge::handle_provider_usage(
-                    Arc::clone(&self.provider_usage_service),
-                    request,
-                )
-                .await
-                {
-                    Ok(response) => {
-                        self.send_agent_envelope(proto::AgentEnvelope {
-                            request_id,
-                            timestamp: now_unix_seconds(),
-                            payload: Some(proto::agent_envelope::Payload::ProviderUsageResp(
-                                response,
-                            )),
-                        })
-                        .await
+                let controller = Arc::clone(self);
+                tauri::async_runtime::spawn(async move {
+                    let result = match gateway_bridge::handle_provider_usage(
+                        Arc::clone(&controller.provider_usage_service),
+                        request,
+                    )
+                    .await
+                    {
+                        Ok(response) => {
+                            controller
+                                .send_agent_envelope(provider_usage_agent_envelope(
+                                    request_id.clone(),
+                                    response,
+                                ))
+                                .await
+                        }
+                        Err(error) => {
+                            controller
+                                .send_error_response(request_id.clone(), 500, error)
+                                .await
+                        }
+                    };
+                    if let Err(error) = result {
+                        eprintln!("gateway provider usage handler failed: {error}");
                     }
-                    Err(error) => self.send_error_response(request_id, 500, error).await,
-                }
+                });
+                Ok(())
             }
             Some(proto::gateway_envelope::Payload::ProviderModels(request)) => {
                 match gateway_bridge::handle_provider_models(request).await {

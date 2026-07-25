@@ -31,6 +31,12 @@ fn provider_usage_response_serializes_only_result_json() {
     })
     .expect("provider usage response should serialize");
 
+    let expected_result_json = concat!(
+        r#"{"entries":[{"label":"Balance","value":"4.20","unit":"USD"}],"#,
+        r#""queriedAt":1772000000000,"error":null,"isStale":false}"#,
+    );
+    assert_eq!(response.result_json, expected_result_json);
+
     let result: Value =
         serde_json::from_str(&response.result_json).expect("result_json should be valid JSON");
     assert_eq!(
@@ -45,6 +51,16 @@ fn provider_usage_response_serializes_only_result_json() {
     assert!(!response.result_json.contains("apiKey"));
     assert!(!response.result_json.contains("accessToken"));
     assert!(!response.result_json.contains("secretAccessKey"));
+
+    let envelope = super::envelope_handler::provider_usage_agent_envelope(
+        "provider-usage-request".to_string(),
+        response,
+    );
+    assert_eq!(envelope.request_id, "provider-usage-request");
+    let Some(proto::agent_envelope::Payload::ProviderUsageResp(response)) = envelope.payload else {
+        panic!("expected provider usage response payload");
+    };
+    assert_eq!(response.result_json, expected_result_json);
 }
 
 fn gateway_chat_request(

@@ -1,4 +1,5 @@
 import type { Context } from "@earendil-works/pi-ai";
+import { DEFAULT_LOCALE, type Locale } from "../../../i18n/config";
 import { type ModelOption, toModelValue } from "../../providers/llm";
 import type { AppSettings } from "../../settings";
 import { createUuid } from "../../shared/id";
@@ -7,6 +8,10 @@ import { getMessageText } from "../messages/uiMessages";
 
 const FALLBACK_TITLE_MAX_CHARS = 48;
 const TITLE_LOOKAHEAD_TIMEOUT_MS = 1_200;
+const TITLE_MAX_LATIN_WORDS = 10;
+const TITLE_MAX_CJK_CHARS = 24;
+const TITLE_MAX_CHARS = 80;
+const CJK_CHAR_PATTERN = /[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]/;
 const MODEL_GENERATING_STATUS_PATTERN = /^第\s*\d+\s*轮：模型生成中\.\.\.$/;
 
 export const VIBING_STATUS = "Vibing...";
@@ -113,8 +118,23 @@ export function buildModelOptions(
   return options;
 }
 
-export function buildConversationTitlePrompt(content: string) {
-  return `Based on the following content, generate a title within 10 words for this conversation and output it directly without any other content:${content}`;
+/** System prompt for the lightweight first-turn title job. Follows UI locale. */
+export function buildConversationTitleSystemPrompt(locale: Locale = DEFAULT_LOCALE) {
+  if (locale === "zh-CN") {
+    return "你负责生成简洁的会话标题。只输出标题本身，不要解释、不要引号。标题必须使用简体中文；专有名词（如 Grok、API）可保留原文。";
+  }
+  return "You generate concise conversation titles. Output the title only, with no extra explanation or quotes.";
+}
+
+/**
+ * User prompt for the title job. Language follows the app UI locale so Chinese
+ * installs no longer get English titles by default.
+ */
+export function buildConversationTitlePrompt(content: string, locale: Locale = DEFAULT_LOCALE) {
+  if (locale === "zh-CN") {
+    return `根据以下内容，为本次会话生成一个简练的简体中文标题（约 8～18 个字，概括主题，不要照抄整句问话），直接输出标题，不要其他内容：\n${content}`;
+  }
+  return `Based on the following content, generate a title within 10 words for this conversation and output it directly without any other content:\n${content}`;
 }
 
 export function normalizeConversationTitle(raw: string) {
@@ -126,9 +146,17 @@ export function normalizeConversationTitle(raw: string) {
 
   if (!singleLine) return "";
 
+  // CJK titles are character-dense and usually unspaced; word caps would keep them whole.
+  if (CJK_CHAR_PATTERN.test(singleLine)) {
+    return singleLine.slice(0, TITLE_MAX_CJK_CHARS).trim();
+  }
+
   const words = singleLine.split(" ").filter(Boolean);
-  const limitedWords = words.length > 10 ? words.slice(0, 10).join(" ") : singleLine;
-  return limitedWords.slice(0, 80).trim();
+  const limitedWords =
+    words.length > TITLE_MAX_LATIN_WORDS
+      ? words.slice(0, TITLE_MAX_LATIN_WORDS).join(" ")
+      : singleLine;
+  return limitedWords.slice(0, TITLE_MAX_CHARS).trim();
 }
 
 export function buildFallbackConversationTitle(content: string) {

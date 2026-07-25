@@ -2285,6 +2285,14 @@ test("chat page helpers keep model options stable and normalize status/title edg
   );
   assert.equal(chatHelpers.normalizeConversationTitle("  one two \n three  "), "one two three");
   assert.equal(chatHelpers.normalizeConversationTitle("one two three four five six seven eight nine ten eleven"), "one two three four five six seven eight nine ten");
+  assert.equal(
+    chatHelpers.normalizeConversationTitle("侧边栏会话标题改成中文简要总结并写入全局记忆偏好"),
+    "侧边栏会话标题改成中文简要总结并写入全局记忆偏好".slice(0, 24),
+  );
+  assert.match(chatHelpers.buildConversationTitleSystemPrompt("zh-CN"), /简体中文/);
+  assert.match(chatHelpers.buildConversationTitleSystemPrompt("en-US"), /concise conversation titles/i);
+  assert.match(chatHelpers.buildConversationTitlePrompt("hello", "zh-CN"), /简体中文标题/);
+  assert.match(chatHelpers.buildConversationTitlePrompt("hello", "en-US"), /within 10 words/i);
   assert.equal(chatHelpers.buildFallbackConversationTitle("x".repeat(60)), `${"x".repeat(48)}...`);
   assert.equal(chatHelpers.normalizeLiveToolStatus("第 2 轮：模型生成中..."), chatHelpers.VIBING_STATUS);
   assert.equal(chatHelpers.normalizeLiveToolStatus("Running"), "Running");

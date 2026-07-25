@@ -83,3 +83,24 @@ test("WebUI protobuf encodes usage request and decodes JSON response", () => {
     },
   });
 });
+
+test("WebUI protobuf rejects malformed usage response JSON", () => {
+  const frame = codec.encodeServerFrame({
+    request_id: "request-2",
+    agent_id: "desktop-agent",
+    agent_response: {
+      provider_usage_resp: { result_json: "{not-json" },
+    },
+  });
+
+  const decoded = adapters.decodeServerFrame(adapters.decodeServerFrameBinary(frame), {
+    agentOnline: true,
+  });
+
+  assert.deepEqual(decoded, {
+    kind: "error",
+    requestId: "request-2",
+    agentId: "desktop-agent",
+    message: "provider usage response is not valid JSON",
+  });
+});

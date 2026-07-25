@@ -57,7 +57,11 @@ import {
 } from "../../lib/providers/customHeaders";
 import { parseModelValue, toModelValue } from "../../lib/providers/llm";
 import { sortModelsByActiveStateAndVendor } from "../../lib/providers/modelVendor";
-import { type ProviderUsageState, useProviderUsage } from "../../lib/providers/usageQuery";
+import {
+  getProviderUsageCardDisplay,
+  type ProviderUsageState,
+  useProviderUsage,
+} from "../../lib/providers/usageQuery";
 import {
   CODEX_REQUEST_FORMAT_LABELS,
   type CodexRequestFormat,
@@ -2373,8 +2377,8 @@ function ProviderList(props: {
             {filtered.map((provider) =>
               (() => {
                 const usage = usageByProvider[provider.id];
-                const showUsage = provider.usageQuery.enabled || usage;
                 const refreshing = refreshingProviderIds.has(provider.id);
+                const usageDisplay = getProviderUsageCardDisplay(provider, usage, refreshing);
                 return (
                   <div
                     key={provider.id}
@@ -2404,36 +2408,34 @@ function ProviderList(props: {
                         {provider.baseUrl || t("settings.noBaseUrl")} {" · "}
                         {provider.activeModels.length} {t("settings.activeModels")}
                       </div>
-                      {showUsage ? (
+                      {usageDisplay.show ? (
                         <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-                          {usage?.entries.map((entry) => (
+                          {usageDisplay.entries.map((entry) => (
                             <span key={entry.label} className="truncate">
                               {entry.label}: {entry.value}
                               {entry.unit ? ` ${entry.unit}` : ""}
                             </span>
                           ))}
-                          {usage?.isStale ? <span title="Stale usage data">Stale</span> : null}
-                          {usage?.error ? (
-                            <span className="text-destructive">{usage.error}</span>
+                          {usageDisplay.isStale ? (
+                            <span title="Stale usage data">Stale</span>
                           ) : null}
-                          {usage?.queriedAt ? (
-                            <time dateTime={new Date(usage.queriedAt).toISOString()}>
-                              {new Date(usage.queriedAt).toLocaleString()}
-                            </time>
+                          {usageDisplay.error ? (
+                            <span className="text-destructive">{usageDisplay.error}</span>
                           ) : null}
+                          {usageDisplay.updatedAt ? <time>{usageDisplay.updatedAt}</time> : null}
                         </div>
                       ) : null}
                     </div>
                     <div className="settings-hover-actions flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-                      {showUsage ? (
+                      {usageDisplay.show ? (
                         <Button
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                          disabled={refreshing}
+                          disabled={usageDisplay.refresh.disabled}
                           onClick={() => onRefreshUsage(provider.id)}
-                          title="Refresh usage"
-                          aria-label="Refresh usage"
+                          title={usageDisplay.refresh.ariaLabel}
+                          aria-label={usageDisplay.refresh.ariaLabel}
                         >
                           <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
                         </Button>

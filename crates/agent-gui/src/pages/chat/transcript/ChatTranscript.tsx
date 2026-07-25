@@ -24,10 +24,7 @@ import { FloorNavRail } from "./FloorNavRail";
 import { RowInteractionProvider, useRowInteractionStore } from "./rowInteraction";
 import { TranscriptList, type TranscriptNavHandle } from "./TranscriptList";
 import { HistorySwitchLoadingOverlay } from "./TranscriptLoadingStates";
-import {
-  CHAT_TRANSCRIPT_WIDTH_CSS_VAR,
-  TranscriptWidthControls,
-} from "./TranscriptWidthControls";
+import { CHAT_TRANSCRIPT_WIDTH_CSS_VAR, TranscriptWidthControls } from "./TranscriptWidthControls";
 import type { ChatTranscriptProps } from "./transcriptTypes";
 import {
   clampTranscriptContextMenuPosition,
@@ -221,7 +218,8 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
     : null;
   const copySelectedTextLabel = locale === "en-US" ? "Copy selected text" : "复制选中文本";
   const jumpToBottomLabel = locale === "en-US" ? "Scroll to bottom" : "回到底部";
-  const resizeTranscriptLabel = locale === "en-US" ? "Resize conversation content" : "调整对话正文宽度";
+  const resizeTranscriptLabel =
+    locale === "en-US" ? "Resize conversation content" : "调整对话正文宽度";
   const resetTranscriptWidthLabel =
     locale === "en-US" ? "Double-click to reset" : "双击恢复默认宽度";
 

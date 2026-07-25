@@ -4677,9 +4677,7 @@ export default function GatewayApp() {
                             : "调整对话正文宽度"
                         }
                         resetLabel={
-                          settings.locale === "en-US"
-                            ? "Double-click to reset"
-                            : "双击恢复默认宽度"
+                          settings.locale === "en-US" ? "Double-click to reset" : "双击恢复默认宽度"
                         }
                       />
                       {displayedTranscriptRowCount > 0 && !conversationOpenState.showOverlay ? (

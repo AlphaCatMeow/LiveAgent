@@ -1,4 +1,5 @@
 import {
+  type CSSProperties,
   memo,
   type MouseEvent as ReactMouseEvent,
   useCallback,
@@ -23,6 +24,10 @@ import { FloorNavRail } from "./FloorNavRail";
 import { RowInteractionProvider, useRowInteractionStore } from "./rowInteraction";
 import { TranscriptList, type TranscriptNavHandle } from "./TranscriptList";
 import { HistorySwitchLoadingOverlay } from "./TranscriptLoadingStates";
+import {
+  CHAT_TRANSCRIPT_WIDTH_CSS_VAR,
+  TranscriptWidthControls,
+} from "./TranscriptWidthControls";
 import type { ChatTranscriptProps } from "./transcriptTypes";
 import {
   clampTranscriptContextMenuPosition,
@@ -49,6 +54,8 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
     liveTranscriptStore,
     isCompactionRunning,
     bottomReservePx = 0,
+    contentWidth,
+    onContentWidthChange,
     onResendFromEdit,
     onBranchConversation,
     branchPendingMessageId,
@@ -214,15 +221,23 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
     : null;
   const copySelectedTextLabel = locale === "en-US" ? "Copy selected text" : "复制选中文本";
   const jumpToBottomLabel = locale === "en-US" ? "Scroll to bottom" : "回到底部";
+  const resizeTranscriptLabel = locale === "en-US" ? "Resize conversation content" : "调整对话正文宽度";
+  const resetTranscriptWidthLabel =
+    locale === "en-US" ? "Double-click to reset" : "双击恢复默认宽度";
 
   return (
     <div
       ref={transcriptRootRef}
       className="relative min-h-0 flex-1"
+      style={
+        {
+          [CHAT_TRANSCRIPT_WIDTH_CSS_VAR]: `${contentWidth}px`,
+        } as CSSProperties
+      }
       onContextMenu={handleTranscriptContextMenu}
     >
       <ScrollArea ref={setScrollAreaRoot} viewportRef={setScrollViewport} className="h-full">
-        <div className="mx-auto w-full max-w-[768px] px-5 py-4">
+        <div className="mx-auto w-full max-w-[var(--chat-transcript-content-width)] px-5 py-4">
           {showNoModelsState || showStartChatState ? (
             <div className="flex min-h-[calc(100vh-220px)] flex-col items-center justify-center">
               {/* Keyed per conversation so the hero entrance replays when
@@ -251,6 +266,7 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
                 historyItems={historyItems}
                 liveTranscriptStore={liveTranscriptStore}
                 scrollViewport={scrollViewport}
+                layoutWidth={contentWidth}
                 isViewportFollowing={scrollFollowHandle.isFollowing}
                 isSending={isSending}
                 isAgentMode={isAgentMode}
@@ -271,6 +287,13 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
           <div style={{ height: transcriptBottomReservePx }} />
         </div>
       </ScrollArea>
+      <TranscriptWidthControls
+        hostRef={transcriptRootRef}
+        width={contentWidth}
+        onWidthChange={onContentWidthChange}
+        resizeLabel={resizeTranscriptLabel}
+        resetLabel={resetTranscriptWidthLabel}
+      />
       {!showNoModelsState && !showStartChatState && !isTranscriptSettling ? (
         <FloorNavRail
           conversationId={conversationId}

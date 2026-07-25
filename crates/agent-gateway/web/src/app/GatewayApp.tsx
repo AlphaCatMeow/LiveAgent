@@ -89,6 +89,7 @@ import {
   type SelectedModel,
   setSelectedModel,
   updateChatRuntimeControlsForProvider,
+  updateChatTranscriptWidth,
   updateCustomSettings,
   updateRightDockFileTreeState,
   updateRightDockProjectState,
@@ -147,6 +148,10 @@ import {
 } from "@/lib/sidebar/webSidebarBackend";
 import { findWorkspaceProject, mergeWorkspaceProjectsWithHistory } from "@/lib/workspaceProjects";
 import { FloorNavRail } from "@/pages/chat/transcript/FloorNavRail";
+import {
+  CHAT_TRANSCRIPT_WIDTH_CSS_VAR,
+  TranscriptWidthControls,
+} from "@/pages/chat/transcript/TranscriptWidthControls";
 import { WorkspaceCloneModal } from "@/pages/chat/WorkspaceCloneModal";
 import {
   type WorkspaceCloneTask,
@@ -341,6 +346,7 @@ export default function GatewayApp() {
     null,
   );
   const [transcriptViewport, setTranscriptViewport] = useState<HTMLDivElement | null>(null);
+  const transcriptStageRef = useRef<HTMLElement | null>(null);
   const { handle: transcriptFollow, following: transcriptFollowing } = useScrollFollow({
     viewport: transcriptViewport,
     listenerRoot: transcriptScrollAreaRoot,
@@ -4043,6 +4049,12 @@ export default function GatewayApp() {
   );
   // RightDockPanel is memo'd: every callback handed to it must be stable or
   // the memo boundary is void (see the panel-side context useMemo).
+  const handleChatTranscriptWidthChange = useCallback(
+    (nextWidth: number) => {
+      setSettings((prev) => updateChatTranscriptWidth(prev, nextWidth));
+    },
+    [setSettings],
+  );
   const handleRightDockWidthChange = useCallback(
     (nextWidth: number) => {
       setSettings((prev) => updateRightDockWidth(prev, nextWidth));
@@ -4602,7 +4614,15 @@ export default function GatewayApp() {
                     <div className="gateway-banner-error">{chatError}</div>
                   ) : null}
 
-                  <section className="gateway-transcript-stage">
+                  <section
+                    ref={transcriptStageRef}
+                    className="gateway-transcript-stage"
+                    style={
+                      {
+                        [CHAT_TRANSCRIPT_WIDTH_CSS_VAR]: `${settings.customSettings.chatTranscript.width}px`,
+                      } as CSSProperties
+                    }
+                  >
                     <div className="gateway-transcript-scroll-shell">
                       <ScrollArea
                         ref={setTranscriptScrollAreaRoot}
@@ -4615,6 +4635,7 @@ export default function GatewayApp() {
                             rows={transcriptRows}
                             liveStartIndex={transcriptLiveStartIndex}
                             activeTurnKey={displayedTranscript.activeTurnKey}
+                            contentWidth={settings.customSettings.chatTranscript.width}
                             isViewportFollowing={transcriptFollow.isFollowing}
                             navRef={transcriptNavRef}
                             onAnchorUserRowChange={setActiveFloorKey}
@@ -4646,6 +4667,21 @@ export default function GatewayApp() {
                           />
                         </ChangedFilesActionsProvider>
                       </ScrollArea>
+                      <TranscriptWidthControls
+                        hostRef={transcriptStageRef}
+                        width={settings.customSettings.chatTranscript.width}
+                        onWidthChange={handleChatTranscriptWidthChange}
+                        resizeLabel={
+                          settings.locale === "en-US"
+                            ? "Resize conversation content"
+                            : "调整对话正文宽度"
+                        }
+                        resetLabel={
+                          settings.locale === "en-US"
+                            ? "Double-click to reset"
+                            : "双击恢复默认宽度"
+                        }
+                      />
                       {displayedTranscriptRowCount > 0 && !conversationOpenState.showOverlay ? (
                         <FloorNavRail
                           conversationId={displayedConversationId}

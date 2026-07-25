@@ -15,7 +15,7 @@ import {
 // not change follow state, and nested elements under it don't consume wheels.
 const SCROLLABLE_OVERFLOW_MIN_PX = 4;
 
-function isEditableEventTarget(target: EventTarget | null) {
+function shouldIgnoreScrollKeyTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {
     return false;
   }
@@ -23,12 +23,13 @@ function isEditableEventTarget(target: EventTarget | null) {
     target.isContentEditable ||
     target instanceof HTMLInputElement ||
     target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement
+    target instanceof HTMLSelectElement ||
+    target.closest("[data-scroll-follow-ignore-keys]") !== null
   );
 }
 
 function isHistoryScrollKey(event: KeyboardEvent) {
-  if (isEditableEventTarget(event.target)) {
+  if (shouldIgnoreScrollKeyTarget(event.target)) {
     return false;
   }
   return (
@@ -40,7 +41,7 @@ function isHistoryScrollKey(event: KeyboardEvent) {
 }
 
 function isFollowScrollKey(event: KeyboardEvent) {
-  if (isEditableEventTarget(event.target)) {
+  if (shouldIgnoreScrollKeyTarget(event.target)) {
     return false;
   }
   return (

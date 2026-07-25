@@ -134,9 +134,18 @@ export type FontScaleSettings = {
   rightDock: number;
 };
 
+export const DEFAULT_CHAT_TRANSCRIPT_WIDTH = 768;
+export const MIN_CHAT_TRANSCRIPT_WIDTH = 560;
+export const MAX_CHAT_TRANSCRIPT_WIDTH = 1200;
+
+export type ChatTranscriptSettings = {
+  width: number;
+};
+
 export type CustomSettings = {
   conversationTitleModel?: SelectedModel;
   chatSidebar: ChatSidebarSettings;
+  chatTranscript: ChatTranscriptSettings;
   rightDock: RightDockSettings;
   // Empty strings select the built-in font stacks for their respective UI zones.
   interfaceFontFamily: string;
@@ -2134,6 +2143,18 @@ export function normalizeFontScaleSettings(input: unknown): FontScaleSettings {
   };
 }
 
+export function normalizeChatTranscriptSettings(input: unknown): ChatTranscriptSettings {
+  const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  return {
+    width: normalizeIntegerInRange(
+      obj.width,
+      MIN_CHAT_TRANSCRIPT_WIDTH,
+      MAX_CHAT_TRANSCRIPT_WIDTH,
+      DEFAULT_CHAT_TRANSCRIPT_WIDTH,
+    ),
+  };
+}
+
 export function normalizeCustomSettings(
   input: unknown,
   customProviders: CustomProvider[],
@@ -2151,6 +2172,7 @@ export function normalizeCustomSettings(
       projectsCollapsed: chatSidebar.projectsCollapsed === true,
       recentCollapsed: chatSidebar.recentCollapsed === true,
     },
+    chatTranscript: normalizeChatTranscriptSettings(obj.chatTranscript),
     rightDock: normalizeRightDockSettings(obj.rightDock),
     // Read the retired field only to migrate persisted settings; normalization never emits it.
     interfaceFontFamily: normalizeFontFamily(
@@ -2450,6 +2472,12 @@ export function getRightDockProjectState(
   return normalizeRightDockProjectState(
     normalizedPathKey ? customSettings.rightDock.projects[normalizedPathKey] : {},
   );
+}
+
+export function updateChatTranscriptWidth(prev: AppSettings, width: number): AppSettings {
+  const nextWidth = normalizeChatTranscriptSettings({ width }).width;
+  if (prev.customSettings.chatTranscript.width === nextWidth) return prev;
+  return updateCustomSettings(prev, { chatTranscript: { width: nextWidth } });
 }
 
 export function updateRightDockWidth(prev: AppSettings, width: number): AppSettings {

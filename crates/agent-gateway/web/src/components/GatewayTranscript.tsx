@@ -103,7 +103,7 @@ type GatewayTranscriptProps = {
   onOpenSettings?: (section?: SectionId) => void;
   hasMoreHistory?: boolean;
   isLoadingMoreHistory?: boolean;
-  onLoadFullHistory?: () => void;
+  onLoadEarlierHistory?: () => void;
   isAgentMode?: boolean;
   showUsage?: boolean;
   usageContextWindow?: number;
@@ -1166,7 +1166,7 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
   onAnchorUserRowChange?: (rowKey: string | null) => void;
   hasMoreHistory?: boolean;
   isLoadingMoreHistory?: boolean;
-  onLoadFullHistory?: () => void;
+  onLoadEarlierHistory?: () => void;
   isStreaming: boolean;
   isAgentMode: boolean;
   showUsage: boolean;
@@ -1198,7 +1198,7 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
     onAnchorUserRowChange,
     hasMoreHistory,
     isLoadingMoreHistory,
-    onLoadFullHistory,
+    onLoadEarlierHistory,
     isStreaming,
     isAgentMode,
     showUsage,
@@ -1527,8 +1527,8 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
             >
               <button
                 type="button"
-                onClick={onLoadFullHistory}
-                disabled={isLoadingMoreHistory || !onLoadFullHistory}
+                onClick={onLoadEarlierHistory}
+                disabled={isLoadingMoreHistory || !onLoadEarlierHistory}
                 className="rounded-full border border-border/60 bg-background/80 px-4 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isLoadingMoreHistory
@@ -1731,7 +1731,7 @@ export function GatewayTranscript({
   onOpenSettings,
   hasMoreHistory = false,
   isLoadingMoreHistory = false,
-  onLoadFullHistory,
+  onLoadEarlierHistory,
   isAgentMode = true,
   showUsage = false,
   usageContextWindow,
@@ -1808,7 +1808,7 @@ export function GatewayTranscript({
           onAnchorUserRowChange={onAnchorUserRowChange}
           hasMoreHistory={hasMoreHistory}
           isLoadingMoreHistory={isLoadingMoreHistory}
-          onLoadFullHistory={onLoadFullHistory}
+          onLoadEarlierHistory={onLoadEarlierHistory}
           isStreaming={isStreaming}
           isAgentMode={isAgentMode}
           showUsage={showUsage}

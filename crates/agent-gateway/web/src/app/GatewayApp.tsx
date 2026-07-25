@@ -29,6 +29,14 @@ import { registerAskUserQuestionAnswerHandler } from "@/lib/chat/askUserQuestion
 import type { ChatHistorySummary } from "@/lib/chat/chatHistory";
 import { buildModelOptions } from "@/lib/chat/chatPageHelpers";
 import type { HistoryMessageRef } from "@/lib/chat/conversationState";
+import {
+  adoptHistoryWindowState,
+  evaluateHistoryWindowResponse,
+  type HistoryWindowState,
+  planHistoryWindowRequest,
+  readHistoryWindowCounts,
+  trimLeadingHeadlessEntries,
+} from "@/lib/chat/historyWindow";
 import type { CodeMentionReference } from "@/lib/chat/mentionReferences";
 import { createActivityStore } from "@/lib/chat/stream/activityStore";
 import {
@@ -175,6 +183,7 @@ import {
   CHAT_RUNTIME_PREPARING_STATUS,
   DEFAULT_BROWSER_TITLE,
   HISTORY_DETAIL_INITIAL_MAX_MESSAGES,
+  HISTORY_DETAIL_LOAD_EARLIER_PAGE_MESSAGES,
   HISTORY_LIST_PAGE_SIZE,
   MAX_UPLOAD_FILES,
   MCP_HUB_BROWSER_TITLE,
@@ -375,6 +384,11 @@ export default function GatewayApp() {
   } | null>(null);
   // Per-conversation runtime workdir (drafts have no persisted summary yet).
   const conversationWorkdirsRef = useRef<Map<string, string>>(new Map());
+  // Lazy history windows: per conversation, the persisted-message edge the
+  // loaded transcript starts at (see lib/chat/historyWindow.ts). Entries are
+  // (re)established by every applied history fetch and dropped with the
+  // conversation's other per-id resources.
+  const historyWindowStatesRef = useRef<Map<string, HistoryWindowState>>(new Map());
   const displayedConversationWorkdirRef = useRef("");
   const pendingUploadContextRef = useRef<{
     conversationId: string;
@@ -843,8 +857,22 @@ export default function GatewayApp() {
   // id-preserving merge into the transcript store (no flicker, no remount).
   // Only runs while the conversation is idle; a run started mid-fetch aborts
   // the merge so a stale snapshot can never truncate freshly folded entries.
+  //
+  // Fetches are EDGE-ANCHORED WINDOWS, not full hydrations: the request spans
+  // from the conversation's established window edge (historyWindow.ts) to the
+  // tail, so the per-turn refresh cost stays proportional to the loaded
+  // window instead of the conversation's lifetime size. `extendMessages`
+  // grows the window upward by a page (the transcript's "load earlier"
+  // affordance). A windowed response whose top edge slipped below the
+  // established one (concurrent append while the request was in flight) is
+  // refetched once with the corrected span and skipped if it slipped again —
+  // applying it could truncate the rendered region's top.
   const refreshDisplayedConversationHistorySnapshot = useCallback(
-    async (targetConversationId: string, currentApi = api, options?: { forceFull?: boolean }) => {
+    async (
+      targetConversationId: string,
+      currentApi = api,
+      options?: { extendMessages?: number },
+    ) => {
       const conversationIdValue = targetConversationId.trim();
       if (!currentApi || !conversationIdValue || isLocalDraftConversationId(conversationIdValue)) {
         return;
@@ -857,30 +885,77 @@ export default function GatewayApp() {
         return;
       }
 
-      // If the full history is already loaded, refresh the full transcript so
-      // the merge cannot truncate it back to the most recent page.
-      const hasFullHistoryLoaded =
-        options?.forceFull === true ||
-        (selectedHistoryRef.current?.conversation_id === conversationIdValue &&
-          selectedHistoryRef.current.has_more === false);
+      const extendMessages = options?.extendMessages;
+      const windowStates = historyWindowStatesRef.current;
 
       let detail: HistoryDetail;
       let entries: ChatEntry[];
       try {
+        const planned = planHistoryWindowRequest(windowStates.get(conversationIdValue), {
+          initialWindowMessages: HISTORY_DETAIL_INITIAL_MAX_MESSAGES,
+          extendMessages,
+        });
         detail = await currentApi.getHistory(
           conversationIdValue,
-          hasFullHistoryLoaded ? undefined : { maxMessages: HISTORY_DETAIL_INITIAL_MAX_MESSAGES },
+          planned === undefined ? undefined : { maxMessages: planned },
         );
-        entries = await parseHistoryMessagesJsonAsync(detail.messages_json);
-        if (
-          detail.has_more === true &&
-          entries.length < getConversationTranscriptEntryCount(conversationIdValue)
-        ) {
-          // Partial window smaller than what is currently rendered: merging
-          // it would truncate the top of a longer transcript. Refetch full.
-          detail = await currentApi.getHistory(conversationIdValue);
-          entries = await parseHistoryMessagesJsonAsync(detail.messages_json);
+
+        if (planned !== undefined && detail.has_more === true) {
+          const counts = readHistoryWindowCounts(detail);
+          if (!counts) {
+            // Producer reported a partial window without usable counts (a
+            // contradiction — both come from the same code path): fall back
+            // to a full fetch rather than risking a top truncation.
+            windowStates.delete(conversationIdValue);
+            detail = await currentApi.getHistory(conversationIdValue);
+          } else {
+            const verdict = evaluateHistoryWindowResponse({
+              previous: windowStates.get(conversationIdValue),
+              counts,
+              extendMessages,
+            });
+            if (verdict.action === "retry") {
+              detail = await currentApi.getHistory(conversationIdValue, {
+                maxMessages: verdict.retryMaxMessages,
+              });
+              const retryCounts = readHistoryWindowCounts(detail);
+              const retryVerdict =
+                retryCounts && detail.has_more === true
+                  ? evaluateHistoryWindowResponse({
+                      previous: windowStates.get(conversationIdValue),
+                      counts: retryCounts,
+                      extendMessages,
+                    })
+                  : null;
+              if (detail.has_more === true) {
+                if (!retryVerdict || retryVerdict.action === "retry") {
+                  // The edge slipped twice in a row: give up on this cycle;
+                  // the refresh loops (busy→idle, upsert, stale-retry)
+                  // converge on a later pass.
+                  return;
+                }
+                windowStates.set(conversationIdValue, retryVerdict.nextState);
+              }
+            } else {
+              windowStates.set(conversationIdValue, verdict.nextState);
+            }
+          }
         }
+        if (detail.has_more !== true) {
+          // Complete fetch: the window reaches message 0 and stays complete.
+          const counts = readHistoryWindowCounts(detail);
+          if (counts) {
+            windowStates.set(conversationIdValue, {
+              oldestOffset: 0,
+              lastTotal: counts.totalMessageCount,
+            });
+          } else {
+            windowStates.delete(conversationIdValue);
+          }
+        }
+
+        const parsed = await parseHistoryMessagesJsonAsync(detail.messages_json);
+        entries = detail.has_more === true ? trimLeadingHeadlessEntries(parsed) : parsed;
       } catch {
         return;
       }
@@ -900,7 +975,7 @@ export default function GatewayApp() {
         .get(conversationIdValue)
         .applyHistorySnapshot(entries, { mode: "enrich" });
     },
-    [api, getConversationTranscriptEntryCount, isConversationBusy, transcriptStoreRegistry],
+    [api, isConversationBusy, transcriptStoreRegistry],
   );
 
   const markVisibleConversationRevision = useCallback(() => {
@@ -924,6 +999,12 @@ export default function GatewayApp() {
       }
 
       transcriptStoreRegistry.move(previousId, nextId);
+
+      const windowState = historyWindowStatesRef.current.get(previousId);
+      if (windowState !== undefined) {
+        historyWindowStatesRef.current.delete(previousId);
+        historyWindowStatesRef.current.set(nextId, windowState);
+      }
 
       const workdir = conversationWorkdirsRef.current.get(previousId);
       if (workdir !== undefined) {
@@ -1509,12 +1590,12 @@ export default function GatewayApp() {
     refreshChatQueueSnapshot(update.conversationId?.trim() || pending.conversationId);
     if (pending.isEditResend) {
       // The seeded `rebased` already truncated committed optimistically, but
-      // the command was parked — server-side history is unchanged; a full
-      // quiet refresh restores the truncated suffix.
+      // the command was parked — server-side history is unchanged; a quiet
+      // window refresh restores the truncated suffix (the edit anchor always
+      // sits inside the loaded window, so the window covers the whole cut).
       void refreshDisplayedConversationHistorySnapshot(
         update.conversationId?.trim() || pending.conversationId,
         api,
-        { forceFull: true },
       );
     }
   };
@@ -1522,9 +1603,7 @@ export default function GatewayApp() {
     draftClientRequestsRef.current.delete(pending.clientRequestId);
     const conversationIdValue = pending.conversationId.trim();
     if (pending.isEditResend) {
-      void refreshDisplayedConversationHistorySnapshot(conversationIdValue, api, {
-        forceFull: true,
-      });
+      void refreshDisplayedConversationHistorySnapshot(conversationIdValue, api);
     }
     if (isLocalDraftConversationId(conversationIdValue)) {
       // The draft never materialized: drop its optimistic sidebar row. The
@@ -1928,13 +2007,30 @@ export default function GatewayApp() {
     }
 
     try {
-      const detail = await currentApi.getHistory(conversationIdValue, {
-        maxMessages: HISTORY_DETAIL_INITIAL_MAX_MESSAGES,
-      });
+      // Revisits fetch the conversation's established window (everything the
+      // user has paged up to), first opens fetch the initial tail window.
+      // The replace apply repaints the store region from this window either
+      // way, so the response's counts are adopted unconditionally — on the
+      // rare in-flight append the region top just lands a page lower.
+      const planned = planHistoryWindowRequest(
+        historyWindowStatesRef.current.get(conversationIdValue),
+        { initialWindowMessages: HISTORY_DETAIL_INITIAL_MAX_MESSAGES },
+      );
+      const detail = await currentApi.getHistory(
+        conversationIdValue,
+        planned === undefined ? undefined : { maxMessages: planned },
+      );
       if (isStale()) {
         return "painted";
       }
-      const entries = await parseHistoryMessagesJsonAsync(detail.messages_json);
+      const counts = readHistoryWindowCounts(detail);
+      if (counts) {
+        historyWindowStatesRef.current.set(conversationIdValue, adoptHistoryWindowState(counts));
+      } else {
+        historyWindowStatesRef.current.delete(conversationIdValue);
+      }
+      const parsed = await parseHistoryMessagesJsonAsync(detail.messages_json);
+      const entries = detail.has_more === true ? trimLeadingHeadlessEntries(parsed) : parsed;
       if (isStale()) {
         return "painted";
       }
@@ -1964,18 +2060,15 @@ export default function GatewayApp() {
     }
   }
 
-  // Phase 2: quiet full hydration at idle, through the id-preserving enrich
-  // path — it never clobbers live-stream transcript entries and it skips
-  // entirely when phase 1 already returned the whole conversation.
-  async function hydrateConversationFull(conversationIdValue: string, _seq: number): Promise<void> {
-    const selected = selectedHistoryRef.current;
-    if (selected?.conversation_id === conversationIdValue && selected.has_more !== true) {
-      return;
-    }
-    await refreshDisplayedConversationHistorySnapshot(conversationIdValue, api, {
-      forceFull: true,
-    });
-  }
+  // Phase 2: intentionally a no-op. Phase 1 painted the conversation's whole
+  // established window, and messages above the window edge stay unfetched
+  // until the user asks for them ("load earlier history") — hydrating the
+  // full conversation at idle would put open cost back on the conversation's
+  // lifetime size, which is exactly what the lazy window avoids.
+  async function hydrateConversationFull(
+    _conversationIdValue: string,
+    _seq: number,
+  ): Promise<void> {}
 
   openInitialRef.current = openConversationInitial;
   hydrateFullRef.current = hydrateConversationFull;
@@ -2795,6 +2888,7 @@ export default function GatewayApp() {
               // Immediate local echo; the gateway delete events confirm.
               sidebarStore.removeLocal(conversationId);
               transcriptStoreRegistry.remove(conversationId);
+              historyWindowStatesRef.current.delete(conversationId);
               conversationWorkdirsRef.current.delete(conversationId);
               clearCachedComposerDraft(conversationId);
               setPendingUploadsForConversation(conversationId, []);
@@ -3006,6 +3100,7 @@ export default function GatewayApp() {
         }
         removedIds.add(id);
         transcriptStoreRegistry.remove(id);
+        historyWindowStatesRef.current.delete(id);
         conversationWorkdirsRef.current.delete(id);
         composerDraftCacheRef.current.delete(id);
         setPendingUploadsForConversation(id, []);
@@ -3040,6 +3135,7 @@ export default function GatewayApp() {
   const handleSidebarLocalDraftDeleted = useCallback(
     (id: string) => {
       transcriptStoreRegistry.remove(id);
+      historyWindowStatesRef.current.delete(id);
       conversationWorkdirsRef.current.delete(id);
       composerDraftCacheRef.current.delete(id);
       setPendingUploadsForConversation(id, []);
@@ -3524,6 +3620,7 @@ export default function GatewayApp() {
     transcriptStoreRegistry.clear();
     activityStore.clear();
     draftClientRequestsRef.current.clear();
+    historyWindowStatesRef.current.clear();
     conversationWorkdirsRef.current.clear();
     composerDraftCacheRef.current.clear();
     composerDraftOwnerRef.current = "";
@@ -4196,15 +4293,15 @@ export default function GatewayApp() {
     selectedHistory?.conversation_id === displayedConversationId &&
     selectedHistory.has_more === true;
   const loadingOlderHistory = fullHistoryLoading && displayedTranscriptRowCount > 0;
-  const handleLoadFullHistory = useCallback(() => {
+  const handleLoadEarlierHistory = useCallback(() => {
     if (!api || !displayedConversationId) {
       return;
     }
-    // Explicit full fetch through the id-preserving enrich path (same as the
-    // idle hydration); no-ops while a run is streaming.
+    // Grow the loaded window upward by one page through the id-preserving
+    // enrich path; no-ops while a run is streaming.
     setFullHistoryLoading(true);
     void refreshDisplayedConversationHistorySnapshot(displayedConversationId, api, {
-      forceFull: true,
+      extendMessages: HISTORY_DETAIL_LOAD_EARLIER_PAGE_MESSAGES,
     }).finally(() => {
       setFullHistoryLoading(false);
     });
@@ -4629,8 +4726,8 @@ export default function GatewayApp() {
                             onOpenSettings={openSettings}
                             hasMoreHistory={selectedHistoryHasMore}
                             isLoadingMoreHistory={loadingOlderHistory}
-                            onLoadFullHistory={
-                              selectedHistoryHasMore ? handleLoadFullHistory : undefined
+                            onLoadEarlierHistory={
+                              selectedHistoryHasMore ? handleLoadEarlierHistory : undefined
                             }
                             isAgentMode={isAgentMode}
                             showUsage={isAgentDevExecutionMode}

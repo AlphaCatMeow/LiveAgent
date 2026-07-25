@@ -395,14 +395,24 @@ html[data-liveagent-webui="gateway"] .scroll-area-thumb:active {
   background: var(--gateway-scrollbar-thumb-active);
 }
 
-html[data-liveagent-webui="gateway"] .upload-file-list,
 html[data-liveagent-webui="gateway"] .tool-text-scroll,
 html[data-liveagent-webui="gateway"] .mention-popup-scroll,
 html[data-liveagent-webui="gateway"] .settings-provider-tabs-wrap {
   scrollbar-color: var(--gateway-scrollbar-thumb) transparent;
 }
 
-html[data-liveagent-webui="gateway"] .upload-file-list::-webkit-scrollbar,
+/* Upload file list: scrollable without a visible scrollbar (overrides gateway globals) */
+html[data-liveagent-webui="gateway"] .upload-file-list {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+html[data-liveagent-webui="gateway"] .upload-file-list::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 html[data-liveagent-webui="gateway"] .settings-provider-tabs-wrap::-webkit-scrollbar {
   height: 8px;
 }
@@ -3254,11 +3264,6 @@ html[data-liveagent-webui="gateway"]
 
   .gateway-composer-layer > .gateway-chat-column {
     min-width: 0;
-  }
-
-  .gateway-chat-frame .upload-file-list > div {
-    width: min(76vw, 17rem);
-    min-width: min(76vw, 17rem);
   }
 
   .gateway-chat-frame .mention-composer {

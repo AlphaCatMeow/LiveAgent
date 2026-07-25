@@ -224,9 +224,11 @@ import { WorkspaceOverlayHost } from "./WorkspaceOverlayHost";
 const STALE_HISTORY_RETRY_INITIAL_DELAY_MS = 1_000;
 const STALE_HISTORY_RETRY_MAX_DELAY_MS = 30_000;
 
-// Two-phase open: schedule the quiet full hydration at browser idle time,
-// with a hard timeout so it still runs on busy pages (mirrors the GUI helper
-// semantics).
+// Idle scheduler for the open controller (mirrors the GUI helper semantics:
+// requestIdleCallback with a hard timeout so it still runs on busy pages).
+// The web end's opens resolve "painted-complete", so the controller never
+// actually schedules its phase-2 hydration through this — it exists to
+// satisfy the shared controller deps.
 const HYDRATE_IDLE_TIMEOUT_MS = 1_500;
 function scheduleIdleTask(task: () => void): () => void {
   if (typeof window.requestIdleCallback === "function") {
@@ -551,20 +553,19 @@ export default function GatewayApp() {
     );
   }, [activeWorkspaceProjectPath, isAgentMode, sidebarStore]);
 
-  // Two-phase open controller: phase 1 paints the message tail fast, phase 2
-  // hydrates the full transcript at idle. Deps go through refs (assigned per
-  // render) so the controller instance stays stable.
-  const openInitialRef = useRef<(id: string, seq: number) => Promise<"cache-hit" | "painted">>(() =>
-    Promise.resolve("painted"),
-  );
-  const hydrateFullRef = useRef<(id: string, seq: number) => Promise<void>>(() =>
-    Promise.resolve(),
-  );
+  // Conversation-open controller: the web end paints the conversation's whole
+  // established history window in phase 1 (openInitial resolves
+  // "painted-complete"), so the controller never schedules a phase-2
+  // hydration — messages above the window edge stay unfetched until the user
+  // pages up. Deps go through refs (assigned per render) so the controller
+  // instance stays stable.
+  const openInitialRef = useRef<
+    (id: string, seq: number) => Promise<"cache-hit" | "painted" | "painted-complete">
+  >(() => Promise.resolve("painted-complete"));
   const openController = useMemo(
     () =>
       createConversationOpenController({
         openInitial: (id, seq) => openInitialRef.current(id, seq),
-        hydrateFull: (id, seq) => hydrateFullRef.current(id, seq),
         scheduleIdle: scheduleIdleTask,
         onStateChange: setConversationOpenState,
       }),
@@ -1854,8 +1855,7 @@ export default function GatewayApp() {
   });
   displayedConversationBusyRef.current = displayedConversationBusy;
 
-  // Phase-1 open in flight (initial tail fetch). The quiet phase-2 hydration
-  // ("hydrating") intentionally does NOT gate the composer or transcript.
+  // Open in flight (history-window fetch, before the replace apply paints).
   const historyDetailLoading = conversationOpenState.phase === "opening";
 
   // Deterministic messageRef attachment: when the displayed conversation
@@ -1983,17 +1983,22 @@ export default function GatewayApp() {
     });
   }, [api, refreshDisplayedConversationHistorySnapshot]);
 
-  // --- Two-phase conversation open (controller deps) ------------------------
-  // Phase 1: paint the message tail fast. Sets the selection state
-  // synchronously (controller.open calls this in the same tick), fetches the
-  // initial slice, and replace-applies it to the transcript store. The web
-  // end has no synchronous local-activation path, so it always resolves
-  // "painted" (never "cache-hit") — revisits still show the cached transcript
-  // instantly because the registry store keeps rendering underneath.
+  // --- Conversation open (controller deps) ----------------------------------
+  // Single-phase open: paint the conversation's established history window
+  // (first opens fetch the initial tail, revisits everything the user has
+  // paged up to). Sets the selection state synchronously (controller.open
+  // calls this in the same tick), fetches the window, and replace-applies it
+  // to the transcript store. The web end has no synchronous local-activation
+  // path, so it always resolves "painted-complete" (never "cache-hit") —
+  // revisits still show the cached transcript instantly because the registry
+  // store keeps rendering underneath. Messages above the window edge stay
+  // unfetched until the user pages up ("load earlier history"): an idle full
+  // hydration would put open cost back on the conversation's lifetime size,
+  // which is exactly what the lazy window avoids.
   async function openConversationInitial(
     conversationIdValue: string,
     _seq: number,
-  ): Promise<"cache-hit" | "painted"> {
+  ): Promise<"cache-hit" | "painted-complete"> {
     const currentApi = api;
     if (!currentApi) {
       throw new Error("Gateway client is not ready.");
@@ -2038,7 +2043,7 @@ export default function GatewayApp() {
         planned === undefined ? undefined : { maxMessages: planned },
       );
       if (isStale()) {
-        return "painted";
+        return "painted-complete";
       }
       const counts = readHistoryWindowCounts(detail);
       if (counts) {
@@ -2049,7 +2054,7 @@ export default function GatewayApp() {
       const parsed = await parseHistoryMessagesJsonAsync(detail.messages_json);
       const entries = detail.has_more === true ? trimLeadingHeadlessEntries(parsed) : parsed;
       if (isStale()) {
-        return "painted";
+        return "painted-complete";
       }
       setSelectedHistory(detail);
       transcriptStoreRegistry
@@ -2059,7 +2064,7 @@ export default function GatewayApp() {
       if (detailWorkdir) {
         conversationWorkdirsRef.current.set(conversationIdValue, detailWorkdir);
       }
-      return "painted";
+      return "painted-complete";
     } catch (error) {
       if (!isStale()) {
         const message = asErrorMessage(
@@ -2077,18 +2082,7 @@ export default function GatewayApp() {
     }
   }
 
-  // Phase 2: intentionally a no-op. Phase 1 painted the conversation's whole
-  // established window, and messages above the window edge stay unfetched
-  // until the user asks for them ("load earlier history") — hydrating the
-  // full conversation at idle would put open cost back on the conversation's
-  // lifetime size, which is exactly what the lazy window avoids.
-  async function hydrateConversationFull(
-    _conversationIdValue: string,
-    _seq: number,
-  ): Promise<void> {}
-
   openInitialRef.current = openConversationInitial;
-  hydrateFullRef.current = hydrateConversationFull;
 
   const prepareChatRuntime = useCallback(
     async (
@@ -3094,8 +3088,8 @@ export default function GatewayApp() {
       return;
     }
 
-    // Two-phase open: initial tail paint now, quiet full hydration at idle;
-    // the overlay appears only after ~150ms of still-loading.
+    // Paint the conversation's established history window; the overlay
+    // appears only after ~150ms of still-loading.
     openController.open(targetConversationId);
     restoreCachedComposerDraft(targetConversationId);
   }

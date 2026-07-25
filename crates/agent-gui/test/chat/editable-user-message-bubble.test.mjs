@@ -101,19 +101,43 @@ test("editing shows every attachment once no pasted-text marker references it", 
   );
 });
 
-test("removing the pasted-text marker text makes its attachment card reappear live", () => {
-  // draftText starts with the marker (card hidden); the component's own
-  // useMemo must react as the user keeps typing/removes the marker later —
-  // simulated here by rendering with the marker already absent from a text
-  // that still differs from initialText's default state.
+test("editing hides a card per marker when the message references several pastes", () => {
+  const secondPastedFile = {
+    ...pastedFile,
+    relativePath: ".liveagent/uploads/session-1/pasted-text-2.txt",
+    fileName: "pasted-text-2.txt",
+    displayLabel: "Pasted text 2",
+  };
+  const text = [
+    `先看 [Pasted text 1: ${pastedFile.relativePath}]`,
+    `再看 [Pasted text 2: ${secondPastedFile.relativePath}]`,
+  ].join("\n");
+
   const cardsProps = renderBubble({
-    initialText: "已经删除了粘贴引用，只剩下普通文字",
-    attachments: [pastedFile],
+    initialText: text,
+    attachments: [pastedFile, normalFile, secondPastedFile],
   });
 
   assert.deepEqual(
     cardsProps.files.map((file) => file.relativePath),
-    [pastedFile.relativePath],
-    "once its marker is gone, the pasted-text file falls back to a normal, removable card",
+    [normalFile.relativePath],
+    "every marker in the text must suppress its own card, not just the first one",
+  );
+});
+
+test("a marker pointing at a path with no attachment hides nothing", () => {
+  // Guards against matching markers positionally (or by label/index) instead
+  // of by relativePath: an editor can leave a stale marker behind whose file
+  // is already gone from the attachment list, and that must not blank out an
+  // unrelated card.
+  const cardsProps = renderBubble({
+    initialText: "[Pasted text 1: .liveagent/uploads/session-1/already-removed.txt] 还有附件",
+    attachments: [normalFile, pastedFile],
+  });
+
+  assert.deepEqual(
+    new Set(cardsProps.files.map((file) => file.relativePath)),
+    new Set([normalFile.relativePath, pastedFile.relativePath]),
+    "an unresolvable marker must not hide a card that it does not reference",
   );
 });

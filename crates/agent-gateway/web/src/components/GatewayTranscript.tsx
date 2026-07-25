@@ -1478,6 +1478,47 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
     reportAnchorRef.current();
   }, [virtualItems]);
 
+  // Infinite upward paging: scrolling within one viewport of the top requests
+  // the previous page through the same handler as the "load earlier history"
+  // button (which stays as the visible affordance and loading indicator).
+  // Only scroll events trigger it — opening a conversation lands at the
+  // bottom and never auto-fetches — and after a page lands the keyed
+  // anchoring parks the viewport about a page below the top, so walking
+  // further back keeps paging one request at a time: readers load exactly as
+  // far as they scroll, servers transfer only the pages actually walked to,
+  // and a failed fetch retries only on the next user scroll (no hammering).
+  const autoLoadEarlierInFlightRef = useRef(false);
+  const maybeAutoLoadEarlierRef = useRef(() => {});
+  maybeAutoLoadEarlierRef.current = () => {
+    if (
+      readOnly ||
+      isStreaming ||
+      !hasMoreHistory ||
+      !onLoadEarlierHistory ||
+      isLoadingMoreHistory ||
+      autoLoadEarlierInFlightRef.current ||
+      !scrollViewport ||
+      scrollViewport.scrollTop > scrollViewport.clientHeight
+    ) {
+      return;
+    }
+    autoLoadEarlierInFlightRef.current = true;
+    onLoadEarlierHistory();
+  };
+  useEffect(() => {
+    if (!scrollViewport || readOnly) return;
+    const handler = () => maybeAutoLoadEarlierRef.current();
+    scrollViewport.addEventListener("scroll", handler, { passive: true });
+    return () => scrollViewport.removeEventListener("scroll", handler);
+  }, [scrollViewport, readOnly]);
+  useEffect(() => {
+    // The latch guards the gap between firing and the loading flag landing;
+    // it releases whenever a load cycle is not (or no longer) running.
+    if (!isLoadingMoreHistory) {
+      autoLoadEarlierInFlightRef.current = false;
+    }
+  }, [isLoadingMoreHistory]);
+
   // First paint of a conversation lands at the bottom before the user sees
   // anything: scrollToEnd re-targets as dynamic measurements land. The region
   // remounts per conversation (keyed by the parent), so this runs once per

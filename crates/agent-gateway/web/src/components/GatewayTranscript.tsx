@@ -103,7 +103,7 @@ type GatewayTranscriptProps = {
   onOpenSettings?: (section?: SectionId) => void;
   hasMoreHistory?: boolean;
   isLoadingMoreHistory?: boolean;
-  onLoadFullHistory?: () => void;
+  onLoadEarlierHistory?: () => void;
   isAgentMode?: boolean;
   showUsage?: boolean;
   usageContextWindow?: number;
@@ -1180,7 +1180,7 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
   onAnchorUserRowChange?: (rowKey: string | null) => void;
   hasMoreHistory?: boolean;
   isLoadingMoreHistory?: boolean;
-  onLoadFullHistory?: () => void;
+  onLoadEarlierHistory?: () => void;
   isStreaming: boolean;
   isAgentMode: boolean;
   showUsage: boolean;
@@ -1212,7 +1212,7 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
     onAnchorUserRowChange,
     hasMoreHistory,
     isLoadingMoreHistory,
-    onLoadFullHistory,
+    onLoadEarlierHistory,
     isStreaming,
     isAgentMode,
     showUsage,
@@ -1492,6 +1492,47 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
     reportAnchorRef.current();
   }, [virtualItems]);
 
+  // Infinite upward paging: scrolling within one viewport of the top requests
+  // the previous page through the same handler as the "load earlier history"
+  // button (which stays as the visible affordance and loading indicator).
+  // Only scroll events trigger it — opening a conversation lands at the
+  // bottom and never auto-fetches — and after a page lands the keyed
+  // anchoring parks the viewport about a page below the top, so walking
+  // further back keeps paging one request at a time: readers load exactly as
+  // far as they scroll, servers transfer only the pages actually walked to,
+  // and a failed fetch retries only on the next user scroll (no hammering).
+  const autoLoadEarlierInFlightRef = useRef(false);
+  const maybeAutoLoadEarlierRef = useRef(() => {});
+  maybeAutoLoadEarlierRef.current = () => {
+    if (
+      readOnly ||
+      isStreaming ||
+      !hasMoreHistory ||
+      !onLoadEarlierHistory ||
+      isLoadingMoreHistory ||
+      autoLoadEarlierInFlightRef.current ||
+      !scrollViewport ||
+      scrollViewport.scrollTop > scrollViewport.clientHeight
+    ) {
+      return;
+    }
+    autoLoadEarlierInFlightRef.current = true;
+    onLoadEarlierHistory();
+  };
+  useEffect(() => {
+    if (!scrollViewport || readOnly) return;
+    const handler = () => maybeAutoLoadEarlierRef.current();
+    scrollViewport.addEventListener("scroll", handler, { passive: true });
+    return () => scrollViewport.removeEventListener("scroll", handler);
+  }, [scrollViewport, readOnly]);
+  useEffect(() => {
+    // The latch guards the gap between firing and the loading flag landing;
+    // it releases whenever a load cycle is not (or no longer) running.
+    if (!isLoadingMoreHistory) {
+      autoLoadEarlierInFlightRef.current = false;
+    }
+  }, [isLoadingMoreHistory]);
+
   // First paint of a conversation lands at the bottom before the user sees
   // anything: scrollToEnd re-targets as dynamic measurements land. The region
   // remounts per conversation (keyed by the parent), so this runs once per
@@ -1541,8 +1582,8 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
             >
               <button
                 type="button"
-                onClick={onLoadFullHistory}
-                disabled={isLoadingMoreHistory || !onLoadFullHistory}
+                onClick={onLoadEarlierHistory}
+                disabled={isLoadingMoreHistory || !onLoadEarlierHistory}
                 className="rounded-full border border-border/60 bg-background/80 px-4 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {isLoadingMoreHistory
@@ -1745,7 +1786,7 @@ export function GatewayTranscript({
   onOpenSettings,
   hasMoreHistory = false,
   isLoadingMoreHistory = false,
-  onLoadFullHistory,
+  onLoadEarlierHistory,
   isAgentMode = true,
   showUsage = false,
   usageContextWindow,
@@ -1822,7 +1863,7 @@ export function GatewayTranscript({
           onAnchorUserRowChange={onAnchorUserRowChange}
           hasMoreHistory={hasMoreHistory}
           isLoadingMoreHistory={isLoadingMoreHistory}
-          onLoadFullHistory={onLoadFullHistory}
+          onLoadEarlierHistory={onLoadEarlierHistory}
           isStreaming={isStreaming}
           isAgentMode={isAgentMode}
           showUsage={showUsage}

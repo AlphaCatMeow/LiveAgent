@@ -322,7 +322,11 @@ function ToolCallItem({
   item,
   isRunning,
   isAborted = false,
-}: { item: ToolTraceItem; isRunning?: boolean; isAborted?: boolean }) {
+}: {
+  item: ToolTraceItem;
+  isRunning?: boolean;
+  isAborted?: boolean;
+}) {
   const { t } = useLocale();
   const result = item.toolResult;
   const builtinResultKind = getBuiltinResultKind(result);

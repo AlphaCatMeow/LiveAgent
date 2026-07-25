@@ -1,6 +1,11 @@
-import type { Model, ModelThinkingLevel, OpenAICompletionsCompat } from "@earendil-works/pi-ai";
-import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import type { Model, OpenAICompletionsCompat } from "@earendil-works/pi-ai";
 import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
+import {
+  type ModelThinkingCapability,
+  resolveModelThinking,
+  type ThinkingLevelMap,
+  toThinkingLevelMap,
+} from "../../models/modelThinking";
 import {
   type CodexRequestFormat,
   getProviderModelDefaults,
@@ -8,7 +13,6 @@ import {
   type ProviderModelConfig,
 } from "../../settings";
 import {
-  anthropicModelSupportsXHigh,
   findBuiltinAnthropicModel,
   isAnthropicAdaptiveModelId,
   resolveAnthropicContextWindow,
@@ -21,15 +25,27 @@ import {
 } from "../deepSeekProviderAdapter";
 import { isXaiProviderTarget } from "./xaiResponsesPayload";
 
-/** Grok / xAI 思考档：UI 标准档 → 官方 effort；max 不暴露，off 对多数模型不可用。 */
-const XAI_THINKING_LEVEL_MAP: NonNullable<Model<"openai-responses">["thinkingLevelMap"]> = {
-  off: null,
+// ---------------------------------------------------------------------------
+// 思考档位：可用性一律来自 lib/models/modelThinking（生成目录），此处只保留
+// 各家 wire 值改写表；toThinkingLevelMap 保证 wire 表不复活目录裁掉的档，
+// UI 列表与请求期 clamp（pi-ai getSupportedThinkingLevels）由此同源。
+// ---------------------------------------------------------------------------
+
+/** Grok / xAI wire 值：官方 effort 无 minimal，向上取 low。 */
+const XAI_THINKING_WIRE_VALUES: ThinkingLevelMap = {
   minimal: "low",
-  low: "low",
-  medium: "medium",
-  high: "high",
-  xhigh: "xhigh",
 };
+
+function resolveModelThinkingFields(
+  capability: ModelThinkingCapability,
+  wireValues?: ThinkingLevelMap,
+): Pick<Model<any>, "reasoning"> & { thinkingLevelMap?: ThinkingLevelMap } {
+  const thinkingLevelMap = toThinkingLevelMap(capability, wireValues);
+  return {
+    reasoning: capability.reasoning,
+    ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
+  };
+}
 
 const CODEX_RESPONSES_SUFFIX = "/responses";
 const CODEX_RESPONSE_SUFFIX = "/response";
@@ -71,21 +87,14 @@ function resolveKnownAnthropicModel(
   } as Model<any>;
 }
 
-// 目录彻底未命中的三方改名 id（如 claude-4.6-sonnet）退回 ee8dba1 之前的 id 启发式：
-// 能识别为 adaptive 家族的补上 compat.forceAdaptiveThinking 与 xhigh/max 档位声明，
-// pi-ai stream() 与本地 thinkingLevels.ts 都以模型对象上的这两个字段为准。
-export function deriveAnthropicThinkingOverridesForCustomModel(modelId: string): {
-  compat?: Model<"anthropic-messages">["compat"];
-  thinkingLevelMap?: Model<"anthropic-messages">["thinkingLevelMap"];
-} {
-  if (!isAnthropicAdaptiveModelId(modelId)) return {};
-
-  // xhigh：Opus 4.7+ 与 Claude 5 家族；Mythos Preview / Opus 4.6 / Sonnet 4.6 只到 max。
-  const supportsXHigh = anthropicModelSupportsXHigh(modelId);
-  return {
-    compat: { forceAdaptiveThinking: true },
-    thinkingLevelMap: supportsXHigh ? { xhigh: "xhigh", max: "max" } : { max: "max" },
-  };
+// 目录彻底未命中的三方改名 id（如 claude-4.6-sonnet）退回 id 启发式：能识别为
+// adaptive 家族的补上 compat.forceAdaptiveThinking（wire 语义——thinking.type
+// adaptive + output_config.effort），pi-ai stream() 与本地 thinkingLevels.ts 都以
+// 该字段为准。档位声明不在这里——那由 resolveModelThinking 的同一启发式兜底。
+function deriveAnthropicCompatForCustomModel(
+  modelId: string,
+): Model<"anthropic-messages">["compat"] | undefined {
+  return isAnthropicAdaptiveModelId(modelId) ? { forceAdaptiveThinking: true } : undefined;
 }
 
 function maybeAppendGeminiApiVersion(baseUrl: string) {
@@ -319,6 +328,9 @@ export function createModelFromConfig(
   // 计费功能已整体移除：pi-ai 的 Model.cost 是结构必填字段，统一喂零价，
   // 流式侧算出的 usage.cost 恒为 0（known 分支同样覆盖，防止目录单价复活计费）。
   const zeroCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  // 思考能力（reasoning + 档位）唯一来源：生成目录（未命中走其兜底推断）。
+  // pi-ai 目录命中时只取其 thinkingLevelMap 的 wire 改写值，可用性不听它的。
+  const thinking = resolveModelThinking(providerId, modelId);
 
   if (providerId === "codex" || providerId === "xai") {
     const { baseUrl: normalizedBaseUrl, preferredApi } = normalizeCodexBaseUrl(baseUrl);
@@ -355,7 +367,10 @@ export function createModelFromConfig(
           contextWindow,
           maxTokens,
           cost: zeroCost,
-          ...(isXaiTarget ? { thinkingLevelMap: { ...XAI_THINKING_LEVEL_MAP } } : {}),
+          ...resolveModelThinkingFields(
+            thinking,
+            isXaiTarget ? XAI_THINKING_WIRE_VALUES : known.thinkingLevelMap,
+          ),
           ...(responsesCompat
             ? {
                 compat: {
@@ -374,38 +389,33 @@ export function createModelFromConfig(
       );
     }
 
+    const completionsOverrides =
+      api === "openai-completions"
+        ? resolveCodexOpenAICompletionsOverrides({
+            baseUrl: normalizedBaseUrl,
+            upstreamBaseUrl,
+            modelId,
+          })
+        : undefined;
     const custom: Model<any> = {
       id: modelId,
       name: modelId,
       api,
       provider: "openai",
       baseUrl: normalizedBaseUrl,
-      // 目录之外的自定义模型无法从 id 可靠判断推理能力，与 anthropic/gemini
-      // 自定义分支一致按可推理处理（标准档位，xhigh/max 仍需目录 opt-in），
-      // 是否真的下发思考由用户的开关决定。
-      reasoning: true,
+      ...resolveModelThinkingFields(
+        thinking,
+        isXaiTarget ? XAI_THINKING_WIRE_VALUES : completionsOverrides?.thinkingLevelMap,
+      ),
       input: resolveCodexModelInput(api, modelId),
       cost: zeroCost,
       contextWindow,
       maxTokens,
     };
-    if (isXaiTarget) {
-      custom.thinkingLevelMap = { ...XAI_THINKING_LEVEL_MAP };
-    }
     if (api === "openai-responses" && responsesCompat) {
       custom.compat = responsesCompat;
-    } else if (api === "openai-completions") {
-      const overrides = resolveCodexOpenAICompletionsOverrides({
-        baseUrl: normalizedBaseUrl,
-        upstreamBaseUrl,
-        modelId,
-      });
-      if (overrides) {
-        custom.compat = overrides.compat;
-        if (overrides.thinkingLevelMap) {
-          custom.thinkingLevelMap = overrides.thinkingLevelMap;
-        }
-      }
+    } else if (completionsOverrides) {
+      custom.compat = completionsOverrides.compat;
     }
     return applyDeepSeekModelDefaults(custom, {
       providerId,
@@ -424,6 +434,7 @@ export function createModelFromConfig(
         contextWindow,
         maxTokens,
         cost: zeroCost,
+        ...resolveModelThinkingFields(thinking, known.thinkingLevelMap),
       };
     }
 
@@ -433,7 +444,7 @@ export function createModelFromConfig(
       api: "google-generative-ai",
       provider: "google",
       baseUrl: normalizedBaseUrl,
-      reasoning: true,
+      ...resolveModelThinkingFields(thinking),
       input: ["text", "image"],
       cost: zeroCost,
       contextWindow,
@@ -450,6 +461,7 @@ export function createModelFromConfig(
         contextWindow,
         maxTokens,
         cost: zeroCost,
+        ...resolveModelThinkingFields(thinking, known.thinkingLevelMap),
       },
       {
         providerId,
@@ -460,22 +472,19 @@ export function createModelFromConfig(
     );
   }
 
-  const thinkingOverrides = deriveAnthropicThinkingOverridesForCustomModel(modelId);
+  const customCompat = deriveAnthropicCompatForCustomModel(modelId);
   const custom: Model<"anthropic-messages"> = {
     id: resolveAnthropicWireModelId(modelId, upstreamBaseUrl?.trim() || baseUrl),
     name: modelId,
     api: "anthropic-messages",
     provider: "anthropic",
     baseUrl,
-    reasoning: true,
+    ...resolveModelThinkingFields(thinking),
     input: ["text"],
     cost: zeroCost,
     contextWindow,
     maxTokens,
-    ...(thinkingOverrides.compat ? { compat: thinkingOverrides.compat } : {}),
-    ...(thinkingOverrides.thinkingLevelMap
-      ? { thinkingLevelMap: thinkingOverrides.thinkingLevelMap }
-      : {}),
+    ...(customCompat ? { compat: customCompat } : {}),
   };
   return applyDeepSeekModelDefaults(custom, {
     providerId,
@@ -483,44 +492,4 @@ export function createModelFromConfig(
     upstreamBaseUrl,
     modelId,
   });
-}
-
-export function getAvailableThinkingLevelsForModel(
-  providerId: ProviderId,
-  modelId: string,
-  baseUrl: string,
-  requestFormat?: CodexRequestFormat,
-  modelConfig?: ProviderModelConfig,
-  upstreamBaseUrl?: string,
-): ModelThinkingLevel[] {
-  if (!modelId.trim()) return [];
-  const model = createModelFromConfig(
-    providerId,
-    modelId,
-    baseUrl,
-    requestFormat,
-    modelConfig,
-    upstreamBaseUrl,
-  );
-  return getSupportedThinkingLevels(model).filter((level) => level !== "off");
-}
-
-export function isThinkingAlwaysOnForModel(
-  providerId: ProviderId,
-  modelId: string,
-  baseUrl: string,
-  requestFormat?: CodexRequestFormat,
-  modelConfig?: ProviderModelConfig,
-  upstreamBaseUrl?: string,
-): boolean {
-  if (!modelId.trim()) return false;
-  const model = createModelFromConfig(
-    providerId,
-    modelId,
-    baseUrl,
-    requestFormat,
-    modelConfig,
-    upstreamBaseUrl,
-  );
-  return !getSupportedThinkingLevels(model).includes("off");
 }

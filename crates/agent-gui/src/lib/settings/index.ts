@@ -1,4 +1,3 @@
-import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { DEFAULT_LOCALE, type Locale, normalizeLocale } from "../../i18n/config";
 import {
   getProviderFallbackLimits,
@@ -8,6 +7,11 @@ import {
   resolveModelLimitsAcrossProviders,
 } from "../models/modelCatalog";
 import {
+  clampThinkingLevelToList,
+  resolveModelThinking,
+  type ThinkingLevel,
+} from "../models/modelThinking";
+import {
   ANTHROPIC_LONG_CONTEXT_WINDOW,
   ANTHROPIC_STANDARD_CONTEXT_WINDOW,
   hasAnthropicLongContextSuffix,
@@ -16,10 +20,6 @@ import {
   resolveAnthropicKnownModelLimits,
   shouldSendAnthropicLongContextHeader,
 } from "../providers/anthropicModels";
-import {
-  getAvailableThinkingLevelsForModel,
-  isThinkingAlwaysOnForModel,
-} from "../providers/runtime/modelFactory";
 import { createUuid } from "../shared/id";
 import { mergeAlwaysEnabledSkillNames } from "../skills/builtin";
 import { normalizeFontFamily } from "../system/fontFamily";
@@ -29,7 +29,13 @@ import { normalizeApiKey, normalizeBaseUrl, normalizeModels } from "./normalize"
 export { normalizeFontFamily } from "../system/fontFamily";
 
 export type { SystemToolId } from "../tools/systemToolOptions";
-export { isThinkingAlwaysOnForModel };
+
+export function isThinkingAlwaysOnForModel(
+  providerId: ProviderId,
+  modelId: string | undefined,
+): boolean {
+  return resolveModelThinking(providerId, modelId).alwaysOn;
+}
 
 export type ProviderId = "codex" | "claude_code" | "gemini" | "xai";
 
@@ -37,7 +43,7 @@ export type ExecutionMode = "text" | "tools" | "agent-dev";
 
 export type CodexRequestFormat = "openai-completions" | "openai-responses";
 
-export type ReasoningLevel = ModelThinkingLevel;
+export type ReasoningLevel = "off" | ThinkingLevel;
 
 export type McpTransport = "stdio" | "http" | "sse";
 
@@ -826,7 +832,13 @@ function normalizeChatRuntimeReasoningForLevels(
     return DEFAULT_CHAT_RUNTIME_CONTROLS.reasoning;
   }
   const reasoning = normalizeChatRuntimeReasoning(input);
-  return levels.includes(reasoning) ? reasoning : DEFAULT_CHAT_RUNTIME_CONTROLS.reasoning;
+  if (levels.includes(reasoning)) return reasoning;
+  // 存量档位不在该模型档位表内：先回默认档，默认档也不可用（如单档 toggle
+  // 模型、gpt-5.2-chat-latest 只有 medium）时钳到最近档，绝不返回表外档位。
+  const fallback = DEFAULT_CHAT_RUNTIME_CONTROLS.reasoning;
+  if (levels.includes(fallback)) return fallback;
+  const clampSource = (reasoning === "off" ? fallback : reasoning) as ThinkingLevel;
+  return clampThinkingLevelToList(clampSource, levels as ThinkingLevel[]) ?? fallback;
 }
 
 function normalizeChatRuntimeReasoningByProvider(
@@ -863,18 +875,8 @@ export function getChatRuntimeReasoningLevelsForProvider(params: {
   providerId?: ProviderId;
   requestFormat?: CodexRequestFormat;
   modelId?: string;
-  baseUrl?: string;
-  modelConfig?: ProviderModelConfig;
 }): ReasoningLevel[] {
-  const modelId = params.modelId?.trim();
-  if (!modelId) return [];
-  return getAvailableThinkingLevelsForModel(
-    params.providerId ?? "claude_code",
-    modelId,
-    params.baseUrl ?? "",
-    params.requestFormat,
-    params.modelConfig,
-  );
+  return resolveModelThinking(params.providerId ?? "claude_code", params.modelId).levels;
 }
 
 export function normalizeChatRuntimeControlsForProvider(
@@ -883,8 +885,6 @@ export function normalizeChatRuntimeControlsForProvider(
     providerId?: ProviderId;
     requestFormat?: CodexRequestFormat;
     modelId?: string;
-    baseUrl?: string;
-    modelConfig?: ProviderModelConfig;
   },
 ): ChatRuntimeControls {
   const controls = normalizeChatRuntimeControls(input);
@@ -915,8 +915,6 @@ export function updateChatRuntimeControlsForProvider(
     providerId?: ProviderId;
     requestFormat?: CodexRequestFormat;
     modelId?: string;
-    baseUrl?: string;
-    modelConfig?: ProviderModelConfig;
   },
 ): ChatRuntimeControls {
   const key = getChatRuntimeReasoningProviderKey(params);

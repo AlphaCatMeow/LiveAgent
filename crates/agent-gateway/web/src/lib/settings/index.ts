@@ -1,17 +1,19 @@
-import type { KnownProvider, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
-import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import { DEFAULT_LOCALE, type Locale, normalizeLocale } from "../../i18n/config";
 import { normalizeFontFamily } from "../fontFamily";
 import {
   findCatalogModel,
   getProviderFallbackLimits,
-  normalizeModelIdCandidates,
   normalizeModelLimits,
   repairStaleCrossProviderLimits,
   resolveModelLimits,
   resolveModelLimitsAcrossProviders,
 } from "../models/modelCatalog";
+import {
+  clampThinkingLevelToList,
+  isAnthropicAdaptiveModelId,
+  resolveModelThinking,
+  type ThinkingLevel,
+} from "../models/modelThinking";
 import { createUuid } from "../shared/id";
 import { mergeAlwaysEnabledSkillNames } from "../skills/builtin";
 import { SYSTEM_TOOL_OPTIONS, type SystemToolId } from "../tools/systemToolOptions";
@@ -27,7 +29,7 @@ export type ExecutionMode = "text" | "tools" | "agent-dev";
 
 export type CodexRequestFormat = "openai-completions" | "openai-responses";
 
-export type ReasoningLevel = ModelThinkingLevel;
+export type ReasoningLevel = "off" | ThinkingLevel;
 
 export type McpTransport = "stdio" | "http" | "sse";
 
@@ -807,7 +809,13 @@ function normalizeChatRuntimeReasoningForLevels(
     return DEFAULT_CHAT_RUNTIME_CONTROLS.reasoning;
   }
   const reasoning = normalizeChatRuntimeReasoning(input);
-  return levels.includes(reasoning) ? reasoning : DEFAULT_CHAT_RUNTIME_CONTROLS.reasoning;
+  if (levels.includes(reasoning)) return reasoning;
+  // 存量档位不在该模型档位表内：先回默认档，默认档也不可用（如单档 toggle
+  // 模型、gpt-5.2-chat-latest 只有 medium）时钳到最近档，绝不返回表外档位。
+  const fallback = DEFAULT_CHAT_RUNTIME_CONTROLS.reasoning;
+  if (levels.includes(fallback)) return fallback;
+  const clampSource = (reasoning === "off" ? fallback : reasoning) as ThinkingLevel;
+  return clampThinkingLevelToList(clampSource, levels as ThinkingLevel[]) ?? fallback;
 }
 
 function normalizeChatRuntimeReasoningByProvider(
@@ -1009,98 +1017,9 @@ export function normalizeRemoteSettings(input: unknown): RemoteSettings {
   };
 }
 
-function toKnownProvider(providerId: ProviderId): KnownProvider {
-  if (providerId === "codex" || providerId === "xai") return "openai";
-  if (providerId === "gemini") return "google";
-  return "anthropic";
-}
-
-// 思考档位检测用的 pi-ai 目录回查（限额/单价不走这里——那些来自
-// lib/models/modelCatalog 的生成目录）：其 compat/thinkingLevelMap 反映
-// pi-ai 请求路径元数据。xai 刻意不回查（resolveThinkingModel 早退），
-// pi-ai 目录的 xai compat 反映 completions 路径，与 LiveAgent 强制
-// Responses + thinkingLevelMap 不符。
-function findKnownModel(providerId: ProviderId, modelId: string | undefined) {
-  const trimmedId = modelId?.trim();
-  if (!trimmedId) return undefined;
-  return getBuiltinModels(toKnownProvider(providerId)).find((model) => model.id === trimmedId);
-}
-
-// —— 以下 Anthropic 启发式与桌面端 anthropicModels.ts/modelFactory.ts
-// 手动保持同步；装饰 id 候选链与目录模块共用同一实现 ——
-// 中转/网关常给官方 Anthropic 模型 id 加装饰（日期后缀、@版本、大小写变化、
-// AnyRouter 系的 [1m] 长上下文后缀），逐字匹配漏检后档位列表会塌缩、丢掉
-// xhigh/max，上下文窗口默认值也与桌面端实际请求脱节。
-function findKnownAnthropicModel(modelId: string) {
-  const models = getBuiltinModels("anthropic");
-  for (const candidate of normalizeModelIdCandidates(modelId)) {
-    const known = models.find((model) => model.id === candidate);
-    if (known) return known;
-  }
-  return undefined;
-}
-
-function findKnownModelForThinking(providerId: ProviderId, modelId: string) {
-  return toKnownProvider(providerId) === "anthropic"
-    ? findKnownAnthropicModel(modelId)
-    : findKnownModel(providerId, modelId);
-}
-
-function isClaudeFamilyVersionAtLeast(
-  normalizedModelId: string,
-  family: "opus" | "sonnet",
-  minimumMinor: number,
-) {
-  // minor 限定 1-2 位数字，避免把日期后缀（如 claude-sonnet-4-20250514）误读成小版本号；
-  // 同时接受三方中转的倒序命名（claude-4.6-sonnet）。
-  const match = normalizedModelId.match(
-    new RegExp(`(?:${family}[-.]4[-.](\\d{1,2})(?!\\d)|4[-.](\\d{1,2})(?!\\d)[-.]${family})`),
-  );
-  if (!match) return false;
-  const minor = Number(match[1] ?? match[2]);
-  return Number.isFinite(minor) && minor >= minimumMinor;
-}
-
-// Claude 5 起（sonnet-5 / fable-5 / mythos-5 等）整个家族都是 adaptive thinking 且支持 xhigh。
-// 倒序写法（claude-5-sonnet）用负向后行断言排除 3-5-sonnet 这类旧世代小版本号。
-function isClaudeFamilyMajorVersionAtLeast(normalizedModelId: string, minimumMajor: number) {
-  const match = normalizedModelId.match(
-    /(?:(?:opus|sonnet|haiku|fable|mythos)[-.](\d{1,2})(?!\d)|(?<!\d[-.])(\d{1,2})[-.](?:opus|sonnet|haiku|fable|mythos))/,
-  );
-  if (!match) return false;
-  const major = Number(match[1] ?? match[2]);
-  return Number.isFinite(major) && major >= minimumMajor;
-}
-
-// adaptive 世代（Opus/Sonnet 4.6+、Claude 5、Mythos Preview）即 1M GA 世代；
-// 与桌面端 anthropicModels.ts 的 isAnthropicAdaptiveModelId 手动同步。目录里
-// forceAdaptiveThinking 的模型集合与该启发式等价，限额路径以此判定摆脱目录
-// compat 依赖。
-function isAnthropicAdaptiveModelId(modelId: string): boolean {
-  const id = modelId.trim().toLowerCase();
-  return (
-    id.includes("mythos-preview") ||
-    isClaudeFamilyVersionAtLeast(id, "opus", 6) ||
-    isClaudeFamilyVersionAtLeast(id, "sonnet", 6) ||
-    isClaudeFamilyMajorVersionAtLeast(id, 5)
-  );
-}
-
-// 目录彻底未命中的三方改名 id（如 claude-4.6-sonnet）退回 id 启发式，推断
-// xhigh/max 档位声明；与桌面端 deriveAnthropicThinkingOverridesForCustomModel 同步。
-function deriveAnthropicThinkingLevelMapForCustomModel(
-  modelId: string,
-): Record<string, string> | undefined {
-  if (!isAnthropicAdaptiveModelId(modelId)) return undefined;
-  const id = modelId.trim().toLowerCase();
-  const supportsXHigh =
-    isClaudeFamilyVersionAtLeast(id, "opus", 7) || isClaudeFamilyMajorVersionAtLeast(id, 5);
-  return supportsXHigh ? { xhigh: "xhigh", max: "max" } : { max: "max" };
-}
-
 // 旧世代默认按 200K 处理；显式 [1m] 变体表示中转端能力，adaptive 世代
-// （forceAdaptiveThinking）则是 1M GA 世代。与桌面端 anthropicModels.ts 的
-// 有效窗口规则手动保持同步。
+// （isAnthropicAdaptiveModelId，来自镜像模块 lib/models/modelThinking）则是
+// 1M GA 世代。与桌面端 anthropicModels.ts 的有效窗口规则手动保持同步。
 const ANTHROPIC_STANDARD_CONTEXT_WINDOW = 200_000;
 const ANTHROPIC_LONG_CONTEXT_WINDOW = 1_000_000;
 
@@ -1145,69 +1064,24 @@ function getKnownModelLimits(
   return resolveModelLimits(providerId, trimmedId);
 }
 
-// Grok / xAI 思考档：与桌面端 modelFactory 的 XAI_THINKING_LEVEL_MAP 手动同步
-// （off:null=思考恒开，max 不暴露）。桌面端对 xai 的所有模型（目录内外）一律
-// 盖这份映射，web 侧同样无条件应用，否则跨端钳制会把桌面设置的 xhigh 压回 high。
-const XAI_THINKING_LEVEL_MAP = {
-  off: null,
-  minimal: "low",
-  low: "low",
-  medium: "medium",
-  high: "high",
-  xhigh: "xhigh",
-} as const;
-
-function resolveThinkingModel(providerId: ProviderId, trimmedId: string) {
-  if (providerId === "xai") {
-    return {
-      reasoning: true,
-      thinkingLevelMap: XAI_THINKING_LEVEL_MAP,
-    } as Parameters<typeof getSupportedThinkingLevels>[0];
-  }
-  const known = findKnownModelForThinking(providerId, trimmedId);
-  if (known) return known;
-  // 目录之外的自定义模型（deepseek/glm 等三方聚合）无法从 id 判断推理能力，
-  // 与桌面端 modelFactory 自定义分支一致按可推理处理：标准档位，xhigh/max
-  // 仍需目录 opt-in；deepseek 走 codex 时镜像桌面端 DeepSeek 适配层的 xhigh 档，
-  // claude_code 走桌面端同款 id 启发式补 xhigh/max。
-  const customThinkingLevelMap =
-    providerId === "codex" && trimmedId.toLowerCase().includes("deepseek")
-      ? { xhigh: "max" }
-      : toKnownProvider(providerId) === "anthropic"
-        ? deriveAnthropicThinkingLevelMapForCustomModel(trimmedId)
-        : undefined;
-  return {
-    reasoning: true,
-    ...(customThinkingLevelMap ? { thinkingLevelMap: customThinkingLevelMap } : {}),
-  } as Parameters<typeof getSupportedThinkingLevels>[0];
-}
+// ---------------------------------------------------------------------------
+// 思考档位（可用性单一真源：lib/models/modelThinking，两端字节镜像）
+// ---------------------------------------------------------------------------
+// 目录（models.dev 生成快照）直接回答"这个模型有哪些思考档、能否关闭"，
+// UI 列表与桌面端请求期钳制同源；旧的 pi-ai 目录回查与手动同步启发式已删。
 
 export function getKnownModelThinkingLevels(
   providerId: ProviderId,
   modelId: string | undefined,
 ): ReasoningLevel[] {
-  const trimmedId = modelId?.trim();
-  if (!trimmedId) return [];
-  const model = resolveThinkingModel(providerId, trimmedId);
-  return getSupportedThinkingLevels(model).filter((level) => level !== "off");
+  return resolveModelThinking(providerId, modelId).levels;
 }
 
 export function isThinkingAlwaysOnForModel(
   providerId: ProviderId,
   modelId: string | undefined,
-  _baseUrl?: string,
-  _requestFormat?: CodexRequestFormat,
-  _modelConfig?: ProviderModelConfig,
 ): boolean {
-  const trimmedId = modelId?.trim();
-  if (!trimmedId) return false;
-  // xai 的映射 off:null 意味着思考恒开（与桌面端一致）；其余供应商目录
-  // 未命中时保持可关闭的兜底判定。
-  if (providerId === "xai") {
-    return !getSupportedThinkingLevels(resolveThinkingModel(providerId, trimmedId)).includes("off");
-  }
-  const known = findKnownModelForThinking(providerId, trimmedId);
-  return known ? !getSupportedThinkingLevels(known).includes("off") : false;
+  return resolveModelThinking(providerId, modelId).alwaysOn;
 }
 
 export function getProviderModelDefaults(

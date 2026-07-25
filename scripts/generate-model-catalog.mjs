@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// Generates the model metadata catalog (context window / max output)
-// consumed by both frontends, from the models.dev open database. The output
-// is written byte-identically to:
+// Generates the model metadata catalog (context window / max output /
+// thinking capability) consumed by both frontends, from the models.dev open
+// database. The output is written byte-identically to:
 //   crates/agent-gui/src/lib/models/catalog.generated.ts
 //   crates/agent-gateway/web/src/lib/models/catalog.generated.ts
 // and is enforced in sync by scripts/check-mirror.mjs.
@@ -60,14 +60,16 @@ const SECTIONS = [
   { key: "tencent", sources: ["tencent-coding-plan"], min: 4 },
 ];
 
-// Models that must exist; their absence signals an upstream schema change
-// (or, for unioned sections, a source-key rename).
+// Models that must exist (with the expected thinking shape); their absence
+// signals an upstream schema change (or, for unioned sections, a source-key
+// rename). `level` must be present in the extracted thinking levels; `off`
+// must match when specified.
 const SENTINELS = [
-  ["anthropic", "claude-sonnet-4-6"],
-  ["openai", "gpt-5"],
-  ["deepseek", "deepseek-chat"],
-  ["zhipuai", "glm-4.6"],
-  ["alibaba", "qwen-max"],
+  { section: "anthropic", id: "claude-sonnet-4-6", level: "high", off: true },
+  { section: "openai", id: "gpt-5", level: "minimal" },
+  { section: "deepseek", id: "deepseek-chat" },
+  { section: "zhipuai", id: "glm-4.6", off: true },
+  { section: "alibaba", id: "qwen-max" },
 ];
 
 // Single semantic rule shared with lib/models/modelCatalog.ts (bound together
@@ -79,6 +81,79 @@ const MAX_OUTPUT_TOKEN_CAP = 32_000;
 function normalizeMaxOutputToken(contextWindow, maxOutputToken) {
   if (maxOutputToken < contextWindow) return maxOutputToken;
   return Math.min(MAX_OUTPUT_TOKEN_CAP, Math.max(1, Math.floor(contextWindow / 4)));
+}
+
+// ---------------------------------------------------------------------------
+// Thinking capability extraction
+// ---------------------------------------------------------------------------
+// Upstream expresses "how can thinking be tuned" as reasoning_options entries
+// of three shapes: an effort ladder, an on/off toggle, and a raw token budget.
+// The catalog reduces that to the app's own ladder: which UI levels exist and
+// whether thinking can be turned off. Wire semantics (what each level sends)
+// stay in the streaming runtime — this is capability data only.
+
+// App-side ladder, ascending. Upstream's "none" is not a level: it folds into
+// `off`. Unknown future values are dropped with a note rather than failing the
+// refresh — thinking data must never block a limits update.
+const THINKING_LEVELS = ["minimal", "low", "medium", "high", "xhigh", "max"];
+
+// Budget-only models (no effort ladder published) get the four standard
+// levels: the runtime maps them onto its per-provider budget tables, and
+// xhigh/max stay opt-in via an explicit effort ladder.
+const BUDGET_DEFAULT_LEVELS = ["minimal", "low", "medium", "high"];
+
+// Pure-toggle models (toggle only, no ladder and no budget — glm-4.x, gemma,
+// MiniMax-M3) get a single "high" notch: their wire protocols only understand
+// on/off, but the app's enable path is level-based, so one selectable level is
+// what makes the toggle reachable. The UI hides single-entry level pickers.
+const TOGGLE_ONLY_LEVELS = ["high"];
+
+// The anthropic-messages protocol always allows disabling thinking client-side
+// (the request simply omits the thinking block), so upstream's ladder never
+// lists "none" for Anthropic models even though `off` is real. Fixed always-on
+// models (empty options) are still honored as such.
+const CLIENT_SIDE_OFF_SECTIONS = new Set(["anthropic"]);
+
+// Facts the upstream schema cannot express, keyed "section/id". Kept tiny and
+// documented — anything expressible upstream must come from upstream.
+// claude-fable-5: adaptive thinking cannot be disabled (the API requires the
+// thinking block; pi-ai's catalog marks off:null) — the client-side-off rule
+// above must not apply.
+const THINKING_OVERRIDES = new Map([["anthropic/claude-fable-5", { off: false }]]);
+
+function normalizeThinking(model, id, label, sectionKey) {
+  if (!model?.reasoning) return undefined;
+  const options = Array.isArray(model.reasoning_options) ? model.reasoning_options : [];
+  if (options.length === 0) {
+    // Reasoning is always on and not tunable (e.g. deepseek-reasoner,
+    // MiniMax-M2 family) — levels stay empty, off stays false.
+    return { levels: [], off: false };
+  }
+  const effort = options.find((option) => option?.type === "effort");
+  const hasToggle = options.some((option) => option?.type === "toggle");
+  const hasBudget = options.some((option) => option?.type === "budget_tokens");
+
+  let off = hasToggle || CLIENT_SIDE_OFF_SECTIONS.has(sectionKey);
+  let levels = [];
+  if (effort && Array.isArray(effort.values)) {
+    const values = new Set();
+    for (const value of effort.values) {
+      if (value === "none") {
+        off = true;
+      } else if (THINKING_LEVELS.includes(value)) {
+        values.add(value);
+      } else {
+        console.error(`note ${label}: unknown effort value "${value}" dropped`);
+      }
+    }
+    levels = THINKING_LEVELS.filter((level) => values.has(level));
+  } else if (hasBudget) {
+    levels = [...BUDGET_DEFAULT_LEVELS];
+  } else if (hasToggle) {
+    levels = [...TOGGLE_ONLY_LEVELS];
+  }
+  const override = THINKING_OVERRIDES.get(`${sectionKey}/${id}`);
+  return { levels, off, ...(override ?? {}) };
 }
 
 function fail(message) {
@@ -168,10 +243,12 @@ function extractSection(section, upstream, claimedLower) {
         continue;
       }
       claimedLower.set(lower, section.key);
+      const thinking = normalizeThinking(model, id, `${source}/${id}`, section.key);
       entries.push({
         id,
         contextWindow,
         maxOutputToken: normalizeMaxOutputToken(contextWindow, rawOutput),
+        ...(thinking ? { thinking } : {}),
       });
     }
   }
@@ -180,7 +257,16 @@ function extractSection(section, upstream, claimedLower) {
 }
 
 function renderEntry(entry) {
-  return `    { id: ${JSON.stringify(entry.id)}, contextWindow: ${entry.contextWindow}, maxOutputToken: ${entry.maxOutputToken} },`;
+  const parts = [
+    `id: ${JSON.stringify(entry.id)}`,
+    `contextWindow: ${entry.contextWindow}`,
+    `maxOutputToken: ${entry.maxOutputToken}`,
+  ];
+  if (entry.thinking) {
+    const levels = entry.thinking.levels.map((level) => JSON.stringify(level)).join(", ");
+    parts.push(`thinking: { levels: [${levels}], off: ${entry.thinking.off} }`);
+  }
+  return `    { ${parts.join(", ")} },`;
 }
 
 function renderCatalog(catalog, snapshotDate) {
@@ -190,10 +276,21 @@ function renderCatalog(catalog, snapshotDate) {
     `// Source: https://models.dev/api.json (sections: ${keys.join(", ")})`,
     "// Refresh: make update-model-catalog",
     "",
+    'export type CatalogThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";',
+    "",
+    "export type CatalogModelThinking = {",
+    "  /** Selectable levels, ascending; [] = thinking is always on and not tunable. */",
+    "  levels: readonly CatalogThinkingLevel[];",
+    "  /** Whether thinking can be turned off. */",
+    "  off: boolean;",
+    "};",
+    "",
     "export type CatalogModelEntry = {",
     "  id: string;",
     "  contextWindow: number;",
     "  maxOutputToken: number;",
+    "  /** Absent = the model does not reason. */",
+    "  thinking?: CatalogModelThinking;",
     "};",
     "",
     `export type CatalogProviderId = ${keys.map((key) => JSON.stringify(key)).join(" | ")};`,
@@ -238,9 +335,24 @@ for (const section of SECTIONS) {
   }
   catalog[section.key] = entries;
 }
-for (const [sectionKey, modelId] of SENTINELS) {
-  if (!catalog[sectionKey].some((entry) => entry.id === modelId)) {
-    fail(`sentinel model ${sectionKey}/${modelId} missing; upstream schema may have changed`);
+for (const sentinel of SENTINELS) {
+  const entry = catalog[sentinel.section].find((candidate) => candidate.id === sentinel.id);
+  if (!entry) {
+    fail(
+      `sentinel model ${sentinel.section}/${sentinel.id} missing; upstream schema may have changed`,
+    );
+  }
+  if (sentinel.level && !entry.thinking?.levels.includes(sentinel.level)) {
+    fail(
+      `sentinel ${sentinel.section}/${sentinel.id}: expected thinking level "${sentinel.level}"; ` +
+        "upstream reasoning_options schema may have changed",
+    );
+  }
+  if (sentinel.off !== undefined && entry.thinking?.off !== sentinel.off) {
+    fail(
+      `sentinel ${sentinel.section}/${sentinel.id}: expected thinking.off=${sentinel.off}; ` +
+        "upstream reasoning_options schema may have changed",
+    );
   }
 }
 

@@ -1,12 +1,13 @@
 import { type MutableRefObject, useCallback, useEffect, useMemo } from "react";
 import { setChatHistoryModel } from "../../../lib/chat/history/chatHistory";
 import { buildModelOptions } from "../../../lib/chat/page/chatPageHelpers";
-import { isThinkingAlwaysOnForModel, toModelValue } from "../../../lib/providers/llm";
+import { toModelValue } from "../../../lib/providers/llm";
 import {
   type AppSettings,
   type ChatRuntimeControls,
   findProviderModelConfig,
   getChatRuntimeReasoningLevelsForProvider,
+  isThinkingAlwaysOnForModel,
   normalizeChatRuntimeControlsForProvider,
   normalizeSelectedModelForProviders,
   parseSelectedModelJson,
@@ -141,28 +142,13 @@ export function useChatModelSelection(params: UseChatModelSelectionParams) {
     updateConversationRuntimeEntry,
   ]);
 
-  const currentChatModelConfig = useMemo(
-    () =>
-      currentChatProvider && currentChatModelId
-        ? findProviderModelConfig(currentChatProvider, currentChatModelId)
-        : undefined,
-    [currentChatProvider, currentChatModelId],
-  );
   const chatRuntimeReasoningParams = useMemo(
     () => ({
       providerId: currentChatProvider?.type,
       requestFormat: currentChatProvider?.requestFormat,
       modelId: currentChatModelId,
-      baseUrl: currentChatProvider?.baseUrl,
-      modelConfig: currentChatModelConfig,
     }),
-    [
-      currentChatModelConfig,
-      currentChatModelId,
-      currentChatProvider?.baseUrl,
-      currentChatProvider?.requestFormat,
-      currentChatProvider?.type,
-    ],
+    [currentChatModelId, currentChatProvider?.requestFormat, currentChatProvider?.type],
   );
   const chatRuntimeReasoningOptions = useMemo(
     () => getChatRuntimeReasoningLevelsForProvider(chatRuntimeReasoningParams),
@@ -170,20 +156,8 @@ export function useChatModelSelection(params: UseChatModelSelectionParams) {
   );
   const chatRuntimeThinkingAlwaysOn = useMemo(
     () =>
-      isThinkingAlwaysOnForModel(
-        currentChatProvider?.type ?? "claude_code",
-        currentChatModelId ?? "",
-        currentChatProvider?.baseUrl ?? "",
-        currentChatProvider?.requestFormat,
-        currentChatModelConfig,
-      ),
-    [
-      currentChatModelConfig,
-      currentChatModelId,
-      currentChatProvider?.baseUrl,
-      currentChatProvider?.requestFormat,
-      currentChatProvider?.type,
-    ],
+      isThinkingAlwaysOnForModel(currentChatProvider?.type ?? "claude_code", currentChatModelId),
+    [currentChatModelId, currentChatProvider?.type],
   );
   const chatRuntimeControlsForCurrentProvider = useMemo(
     () =>

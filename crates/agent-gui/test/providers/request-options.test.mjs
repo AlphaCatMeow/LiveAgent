@@ -508,8 +508,12 @@ test("DeepSeek Codex models force Chat Completions compat", () => {
   assert.equal(model.compat.requiresReasoningContentOnAssistantMessages, true);
   assert.equal(model.compat.supportsStrictMode, false);
   assert.equal(model.compat.maxTokensField, "max_tokens");
-  assert.equal(model.thinkingLevelMap.minimal, "high");
-  assert.equal(model.thinkingLevelMap.xhigh, "max");
+  // 档位来自生成目录：deepseek-v4-pro 只有 high/max（minimal/low/medium=null），
+  // xhigh 目录未声明故不复活；wire 改写只补到已支持档位（high→"high"）。
+  assert.equal(model.thinkingLevelMap.minimal, null);
+  assert.equal(model.thinkingLevelMap.high, "high");
+  assert.equal(model.thinkingLevelMap.xhigh, undefined);
+  assert.equal(model.thinkingLevelMap.max, "max");
 });
 
 test("DeepSeek OpenAI payload adapter injects thinking and reasoning_content", async () => {

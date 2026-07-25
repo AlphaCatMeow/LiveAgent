@@ -298,7 +298,9 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
   const uploadDisabled = isInputDisabled || isUploadingFiles || !isAgentMode || !workdir;
   const controlsDisabled = isInputDisabled;
   const hasSendableDraft = !composerIsEmpty || pendingUploadedFiles.length > 0;
-  const thinkingSupported = reasoningOptions.length > 0;
+  // 档位为空但恒开（deepseek-reasoner 型"恒开不可调"）也算支持思考——
+  // 亮灯但开关与档位均不可操作；两者皆无才是真不支持。
+  const thinkingSupported = reasoningOptions.length > 0 || thinkingAlwaysOn;
   const sendDisabled = isInputDisabled || isUploadingFiles || !hasSendableDraft;
   const canQueueDraftWhileSending = isSending && !sendDisabled;
   const primaryActionTitle = canQueueDraftWhileSending
@@ -306,9 +308,13 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
     : isSending
       ? t("chat.stopGeneration")
       : t("chat.sendMessage");
+  // controls 已经过 normalizeChatRuntimeControlsForProvider 钳制；这里兜底
+  // 取表内最高档，绝不给 Select 喂表外值。
   const selectedReasoning = reasoningOptions.includes(chatRuntimeControls.reasoning)
     ? chatRuntimeControls.reasoning
-    : DEFAULT_CHAT_RUNTIME_CONTROLS.reasoning;
+    : reasoningOptions.includes(DEFAULT_CHAT_RUNTIME_CONTROLS.reasoning)
+      ? DEFAULT_CHAT_RUNTIME_CONTROLS.reasoning
+      : (reasoningOptions[reasoningOptions.length - 1] ?? DEFAULT_CHAT_RUNTIME_CONTROLS.reasoning);
   const uploadTooltip = isUploadingFiles
     ? t("chat.upload.uploading")
     : !isAgentMode
@@ -932,7 +938,7 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
                 </button>
               </RuntimeControlTooltip>
 
-              {reasoningOptions.length > 0 ? (
+              {reasoningOptions.length > 1 ? (
                 <div
                   aria-hidden={!chatRuntimeControls.thinkingEnabled}
                   className={cn(

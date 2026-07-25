@@ -91,6 +91,7 @@
     "lib/tools/builtinToolCatalog.ts",
     "lib/models/catalog.generated.ts",
     "lib/models/modelCatalog.ts",
+    "lib/models/modelThinking.ts",
     "lib/skills/builtin.ts",
     "lib/skills/clawHub.ts",
     "lib/skills/clawHubCategories.ts",

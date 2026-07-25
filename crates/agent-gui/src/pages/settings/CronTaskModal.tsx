@@ -123,21 +123,12 @@ function getCronReasoningLevels(
     : undefined;
   if (!selectedModel || !provider) return [...CRON_REASONING_LEVELS];
 
-  const modelConfig = provider.models.find((model) => model.id === selectedModel.model);
   const supportedLevels = getChatRuntimeReasoningLevelsForProvider({
     providerId: provider.type,
-    baseUrl: provider.baseUrl,
     requestFormat: provider.requestFormat,
     modelId: selectedModel.model,
-    modelConfig,
   }).filter(isCronReasoningLevel);
-  const thinkingAlwaysOn = isThinkingAlwaysOnForModel(
-    provider.type,
-    selectedModel.model,
-    provider.baseUrl,
-    provider.requestFormat,
-    modelConfig,
-  );
+  const thinkingAlwaysOn = isThinkingAlwaysOnForModel(provider.type, selectedModel.model);
 
   return thinkingAlwaysOn ? supportedLevels : ["off", ...supportedLevels];
 }

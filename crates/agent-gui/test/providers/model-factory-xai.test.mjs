@@ -25,8 +25,10 @@ test("formal xai provider type always uses openai-responses", () => {
     "openai-completions",
   );
   assert.equal(model.api, "openai-responses");
-  assert.equal(model.thinkingLevelMap?.minimal, "low");
-  assert.equal(model.thinkingLevelMap?.high, "high");
+  // 档位来自生成目录：grok-4.5 只有 low/medium/high（minimal 不存在=null）；
+  // 思考恒不可关（off:null），high 直通无需改写。
+  assert.equal(model.thinkingLevelMap?.minimal, null);
+  assert.equal(model.thinkingLevelMap?.high, undefined);
   assert.equal(model.thinkingLevelMap?.off, null);
 });
 

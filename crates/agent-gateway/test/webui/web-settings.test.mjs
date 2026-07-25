@@ -320,19 +320,20 @@ test("web chat runtime controls default and follow model-aware reasoning support
   });
 
   assert.deepEqual(settings.getChatRuntimeReasoningLevelsForProvider({}), []);
+  // 档位全部来自生成目录（models.dev）：adaptive 世代无 minimal 档。
   assert.deepEqual(
     settings.getChatRuntimeReasoningLevelsForProvider({
       providerId: "claude_code",
       modelId: "claude-opus-4-8",
     }),
-    ["minimal", "low", "medium", "high", "xhigh", "max"],
+    ["low", "medium", "high", "xhigh", "max"],
   );
   assert.deepEqual(
     settings.getChatRuntimeReasoningLevelsForProvider({
       providerId: "claude_code",
       modelId: "claude-sonnet-4-6",
     }),
-    ["minimal", "low", "medium", "high", "max"],
+    ["low", "medium", "high", "max"],
   );
   assert.deepEqual(
     settings.getChatRuntimeReasoningLevelsForProvider({
@@ -340,7 +341,7 @@ test("web chat runtime controls default and follow model-aware reasoning support
       requestFormat: "openai-responses",
       modelId: "gpt-5.2",
     }),
-    ["minimal", "low", "medium", "high", "xhigh"],
+    ["low", "medium", "high", "xhigh"],
   );
   assert.deepEqual(
     settings.getChatRuntimeReasoningLevelsForProvider({
@@ -357,29 +358,31 @@ test("web chat runtime controls default and follow model-aware reasoning support
     }),
     ["minimal", "low", "medium", "high"],
   );
-  // 目录之外的自定义模型（deepseek/glm 等）按可推理处理，与桌面端一致：
-  // 标准四档；deepseek 走 codex 时镜像桌面端适配层的 xhigh 档。
+  // 中转挂载的国产厂商模型走跨供应商回查命中真实形态：glm-4.7 纯 toggle
+  //（单 "high" 档），deepseek-reasoner 恒开不可调（无档位），deepseek-chat
+  // 非思考模型（思考控件整组隐藏）。
   assert.deepEqual(
     settings.getChatRuntimeReasoningLevelsForProvider({
       providerId: "codex",
       requestFormat: "openai-completions",
       modelId: "glm-4.7",
     }),
-    ["minimal", "low", "medium", "high"],
+    ["high"],
   );
   assert.deepEqual(
     settings.getChatRuntimeReasoningLevelsForProvider({
       providerId: "claude_code",
       modelId: "deepseek-reasoner",
     }),
-    ["minimal", "low", "medium", "high"],
+    [],
   );
+  assert.equal(settings.isThinkingAlwaysOnForModel("claude_code", "deepseek-reasoner"), true);
   assert.deepEqual(
     settings.getChatRuntimeReasoningLevelsForProvider({
       providerId: "codex",
       modelId: "deepseek-chat",
     }),
-    ["minimal", "low", "medium", "high", "xhigh"],
+    [],
   );
 
   assert.equal(settings.isThinkingAlwaysOnForModel("claude_code", "claude-fable-5"), true);
@@ -393,30 +396,30 @@ test("web chat runtime controls default and follow model-aware reasoning support
       providerId: "claude_code",
       modelId: "claude-opus-4-8-20260213",
     }),
-    ["minimal", "low", "medium", "high", "xhigh", "max"],
+    ["low", "medium", "high", "xhigh", "max"],
   );
   assert.deepEqual(
     settings.getChatRuntimeReasoningLevelsForProvider({
       providerId: "claude_code",
       modelId: "claude-sonnet-4-6-20251114",
     }),
-    ["minimal", "low", "medium", "high", "max"],
+    ["low", "medium", "high", "max"],
   );
   assert.equal(settings.isThinkingAlwaysOnForModel("claude_code", "Claude-Fable-5"), true);
-  // 目录彻底未命中的三方改名 id 走 id 启发式补 xhigh/max。
+  // 目录彻底未命中的三方改名 id 走 id 启发式补 xhigh/max（adaptive 世代无 minimal）。
   assert.deepEqual(
     settings.getChatRuntimeReasoningLevelsForProvider({
       providerId: "claude_code",
       modelId: "claude-4.6-sonnet",
     }),
-    ["minimal", "low", "medium", "high", "max"],
+    ["low", "medium", "high", "max"],
   );
   assert.deepEqual(
     settings.getChatRuntimeReasoningLevelsForProvider({
       providerId: "claude_code",
       modelId: "claude-5-sonnet",
     }),
-    ["minimal", "low", "medium", "high", "xhigh", "max"],
+    ["low", "medium", "high", "xhigh", "max"],
   );
   // 旧世代 id 不误判。
   assert.deepEqual(
@@ -1606,26 +1609,29 @@ test("xai model limits use the generated catalog without changing thinking detec
   // 上游（models.dev）已下架的旧模型与未收录模型一样吃供应商兜底值。
   assert.equal(settings.getProviderModelDefaults("xai", "grok-3").contextWindow, 258_000);
   assert.equal(settings.getProviderModelDefaults("xai", "grok-unknown").contextWindow, 258_000);
-  // 思考档位检测刻意不吃模型目录（限额目录不含请求路径元数据），
-  // 而是无条件应用与桌面端同步的 XAI 档位映射。
+  // 思考档位与限额同吃生成目录（见下一个用例）。
   assert.ok(settings.getKnownModelThinkingLevels("xai", "grok-4.5").includes("high"));
 });
 
-test("xai thinking levels mirror the desktop XAI thinking map", () => {
-  // 与桌面端 modelFactory XAI_THINKING_LEVEL_MAP 对齐：档位含 xhigh、思考恒开。
-  // 否则 normalizeChatRuntimeControlsForProvider 的钳制会把桌面端设置的
-  // xhigh 在 web 侧压回 high，跨端行为分叉。
-  const levels = settings.getKnownModelThinkingLevels("xai", "grok-4.5");
-  assert.ok(levels.includes("xhigh"));
-  assert.ok(!levels.includes("off"));
-  assert.ok(!levels.includes("max"));
+test("xai thinking levels come from the catalog per model, thinking always on", () => {
+  // 档位按型号差异化（目录真值）：grok-4.5 只有 low/medium/high；
+  // grok-4.20-multi-agent-0309 声明到 xhigh。xai 思考一律恒开
+  //（wire 无法表达 off），目录的 off 声明对 xai 供应商不生效。
+  assert.deepEqual(settings.getKnownModelThinkingLevels("xai", "grok-4.5"), [
+    "low",
+    "medium",
+    "high",
+  ]);
   assert.equal(settings.isThinkingAlwaysOnForModel("xai", "grok-4.5"), true);
-  // 钳制路径：当前供应商为 xai 时 xhigh 不再被压回 high。
+  const multiAgent = settings.getKnownModelThinkingLevels("xai", "grok-4.20-multi-agent-0309");
+  assert.ok(multiAgent.includes("xhigh"));
+  assert.equal(settings.isThinkingAlwaysOnForModel("xai", "grok-4.3"), true);
+  // 钳制路径：xhigh 超出 grok-4.5 档位表时压回默认 high。
   const clamped = settings.normalizeChatRuntimeControlsForProvider(
     { reasoning: "xhigh", reasoningByProvider: { xai: "xhigh" } },
     { providerId: "xai", modelId: "grok-4.5" },
   );
-  assert.equal(clamped.reasoning, "xhigh");
+  assert.equal(clamped.reasoning, "high");
 });
 
 test("gateway sync keeps all web font families local", () => {

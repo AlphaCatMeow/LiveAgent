@@ -25,6 +25,7 @@ pub async fn shell_run(
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
     let cancel_token = normalized_run_id.as_deref().map(|id| registry.register(id));
+    let registered_token = cancel_token.clone();
 
     let join_result = tauri::async_runtime::spawn_blocking(move || {
         run_shell_script(
@@ -39,8 +40,8 @@ pub async fn shell_run(
     })
     .await;
 
-    if let Some(run_id) = normalized_run_id {
-        registry.unregister(&run_id);
+    if let (Some(run_id), Some(token)) = (normalized_run_id.as_deref(), registered_token.as_ref()) {
+        registry.unregister(run_id, token);
     }
 
     join_result.map_err(|e| format!("shell_run join failed: {e}"))?
@@ -48,6 +49,16 @@ pub async fn shell_run(
 
 #[tauri::command(rename_all = "snake_case")]
 pub fn shell_cancel(
+    registry: State<'_, Arc<ShellRunRegistry>>,
+    run_id: String,
+) -> ShellCancelResponse {
+    ShellCancelResponse {
+        cancelled: registry.cancel(run_id.trim()),
+    }
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn runtime_cancel(
     registry: State<'_, Arc<ShellRunRegistry>>,
     run_id: String,
 ) -> ShellCancelResponse {

@@ -69,6 +69,12 @@ import { comparableToolCall } from "./flattenedToolCallText";
 import { recoverAssistantSeedToolCalls, stripSeedToolCallMarkup } from "./seedToolCalls";
 import { wrapStreamWithToolCallArgumentGuard } from "./toolCallArgumentGuard";
 
+function throwIfRunnerCancelled(signal?: AbortSignal) {
+  if (signal?.aborted) {
+    throw new Error("Cancelled");
+  }
+}
+
 function createLinkedAbortSignal(signals: Array<AbortSignal | undefined>): {
   signal?: AbortSignal;
   cleanup: () => void;
@@ -703,7 +709,7 @@ export async function runAssistantWithTools(params: {
   if (!params.workdir.trim() && !params.allowEmptyWorkdir) {
     throw new Error("A working directory must be configured for tool mode");
   }
-  if (params.signal?.aborted) throw new Error("Cancelled");
+  throwIfRunnerCancelled(params.signal);
 
   const subagentScheduler = params.subagentScheduler ?? createSubagentScheduler();
 
@@ -770,6 +776,7 @@ export async function runAssistantWithTools(params: {
       toolCall: ToolCall,
       signal?: AbortSignal,
     ): Promise<{ content: ToolResultMessage["content"]; details: unknown }> => {
+      throwIfRunnerCancelled(signal ?? params.signal);
       const effectiveToolCall = normalizeToolCallNameForExecution(toolCall);
       if (effectiveToolCall !== toolCall) {
         toolCallsById.set(effectiveToolCall.id, effectiveToolCall);
@@ -843,6 +850,7 @@ export async function runAssistantWithTools(params: {
       } finally {
         linkedSignal.cleanup();
       }
+      throwIfRunnerCancelled(linkedSignal.signal);
 
       toolResultErrorFlags.set(effectiveToolCall.id, Boolean(toolResult.isError));
       return {
@@ -1738,9 +1746,12 @@ export async function runAssistantWithTools(params: {
     try {
       let recoveredSeedTurnCount = 0;
       while (true) {
+        throwIfRunnerCancelled(params.signal);
         await agent.continue();
+        throwIfRunnerCancelled(params.signal);
 
         const override = await consumePendingTurnOverride();
+        throwIfRunnerCancelled(params.signal);
         if (override) {
           applyTurnContextOverride(override);
         }
@@ -1770,6 +1781,7 @@ export async function runAssistantWithTools(params: {
 
         const syntheticToolResults: ToolResultMessage[] = [];
         for (const toolCall of recoveredSeedToolCalls) {
+          throwIfRunnerCancelled(params.signal);
           toolCallsById.set(toolCall.id, toolCall);
           const shouldSilenceToolCall = shouldSilenceProviderNativeToolCall(toolCall);
           if (!shouldSilenceToolCall) {
@@ -1779,6 +1791,7 @@ export async function runAssistantWithTools(params: {
           }
 
           const result = await executeSingleToolCall(toolCall, params.signal);
+          throwIfRunnerCancelled(params.signal);
           const toolResult = {
             role: "toolResult",
             toolCallId: toolCall.id,
@@ -1800,6 +1813,7 @@ export async function runAssistantWithTools(params: {
         }
 
         if (params.onBeforeNextTurn) {
+          throwIfRunnerCancelled(params.signal);
           pendingTurnOverridePromise = params.onBeforeNextTurn({
             round: recoveredSeedRound,
             assistant: recoveredSeedAssistant,
@@ -1815,7 +1829,9 @@ export async function runAssistantWithTools(params: {
         }
       }
 
+      throwIfRunnerCancelled(params.signal);
       await waitForHostedSearchFinalizations();
+      throwIfRunnerCancelled(params.signal);
 
       const messages = getAgentMessages(agent).slice();
       const assistant =

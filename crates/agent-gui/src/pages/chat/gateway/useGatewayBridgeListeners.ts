@@ -31,6 +31,8 @@ type UseGatewayBridgeListenersParams = GatewayBridgeRuntimeRefs & {
   ) => Promise<boolean>;
   isConversationRunning: (conversationId: string) => boolean;
   getConversationAbortController: (conversationId: string) => AbortController | null;
+  requestConversationStop: (conversationId: string) => boolean;
+  requestActiveConversationStop: (conversationId: string, options: { force: boolean }) => boolean;
 };
 
 type GatewayBridgeRequestRegistry = {
@@ -711,6 +713,10 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
       if (!conversationId) {
         return;
       }
+      latestParamsRef.current.requestConversationStop(conversationId);
+      latestParamsRef.current.requestActiveConversationStop(conversationId, {
+        force: false,
+      });
       const controller = latestParamsRef.current.getConversationAbortController(conversationId);
       controller?.abort();
     }).then((dispose) => {

@@ -134,6 +134,8 @@ test("gateway bridge listener keeps one worker across renders and handles native
     const sendActionRef = { current: async () => true };
     let firstAbortCalls = 0;
     let secondAbortCalls = 0;
+    const stopRequestIds = [];
+    const activeStopCalls = [];
     const baseParams = {
       currentConversationIdRef,
       conversationRuntimeCacheRef: { current: new Map() },
@@ -151,6 +153,13 @@ test("gateway bridge listener keeps one worker across renders and handles native
       },
       getConversationAbortController() {
         return { abort: () => firstAbortCalls++ };
+      },
+      requestConversationStop(conversationId) {
+        stopRequestIds.push(conversationId);
+      },
+      requestActiveConversationStop(conversationId, options) {
+        activeStopCalls.push({ conversationId, options });
+        return true;
       },
     };
 
@@ -211,6 +220,10 @@ test("gateway bridge listener keeps one worker across renders and handles native
     });
     assert.equal(firstAbortCalls, 0);
     assert.equal(secondAbortCalls, 1, "listeners must dispatch through the latest callback refs");
+    assert.deepEqual(stopRequestIds, ["conversation-1"]);
+    assert.deepEqual(activeStopCalls, [
+      { conversationId: "conversation-1", options: { force: false } },
+    ]);
 
     const runtimeWorkerIds = invokeCalls
       .filter((call) => call.command === "gateway_chat_runtime_heartbeat")

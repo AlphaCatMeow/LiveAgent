@@ -149,3 +149,62 @@ test("MCP business tool calls on different servers can run concurrently", async 
 
   assert.equal(maxActiveCalls, 2);
 });
+
+test("MCP abort releases the tool call and requests Rust runtime cancellation", async () => {
+  let resolveCall;
+  const callPromise = new Promise((resolve) => {
+    resolveCall = resolve;
+  });
+  const invocations = [];
+  const loader = createTsModuleLoader({
+    mocks: {
+      "@tauri-apps/api/core": {
+        async invoke(command, args) {
+          invocations.push({ command, args });
+          if (command === "mcp_list_tools") {
+            return [
+              {
+                serverId: "docs",
+                serverLabel: "Docs",
+                name: "search",
+                description: "Search docs",
+                inputSchema: { type: "object" },
+              },
+            ];
+          }
+          if (command === "mcp_call_tool") {
+            return callPromise;
+          }
+          if (command === "runtime_cancel") {
+            return { cancelled: true };
+          }
+          throw new Error("Unexpected invoke: " + command);
+        },
+      },
+    },
+  });
+  const { createMcpTools } = loader.loadModule("src/lib/tools/mcpTools.ts");
+  const bundle = await createMcpTools({ servers: [createServer("docs")] });
+  const search = bundle.tools[0];
+  const controller = new AbortController();
+
+  const resultPromise = bundle.executeToolCall(
+    createToolCall("call-abort", search.name, { q: "agent" }),
+    controller.signal,
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort();
+  const result = await resultPromise;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /Cancelled/);
+  assert.ok(
+    invocations.some(
+      (call) =>
+        call.command === "runtime_cancel" && call.args.run_id === "mcp:call-abort",
+    ),
+  );
+
+  resolveCall({ content: [], isError: false, details: {} });
+});

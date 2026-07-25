@@ -418,6 +418,30 @@ impl GatewayController {
             .await
     }
 
+    pub async fn mark_local_chat_run_cancelled(
+        &self,
+        request_id: String,
+        conversation_id: String,
+    ) -> Result<(), String> {
+        let request_id = request_id.trim().to_string();
+        let conversation_id = conversation_id.trim().to_string();
+        if request_id.is_empty() || conversation_id.is_empty() {
+            return Ok(());
+        }
+        if !self.ledger_mark_run_terminal(
+            &request_id,
+            &conversation_id,
+            ChatRunLedgerState::Cancelled,
+            "",
+            "",
+        )? {
+            return Ok(());
+        }
+        self.send_gateway_chat_control_event(request_id.clone(), conversation_id, "cancelled")
+            .await?;
+        self.ledger_mark_run_terminal_sent(&request_id)
+    }
+
     pub async fn mark_chat_request_queued_in_gui(
         &self,
         request_id: String,

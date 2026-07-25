@@ -980,8 +980,8 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
       runtime,
       selectedModel,
     };
-    // No chat signal: the controller owns the run's AbortController, so the
-    // next user turn cannot kill an in-flight extraction mid-write.
+    // The controller owns the extraction scope and links this stable turn-level
+    // userStop signal, so request-scope churn cannot detach cancellation.
     return memoryExtraction.requestExtraction({
       primary: memoryExtractionModel ?? currentMemoryExtractionModel,
       fallback: memoryExtractionModel ? currentMemoryExtractionModel : undefined,
@@ -991,6 +991,7 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
       workdir: conversationCwd ?? effectiveWorkdir,
       messages: buildPreparedContext(finalState).messages,
       statusText: memoryExtractionStatusText,
+      signal: cancellation.userStop.signal,
       debugLogger: conversationDebugLogger,
       visibleEvents,
     });

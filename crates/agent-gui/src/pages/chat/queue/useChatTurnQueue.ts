@@ -53,6 +53,16 @@ type UseChatTurnQueueParams = {
   isConversationRunning: (conversationId: string) => boolean;
   runningConversationIds: ReadonlySet<string>;
   getConversationAbortController: (conversationId: string) => AbortController | null;
+  setConversationAbortController: (
+    conversationId: string,
+    controller: AbortController | null,
+  ) => void;
+  setConversationSendingState: (conversationId: string, value: boolean) => void;
+  requestConversationStop: (conversationId: string) => boolean;
+  getConversationStopRequestVersion: (conversationId: string) => number;
+  isConversationStopRequested: (conversationId: string) => boolean;
+  consumeConversationStop: (conversationId: string, expectedVersion?: number) => boolean;
+  requestActiveConversationStop: (conversationId: string, options: { force: boolean }) => boolean;
   getConversationLiveTranscriptStore: (conversationId: string) => LiveTranscriptStore;
   captureAbortSnapshot: (store: LiveTranscriptStore) => void;
   updateToolStatus: (status: string | null, store: LiveTranscriptStore) => void;
@@ -84,6 +94,13 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
     isConversationRunning,
     runningConversationIds,
     getConversationAbortController,
+    setConversationAbortController,
+    setConversationSendingState,
+    requestConversationStop,
+    getConversationStopRequestVersion,
+    isConversationStopRequested,
+    consumeConversationStop,
+    requestActiveConversationStop,
     getConversationLiveTranscriptStore,
     captureAbortSnapshot,
     updateToolStatus,
@@ -98,6 +115,18 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
   const [queuedChatTurns, setQueuedChatTurns] = useState<QueuedChatTurn[]>([]);
   const queuedChatTurnsRef = useRef<QueuedChatTurn[]>([]);
   const queuedChatProcessingConversationIdsRef = useRef(new Set<string>());
+  const queuedChatStopVersionsRef = useRef(new Map<string, number>());
+  const queuedChatProcessingStatesRef = useRef(
+    new Map<
+      string,
+      {
+        stopVersion: number;
+        stopRequestVersion: number | null;
+        inFlightTurn: QueuedChatTurn | null;
+      }
+    >(),
+  );
+  const chatQueuePublishChainsRef = useRef(new Map<string, Promise<void>>());
   const queuedChatTurnEditSlotRef = useRef<
     | (QueuedChatTurnEditSlot & {
         originalId: string;
@@ -185,6 +214,18 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
     return conversationIds;
   }
 
+  function cancelGatewayQueuedTurnRequest(item: QueuedChatTurn | null | undefined) {
+    const gatewayRequest = item?.gatewayRequest;
+    if (!item || !gatewayRequest) return;
+    void invoke("gateway_chat_cancel_request", {
+      request_id: gatewayRequest.requestId,
+      conversation_id: item.conversationId,
+      worker_id: gatewayRequest.workerId ?? "gui-queue",
+    } as any).catch((error) => {
+      console.warn("gateway_chat_cancel_request failed", error);
+    });
+  }
+
   function publishChatQueueSnapshot(
     conversationId: string,
     queue: readonly QueuedChatTurn[] = queuedChatTurnsRef.current,
@@ -194,14 +235,28 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
       return;
     }
     const snapshot = buildChatQueueSnapshot(targetConversationId, queue);
-    void invoke("gateway_publish_chat_queue_event", {
-      input: {
-        conversationId: snapshot.conversationId,
-        snapshotJson: JSON.stringify(snapshot),
-        revision: snapshot.revision,
-      },
-    } as any).catch((error) => {
-      console.warn("gateway_publish_chat_queue_event failed", error);
+    const previous =
+      chatQueuePublishChainsRef.current.get(targetConversationId) ?? Promise.resolve();
+    const publication = previous
+      .catch(() => undefined)
+      .then(() =>
+        invoke("gateway_publish_chat_queue_event", {
+          input: {
+            conversationId: snapshot.conversationId,
+            snapshotJson: JSON.stringify(snapshot),
+            revision: snapshot.revision,
+          },
+        } as any),
+      )
+      .then(() => undefined)
+      .catch((error) => {
+        console.warn("gateway_publish_chat_queue_event failed", error);
+      });
+    chatQueuePublishChainsRef.current.set(targetConversationId, publication);
+    void publication.finally(() => {
+      if (chatQueuePublishChainsRef.current.get(targetConversationId) === publication) {
+        chatQueuePublishChainsRef.current.delete(targetConversationId);
+      }
     });
   }
 
@@ -244,24 +299,52 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
     [currentConversationId, queuedChatTurns],
   );
 
+  function resolveStopConversationId() {
+    const visibleConversationId = currentConversationId.trim();
+    if (visibleConversationId && runningConversationIds.has(visibleConversationId)) {
+      return visibleConversationId;
+    }
+    const referencedConversationId = currentConversationIdRef.current.trim();
+    if (referencedConversationId && runningConversationIds.has(referencedConversationId)) {
+      return referencedConversationId;
+    }
+    const runningConversationId = runningConversationIds.values().next().value;
+    return runningConversationId || visibleConversationId || referencedConversationId;
+  }
+
   function stopConversation(conversationId: string) {
     const targetConversationId = conversationId.trim();
     if (!targetConversationId) return false;
+    const force = requestConversationStop(targetConversationId);
+    const stopRequestVersion = getConversationStopRequestVersion(targetConversationId);
+    const nextStopVersion = (queuedChatStopVersionsRef.current.get(targetConversationId) ?? 0) + 1;
+    queuedChatStopVersionsRef.current.set(targetConversationId, nextStopVersion);
+    const processingState = queuedChatProcessingStatesRef.current.get(targetConversationId);
+    if (processingState) {
+      processingState.stopRequestVersion = stopRequestVersion;
+      cancelGatewayQueuedTurnRequest(processingState.inFlightTurn);
+    }
     const controller = getConversationAbortController(targetConversationId);
-    if (!controller) return false;
     const transcriptStore = getConversationLiveTranscriptStore(targetConversationId);
-    captureAbortSnapshot(transcriptStore);
-    updateToolStatus("正在停止当前任务...", transcriptStore);
-    controller.abort();
-    return true;
+    if (controller) {
+      captureAbortSnapshot(transcriptStore);
+      updateToolStatus("正在停止当前任务...", transcriptStore);
+      controller.abort();
+    }
+    const handled = requestActiveConversationStop(targetConversationId, { force });
+    if (force) {
+      queuedChatProcessingConversationIdsRef.current.delete(targetConversationId);
+      setConversationAbortController(targetConversationId, null);
+      setConversationSendingState(targetConversationId, false);
+      updateToolStatus(null, transcriptStore);
+    }
+    return handled || Boolean(controller);
   }
 
   function stopSending() {
-    const conversationId = currentConversationIdRef.current.trim();
+    const conversationId = resolveStopConversationId();
     if (!conversationId) return;
-    if (!stopConversation(conversationId)) {
-      requestQueuedChatTurnProcessing(conversationId);
-    }
+    stopConversation(conversationId);
   }
 
   function clearCurrentComposerDraftForQueuedTurn(conversationId: string) {
@@ -336,6 +419,12 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
   function requestQueuedChatTurnProcessing(conversationId: string) {
     const targetConversationId = conversationId.trim();
     if (!targetConversationId) return;
+    if (isConversationStopRequested(targetConversationId)) {
+      queuedChatProcessingConversationIdsRef.current.delete(targetConversationId);
+      const stopRequestVersion = getConversationStopRequestVersion(targetConversationId);
+      consumeConversationStop(targetConversationId, stopRequestVersion);
+      return;
+    }
     if (queuedChatProcessingConversationIdsRef.current.has(targetConversationId)) return;
     if (isConversationRunning(targetConversationId)) return;
     if (isQueuedChatTurnEditBlockingProcessing(targetConversationId)) return;
@@ -344,14 +433,32 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
     }
 
     queuedChatProcessingConversationIdsRef.current.add(targetConversationId);
+    const processingState = {
+      stopVersion: queuedChatStopVersionsRef.current.get(targetConversationId) ?? 0,
+      stopRequestVersion: null as number | null,
+      inFlightTurn: null as QueuedChatTurn | null,
+    };
+    queuedChatProcessingStatesRef.current.set(targetConversationId, processingState);
+    const wasStoppedDuringProcessing = () =>
+      (queuedChatStopVersionsRef.current.get(targetConversationId) ?? 0) !==
+      processingState.stopVersion;
+    const releaseProcessingState = () => {
+      if (queuedChatProcessingStatesRef.current.get(targetConversationId) !== processingState) {
+        return;
+      }
+      queuedChatProcessingStatesRef.current.delete(targetConversationId);
+      queuedChatProcessingConversationIdsRef.current.delete(targetConversationId);
+    };
     let inFlightQueuedTurn: QueuedChatTurn | null = null;
     void Promise.resolve()
       .then(async () => {
+        if (isConversationStopRequested(targetConversationId)) return false;
         if (isConversationRunning(targetConversationId)) return;
         const taken = takeNextQueuedChatTurn(queuedChatTurnsRef.current, targetConversationId);
         if (!taken.item) return false;
         const queuedTurn = taken.item;
         inFlightQueuedTurn = queuedTurn;
+        processingState.inFlightTurn = queuedTurn;
         setQueuedChatTurnsState(() => taken.queue);
         const gatewayRequest = queuedTurn.gatewayRequest;
         const gatewayWorkerId = gatewayRequest?.workerId?.trim() || "gui-queue";
@@ -394,24 +501,40 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
           beforeRuntimeStart: markGatewayStarted,
           afterInitialHistoryPersist: markGatewayStarted,
         });
+        const stopped = wasStoppedDuringProcessing();
         if (!accepted) {
-          setQueuedChatTurnsState((current) =>
-            promoteQueuedChatTurn(appendQueuedChatTurn(current, queuedTurn), queuedTurn.id),
-          );
+          if (stopped && gatewayRequest) {
+            cancelGatewayQueuedTurnRequest(queuedTurn);
+          } else {
+            setQueuedChatTurnsState((current) =>
+              promoteQueuedChatTurn(appendQueuedChatTurn(current, queuedTurn), queuedTurn.id),
+            );
+          }
           inFlightQueuedTurn = null;
         } else if (gatewayRequest) {
-          void invoke("gateway_chat_complete", {
-            request_id: gatewayRequest.requestId,
-            conversation_id: targetConversationId,
-            worker_id: gatewayWorkerId,
-          } as any).catch((error) => {
-            console.warn("gateway_chat_complete failed", error);
-          });
+          if (stopped) {
+            cancelGatewayQueuedTurnRequest(queuedTurn);
+          } else {
+            void invoke("gateway_chat_complete", {
+              request_id: gatewayRequest.requestId,
+              conversation_id: targetConversationId,
+              worker_id: gatewayWorkerId,
+            } as any).catch((error) => {
+              console.warn("gateway_chat_complete failed", error);
+            });
+          }
         }
+        processingState.inFlightTurn = null;
         return accepted;
       })
       .then((accepted) => {
-        queuedChatProcessingConversationIdsRef.current.delete(targetConversationId);
+        releaseProcessingState();
+        if (wasStoppedDuringProcessing() || isConversationStopRequested(targetConversationId)) {
+          if (processingState.stopRequestVersion !== null) {
+            consumeConversationStop(targetConversationId, processingState.stopRequestVersion);
+          }
+          return;
+        }
         if (
           accepted &&
           !isConversationRunning(targetConversationId) &&
@@ -423,15 +546,25 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
       .catch(() => {
         const failedQueuedTurn = inFlightQueuedTurn;
         if (failedQueuedTurn) {
-          setQueuedChatTurnsState((current) =>
-            promoteQueuedChatTurn(
-              appendQueuedChatTurn(current, failedQueuedTurn),
-              failedQueuedTurn.id,
-            ),
-          );
+          if (wasStoppedDuringProcessing() && failedQueuedTurn.gatewayRequest) {
+            cancelGatewayQueuedTurnRequest(failedQueuedTurn);
+          } else {
+            setQueuedChatTurnsState((current) =>
+              promoteQueuedChatTurn(
+                appendQueuedChatTurn(current, failedQueuedTurn),
+                failedQueuedTurn.id,
+              ),
+            );
+          }
           inFlightQueuedTurn = null;
         }
-        queuedChatProcessingConversationIdsRef.current.delete(targetConversationId);
+        processingState.inFlightTurn = null;
+        releaseProcessingState();
+        if (isConversationStopRequested(targetConversationId)) {
+          if (processingState.stopRequestVersion !== null) {
+            consumeConversationStop(targetConversationId, processingState.stopRequestVersion);
+          }
+        }
       });
   }
 
@@ -440,11 +573,18 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
     previousRunningConversationIdsRef.current = runningConversationIds;
     for (const conversationId of getQueuedConversationIds(queuedChatTurnsRef.current)) {
       if (
-        previousRunningConversationIds.has(conversationId) &&
-        !runningConversationIds.has(conversationId)
+        !previousRunningConversationIds.has(conversationId) ||
+        runningConversationIds.has(conversationId)
       ) {
-        requestQueuedChatTurnProcessing(conversationId);
+        continue;
       }
+      if (isConversationStopRequested(conversationId)) {
+        queuedChatProcessingConversationIdsRef.current.delete(conversationId);
+        const stopRequestVersion = getConversationStopRequestVersion(conversationId);
+        consumeConversationStop(conversationId, stopRequestVersion);
+        continue;
+      }
+      requestQueuedChatTurnProcessing(conversationId);
     }
   }, [runningConversationIds, queuedChatTurns]);
 
@@ -514,16 +654,7 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
   function removeQueuedTurn(id: string) {
     const queuedTurn = queuedChatTurnsRef.current.find((item) => item.id === id.trim());
     setQueuedChatTurnsState((current) => removeQueuedChatTurn(current, id));
-    const gatewayRequest = queuedTurn?.gatewayRequest;
-    if (gatewayRequest) {
-      void invoke("gateway_chat_cancel_request", {
-        request_id: gatewayRequest.requestId,
-        conversation_id: queuedTurn?.conversationId,
-        worker_id: gatewayRequest.workerId ?? "gui-queue",
-      } as any).catch((error) => {
-        console.warn("gateway_chat_cancel_request failed", error);
-      });
-    }
+    cancelGatewayQueuedTurnRequest(queuedTurn);
   }
 
   function shouldQueueGatewayChatRequest(

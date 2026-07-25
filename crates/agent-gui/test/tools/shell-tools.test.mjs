@@ -530,6 +530,78 @@ test("ManagedProcess starts foreground commands through process manager", async 
   assert.equal(calls[0].args.cwd, "app");
 });
 
+test("ManagedProcess abort stops a process returned after cancellation", async () => {
+  let resolveStart;
+  const startPromise = new Promise((resolve) => {
+    resolveStart = resolve;
+  });
+  const calls = [];
+  const loader = createTsModuleLoader({
+    mocks: {
+      "@tauri-apps/api/core": {
+        async invoke(command, args) {
+          calls.push({ command, args });
+          if (command === "managed_process_start") {
+            return startPromise;
+          }
+          if (command === "managed_process_stop") {
+            return undefined;
+          }
+          throw new Error("unexpected invoke " + command);
+        },
+      },
+    },
+  });
+  const { createShellTools } = loader.loadModule("src/lib/tools/shellTools.ts");
+  const bundle = createShellTools({
+    workdir: "/repo",
+    providerId: "claude_code",
+  });
+  const controller = new AbortController();
+
+  const resultPromise = bundle.executeToolCall(
+    {
+      type: "toolCall",
+      id: "managed-cancelled-start",
+      name: "ManagedProcess",
+      arguments: {
+        action: "start",
+        command: "deno run --allow-net main.ts",
+      },
+    },
+    controller.signal,
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.abort();
+  const result = await resultPromise;
+  assert.equal(result.isError, true);
+  assert.match(result.content[0].text, /Cancelled/);
+
+  resolveStart({
+    process: {
+      id: "proc-late",
+      label: "dev",
+      command: "deno run --allow-net main.ts",
+      cwd: "/repo",
+      shell: "zsh",
+      pid: 123,
+      log_path: "/tmp/proc-late.log",
+      started_at: 10,
+      finished_at: null,
+      exit_code: null,
+      running: true,
+    },
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.ok(
+    calls.some(
+      (call) =>
+        call.command === "managed_process_stop" && call.args.process_id === "proc-late",
+    ),
+  );
+});
+
 test("ManagedProcess rejects nested shell background operators", async () => {
   const calls = [];
   const loader = createTsModuleLoader({

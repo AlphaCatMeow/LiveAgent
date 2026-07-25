@@ -25,6 +25,12 @@ const STREAM_EOF_GRACE_MS: u64 = 300;
 
 pub(crate) type ShellCancelToken = Arc<AtomicBool>;
 
+pub(crate) async fn wait_for_cancel(token: ShellCancelToken) {
+    while !token.load(Ordering::SeqCst) {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct ShellRunRegistry {
     runs: Mutex<HashMap<String, ShellCancelToken>>,
@@ -33,10 +39,14 @@ pub(crate) struct ShellRunRegistry {
 impl ShellRunRegistry {
     pub(crate) fn register(&self, run_id: &str) -> ShellCancelToken {
         let token = Arc::new(AtomicBool::new(false));
-        self.runs
+        let previous = self
+            .runs
             .lock()
             .expect("shell run registry poisoned")
             .insert(run_id.to_string(), Arc::clone(&token));
+        if let Some(previous) = previous {
+            previous.store(true, Ordering::SeqCst);
+        }
         token
     }
 
@@ -54,11 +64,14 @@ impl ShellRunRegistry {
         true
     }
 
-    pub(crate) fn unregister(&self, run_id: &str) {
-        self.runs
-            .lock()
-            .expect("shell run registry poisoned")
-            .remove(run_id);
+    pub(crate) fn unregister(&self, run_id: &str, token: &ShellCancelToken) {
+        let mut runs = self.runs.lock().expect("shell run registry poisoned");
+        let owns_registration = runs
+            .get(run_id)
+            .is_some_and(|registered| Arc::ptr_eq(registered, token));
+        if owns_registration {
+            runs.remove(run_id);
+        }
     }
 }
 
@@ -900,8 +913,23 @@ mod tests {
         assert!(!token.load(std::sync::atomic::Ordering::SeqCst));
         assert!(registry.cancel("run-1"));
         assert!(token.load(std::sync::atomic::Ordering::SeqCst));
-        registry.unregister("run-1");
+        registry.unregister("run-1", &token);
         assert!(!registry.cancel("run-1"));
+    }
+
+    #[test]
+    fn duplicate_run_id_cancels_old_token_without_losing_new_registration() {
+        let registry = ShellRunRegistry::default();
+        let first = registry.register("same-run");
+        let second = registry.register("same-run");
+
+        assert!(first.load(std::sync::atomic::Ordering::SeqCst));
+        registry.unregister("same-run", &first);
+        assert!(registry.cancel("same-run"));
+        assert!(second.load(std::sync::atomic::Ordering::SeqCst));
+
+        registry.unregister("same-run", &second);
+        assert!(!registry.cancel("same-run"));
     }
 
     #[cfg(unix)]
@@ -937,7 +965,7 @@ mod tests {
             .expect("shell cancel worker thread should not panic")
             .expect("shell run should return a cancelled response");
 
-        registry.unregister("cancel-test");
+        registry.unregister("cancel-test", &token);
         let _ = fs::remove_dir_all(&temp_dir);
 
         assert!(result.cancelled);

@@ -39,6 +39,7 @@ func vetAgentRequest(sm session.AgentView, env *gatewayv2.GatewayEnvelope) error
 		*gatewayv2.GatewayEnvelope_HistoryWorkdirs,
 		*gatewayv2.GatewayEnvelope_HistoryBranch,
 		*gatewayv2.GatewayEnvelope_ProviderList,
+		*gatewayv2.GatewayEnvelope_ProviderUsage,
 		*gatewayv2.GatewayEnvelope_ProviderModels,
 		*gatewayv2.GatewayEnvelope_SettingsGet,
 		*gatewayv2.GatewayEnvelope_SettingsUpdate,

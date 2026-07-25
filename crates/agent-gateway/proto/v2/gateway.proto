@@ -58,6 +58,7 @@ message GatewayEnvelope {
     WorkspaceWatchRequest workspace_watch = 90;
     ManagedProcessRequest managed_process_request = 91;
     HistoryBranchRequest history_branch = 92;
+    ProviderUsageRequest provider_usage = 93;
   }
 
   // Legacy tunnel control/frame payloads (pre-rewrite protocol) and the
@@ -126,6 +127,7 @@ message AgentEnvelope {
     ManagedProcessResponse managed_process_response = 91;
     ManagedProcessSnapshot managed_process_snapshot = 92;
     HistoryBranchResponse history_branch_resp = 93;
+    ProviderUsageResponse provider_usage_resp = 94;
     ErrorResponse error = 99;
   }
 
@@ -1098,4 +1100,13 @@ message ProviderModelsRequest {
 
 message ProviderModelsResponse {
   string models_json = 1;
+}
+
+message ProviderUsageRequest {
+  string provider_id = 1;
+  bool refresh = 2;
+}
+
+message ProviderUsageResponse {
+  string result_json = 1;
 }

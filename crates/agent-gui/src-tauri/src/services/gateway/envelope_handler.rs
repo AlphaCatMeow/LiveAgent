@@ -462,6 +462,26 @@ impl GatewayController {
                     Err(error) => self.send_error_response(request_id, 500, error).await,
                 }
             }
+            Some(proto::gateway_envelope::Payload::ProviderUsage(request)) => {
+                match gateway_bridge::handle_provider_usage(
+                    Arc::clone(&self.provider_usage_service),
+                    request,
+                )
+                .await
+                {
+                    Ok(response) => {
+                        self.send_agent_envelope(proto::AgentEnvelope {
+                            request_id,
+                            timestamp: now_unix_seconds(),
+                            payload: Some(proto::agent_envelope::Payload::ProviderUsageResp(
+                                response,
+                            )),
+                        })
+                        .await
+                    }
+                    Err(error) => self.send_error_response(request_id, 500, error).await,
+                }
+            }
             Some(proto::gateway_envelope::Payload::ProviderModels(request)) => {
                 match gateway_bridge::handle_provider_models(request).await {
                     Ok(response) => {

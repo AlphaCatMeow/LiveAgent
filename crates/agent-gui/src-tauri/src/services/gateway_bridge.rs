@@ -29,10 +29,26 @@ use crate::services::memory::{
     MemoryOrganizeRunReadArgs, MemoryOrganizeRunUpdateArgs, MemoryQuotaSummaryArgs, MemoryReadArgs,
     MemoryRecentRejectionsArgs, MemorySearchArgs, MemoryStore, MemoryUpdateArgs, MemoryWriteArgs,
 };
+use crate::services::provider_usage::{ProviderUsageResult, ProviderUsageService};
 use crate::services::skills::system_manage_skill_sync;
 
 const DEFAULT_HISTORY_LIST_PAGE: i32 = 1;
 const DEFAULT_HISTORY_LIST_PAGE_SIZE: i32 = 80;
+
+pub fn provider_usage_response(
+    result: ProviderUsageResult,
+) -> Result<proto::ProviderUsageResponse, String> {
+    let result_json = serde_json::to_string(&result)
+        .map_err(|error| format!("serialize provider usage result failed: {error}"))?;
+    Ok(proto::ProviderUsageResponse { result_json })
+}
+
+pub async fn handle_provider_usage(
+    service: Arc<ProviderUsageService>,
+    request: proto::ProviderUsageRequest,
+) -> Result<proto::ProviderUsageResponse, String> {
+    provider_usage_response(service.query(&request.provider_id, request.refresh).await)
+}
 
 #[derive(Debug, Deserialize)]
 struct HistorySharedListArgs {

@@ -45,10 +45,7 @@ async function withMcpServerCallLock<T>(
   const tail = previous.catch(() => undefined).then(() => current);
   mcpServerCallLocks.set(serverId, tail);
 
-  await waitForAbortablePromise(
-    previous.catch(() => undefined),
-    signal,
-  );
+  await waitForAbortablePromise(previous.catch(() => undefined), signal);
   try {
     return await run();
   } finally {

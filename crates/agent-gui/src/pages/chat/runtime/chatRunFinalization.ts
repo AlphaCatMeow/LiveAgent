@@ -31,3 +31,24 @@ export async function settleChatRunFinalization(
     }
   }
 }
+
+/**
+ * Ordered chat-run finalization: history persistence must land before the
+ * gateway stream close / terminal runtime snapshot become observable remotely
+ * (26f2561 — "done" is only sent after persist), otherwise a WebUI client can
+ * hydrate a truncated conversation. The barrier is therefore awaited first
+ * instead of being raced against the flushes; the flushes themselves carry no
+ * mutual ordering and run together.
+ */
+export async function finalizeChatRunInOrder(params: {
+  waitForPersistBarrier: () => Promise<unknown>;
+  closeBridge: () => Promise<unknown>;
+  finishRuntimeRun: () => Promise<unknown>;
+}): Promise<void> {
+  try {
+    await params.waitForPersistBarrier();
+  } catch (error) {
+    console.warn("chat run persist barrier failed", error);
+  }
+  await Promise.allSettled([params.closeBridge(), params.finishRuntimeRun()]);
+}

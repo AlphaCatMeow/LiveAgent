@@ -360,3 +360,58 @@ test("slow chat finalization cannot delay synchronous UI release", async () => {
   assert.equal(await settling, "timed_out");
   gate.resolve();
 });
+
+test("finalization flushes the gateway stream only after history persists", async () => {
+  const loader = createTsModuleLoader();
+  const { finalizeChatRunInOrder } = loader.loadModule(
+    "src/pages/chat/runtime/chatRunFinalization.ts",
+  );
+  const persistGate = deferred();
+  const events = [];
+
+  const finalization = finalizeChatRunInOrder({
+    waitForPersistBarrier: async () => {
+      events.push("persist:start");
+      await persistGate.promise;
+      events.push("persist:done");
+    },
+    closeBridge: async () => {
+      events.push("close");
+    },
+    finishRuntimeRun: async () => {
+      events.push("finish");
+    },
+  });
+  await flushPromises();
+
+  // The 26f2561 invariant: the stream close / terminal snapshot must never
+  // overtake history persistence, or a WebUI client can hydrate a truncated
+  // conversation.
+  assert.deepEqual(events, ["persist:start"], "flushes must wait for the persist barrier");
+
+  persistGate.resolve();
+  await finalization;
+  assert.deepEqual(events, ["persist:start", "persist:done", "close", "finish"]);
+});
+
+test("a failing persist barrier still lets the finalization flushes run", async () => {
+  const loader = createTsModuleLoader();
+  const { finalizeChatRunInOrder } = loader.loadModule(
+    "src/pages/chat/runtime/chatRunFinalization.ts",
+  );
+  const events = [];
+
+  await finalizeChatRunInOrder({
+    waitForPersistBarrier: async () => {
+      throw new Error("persist failed");
+    },
+    closeBridge: async () => {
+      events.push("close");
+    },
+    finishRuntimeRun: async () => {
+      events.push("finish");
+    },
+  });
+
+  assert.deepEqual(events, ["close", "finish"]);
+});

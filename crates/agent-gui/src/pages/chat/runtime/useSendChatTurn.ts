@@ -79,7 +79,11 @@ import type { useChatPageRuntimeStore } from "../hooks/useChatPageRuntimeStore";
 import type { useLiveTranscriptController } from "../hooks/useLiveTranscriptController";
 import type { createChatRuntimeHost } from "./ChatRuntimeHost";
 import { buildErrorAssistantMessage, formatHookWarningMessage } from "./chatPageRuntime";
-import { releaseChatRunUi, settleChatRunFinalization } from "./chatRunFinalization";
+import {
+  finalizeChatRunInOrder,
+  releaseChatRunUi,
+  settleChatRunFinalization,
+} from "./chatRunFinalization";
 import {
   buildPreparedContext as buildPreparedConversationContext,
   buildResumeContext as buildResumeConversationContext,
@@ -755,6 +759,11 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       requestRemoteGatewayCancellation();
       if (!options.force) return;
       releaseConversationRunUi();
+      // Force stop is the escape hatch for a stuck run: it intentionally
+      // skips the persist barrier (which may itself be hung) so the gateway
+      // still learns the run is cancelled. The run's own finally block will
+      // additionally do the ordered persist-first finalization if it ever
+      // completes.
       void settleChatRunFinalization(finishGatewayRuntimeRun("cancelled"));
     };
 
@@ -769,17 +778,15 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
 
     async function finalizeConversationRun(state: GatewayRuntimeSnapshotState) {
       const result = await settleChatRunFinalization(
-        (async () => {
-          await Promise.allSettled([
-            (async () => {
-              await runCleanupPromise;
-              await waitForTerminalHistoryPersist(initialPersistPromise);
-              await waitForTerminalHistoryPersist(terminalHistoryPersistPromise);
-            })(),
-            gatewayBridgeEvents.close(),
-            finishGatewayRuntimeRun(state),
-          ]);
-        })(),
+        finalizeChatRunInOrder({
+          waitForPersistBarrier: async () => {
+            await runCleanupPromise.catch(() => undefined);
+            await waitForTerminalHistoryPersist(initialPersistPromise);
+            await waitForTerminalHistoryPersist(terminalHistoryPersistPromise);
+          },
+          closeBridge: () => gatewayBridgeEvents.close(),
+          finishRuntimeRun: () => finishGatewayRuntimeRun(state),
+        }),
       );
       if (result === "timed_out") {
         console.warn(`chat run finalization timed out: ${conversationId}`);

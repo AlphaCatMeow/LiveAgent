@@ -1348,6 +1348,7 @@ test("settings reload uses persisted right dock state only", () => {
 test("gateway settings sync keeps right dock width local and syncs project state", () => {
   const current = settings.normalizeSettings({
     customSettings: {
+      chatTranscript: { width: 920 },
       rightDock: {
         width: 612,
         projects: {
@@ -1393,6 +1394,7 @@ test("gateway settings sync keeps right dock width local and syncs project state
   });
   const incoming = settings.normalizeSettings({
     customSettings: {
+      chatTranscript: { width: 1100 },
       rightDock: {
         width: 360,
         projects: {
@@ -1439,6 +1441,8 @@ test("gateway settings sync keeps right dock width local and syncs project state
   const payload = sync.buildGatewaySettingsSyncPayload(incoming);
   const synced = sync.applyGatewaySettingsSyncPayload(current, payload);
 
+  assert.equal(payload.customSettings.chatTranscript.width, 768);
+  assert.equal(synced.customSettings.chatTranscript.width, 920);
   assert.equal(synced.customSettings.rightDock.width, 612);
   assert.deepEqual(Object.keys(synced.customSettings.rightDock.projects).sort(), [
     "/desktop/project",
@@ -2173,6 +2177,18 @@ test("font scale settings normalize invalid values to 1 and clamp out-of-range v
 
   const custom = settings.normalizeCustomSettings({ fontScale: { chat: 1.2 } }, []);
   assert.deepEqual(custom.fontScale, { sidebar: 1, chat: 1.2, rightDock: 1 });
+});
+
+test("chat transcript width defaults, clamps, and updates locally", () => {
+  assert.deepEqual(settings.normalizeChatTranscriptSettings(undefined), { width: 768 });
+  assert.deepEqual(settings.normalizeChatTranscriptSettings({ width: 400 }), { width: 560 });
+  assert.deepEqual(settings.normalizeChatTranscriptSettings({ width: 1400 }), { width: 1200 });
+  assert.deepEqual(settings.normalizeChatTranscriptSettings({ width: 920.4 }), { width: 920 });
+
+  const current = settings.normalizeSettings({ customSettings: { chatTranscript: { width: 768 } } });
+  const updated = settings.updateChatTranscriptWidth(current, 960);
+  assert.equal(updated.customSettings.chatTranscript.width, 960);
+  assert.equal(settings.updateChatTranscriptWidth(updated, 960), updated);
 });
 
 test("close window behavior defaults to minimize and only accepts exit", () => {

@@ -64,6 +64,7 @@ import {
   type RightDockProjectState,
   resolveEffectiveTheme,
   type SelectedModel,
+  updateChatTranscriptWidth,
   updateRightDockFileTreeState,
   updateRightDockProjectState,
   updateRightDockWidth,
@@ -580,6 +581,12 @@ export function ChatPage(props: ChatPageProps) {
     : undefined;
   // RightDockPanel is memo'd: every callback handed to it must be stable or
   // the memo boundary is void (see the panel-side context useMemo).
+  const handleChatTranscriptWidthChange = useCallback(
+    (nextWidth: number) => {
+      setSettings((prev) => updateChatTranscriptWidth(prev, nextWidth));
+    },
+    [setSettings],
+  );
   const handleRightDockWidthChange = useCallback(
     (nextWidth: number) => {
       setSettings((prev) => updateRightDockWidth(prev, nextWidth));
@@ -1709,6 +1716,8 @@ export function ChatPage(props: ChatPageProps) {
                   liveTranscriptStore={liveTranscriptStore}
                   isCompactionRunning={isCompactionRunning}
                   bottomReservePx={composerOverlayHeight}
+                  contentWidth={settings.customSettings.chatTranscript.width}
+                  onContentWidthChange={handleChatTranscriptWidthChange}
                   onResendFromEdit={handleResendFromEdit}
                   onBranchConversation={
                     // 水合中/水合失败时 handler 只会静默 return——直接不传，

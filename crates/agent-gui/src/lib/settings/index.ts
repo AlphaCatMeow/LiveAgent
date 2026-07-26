@@ -24,6 +24,11 @@ import { createUuid } from "../shared/id";
 import { mergeAlwaysEnabledSkillNames } from "../skills/builtin";
 import { normalizeFontFamily } from "../system/fontFamily";
 import { SYSTEM_TOOL_OPTIONS, type SystemToolId } from "../tools/systemToolOptions";
+import {
+  DEFAULT_CHAT_TRANSCRIPT_WIDTH,
+  MAX_CHAT_TRANSCRIPT_WIDTH,
+  MIN_CHAT_TRANSCRIPT_WIDTH,
+} from "../transcript-width/transcriptWidthModel";
 import { normalizeApiKey, normalizeBaseUrl, normalizeModels } from "./normalize";
 
 export { normalizeFontFamily } from "../system/fontFamily";
@@ -150,9 +155,18 @@ export type FontScaleSettings = {
   rightDock: number;
 };
 
+// Bounds live with the geometry that enforces them; re-exported here so
+// settings consumers keep a single import site.
+export { DEFAULT_CHAT_TRANSCRIPT_WIDTH, MAX_CHAT_TRANSCRIPT_WIDTH, MIN_CHAT_TRANSCRIPT_WIDTH };
+
+export type ChatTranscriptSettings = {
+  width: number;
+};
+
 export type CustomSettings = {
   conversationTitleModel?: SelectedModel;
   chatSidebar: ChatSidebarSettings;
+  chatTranscript: ChatTranscriptSettings;
   rightDock: RightDockSettings;
   // Empty strings select the built-in stacks for each typography role.
   interfaceFontFamily: string;
@@ -1975,6 +1989,18 @@ export function normalizeFontScaleSettings(input: unknown): FontScaleSettings {
   };
 }
 
+export function normalizeChatTranscriptSettings(input: unknown): ChatTranscriptSettings {
+  const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  return {
+    width: normalizeIntegerInRange(
+      obj.width,
+      MIN_CHAT_TRANSCRIPT_WIDTH,
+      MAX_CHAT_TRANSCRIPT_WIDTH,
+      DEFAULT_CHAT_TRANSCRIPT_WIDTH,
+    ),
+  };
+}
+
 export function normalizeCustomSettings(
   input: unknown,
   customProviders: CustomProvider[],
@@ -1992,6 +2018,7 @@ export function normalizeCustomSettings(
       projectsCollapsed: chatSidebar.projectsCollapsed === true,
       recentCollapsed: chatSidebar.recentCollapsed === true,
     },
+    chatTranscript: normalizeChatTranscriptSettings(obj.chatTranscript),
     rightDock: normalizeRightDockSettings(obj.rightDock),
     // fontFamily was the single pre-split preference. Read it only to migrate
     // saved local settings into the new interface-specific field.
@@ -2301,6 +2328,12 @@ export function getRightDockProjectState(
   return normalizeRightDockProjectState(
     normalizedPathKey ? customSettings.rightDock.projects[normalizedPathKey] : {},
   );
+}
+
+export function updateChatTranscriptWidth(prev: AppSettings, width: number): AppSettings {
+  const nextWidth = normalizeChatTranscriptSettings({ width }).width;
+  if (prev.customSettings.chatTranscript.width === nextWidth) return prev;
+  return updateCustomSettings(prev, { chatTranscript: { width: nextWidth } });
 }
 
 export function updateRightDockWidth(prev: AppSettings, width: number): AppSettings {

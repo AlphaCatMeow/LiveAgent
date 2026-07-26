@@ -35,10 +35,14 @@ import {
   UserMessageContent,
 } from "@/lib/chat/userMessageContent";
 import type { GitClient } from "@/lib/git/types";
+import { DEFAULT_CHAT_TRANSCRIPT_WIDTH } from "@/lib/settings";
 import { cn } from "@/lib/shared/utils";
 import { extractLiveRange } from "@/lib/transcript-virtual/liveRangeExtractor";
 import { createLiveRowScrollAdjustPolicy } from "@/lib/transcript-virtual/liveScrollAdjustPolicy";
-import { createTranscriptMeasurementsLru } from "@/lib/transcript-virtual/measurementsLru";
+import {
+  buildTranscriptLayoutKey,
+  createTranscriptMeasurementsLru,
+} from "@/lib/transcript-virtual/measurementsLru";
 import {
   CHECKPOINT_ROW_ESTIMATE_PX,
   estimateAssistantRowHeight,
@@ -83,6 +87,7 @@ type GatewayTranscriptProps = {
   liveStartIndex?: number;
   // Key of the actively streaming turn (caret / live structural state).
   activeTurnKey?: string | null;
+  contentWidth?: number;
   // Whether the scroll-follow engine is attached to the bottom; gates the
   // virtualizer's resize-compensation carve-out for live-row growth.
   isViewportFollowing?: () => boolean;
@@ -1174,6 +1179,7 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
   rows: readonly TranscriptRow[];
   liveStartIndex: number;
   activeTurnKey?: string | null;
+  contentWidth: number;
   scrollViewport: HTMLDivElement | null;
   isViewportFollowing?: () => boolean;
   navRef?: MutableRefObject<GatewayTranscriptNavHandle | null>;
@@ -1206,6 +1212,7 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
     rows,
     liveStartIndex,
     activeTurnKey,
+    contentWidth,
     scrollViewport,
     isViewportFollowing,
     navRef,
@@ -1332,7 +1339,10 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
   const [initialMeasurementsCache] = useState(
     () =>
       (conversationId && scrollViewport
-        ? transcriptMeasurementsLru.restore(conversationId, scrollViewport.clientWidth)
+        ? transcriptMeasurementsLru.restore(
+            conversationId,
+            buildTranscriptLayoutKey(scrollViewport.clientWidth, contentWidth),
+          )
         : null) ?? [],
   );
 
@@ -1371,6 +1381,12 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
       getLiveStartIndex: () => forceMountStartRef.current,
       isFollowing: () => isViewportFollowing?.() ?? false,
     });
+
+  // Every mounted row is already tracked by the virtualizer's ResizeObserver,
+  // which updates its measured height as the centered transcript reflows.
+  // Do not call measure() on width commits: it clears those fresh measurements
+  // after the DOM has already resized, so estimate-based row positions can
+  // overlap without another resize event to repopulate the cache.
 
   // 楼层跳转：scrollToIndex(align:"start") 后连续几帧重对齐——目标行远处的
   // 估高行在滚动后被真实测量，落点会漂移；对准同一 index 是收敛操作，不会
@@ -1557,7 +1573,7 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
     if (!conversationId || !scrollViewport) return;
     transcriptMeasurementsLru.save(
       conversationId,
-      scrollViewport.clientWidth,
+      buildTranscriptLayoutKey(scrollViewport.clientWidth, contentWidth),
       transcriptVirtualizer.takeSnapshot(),
     );
   };
@@ -1772,6 +1788,7 @@ export function GatewayTranscript({
   rows,
   liveStartIndex = -1,
   activeTurnKey = null,
+  contentWidth = DEFAULT_CHAT_TRANSCRIPT_WIDTH,
   isViewportFollowing,
   navRef,
   onAnchorUserRowChange,
@@ -1857,6 +1874,7 @@ export function GatewayTranscript({
           rows={rows}
           liveStartIndex={liveStartIndex}
           activeTurnKey={activeTurnKey}
+          contentWidth={contentWidth}
           scrollViewport={transcriptScrollViewport}
           isViewportFollowing={isViewportFollowing}
           navRef={navRef}

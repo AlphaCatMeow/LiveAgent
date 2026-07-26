@@ -32,7 +32,10 @@ import type { GitClient } from "../../../lib/git/types";
 import { createEntranceRegistry } from "../../../lib/transcript-virtual/entranceOnce";
 import { extractLiveRange } from "../../../lib/transcript-virtual/liveRangeExtractor";
 import { createLiveRowScrollAdjustPolicy } from "../../../lib/transcript-virtual/liveScrollAdjustPolicy";
-import { createTranscriptMeasurementsLru } from "../../../lib/transcript-virtual/measurementsLru";
+import {
+  buildTranscriptLayoutKey,
+  createTranscriptMeasurementsLru,
+} from "../../../lib/transcript-virtual/measurementsLru";
 import { AssistantRow } from "./AssistantRow";
 import { createTranscriptRowModel } from "./rowModel";
 import { UserMessageRow } from "./UserMessageRow";
@@ -99,6 +102,7 @@ export type TranscriptListProps = {
   historyItems: RenderTimelineItem[];
   liveTranscriptStore: LiveTranscriptStore;
   scrollViewport: HTMLDivElement | null;
+  layoutWidth: number;
   // Whether the scroll-follow engine is attached to the bottom; gates the
   // virtualizer's resize-compensation carve-out for live-row growth.
   isViewportFollowing?: () => boolean;
@@ -137,6 +141,7 @@ export const TranscriptList = memo(function TranscriptList(props: TranscriptList
     historyItems,
     liveTranscriptStore,
     scrollViewport,
+    layoutWidth,
     isViewportFollowing,
     isSending,
     isAgentMode,
@@ -240,7 +245,10 @@ export const TranscriptList = memo(function TranscriptList(props: TranscriptList
   const [initialMeasurementsCache] = useState(
     () =>
       (scrollViewport
-        ? transcriptMeasurementsLru.restore(conversationId, scrollViewport.clientWidth)
+        ? transcriptMeasurementsLru.restore(
+            conversationId,
+            buildTranscriptLayoutKey(scrollViewport.clientWidth, layoutWidth),
+          )
         : null) ?? [],
   );
 
@@ -274,6 +282,12 @@ export const TranscriptList = memo(function TranscriptList(props: TranscriptList
     getLiveStartIndex: () => liveStartIndexRef.current,
     isFollowing: () => isViewportFollowing?.() ?? false,
   });
+
+  // Every mounted row is already tracked by the virtualizer's ResizeObserver,
+  // which updates its measured height as the centered transcript reflows.
+  // Do not call virtualizer.measure() on width commits: it clears those fresh
+  // measurements after the DOM has already resized, so no later resize event
+  // may repopulate them and estimate-based row positions can overlap.
 
   // 楼层导航跳转句柄：按行 key 定位 index 后 scrollToIndex。沿途行首次真实
   // 测量会不断修正总高度，连续若干帧重新对准，让滚动收敛在目标行顶部
@@ -457,7 +471,7 @@ export const TranscriptList = memo(function TranscriptList(props: TranscriptList
     if (!scrollViewport) return;
     transcriptMeasurementsLru.save(
       conversationId,
-      scrollViewport.clientWidth,
+      buildTranscriptLayoutKey(scrollViewport.clientWidth, layoutWidth),
       virtualizer.takeSnapshot(),
     );
   };

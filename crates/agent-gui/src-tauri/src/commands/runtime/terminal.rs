@@ -4,6 +4,7 @@ use tauri::State;
 
 use crate::runtime::sftp::SftpSessionRegistry;
 use crate::runtime::terminal::{
+    normalize_ssh_local_forward_local_port, ssh_local_forward_local_port_available,
     terminal_shell_options as runtime_terminal_shell_options, SshLocalForwardActionResponse,
     SshLocalForwardListResponse, SshTerminalTabsSnapshot, TerminalListResponse,
     TerminalReadTailResponse, TerminalSessionRecord, TerminalSessionRegistry,
@@ -157,6 +158,16 @@ pub async fn terminal_ssh_local_forward_stop(
     registry
         .ssh_local_forward_stop(forward_id, session_id)
         .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn terminal_ssh_local_forward_check_port(local_port: u32) -> Result<bool, String> {
+    let port = normalize_ssh_local_forward_local_port(Some(local_port))?;
+    if port == 0 {
+        // Auto-assign never conflicts; the OS picks a free port at bind time.
+        return Ok(true);
+    }
+    Ok(ssh_local_forward_local_port_available(port).await)
 }
 
 #[tauri::command(rename_all = "snake_case")]

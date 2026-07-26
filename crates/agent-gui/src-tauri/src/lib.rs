@@ -179,6 +179,7 @@ macro_rules! app_invoke_handler {
             commands::terminal::terminal_ssh_local_forward_start,
             commands::terminal::terminal_ssh_local_forward_list,
             commands::terminal::terminal_ssh_local_forward_stop,
+            commands::terminal::terminal_ssh_local_forward_check_port,
             commands::terminal::ssh_terminal_tabs_list,
             commands::terminal::ssh_terminal_tab_open,
             commands::terminal::ssh_terminal_tab_close,

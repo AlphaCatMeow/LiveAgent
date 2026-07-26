@@ -428,6 +428,13 @@ pub(crate) fn normalize_ssh_local_forward_local_port(port: Option<u32>) -> Resul
         .map_err(|_| "SSH local forward local port must be between 0 and 65535".to_string())
 }
 
+/// Test-binds the loopback port the user asked for. Advisory only: the
+/// authoritative bind happens in `ssh_local_forward_start`, this exists so the
+/// UI can show a localized "port in use" error before submitting.
+pub(crate) async fn ssh_local_forward_local_port_available(port: u16) -> bool {
+    TcpListener::bind((Ipv4Addr::LOCALHOST, port)).await.is_ok()
+}
+
 fn ssh_local_forward_session_entry(
     entry: &Arc<TerminalSessionEntry>,
     project_path_key: Option<&str>,
@@ -615,6 +622,35 @@ mod tests {
         assert_eq!(normalize_ssh_local_forward_local_port(None).unwrap(), 0);
         assert_eq!(normalize_ssh_local_forward_local_port(Some(0)).unwrap(), 0);
         assert!(normalize_ssh_local_forward_local_port(Some(65536)).is_err());
+    }
+
+    #[test]
+    fn ssh_local_forward_check_port_reports_occupied() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            // Hold a listener on an OS-assigned port; the check must see it.
+            let holder = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+                .await
+                .expect("bind holder");
+            let port = holder.local_addr().expect("holder addr").port();
+            assert!(!ssh_local_forward_local_port_available(port).await);
+        });
+    }
+
+    #[test]
+    fn ssh_local_forward_check_port_allows_auto() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime");
+        runtime.block_on(async {
+            // Port 0 is the auto-assign sentinel: binding it always succeeds,
+            // so the advisory check reports it as available.
+            assert!(ssh_local_forward_local_port_available(0).await);
+        });
     }
 
     #[test]

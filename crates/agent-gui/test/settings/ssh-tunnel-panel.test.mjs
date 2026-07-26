@@ -273,3 +273,34 @@ test("SSH local forwarding start passes explicit local port and defaults to auto
   assert.equal(calls[0].args.local_port, 15432);
   assert.equal(calls[1].args.local_port, 0);
 });
+
+test("SSH local forwarding checks local port occupancy over the check command", async () => {
+  const calls = [];
+  const clientLoader = createTsModuleLoader({
+    mocks: {
+      "@tauri-apps/api/core": {
+        async invoke(command, args) {
+          calls.push({ command, args });
+          return args.local_port !== 15432;
+        },
+      },
+      "@tauri-apps/api/event": {
+        async listen() {
+          return () => undefined;
+        },
+      },
+    },
+  });
+  const tauriForwarding = clientLoader.loadModule(
+    "src/lib/terminal/tauriSshLocalForwardClient.ts",
+  );
+
+  const occupied = await tauriForwarding.tauriSshLocalForwardClient.checkLocalPort(15432);
+  const free = await tauriForwarding.tauriSshLocalForwardClient.checkLocalPort(15433);
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].command, "terminal_ssh_local_forward_check_port");
+  assert.deepEqual(calls[0].args, { local_port: 15432 });
+  assert.equal(occupied, false);
+  assert.equal(free, true);
+});

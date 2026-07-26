@@ -108,6 +108,13 @@ export const tauriSshLocalForwardClient = {
       }),
     );
   },
+  /** Advisory loopback-port probe; `true` means the port looked free. The
+   * authoritative bind still happens in `start`, so treat this as UX only. */
+  async checkLocalPort(port: number) {
+    return invoke<boolean>("terminal_ssh_local_forward_check_port", {
+      local_port: port,
+    });
+  },
   async subscribe(listener: (event: SshLocalForwardEvent) => void) {
     return listen<RawSshLocalForwardEvent>("terminal:ssh-local-forward", (event) => {
       listener(normalizeEvent(event.payload));

@@ -24,6 +24,19 @@ import type {
 import { createUuid } from "@/lib/shared/id";
 import { BrowserGatewayTerminalStreamClient } from "@/lib/terminal/gatewayTerminalStreamClient";
 import type {
+  RawSshLocalForwardAction,
+  RawSshLocalForwardEvent,
+  RawSshLocalForwardSnapshot,
+  SshLocalForwardAction,
+  SshLocalForwardEvent,
+  SshLocalForwardSnapshot,
+} from "@/lib/terminal/sshLocalForwardTypes";
+import {
+  normalizeSshLocalForwardAction,
+  normalizeSshLocalForwardEvent,
+  normalizeSshLocalForwardSnapshot,
+} from "@/lib/terminal/sshLocalForwardTypes";
+import type {
   SshTerminalTab,
   SshTerminalTabKind,
   SshTerminalTabsSnapshot,
@@ -404,6 +417,12 @@ type RawTerminalResponse = {
   ssh_tabs?: RawSshTerminalTabsSnapshot | null;
   latencyMs?: number;
   latency_ms?: number;
+  sshLocalForwards?: RawSshLocalForwardSnapshot | null;
+  ssh_local_forwards?: RawSshLocalForwardSnapshot | null;
+  sshLocalForward?: RawSshLocalForwardAction | null;
+  ssh_local_forward?: RawSshLocalForwardAction | null;
+  sshLocalForwardPortAvailable?: boolean;
+  ssh_local_forward_port_available?: boolean;
 };
 
 type RawTerminalEvent = {
@@ -415,6 +434,8 @@ type RawTerminalEvent = {
   session?: RawTerminalSession;
   sshTabs?: RawSshTerminalTabsSnapshot | null;
   ssh_tabs?: RawSshTerminalTabsSnapshot | null;
+  sshLocalForward?: RawSshLocalForwardEvent | null;
+  ssh_local_forward?: RawSshLocalForwardEvent | null;
   data?: string | null;
   outputStartOffset?: number;
   output_start_offset?: number;
@@ -1010,10 +1031,14 @@ function normalizeSshTerminalTabsSnapshot(
 
 function normalizeTerminalEvent(input: RawTerminalEvent): TerminalEvent | null {
   const hasSshTabs = Boolean(input.sshTabs || input.ssh_tabs);
-  if (!input.session && !hasSshTabs) return null;
+  const rawSshLocalForward = input.sshLocalForward ?? input.ssh_local_forward;
+  if (!input.session && !hasSshTabs && !rawSshLocalForward) return null;
   const session = input.session ? normalizeTerminalSession(input.session) : undefined;
   const sshTabs = hasSshTabs
     ? normalizeSshTerminalTabsSnapshot(input.sshTabs ?? input.ssh_tabs)
+    : undefined;
+  const sshLocalForward = rawSshLocalForward
+    ? normalizeSshLocalForwardEvent(rawSshLocalForward)
     : undefined;
   const outputStartOffset = normalizeOptionalOffset(
     input.outputStartOffset ?? input.output_start_offset,
@@ -1032,6 +1057,7 @@ function normalizeTerminalEvent(input: RawTerminalEvent): TerminalEvent | null {
     outputStartOffset,
     outputEndOffset,
     sshTabs,
+    sshLocalForward,
   };
 }
 
@@ -2235,6 +2261,76 @@ export class GatewayWebSocketClient {
       tab_id: tabId,
     });
     return normalizeSshTerminalTabsSnapshot(response.sshTabs ?? response.ssh_tabs);
+  }
+
+  async listSshLocalForwards(params?: {
+    sessionId?: string;
+    projectPathKey?: string;
+  }): Promise<SshLocalForwardSnapshot> {
+    const response = await this.requestWithRecovery<RawTerminalResponse>(
+      "terminal.ssh_local_forward_list",
+      {
+        session_id: params?.sessionId,
+        project_path_key: params?.projectPathKey,
+      },
+    );
+    return normalizeSshLocalForwardSnapshot(
+      response.sshLocalForwards ?? response.ssh_local_forwards ?? {},
+    );
+  }
+
+  async startSshLocalForward(params: {
+    sessionId: string;
+    projectPathKey?: string;
+    remoteHost: string;
+    remotePort: number;
+    localPort?: number;
+  }): Promise<SshLocalForwardAction> {
+    const response = await this.request<RawTerminalResponse>("terminal.ssh_local_forward_start", {
+      session_id: params.sessionId,
+      project_path_key: params.projectPathKey,
+      remote_host: params.remoteHost,
+      remote_port: params.remotePort,
+      local_port: params.localPort ?? 0,
+    });
+    const action = response.sshLocalForward ?? response.ssh_local_forward;
+    if (!action) {
+      throw new Error("Terminal response did not include a forward");
+    }
+    return normalizeSshLocalForwardAction(action);
+  }
+
+  async stopSshLocalForward(params: {
+    forwardId: string;
+    sessionId?: string;
+  }): Promise<SshLocalForwardAction> {
+    const response = await this.request<RawTerminalResponse>("terminal.ssh_local_forward_stop", {
+      forward_id: params.forwardId,
+      session_id: params.sessionId,
+    });
+    const action = response.sshLocalForward ?? response.ssh_local_forward;
+    if (!action) {
+      throw new Error("Terminal response did not include a forward");
+    }
+    return normalizeSshLocalForwardAction(action);
+  }
+
+  async checkSshLocalForwardPort(localPort: number): Promise<boolean> {
+    const response = await this.request<RawTerminalResponse>(
+      "terminal.ssh_local_forward_check_port",
+      { local_port: localPort },
+    );
+    return Boolean(
+      response.sshLocalForwardPortAvailable ?? response.ssh_local_forward_port_available,
+    );
+  }
+
+  subscribeSshLocalForward(listener: (event: SshLocalForwardEvent) => void): () => void {
+    return this.subscribeTerminal((event) => {
+      if (event.kind === "ssh_local_forward" && event.sshLocalForward) {
+        listener(event.sshLocalForward);
+      }
+    });
   }
 
   async renameTerminal(
@@ -3613,6 +3709,23 @@ export type GatewayWebSocketClientLike = {
     kind: SshTerminalTabKind;
   }): Promise<SshTerminalTabsSnapshot>;
   closeSshTerminalTab(tabId: string): Promise<SshTerminalTabsSnapshot>;
+  listSshLocalForwards(params?: {
+    sessionId?: string;
+    projectPathKey?: string;
+  }): Promise<SshLocalForwardSnapshot>;
+  startSshLocalForward(params: {
+    sessionId: string;
+    projectPathKey?: string;
+    remoteHost: string;
+    remotePort: number;
+    localPort?: number;
+  }): Promise<SshLocalForwardAction>;
+  stopSshLocalForward(params: {
+    forwardId: string;
+    sessionId?: string;
+  }): Promise<SshLocalForwardAction>;
+  checkSshLocalForwardPort(localPort: number): Promise<boolean>;
+  subscribeSshLocalForward(listener: (event: SshLocalForwardEvent) => void): () => void;
   renameTerminal(
     sessionId: string,
     title: string,

@@ -9,13 +9,14 @@ import {
   isDominantVerticalWheel,
   POINTER_DRAG_SLOP_PX,
   reduceFollowEvent,
+  SCROLL_FOLLOW_IGNORE_KEYS_ATTRIBUTE,
 } from "./scrollFollowCore";
 
 // Below this the element cannot meaningfully scroll; wheel/touch on it must
 // not change follow state, and nested elements under it don't consume wheels.
 const SCROLLABLE_OVERFLOW_MIN_PX = 4;
 
-function isEditableEventTarget(target: EventTarget | null) {
+function shouldIgnoreScrollKeyTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {
     return false;
   }
@@ -23,12 +24,13 @@ function isEditableEventTarget(target: EventTarget | null) {
     target.isContentEditable ||
     target instanceof HTMLInputElement ||
     target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement
+    target instanceof HTMLSelectElement ||
+    target.closest(`[${SCROLL_FOLLOW_IGNORE_KEYS_ATTRIBUTE}]`) !== null
   );
 }
 
 function isHistoryScrollKey(event: KeyboardEvent) {
-  if (isEditableEventTarget(event.target)) {
+  if (shouldIgnoreScrollKeyTarget(event.target)) {
     return false;
   }
   return (
@@ -40,7 +42,7 @@ function isHistoryScrollKey(event: KeyboardEvent) {
 }
 
 function isFollowScrollKey(event: KeyboardEvent) {
-  if (isEditableEventTarget(event.target)) {
+  if (shouldIgnoreScrollKeyTarget(event.target)) {
     return false;
   }
   return (

@@ -42,11 +42,13 @@ function ToolCallItem({
   isRunning,
   readOnly = false,
   redactToolContent = false,
+  isAborted = false,
 }: {
   item: ToolTraceItem;
   isRunning?: boolean;
   readOnly?: boolean;
   redactToolContent?: boolean;
+  isAborted?: boolean;
 }) {
   const { t } = useLocale();
   const result = item.toolResult;
@@ -140,17 +142,20 @@ function ToolCallItem({
           ? { name: getToolDisplayName(item.toolCall.name), action: "" }
           : getToolDisplayTitle(item.toolCall);
 
-  const statusLabel = isRunning
-    ? isAskUser
-      ? askQuestions.length > 0
-        ? t("chat.askUser.waiting")
-        : t("chat.askUser.preparing")
-      : t("chat.tool.running")
-    : result
-      ? result.isError
-        ? t("chat.tool.failed")
-        : t("chat.tool.success")
-      : t("chat.tool.waiting");
+  const statusLabel =
+    isTodo && hasIncompleteTodo && isAborted
+      ? t("chat.tool.aborted")
+      : isRunning
+        ? isAskUser
+          ? askQuestions.length > 0
+            ? t("chat.askUser.waiting")
+            : t("chat.askUser.preparing")
+          : t("chat.tool.running")
+        : result
+          ? result.isError
+            ? t("chat.tool.failed")
+            : t("chat.tool.success")
+          : t("chat.tool.waiting");
 
   const statusTextClass = result?.isError
     ? "text-[hsl(var(--chat-error))]"
@@ -398,5 +403,6 @@ export const MemoToolCallItem = memo(
     previousProps.isRunning === nextProps.isRunning &&
     previousProps.readOnly === nextProps.readOnly &&
     previousProps.redactToolContent === nextProps.redactToolContent &&
+    previousProps.isAborted === nextProps.isAborted &&
     areToolTraceItemsEqual(previousProps.item, nextProps.item),
 );

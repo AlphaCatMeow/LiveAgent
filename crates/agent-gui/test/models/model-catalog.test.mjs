@@ -54,8 +54,14 @@ test("generated catalog upholds the data invariants", () => {
       assert.ok(entry.maxOutputToken < entry.contextWindow, `${label}: output must be < context`);
       const limits = { contextWindow: entry.contextWindow, maxOutputToken: entry.maxOutputToken };
       assert.deepEqual(catalog.normalizeModelLimits(limits), limits, label);
-      // 计费功能已移除：目录条目只承载限额。
-      assert.deepEqual(Object.keys(entry).sort(), ["contextWindow", "id", "maxOutputToken"], label);
+      // 计费功能已移除：目录条目只承载限额与思考能力。
+      const expectedKeys = entry.thinking
+        ? ["contextWindow", "id", "maxOutputToken", "thinking"]
+        : ["contextWindow", "id", "maxOutputToken"];
+      assert.deepEqual(Object.keys(entry).sort(), expectedKeys, label);
+      if (entry.thinking) {
+        assert.deepEqual(Object.keys(entry.thinking).sort(), ["levels", "off"], label);
+      }
     }
   }
 });

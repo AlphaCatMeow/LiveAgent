@@ -698,6 +698,18 @@ function isProviderNativeWebSearchToolName(toolName: string | undefined) {
   );
 }
 
+// 与 agent-gui lib/providers/nativeWebSearch.ts 的同名判定保持一致（手动同步）。
+function isProviderNativeWebFetchToolName(toolName: string | undefined) {
+  const normalized = toolName?.trim().toLowerCase() ?? "";
+  return (
+    normalized === "builtin_web_fetch" ||
+    normalized === "webfetch" ||
+    normalized === "web_fetch" ||
+    normalized.startsWith("web_fetch_2") ||
+    normalized.startsWith("web_fetch_call")
+  );
+}
+
 function isDsmlRecoveredToolCallId(toolCallId: string | undefined) {
   return toolCallId?.startsWith("dsml-tool-call-") ?? false;
 }
@@ -707,11 +719,31 @@ function isRecoveredProviderNativeWebSearchResult(toolResult: ToolResultMessage 
   return details?.recoveredProviderNativeWebSearch === true;
 }
 
+function isRecoveredProviderNativeWebFetchResult(toolResult: ToolResultMessage | undefined) {
+  const details = toolResult?.details as Record<string, unknown> | undefined;
+  return details?.recoveredProviderNativeWebFetch === true;
+}
+
+// History written before the web_fetch bridge existed carries error results
+// like "Tool web_fetch not found"; those rounds should render as clean as the
+// bridged ones instead of resurfacing the old failure rows.
+function isLegacyUnexecutedProviderNativeToolResult(toolResult: ToolResultMessage | undefined) {
+  if (!toolResult?.isError) return false;
+  const text = toolResult.content
+    .flatMap((block) => (block.type === "text" ? [block.text] : []))
+    .join("\n")
+    .trim();
+  return /^Tool .+ not found$/.test(text);
+}
+
 export function shouldDisplayToolTraceItem(
   item: ToolTraceItem,
   options?: { hasHostedSearch?: boolean },
 ) {
-  if (!isProviderNativeWebSearchToolName(item.toolCall.name)) {
+  if (
+    !isProviderNativeWebSearchToolName(item.toolCall.name) &&
+    !isProviderNativeWebFetchToolName(item.toolCall.name)
+  ) {
     return true;
   }
   if (options?.hasHostedSearch) {
@@ -720,7 +752,13 @@ export function shouldDisplayToolTraceItem(
   if (isDsmlRecoveredToolCallId(item.toolCall.id)) {
     return false;
   }
-  if (isRecoveredProviderNativeWebSearchResult(item.toolResult)) {
+  if (
+    isRecoveredProviderNativeWebSearchResult(item.toolResult) ||
+    isRecoveredProviderNativeWebFetchResult(item.toolResult)
+  ) {
+    return false;
+  }
+  if (isLegacyUnexecutedProviderNativeToolResult(item.toolResult)) {
     return false;
   }
   return true;

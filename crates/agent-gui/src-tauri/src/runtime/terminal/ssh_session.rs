@@ -9,6 +9,7 @@ use crate::commands::settings::{
     RuntimeSshKnownHostStatus,
 };
 use crate::runtime::project_path::project_path_key as normalize_project_path_key;
+use crate::runtime::shell_runner::ShellCancelToken;
 
 use super::*;
 
@@ -816,6 +817,7 @@ impl TerminalSessionRegistry {
         cwd: Option<String>,
         timeout_ms: Option<u64>,
         max_bytes: Option<usize>,
+        cancel_token: Option<ShellCancelToken>,
     ) -> Result<TerminalSshExecResponse, String> {
         let command = command.trim().to_string();
         if command.is_empty() {
@@ -844,11 +846,21 @@ impl TerminalSessionRegistry {
         let timeout_duration = normalize_ssh_exec_timeout(timeout_ms);
         let capture_limit = normalize_ssh_exec_max_bytes(max_bytes);
         let start = Instant::now();
-        let result = timeout(
+        let execution = timeout(
             timeout_duration,
             run_ssh_exec_channel(runtime, wrapped_command, capture_limit),
-        )
-        .await;
+        );
+        tokio::pin!(execution);
+        let result = if let Some(cancel_token) = cancel_token {
+            tokio::select! {
+                result = &mut execution => result,
+                _ = cancel_token.cancelled() => {
+                    return Err("Cancelled".to_string());
+                }
+            }
+        } else {
+            execution.await
+        };
         let duration_ms = start.elapsed().as_millis();
 
         match result {

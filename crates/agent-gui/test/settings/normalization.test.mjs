@@ -370,33 +370,30 @@ test("chat runtime controls default and follow provider model reasoning support"
   // 没有 modelId 就无法解析目录，拿不到任何档位。
   assert.deepEqual(settings.getChatRuntimeReasoningLevelsForProvider({}), []);
 
-  // claude-opus-4-5：pi-ai 目录没有 thinkingLevelMap，标准四档，无 xhigh/max。
+  // claude-opus-4-5：目录（models.dev）三档 low/medium/high，无 minimal/xhigh/max。
   assert.deepEqual(
     settings.getChatRuntimeReasoningLevelsForProvider({
       providerId: "claude_code",
       modelId: "claude-opus-4-5",
-      baseUrl: "https://api.anthropic.com",
     }),
-    ["minimal", "low", "medium", "high"],
+    ["low", "medium", "high"],
   );
-  // claude-sonnet-5：目录显式声明 xhigh/max。
+  // claude-sonnet-5：目录声明 xhigh/max（adaptive 世代无 minimal）。
   assert.deepEqual(
     settings.getChatRuntimeReasoningLevelsForProvider({
       providerId: "claude_code",
       modelId: "claude-sonnet-5",
-      baseUrl: "https://api.anthropic.com",
     }),
-    ["minimal", "low", "medium", "high", "xhigh", "max"],
+    ["low", "medium", "high", "xhigh", "max"],
   );
-  // gpt-5.1（openai-responses）：目录只覆盖 off，标准四档。
+  // gpt-5.1：目录 none/low/medium/high → off + 三档。
   assert.deepEqual(
     settings.getChatRuntimeReasoningLevelsForProvider({
       providerId: "codex",
       requestFormat: "openai-responses",
       modelId: "gpt-5.1",
-      baseUrl: "https://api.openai.com/v1",
     }),
-    ["minimal", "low", "medium", "high"],
+    ["low", "medium", "high"],
   );
   // gpt-5.2：目录额外声明 xhigh，仍无 max。
   assert.deepEqual(
@@ -404,65 +401,58 @@ test("chat runtime controls default and follow provider model reasoning support"
       providerId: "codex",
       requestFormat: "openai-responses",
       modelId: "gpt-5.2",
-      baseUrl: "https://api.openai.com/v1",
     }),
-    ["minimal", "low", "medium", "high", "xhigh"],
+    ["low", "medium", "high", "xhigh"],
   );
-  // Groq qwen/qwen3-32b（openai-completions 兼容端点）：目录覆盖到 xhigh，仍无 max。
+  // 目录外的聚合命名（qwen/qwen3-32b 带斜杠，生成期跳过）：标准四档兜底。
   assert.deepEqual(
     settings.getChatRuntimeReasoningLevelsForProvider({
       providerId: "codex",
       requestFormat: "openai-completions",
       modelId: "qwen/qwen3-32b",
-      baseUrl: "https://api.groq.com/openai/v1",
     }),
-    ["minimal", "low", "medium", "high", "xhigh"],
+    ["minimal", "low", "medium", "high"],
   );
-  // gemini-2.5-flash：预算档字段驱动，标准四档，无 xhigh/max。
+  // gemini-2.5-flash：预算式（budget_tokens）→ 标准四档，无 xhigh/max。
   assert.deepEqual(
     settings.getChatRuntimeReasoningLevelsForProvider({
       providerId: "gemini",
       modelId: "gemini-2.5-flash",
-      baseUrl: "https://generativelanguage.googleapis.com/v1beta",
     }),
     ["minimal", "low", "medium", "high"],
   );
-  // gemini-3-pro-preview：目录把 minimal/medium 显式置空，只剩两档（3.0/3.1 同档）。
+  // gemini-3-pro-preview：目录只有两档 low/high。
   assert.deepEqual(
     settings.getChatRuntimeReasoningLevelsForProvider({
       providerId: "gemini",
       modelId: "gemini-3-pro-preview",
-      baseUrl: "https://generativelanguage.googleapis.com/v1beta",
     }),
     ["low", "high"],
   );
-  // 目录之外的自定义模型（glm/kimi 等三方聚合）按可推理处理：标准四档，
-  // 不因 id 猜不中而禁用思考。
+  // 中转挂载的国产厂商模型走跨供应商回查命中真实档位：glm-4.7 是纯 toggle
+  // 形态（单 "high" 档 + 可关），不再吃标准四档兜底。
   assert.deepEqual(
     settings.getChatRuntimeReasoningLevelsForProvider({
       providerId: "codex",
       requestFormat: "openai-completions",
       modelId: "glm-4.7",
-      baseUrl: "https://api.z.ai/api/coding/paas/v4",
     }),
-    ["minimal", "low", "medium", "high"],
+    ["high"],
   );
   assert.deepEqual(
     settings.getChatRuntimeReasoningLevelsForProvider({
       providerId: "claude_code",
       modelId: "glm-4.7",
-      baseUrl: "https://api.z.ai/api/anthropic",
     }),
-    ["minimal", "low", "medium", "high"],
+    ["high"],
   );
-  // DeepSeek 走 codex：适配层 thinkingLevelMap 额外开出 xhigh。
+  // deepseek-chat：目录声明非思考模型，无档位（思考控件整组隐藏）。
   assert.deepEqual(
     settings.getChatRuntimeReasoningLevelsForProvider({
       providerId: "codex",
       modelId: "deepseek-chat",
-      baseUrl: "https://api.deepseek.com",
     }),
-    ["minimal", "low", "medium", "high", "xhigh"],
+    [],
   );
 
   assert.deepEqual(
@@ -508,17 +498,17 @@ test("chat runtime controls default and follow provider model reasoning support"
         providerId: "codex",
         requestFormat: "openai-completions",
         modelId: "qwen/qwen3-32b",
-        baseUrl: "https://api.groq.com/openai/v1",
       },
     ),
     {
       thinkingEnabled: true,
       nativeWebSearchEnabled: true,
-      reasoning: "xhigh",
+      // 目录未命中（聚合命名）走标准四档兜底：存量 xhigh 钳回默认 high。
+      reasoning: "high",
       reasoningByProvider: {
         claude_code: "xhigh",
         codex_openai_responses: "xhigh",
-        codex_openai_completions: "xhigh",
+        codex_openai_completions: "high",
         // gemini / xai 未在 reasoningByProvider 输入里显式给出，也未参与本次调用
         // 的当前 provider key，因此只继承顶层 reasoning 原值，不做钳制。
         gemini: "xhigh",
@@ -1358,6 +1348,7 @@ test("settings reload uses persisted right dock state only", () => {
 test("gateway settings sync keeps right dock width local and syncs project state", () => {
   const current = settings.normalizeSettings({
     customSettings: {
+      chatTranscript: { width: 920 },
       rightDock: {
         width: 612,
         projects: {
@@ -1403,6 +1394,7 @@ test("gateway settings sync keeps right dock width local and syncs project state
   });
   const incoming = settings.normalizeSettings({
     customSettings: {
+      chatTranscript: { width: 1100 },
       rightDock: {
         width: 360,
         projects: {
@@ -1449,6 +1441,8 @@ test("gateway settings sync keeps right dock width local and syncs project state
   const payload = sync.buildGatewaySettingsSyncPayload(incoming);
   const synced = sync.applyGatewaySettingsSyncPayload(current, payload);
 
+  assert.equal(payload.customSettings.chatTranscript.width, 768);
+  assert.equal(synced.customSettings.chatTranscript.width, 920);
   assert.equal(synced.customSettings.rightDock.width, 612);
   assert.deepEqual(Object.keys(synced.customSettings.rightDock.projects).sort(), [
     "/desktop/project",
@@ -2183,6 +2177,18 @@ test("font scale settings normalize invalid values to 1 and clamp out-of-range v
 
   const custom = settings.normalizeCustomSettings({ fontScale: { chat: 1.2 } }, []);
   assert.deepEqual(custom.fontScale, { sidebar: 1, chat: 1.2, rightDock: 1 });
+});
+
+test("chat transcript width defaults, clamps, and updates locally", () => {
+  assert.deepEqual(settings.normalizeChatTranscriptSettings(undefined), { width: 768 });
+  assert.deepEqual(settings.normalizeChatTranscriptSettings({ width: 400 }), { width: 560 });
+  assert.deepEqual(settings.normalizeChatTranscriptSettings({ width: 1400 }), { width: 1200 });
+  assert.deepEqual(settings.normalizeChatTranscriptSettings({ width: 920.4 }), { width: 920 });
+
+  const current = settings.normalizeSettings({ customSettings: { chatTranscript: { width: 768 } } });
+  const updated = settings.updateChatTranscriptWidth(current, 960);
+  assert.equal(updated.customSettings.chatTranscript.width, 960);
+  assert.equal(settings.updateChatTranscriptWidth(updated, 960), updated);
 });
 
 test("close window behavior defaults to minimize and only accepts exit", () => {

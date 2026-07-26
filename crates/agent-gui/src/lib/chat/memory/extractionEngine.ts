@@ -444,12 +444,18 @@ export async function runMemoryExtraction(
 ): Promise<MemoryExtractionResult> {
   const workdir = params.workdir?.trim() ?? "";
   const statusText = params.statusText ?? defaultStatusText;
+  if (params.signal?.aborted) {
+    return { ok: false, aborted: true, ...EMPTY_RESULT };
+  }
 
   const [localDate, candidates, rejections] = await Promise.all([
     resolveLocalDate(),
     loadCandidates(workdir),
     loadRejections(workdir),
   ]);
+  if (params.signal?.aborted) {
+    return { ok: false, aborted: true, ...EMPTY_RESULT };
+  }
 
   // Confirmation deferral: the controller claimed this run only because the
   // short reply may answer a memory confirmation. With candidates loaded we
@@ -596,6 +602,9 @@ export async function runMemoryExtraction(
     const writtenSlugs: string[] = [];
 
     if (accepted.length > 0) {
+      if (params.signal?.aborted) {
+        throw new Error("Cancelled");
+      }
       const batch = planToApplyBatchArgs(accepted);
       const model = params.primary.model;
       const response = await memoryApplyBatch({

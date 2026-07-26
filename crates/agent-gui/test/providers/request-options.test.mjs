@@ -508,8 +508,12 @@ test("DeepSeek Codex models force Chat Completions compat", () => {
   assert.equal(model.compat.requiresReasoningContentOnAssistantMessages, true);
   assert.equal(model.compat.supportsStrictMode, false);
   assert.equal(model.compat.maxTokensField, "max_tokens");
-  assert.equal(model.thinkingLevelMap.minimal, "high");
-  assert.equal(model.thinkingLevelMap.xhigh, "max");
+  // 档位来自生成目录：deepseek-v4-pro 只有 high/max（minimal/low/medium=null），
+  // xhigh 目录未声明故不复活；wire 改写只补到已支持档位（high→"high"）。
+  assert.equal(model.thinkingLevelMap.minimal, null);
+  assert.equal(model.thinkingLevelMap.high, "high");
+  assert.equal(model.thinkingLevelMap.xhigh, undefined);
+  assert.equal(model.thinkingLevelMap.max, "max");
 });
 
 test("DeepSeek OpenAI payload adapter injects thinking and reasoning_content", async () => {
@@ -954,6 +958,27 @@ test("provider payload finalization enables native web search for hosted search 
   );
   assert.deepEqual(anthropicPayload.tools, [
     { type: "web_search_20250305", name: "web_search" },
+  ]);
+
+  // Modern Anthropic models get the paired web_fetch server tool alongside
+  // web_search; legacy/unknown catalog entries (above) keep search-only.
+  const anthropicModernPayload = await anthropicOptions.onPayload(
+    { messages: [{ role: "user", content: "hello" }] },
+    {
+      api: "anthropic-messages",
+      provider: "anthropic",
+      id: "claude-sonnet-5",
+      compat: { forceAdaptiveThinking: true },
+    },
+  );
+  assert.deepEqual(anthropicModernPayload.tools, [
+    { type: "web_search_20260318", name: "web_search" },
+    {
+      type: "web_fetch_20260318",
+      name: "web_fetch",
+      max_uses: 10,
+      max_content_tokens: 50_000,
+    },
   ]);
 
   const geminiOptions = providers.finalizeProviderStreamOptions({

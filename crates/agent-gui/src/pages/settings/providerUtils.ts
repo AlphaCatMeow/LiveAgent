@@ -379,21 +379,6 @@ export function mergeFetchedModels(
   return merged;
 }
 
-export function sortModelsBySelection(
-  models: ProviderModelConfig[],
-  activeModels: ReadonlySet<string>,
-): ProviderModelConfig[] {
-  const selected: ProviderModelConfig[] = [];
-  const unselected: ProviderModelConfig[] = [];
-
-  for (const model of models) {
-    if (activeModels.has(model.id)) selected.push(model);
-    else unselected.push(model);
-  }
-
-  return [...selected, ...unselected];
-}
-
 export function getModelBulkActionCounts(
   selectedModels: ReadonlySet<string>,
   activeModels: ReadonlySet<string>,

@@ -2285,6 +2285,40 @@ test("chat page helpers keep model options stable and normalize status/title edg
   );
   assert.equal(chatHelpers.normalizeConversationTitle("  one two \n three  "), "one two three");
   assert.equal(chatHelpers.normalizeConversationTitle("one two three four five six seven eight nine ten eleven"), "one two three four five six seven eight nine ten");
+  // Rename box shares this normalizer: a long CJK title the user typed must survive intact.
+  assert.equal(
+    chatHelpers.normalizeConversationTitle("关于侧边栏会话标题生成逻辑的重构与国际化适配讨论记录第二版"),
+    "关于侧边栏会话标题生成逻辑的重构与国际化适配讨论记录第二版",
+  );
+  assert.equal(
+    chatHelpers.normalizeConversationTitle("Fix 中文 encoding in the parser module and add regression tests"),
+    "Fix 中文 encoding in the parser module and add regression",
+  );
+  // Generated titles additionally get a CJK character cap.
+  assert.equal(
+    chatHelpers.normalizeGeneratedConversationTitle("关于侧边栏会话标题生成逻辑的重构与国际化适配讨论记录第二版"),
+    "关于侧边栏会话标题生成逻辑的重构与国际化适配讨论",
+  );
+  // Latin-dominant titles keep the word cap even when they contain a CJK token.
+  assert.equal(
+    chatHelpers.normalizeGeneratedConversationTitle("Fix 中文 encoding in the parser module and add regression tests"),
+    "Fix 中文 encoding in the parser module and add regression",
+  );
+  assert.equal(
+    chatHelpers.normalizeGeneratedConversationTitle("one two three four five six seven eight nine ten eleven"),
+    "one two three four five six seven eight nine ten",
+  );
+  // The CJK cap counts code points, so an astral char at the boundary is not split in half.
+  const cappedAstralTitle = chatHelpers.normalizeGeneratedConversationTitle(
+    `${"中".repeat(23)}😀尾`,
+  );
+  assert.equal(cappedAstralTitle, `${"中".repeat(23)}😀`);
+  assert.equal(/[\uD800-\uDBFF]$/.test(cappedAstralTitle), false);
+  assert.equal(chatHelpers.normalizeGeneratedConversationTitle("  "), "");
+  assert.match(chatHelpers.buildConversationTitleSystemPrompt("zh-CN"), /简体中文/);
+  assert.match(chatHelpers.buildConversationTitleSystemPrompt("en-US"), /concise conversation titles/i);
+  assert.match(chatHelpers.buildConversationTitlePrompt("hello", "zh-CN"), /简体中文标题/);
+  assert.match(chatHelpers.buildConversationTitlePrompt("hello", "en-US"), /within 10 words/i);
   assert.equal(chatHelpers.buildFallbackConversationTitle("x".repeat(60)), `${"x".repeat(48)}...`);
   assert.equal(chatHelpers.normalizeLiveToolStatus("第 2 轮：模型生成中..."), chatHelpers.VIBING_STATUS);
   assert.equal(chatHelpers.normalizeLiveToolStatus("Running"), "Running");
@@ -2339,5 +2373,71 @@ test("chat page helpers keep same-name provider instances in separate model grou
         options: [{ value: "different-api::model-c", model: "model-c" }],
       },
     ],
+  );
+});
+
+test("shouldDisplayToolTraceItem hides provider-native web_fetch rows like web_search rows", () => {
+  const fetchCall = {
+    type: "toolCall",
+    id: "toolu_fetch",
+    name: "web_fetch",
+    arguments: { url: "https://example.com/article" },
+  };
+
+  // Bridged (non-executing endpoint) results carry the recovered marker.
+  assert.equal(
+    uiMessages.shouldDisplayToolTraceItem({
+      toolCall: fetchCall,
+      toolResult: {
+        role: "toolResult",
+        toolCallId: "toolu_fetch",
+        toolName: "web_fetch",
+        content: [{ type: "text", text: "This endpoint did not execute..." }],
+        details: { recoveredProviderNativeWebFetch: true },
+        isError: false,
+        timestamp: 0,
+      },
+    }),
+    false,
+  );
+
+  // History written before the bridge existed ("Tool web_fetch not found").
+  assert.equal(
+    uiMessages.shouldDisplayToolTraceItem({
+      toolCall: fetchCall,
+      toolResult: {
+        role: "toolResult",
+        toolCallId: "toolu_fetch",
+        toolName: "web_fetch",
+        content: [{ type: "text", text: "Tool web_fetch not found" }],
+        details: {},
+        isError: true,
+        timestamp: 0,
+      },
+    }),
+    false,
+  );
+
+  // Any web_fetch row disappears once the round has a hosted search card.
+  assert.equal(
+    uiMessages.shouldDisplayToolTraceItem({ toolCall: fetchCall }, { hasHostedSearch: true }),
+    false,
+  );
+
+  // A genuinely failed local tool with a different name keeps its row.
+  assert.equal(
+    uiMessages.shouldDisplayToolTraceItem({
+      toolCall: { type: "toolCall", id: "toolu_other", name: "Read", arguments: {} },
+      toolResult: {
+        role: "toolResult",
+        toolCallId: "toolu_other",
+        toolName: "Read",
+        content: [{ type: "text", text: "Tool Read not found" }],
+        details: {},
+        isError: true,
+        timestamp: 0,
+      },
+    }),
+    true,
   );
 });

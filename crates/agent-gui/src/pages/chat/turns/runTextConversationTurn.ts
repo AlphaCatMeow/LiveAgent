@@ -423,8 +423,8 @@ export async function runTextConversationTurn(params: RunTextConversationTurnPar
       runtime,
       selectedModel,
     };
-    // Fire-and-forget; the controller owns lifecycle/abort, detached from the
-    // chat request signal.
+    // Fire-and-forget; the controller owns lifecycle while the stable turn-level
+    // userStop signal still cancels extraction.
     void memoryExtraction.requestExtraction({
       primary: memoryExtractionModel ?? currentMemoryExtractionModel,
       fallback: memoryExtractionModel ? currentMemoryExtractionModel : undefined,
@@ -434,6 +434,7 @@ export async function runTextConversationTurn(params: RunTextConversationTurnPar
       workdir: conversationCwd,
       messages: buildPreparedContext(finalState).messages,
       statusText: memoryExtractionStatusText,
+      signal: cancellation.userStop.signal,
       debugLogger: conversationDebugLogger,
     });
   }

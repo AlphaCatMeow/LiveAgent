@@ -318,7 +318,15 @@ function getRawArgsDisplayText(toolCall: ToolTraceItem["toolCall"]) {
   return text;
 }
 
-function ToolCallItem({ item, isRunning }: { item: ToolTraceItem; isRunning?: boolean }) {
+function ToolCallItem({
+  item,
+  isRunning,
+  isAborted = false,
+}: {
+  item: ToolTraceItem;
+  isRunning?: boolean;
+  isAborted?: boolean;
+}) {
   const { t } = useLocale();
   const result = item.toolResult;
   const builtinResultKind = getBuiltinResultKind(result);
@@ -402,17 +410,20 @@ function ToolCallItem({ item, isRunning }: { item: ToolTraceItem; isRunning?: bo
         ? { name: t("chat.tool.askUserTitle"), action: "" }
         : getToolDisplayTitle(item.toolCall);
 
-  const statusLabel = isRunning
-    ? isAskUser
-      ? askQuestions.length > 0
-        ? t("chat.askUser.waiting")
-        : t("chat.askUser.preparing")
-      : t("chat.tool.running")
-    : result
-      ? result.isError
-        ? t("chat.tool.failed")
-        : t("chat.tool.success")
-      : t("chat.tool.waiting");
+  const statusLabel =
+    isTodo && hasIncompleteTodo && isAborted
+      ? t("chat.tool.aborted")
+      : isRunning
+        ? isAskUser
+          ? askQuestions.length > 0
+            ? t("chat.askUser.waiting")
+            : t("chat.askUser.preparing")
+          : t("chat.tool.running")
+        : result
+          ? result.isError
+            ? t("chat.tool.failed")
+            : t("chat.tool.success")
+          : t("chat.tool.waiting");
 
   const statusTextClass = result?.isError
     ? "text-[hsl(var(--chat-error))]"
@@ -632,5 +643,6 @@ export const MemoToolCallItem = memo(
   ToolCallItem,
   (previousProps, nextProps) =>
     previousProps.isRunning === nextProps.isRunning &&
+    previousProps.isAborted === nextProps.isAborted &&
     areToolTraceItemsEqual(previousProps.item, nextProps.item),
 );

@@ -1,3 +1,4 @@
+import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { type Dispatch, type SetStateAction, useEffect, useState } from "react";
 
@@ -18,6 +19,11 @@ export function useTauriFileDrop(params: UseTauriFileDropParams) {
   const [isFileDropActive, setIsFileDropActive] = useState(false);
 
   useEffect(() => {
+    // The Vite page can also be opened directly in a browser during
+    // development. Tauri's webview API expects runtime metadata that does not
+    // exist there, so native file-drop support must be a no-op on the web.
+    if (!isTauri()) return;
+
     let cancelled = false;
     let unlisten: (() => void) | null = null;
 
@@ -57,7 +63,7 @@ export function useTauriFileDrop(params: UseTauriFileDropParams) {
         unlisten();
       }
     };
-  }, [canDropUpload, fileDropTitle, importReadableFilePaths]);
+  }, [canDropUpload, fileDropTitle, importReadableFilePaths, setErrorMessage]);
 
   return { isFileDropActive };
 }

@@ -388,6 +388,10 @@ message TerminalRequest {
   bool sftp_enabled = 15;
   string tab_id = 16;
   string tab_kind = 17;
+  string remote_host = 18;
+  uint32 remote_port = 19;
+  uint32 local_port = 20;
+  string forward_id = 21;
 }
 
 message TerminalSession {
@@ -508,6 +512,33 @@ message TerminalSshTabsSnapshot {
   uint64 revision = 4;
 }
 
+message TerminalSshLocalForward {
+  string id = 1;
+  string session_id = 2;
+  string project_path_key = 3;
+  string local_host = 4;
+  uint32 local_port = 5;
+  string address = 6;
+  string remote_host = 7;
+  uint32 remote_port = 8;
+  string status = 9;
+  uint64 created_at = 10;
+  uint64 updated_at = 11;
+  string error = 12;
+}
+
+message TerminalSshLocalForwardsSnapshot {
+  repeated TerminalSshLocalForward forwards = 1;
+  uint64 revision = 2;
+}
+
+message TerminalSshLocalForwardAction {
+  TerminalSshLocalForward forward = 1;
+  uint64 revision = 2;
+  // Only set on events: started | stopped | failed.
+  string kind = 3;
+}
+
 message TerminalResponse {
   string action = 1;
   repeated TerminalSession sessions = 2;
@@ -521,6 +552,9 @@ message TerminalResponse {
   TerminalSshPrompt ssh_prompt = 10;
   uint32 latency_ms = 11;
   TerminalSshTabsSnapshot ssh_tabs = 12;
+  TerminalSshLocalForwardsSnapshot ssh_local_forwards = 13;
+  TerminalSshLocalForwardAction ssh_local_forward = 14;
+  bool ssh_local_forward_port_available = 15;
 }
 
 message TerminalEvent {
@@ -532,6 +566,7 @@ message TerminalEvent {
   uint64 output_start_offset = 6;
   uint64 output_end_offset = 7;
   TerminalSshTabsSnapshot ssh_tabs = 8;
+  TerminalSshLocalForwardAction ssh_local_forward = 9;
 }
 
 message TerminalStreamFrame {

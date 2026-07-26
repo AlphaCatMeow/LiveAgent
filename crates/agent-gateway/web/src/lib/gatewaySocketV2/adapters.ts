@@ -20,6 +20,9 @@ import type {
   TerminalEvent,
   TerminalResponse,
   TerminalSession,
+  TerminalSshLocalForward,
+  TerminalSshLocalForwardAction,
+  TerminalSshLocalForwardsSnapshot,
   TerminalSshTabsSnapshot,
   TerminalStreamFrame,
   TunnelHealth,
@@ -402,6 +405,10 @@ function agentRequestPayload(type: string, body: J): GatewayEnvelope["payload"] 
         sftpEnabled: bool(body.sftp_enabled),
         tabId: trimStr(body.tab_id),
         tabKind: trimStr(body.tab_kind),
+        remoteHost: trimStr(body.remote_host),
+        remotePort: n32(body.remote_port),
+        localPort: n32(body.local_port),
+        forwardId: trimStr(body.forward_id),
       }),
     };
   }
@@ -1437,6 +1444,47 @@ function terminalSshTabsPayload(snapshot: TerminalSshTabsSnapshot | undefined): 
   };
 }
 
+function terminalSshLocalForwardPayload(forward: TerminalSshLocalForward | undefined): J | null {
+  if (!forward) return null;
+  const payload: J = {
+    id: forward.id.trim(),
+    session_id: forward.sessionId.trim(),
+    project_path_key: forward.projectPathKey.trim(),
+    local_host: forward.localHost.trim(),
+    local_port: forward.localPort,
+    address: forward.address.trim(),
+    remote_host: forward.remoteHost.trim(),
+    remote_port: forward.remotePort,
+    status: forward.status.trim(),
+    created_at: num(forward.createdAt),
+    updated_at: num(forward.updatedAt),
+  };
+  if (forward.error.trim()) payload.error = forward.error.trim();
+  return payload;
+}
+
+function terminalSshLocalForwardsPayload(
+  snapshot: TerminalSshLocalForwardsSnapshot | undefined,
+): J | null {
+  if (!snapshot) return null;
+  const forwards: J[] = [];
+  for (const forward of snapshot.forwards) {
+    const payload = terminalSshLocalForwardPayload(forward);
+    if (payload) forwards.push(payload);
+  }
+  return { forwards, revision: num(snapshot.revision) };
+}
+
+function terminalSshLocalForwardActionPayload(
+  action: TerminalSshLocalForwardAction | undefined,
+): J | null {
+  const forward = terminalSshLocalForwardPayload(action?.forward);
+  if (!action || !forward) return null;
+  const payload: J = { forward, revision: num(action.revision) };
+  if (action.kind.trim()) payload.kind = action.kind.trim();
+  return payload;
+}
+
 function terminalResponsePayload(resp: TerminalResponse): J {
   const sessions: J[] = [];
   for (const session of resp.sessions) {
@@ -1483,6 +1531,13 @@ function terminalResponsePayload(resp: TerminalResponse): J {
   }
   const sshTabs = terminalSshTabsPayload(resp.sshTabs);
   if (sshTabs) payload.ssh_tabs = sshTabs;
+  const sshLocalForwards = terminalSshLocalForwardsPayload(resp.sshLocalForwards);
+  if (sshLocalForwards) payload.ssh_local_forwards = sshLocalForwards;
+  const sshLocalForward = terminalSshLocalForwardActionPayload(resp.sshLocalForward);
+  if (sshLocalForward) payload.ssh_local_forward = sshLocalForward;
+  if (resp.action.trim() === "ssh_local_forward_check_port") {
+    payload.ssh_local_forward_port_available = resp.sshLocalForwardPortAvailable;
+  }
   return payload;
 }
 
@@ -1508,6 +1563,8 @@ function terminalEventPayload(event: TerminalEvent): J {
   if (session) payload.session = session;
   const sshTabs = terminalSshTabsPayload(event.sshTabs);
   if (sshTabs) payload.ssh_tabs = sshTabs;
+  const sshLocalForward = terminalSshLocalForwardActionPayload(event.sshLocalForward);
+  if (sshLocalForward) payload.ssh_local_forward = sshLocalForward;
   return payload;
 }
 

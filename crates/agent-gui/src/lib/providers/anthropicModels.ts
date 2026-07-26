@@ -1,6 +1,7 @@
 import type { Model } from "@earendil-works/pi-ai";
 import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import { findCatalogModel, normalizeModelIdCandidates } from "../models/modelCatalog";
+import { anthropicModelSupportsXHigh, isAnthropicAdaptiveModelId } from "../models/modelThinking";
 
 // ---------------------------------------------------------------------------
 // Anthropic 1M 长上下文窗口策略（请求行为，单一真源）
@@ -42,45 +43,9 @@ export function hasAnthropicLongContextSuffix(modelId: string): boolean {
   return /\[1m\]$/i.test(modelId.trim());
 }
 
-function isClaudeFamilyVersionAtLeast(
-  normalizedModelId: string,
-  family: "opus" | "sonnet",
-  minimumMinor: number,
-) {
-  const match = normalizedModelId.match(
-    new RegExp(`(?:${family}[-.]4[-.](\\d{1,2})(?!\\d)|4[-.](\\d{1,2})(?!\\d)[-.]${family})`),
-  );
-  if (!match) return false;
-  const minor = Number(match[1] ?? match[2]);
-  return Number.isFinite(minor) && minor >= minimumMinor;
-}
-
-function isClaudeFamilyMajorVersionAtLeast(normalizedModelId: string, minimumMajor: number) {
-  const match = normalizedModelId.match(
-    /(?:(?:opus|sonnet|haiku|fable|mythos)[-.](\d{1,2})(?!\d)|(?<!\d[-.])(\d{1,2})[-.](?:opus|sonnet|haiku|fable|mythos))/,
-  );
-  if (!match) return false;
-  const major = Number(match[1] ?? match[2]);
-  return Number.isFinite(major) && major >= minimumMajor;
-}
-
-export function isAnthropicAdaptiveModelId(modelId: string): boolean {
-  const normalizedModelId = modelId.trim().toLowerCase();
-  return (
-    normalizedModelId.includes("mythos-preview") ||
-    isClaudeFamilyVersionAtLeast(normalizedModelId, "opus", 6) ||
-    isClaudeFamilyVersionAtLeast(normalizedModelId, "sonnet", 6) ||
-    isClaudeFamilyMajorVersionAtLeast(normalizedModelId, 5)
-  );
-}
-
-export function anthropicModelSupportsXHigh(modelId: string): boolean {
-  const normalizedModelId = modelId.trim().toLowerCase();
-  return (
-    isClaudeFamilyVersionAtLeast(normalizedModelId, "opus", 7) ||
-    isClaudeFamilyMajorVersionAtLeast(normalizedModelId, 5)
-  );
-}
+// 世代启发式的唯一实现在镜像模块 lib/models/modelThinking（web 端同源）；
+// 此处 re-export 供限额/1M 路径的既有消费者使用。
+export { anthropicModelSupportsXHigh, isAnthropicAdaptiveModelId };
 
 function getAnthropicEndpointHost(baseUrl: string | undefined): string | undefined {
   if (!baseUrl?.trim()) return undefined;

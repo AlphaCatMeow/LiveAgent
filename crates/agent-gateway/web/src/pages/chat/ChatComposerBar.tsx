@@ -151,10 +151,21 @@ function PendingComposerAttachment(props: {
   workdir: string;
   disabled: boolean;
   removeLabel: string;
+  previewLabel: string;
+  closePreviewLabel: string;
   imagePreviewLoader?: UploadedImagePreviewLoader;
   onRemove: (relativePath: string) => void;
 }) {
-  const { file, workdir, disabled, removeLabel, imagePreviewLoader, onRemove } = props;
+  const {
+    file,
+    workdir,
+    disabled,
+    removeLabel,
+    previewLabel,
+    closePreviewLabel,
+    imagePreviewLoader,
+    onRemove,
+  } = props;
   const { imageSrc, isLoading } = useComposerUploadedImagePreview(
     file,
     workdir,
@@ -171,6 +182,8 @@ function PendingComposerAttachment(props: {
       fallbackIcon={<TypeIcon className="h-4 w-4" />}
       disabled={disabled}
       removeLabel={removeLabel}
+      previewLabel={previewLabel}
+      closePreviewLabel={closePreviewLabel}
       onRemove={() => onRemove(file.relativePath)}
     />
   );
@@ -277,6 +290,8 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
   const [isComposerExpanded, setIsComposerExpanded] = useState(false);
   const isComposerExpandedRef = useRef(false);
   const glassCardRef = useRef<HTMLDivElement | null>(null);
+  const attachmentListRef = useRef<HTMLDivElement | null>(null);
+  const previousPendingUploadCountRef = useRef(0);
   /** 切换瞬间记录的卡片旧高度，供 FLIP 动画用；消费后立即置空。 */
   const expandFromHeightRef = useRef<number | null>(null);
   const expandAnimationRef = useRef<Animation | null>(null);
@@ -298,7 +313,9 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
   const uploadDisabled = isInputDisabled || isUploadingFiles || !isAgentMode || !workdir;
   const controlsDisabled = isInputDisabled;
   const hasSendableDraft = !composerIsEmpty || pendingUploadedFiles.length > 0;
-  const thinkingSupported = reasoningOptions.length > 0;
+  // 档位为空但恒开（deepseek-reasoner 型"恒开不可调"）也算支持思考——
+  // 亮灯但开关与档位均不可操作；两者皆无才是真不支持。
+  const thinkingSupported = reasoningOptions.length > 0 || thinkingAlwaysOn;
   const sendDisabled = isInputDisabled || isUploadingFiles || !hasSendableDraft;
   const canQueueDraftWhileSending = isSending && !sendDisabled;
   const primaryActionTitle = canQueueDraftWhileSending
@@ -306,9 +323,13 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
     : isSending
       ? t("chat.stopGeneration")
       : t("chat.sendMessage");
+  // controls 已经过 normalizeChatRuntimeControlsForProvider 钳制；这里兜底
+  // 取表内最高档，绝不给 Select 喂表外值。
   const selectedReasoning = reasoningOptions.includes(chatRuntimeControls.reasoning)
     ? chatRuntimeControls.reasoning
-    : DEFAULT_CHAT_RUNTIME_CONTROLS.reasoning;
+    : reasoningOptions.includes(DEFAULT_CHAT_RUNTIME_CONTROLS.reasoning)
+      ? DEFAULT_CHAT_RUNTIME_CONTROLS.reasoning
+      : (reasoningOptions[reasoningOptions.length - 1] ?? DEFAULT_CHAT_RUNTIME_CONTROLS.reasoning);
   const uploadTooltip = isUploadingFiles
     ? t("chat.upload.uploading")
     : !isAgentMode
@@ -328,6 +349,15 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
   const toggleQueueCollapsed = useCallback(() => {
     setQueueCollapsed((current) => !current);
   }, []);
+
+  useLayoutEffect(() => {
+    const previousCount = previousPendingUploadCountRef.current;
+    previousPendingUploadCountRef.current = pendingUploadedFiles.length;
+    if (pendingUploadedFiles.length <= previousCount) return;
+
+    const attachmentList = attachmentListRef.current;
+    if (attachmentList) attachmentList.scrollLeft = attachmentList.scrollWidth;
+  }, [pendingUploadedFiles.length]);
 
   // ref 与 state 同步更新：高度上报的 RO 回调可能先于 effect 执行，
   // 必须在布局变化前就能读到最新展开态。切换前记录卡片当前高度，
@@ -773,7 +803,10 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
           />
 
           {pendingUploadedFiles.length > 0 ? (
-            <div className="upload-file-list relative z-10 flex shrink-0 gap-2 overflow-x-auto pb-1 pl-4 pr-12 pt-3.5">
+            <div
+              ref={attachmentListRef}
+              className="upload-file-list relative z-10 flex shrink-0 items-center gap-1.5 overflow-x-auto overflow-y-hidden pb-1 pl-4 pr-12 pt-2"
+            >
               {pendingUploadedFiles.map((file) => (
                 <PendingComposerAttachment
                   key={`${file.relativePath}-${file.absolutePath ?? file.fileName}`}
@@ -781,6 +814,8 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
                   workdir={workdir}
                   disabled={isInputDisabled}
                   removeLabel={t("chat.upload.removeFile")}
+                  previewLabel={t("chat.upload.previewImage")}
+                  closePreviewLabel={t("chat.upload.closePreview")}
                   imagePreviewLoader={onLoadUploadedImagePreview}
                   onRemove={onRemovePendingUpload}
                 />
@@ -809,7 +844,7 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
           <div
             className={cn(
               "relative flex flex-1 px-4",
-              pendingUploadedFiles.length > 0 ? "pt-2" : "pt-3.5",
+              pendingUploadedFiles.length > 0 ? "pt-1.5" : "pt-3.5",
               isComposerExpanded && "min-h-0",
             )}
             onFocusCapture={onPrepareChatRuntime}
@@ -932,7 +967,7 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
                 </button>
               </RuntimeControlTooltip>
 
-              {reasoningOptions.length > 0 ? (
+              {reasoningOptions.length > 1 ? (
                 <div
                   aria-hidden={!chatRuntimeControls.thinkingEnabled}
                   className={cn(

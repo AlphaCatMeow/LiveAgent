@@ -1,5 +1,6 @@
 import {
   type AppSettings,
+  DEFAULT_CHAT_TRANSCRIPT_WIDTH,
   getDefaultSystemProxyConfig,
   normalizeChatRuntimeControls,
   normalizeRightDockSettings,
@@ -440,11 +441,12 @@ function syncableCustomSettings(
       projectsCollapsed: false,
       recentCollapsed: false,
     },
-    // Typography and scale are local UI preferences; fixed defaults prevent
-    // visual preferences from being broadcast through the gateway.
+    // Typography, scale, and transcript width are local UI preferences; fixed
+    // defaults prevent visual preferences from being broadcast through the gateway.
     interfaceFontFamily: "",
     chatFontFamily: "",
     codeFontFamily: "",
+    chatTranscript: { width: DEFAULT_CHAT_TRANSCRIPT_WIDTH },
     fontScale: { sidebar: 1, chat: 1, rightDock: 1 },
   };
 }
@@ -1169,10 +1171,11 @@ export function applyGatewaySettingsSyncPayload(
           )
         : current.customSettings.rightDock,
       chatSidebar: current.customSettings.chatSidebar,
-      // Typography and scale are local UI preferences, never gateway-synced.
+      // Typography, scale, and transcript width are local UI preferences, never gateway-synced.
       interfaceFontFamily: current.customSettings.interfaceFontFamily,
       chatFontFamily: current.customSettings.chatFontFamily,
       codeFontFamily: current.customSettings.codeFontFamily,
+      chatTranscript: current.customSettings.chatTranscript,
       fontScale: current.customSettings.fontScale,
     },
     skills: (source.skills as AppSettings["skills"] | undefined) ?? current.skills,

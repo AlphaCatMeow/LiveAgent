@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    net::{IpAddr, SocketAddr},
     sync::Mutex,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -23,7 +22,7 @@ const MAX_HEADERS: usize = 64;
 const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_ENTRIES: usize = 16;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
-const DNS_TIMEOUT: Duration = Duration::from_secs(5);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const SCRIPT_TIMEOUT: Duration = Duration::from_millis(100);
 
 const GENERAL_SCRIPT: &str = r#"({
@@ -216,7 +215,6 @@ struct UsageQueryConfig {
     user_id: String,
     access_key_id: String,
     secret_access_key: String,
-    allow_local_network: bool,
 }
 
 fn provider_query_identity(provider: &StoredProvider) -> ProviderQueryIdentity {
@@ -236,10 +234,7 @@ fn provider_query_identity(provider: &StoredProvider) -> ProviderQueryIdentity {
         digest.update((value.len() as u64).to_be_bytes());
         digest.update(value.as_bytes());
     }
-    digest.update([
-        provider.usage_query.enabled as u8,
-        provider.usage_query.allow_local_network as u8,
-    ]);
+    digest.update([provider.usage_query.enabled as u8]);
     digest.finalize().into()
 }
 
@@ -286,7 +281,6 @@ struct PreparedRequest {
 struct PreparedQuery {
     primary: PreparedRequest,
     fallback: Option<PreparedRequest>,
-    allow_local_network: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -374,16 +368,9 @@ fn prepare_script_query(
     };
     let request = evaluate_script_request(script, &variables)?;
     let url = if same_origin {
-        validate_standard_destination(
-            request.url.as_str(),
-            base_url,
-            provider.usage_query.allow_local_network,
-        )?
+        validate_standard_destination(request.url.as_str(), base_url)?
     } else {
-        validate_destination(
-            request.url.as_str(),
-            provider.usage_query.allow_local_network,
-        )?
+        validate_destination(request.url.as_str())?
     };
     let request = HttpRequest { url, ..request };
     Ok(PreparedQuery {
@@ -393,7 +380,6 @@ fn prepare_script_query(
             script: Some((script.to_string(), variables)),
         },
         fallback: None,
-        allow_local_network: provider.usage_query.allow_local_network,
     })
 }
 
@@ -401,7 +387,7 @@ fn prepare_balance_query(provider: &StoredProvider) -> Result<PreparedQuery, Str
     if provider.api_key.trim().is_empty() {
         return Err("Provider API key is not configured".to_string());
     }
-    let base = validate_destination(&provider.base_url, provider.usage_query.allow_local_network)?;
+    let base = validate_destination(&provider.base_url)?;
     if base.scheme() != "https" {
         return Err("Built-in usage adapters require HTTPS".to_string());
     }
@@ -434,15 +420,11 @@ fn prepare_balance_query(provider: &StoredProvider) -> Result<PreparedQuery, Str
         _ => return Err("No balance adapter matches this provider".to_string()),
     };
     let request = bearer_request(endpoint, &provider.api_key)?;
-    Ok(single_request_query(
-        request,
-        adapter,
-        provider.usage_query.allow_local_network,
-    ))
+    Ok(single_request_query(request, adapter))
 }
 
 fn prepare_coding_plan_query(provider: &StoredProvider) -> Result<PreparedQuery, String> {
-    let base = validate_destination(&provider.base_url, provider.usage_query.allow_local_network)?;
+    let base = validate_destination(&provider.base_url)?;
     if base.scheme() != "https" {
         return Err("Built-in usage adapters require HTTPS".to_string());
     }
@@ -479,7 +461,6 @@ fn prepare_coding_plan_query(provider: &StoredProvider) -> Result<PreparedQuery,
                 adapter: ProviderAdapter::VolcengineCoding,
                 script: None,
             }),
-            allow_local_network: provider.usage_query.allow_local_network,
         });
     }
     if provider.api_key.trim().is_empty() {
@@ -525,18 +506,10 @@ fn prepare_coding_plan_query(provider: &StoredProvider) -> Result<PreparedQuery,
         ),
         _ => return Err("No Coding Plan adapter matches this provider".to_string()),
     };
-    Ok(single_request_query(
-        request,
-        adapter,
-        provider.usage_query.allow_local_network,
-    ))
+    Ok(single_request_query(request, adapter))
 }
 
-fn single_request_query(
-    request: HttpRequest,
-    adapter: ProviderAdapter,
-    allow_local_network: bool,
-) -> PreparedQuery {
+fn single_request_query(request: HttpRequest, adapter: ProviderAdapter) -> PreparedQuery {
     PreparedQuery {
         primary: PreparedRequest {
             request,
@@ -544,7 +517,6 @@ fn single_request_query(
             script: None,
         },
         fallback: None,
-        allow_local_network,
     }
 }
 
@@ -564,16 +536,9 @@ fn raw_authorization_request(url: &str, authorization: &str) -> Result<HttpReque
     })
 }
 
-fn validate_standard_destination(
-    request_url: &str,
-    base_url: &str,
-    allow_local_network: bool,
-) -> Result<Url, String> {
-    let request = validate_destination(request_url, allow_local_network)?;
-    let base = validate_destination(base_url, allow_local_network)?;
-    if request.scheme() != "https" || base.scheme() != "https" {
-        return Err("Standard usage templates require HTTPS".to_string());
-    }
+fn validate_standard_destination(request_url: &str, base_url: &str) -> Result<Url, String> {
+    let request = validate_destination(request_url)?;
+    let base = validate_destination(base_url)?;
     if request.scheme() != base.scheme()
         || request.host_str() != base.host_str()
         || request.port_or_known_default() != base.port_or_known_default()
@@ -583,71 +548,25 @@ fn validate_standard_destination(
     Ok(request)
 }
 
-fn validate_destination(raw: &str, allow_local_network: bool) -> Result<Url, String> {
+fn validate_destination(raw: &str) -> Result<Url, String> {
     let url = Url::parse(raw.trim()).map_err(|_| "Usage query URL is invalid".to_string())?;
     if !url.username().is_empty() || url.password().is_some() {
         return Err("Usage query URLs cannot contain credentials".to_string());
     }
-    let host = url
-        .host_str()
-        .ok_or_else(|| "Usage query URL has no host".to_string())?;
-    if url.scheme() != "https" && !(allow_local_network && url.scheme() == "http") {
-        return Err("Usage query URL must use HTTPS".to_string());
+    if url.host_str().is_none() {
+        return Err("Usage query URL has no host".to_string());
     }
-    let normalized_host = host.trim_end_matches('.').to_ascii_lowercase();
-    if matches!(
-        normalized_host.as_str(),
-        "metadata.google.internal" | "metadata" | "instance-data.ec2.internal"
-    ) {
-        return Err("Usage query destination is blocked".to_string());
-    }
-    if !allow_local_network {
-        if let Some(address) = parse_ip_host(host) {
-            if is_disallowed_address(address) {
-                return Err("Usage query destination is blocked".to_string());
-            }
-        }
+    if url.scheme() != "https" && url.scheme() != "http" {
+        return Err("Usage query URL must use HTTP(S)".to_string());
     }
     Ok(url)
 }
 
-fn is_disallowed_address(address: IpAddr) -> bool {
-    match address {
-        IpAddr::V4(address) => {
-            let octets = address.octets();
-            address.is_private()
-                || address.is_loopback()
-                || address.is_link_local()
-                || address.is_unspecified()
-                || address.is_broadcast()
-                || address.is_multicast()
-                || (octets[0] == 100 && (64..=127).contains(&octets[1]))
-        }
-        IpAddr::V6(address) => {
-            address.is_loopback()
-                || address.is_unspecified()
-                || address.is_unique_local()
-                || address.is_unicast_link_local()
-                || address.is_multicast()
-                || address
-                    .to_ipv4_mapped()
-                    .is_some_and(|mapped| is_disallowed_address(IpAddr::V4(mapped)))
-        }
-    }
-}
-
-fn parse_ip_host(host: &str) -> Option<IpAddr> {
-    host.trim_start_matches('[')
-        .trim_end_matches(']')
-        .parse()
-        .ok()
-}
-
 async fn execute_prepared_query(query: &PreparedQuery) -> Result<Vec<ProviderUsageEntry>, String> {
-    match execute_prepared_request(&query.primary, query.allow_local_network).await {
+    match execute_prepared_request(&query.primary).await {
         Ok(primary) if !primary.is_empty() => Ok(primary),
         Ok(primary) => match &query.fallback {
-            Some(fallback) => execute_prepared_request(fallback, query.allow_local_network)
+            Some(fallback) => execute_prepared_request(fallback)
                 .await
                 .map_err(|failure| failure.message),
             None => Ok(primary),
@@ -655,7 +574,7 @@ async fn execute_prepared_query(query: &PreparedQuery) -> Result<Vec<ProviderUsa
         Err(failure) => {
             if should_try_fallback(failure.kind) {
                 if let Some(fallback) = &query.fallback {
-                    return execute_prepared_request(fallback, query.allow_local_network)
+                    return execute_prepared_request(fallback)
                         .await
                         .map_err(|failure| failure.message);
                 }
@@ -671,9 +590,8 @@ fn should_try_fallback(kind: QueryFailureKind) -> bool {
 
 async fn execute_prepared_request(
     prepared: &PreparedRequest,
-    allow_local_network: bool,
 ) -> Result<Vec<ProviderUsageEntry>, QueryFailure> {
-    let response = send_bounded_request(&prepared.request, allow_local_network).await?;
+    let response = send_bounded_request(&prepared.request).await?;
     let body = serde_json::from_slice::<Value>(&response.body).ok();
     let volcengine = matches!(
         prepared.adapter,
@@ -748,23 +666,14 @@ fn classify_volcengine_error(body: &Value) -> Option<QueryFailureKind> {
     })
 }
 
-async fn send_bounded_request(
-    request: &HttpRequest,
-    allow_local_network: bool,
-) -> Result<HttpResponse, QueryFailure> {
-    let host = request
-        .url
-        .host_str()
-        .ok_or_else(|| QueryFailure::new(QueryFailureKind::Soft, "Usage query URL has no host"))?;
-    let addresses = resolve_destination(&request.url, allow_local_network)
-        .await
-        .map_err(|message| QueryFailure::new(QueryFailureKind::Transient, message))?;
-    let client = reqwest::Client::builder()
-        .no_proxy()
+async fn send_bounded_request(request: &HttpRequest) -> Result<HttpResponse, QueryFailure> {
+    // 出网统一走应用代理配置(显式 no_proxy 语义,代理未启用即直连);本地
+    // 与公网地址均默认放行,代理配置无效时 fail fast。
+    let client = crate::services::system_proxy::async_client_builder()
+        .map_err(|message| QueryFailure::new(QueryFailureKind::Transient, message))?
         .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(DNS_TIMEOUT)
+        .connect_timeout(CONNECT_TIMEOUT)
         .timeout(REQUEST_TIMEOUT)
-        .resolve_to_addrs(host, &addresses)
         .build()
         .map_err(|_| {
             QueryFailure::new(
@@ -788,40 +697,6 @@ async fn send_bounded_request(
         .await
         .map_err(|message| QueryFailure::new(QueryFailureKind::Transient, message))?;
     Ok(HttpResponse { status, body })
-}
-
-async fn resolve_destination(
-    url: &Url,
-    allow_local_network: bool,
-) -> Result<Vec<SocketAddr>, String> {
-    let host = url
-        .host_str()
-        .ok_or_else(|| "Usage query URL has no host".to_string())?;
-    let port = url
-        .port_or_known_default()
-        .ok_or_else(|| "Usage query URL has no port".to_string())?;
-    let mut addresses = if let Some(address) = parse_ip_host(host) {
-        vec![SocketAddr::new(address, port)]
-    } else {
-        tokio::time::timeout(DNS_TIMEOUT, tokio::net::lookup_host((host, port)))
-            .await
-            .map_err(|_| "Usage query DNS resolution timed out".to_string())?
-            .map_err(|_| "Usage query DNS resolution failed".to_string())?
-            .collect::<Vec<_>>()
-    };
-    addresses.sort_unstable();
-    addresses.dedup();
-    if addresses.is_empty() {
-        return Err("Usage query DNS resolution returned no addresses".to_string());
-    }
-    if !allow_local_network
-        && addresses
-            .iter()
-            .any(|address| is_disallowed_address(address.ip()))
-    {
-        return Err("Usage query destination is blocked".to_string());
-    }
-    Ok(addresses)
 }
 
 async fn read_limited_response(response: reqwest::Response) -> Result<Vec<u8>, String> {
@@ -1460,47 +1335,20 @@ fn now_millis() -> i64 {
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     #[test]
-    fn destination_policy_rejects_credentials_and_private_addresses() {
-        assert!(validate_destination("https://user:pass@example.test", false).is_err());
-        assert!(validate_destination("https://169.254.169.254/latest", false).is_err());
-        assert!(validate_destination("https://127.0.0.1", false).is_err());
-        assert!(validate_destination("https://[::1]", false).is_err());
-        assert!(validate_destination("https://100.64.0.1", false).is_err());
-        assert!(validate_destination("https://metadata.google.internal", false).is_err());
-        assert!(validate_destination("https://api.example.test", false).is_ok());
-        assert!(validate_destination("http://127.0.0.1:8080", true).is_ok());
-    }
-
-    #[test]
-    fn resolved_address_policy_covers_ipv4_and_ipv6_local_ranges() {
-        for address in [
-            IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
-            IpAddr::V4(Ipv4Addr::new(172, 16, 0, 1)),
-            IpAddr::V4(Ipv4Addr::new(192, 168, 0, 1)),
-            IpAddr::V4(Ipv4Addr::new(100, 127, 255, 254)),
-            IpAddr::V6(Ipv6Addr::LOCALHOST),
-            "fd00::1".parse().unwrap(),
-            "fe80::1".parse().unwrap(),
-        ] {
-            assert!(
-                is_disallowed_address(address),
-                "address should be blocked: {address}"
-            );
-        }
-        assert!(!is_disallowed_address("8.8.8.8".parse().unwrap()));
-        assert!(!is_disallowed_address(
-            "2606:4700:4700::1111".parse().unwrap()
-        ));
-    }
-
-    #[tokio::test]
-    async fn dns_resolution_rejects_localhost_without_opt_in() {
-        let url = Url::parse("https://localhost").expect("localhost URL");
-        assert!(resolve_destination(&url, false).await.is_err());
+    fn destination_policy_rejects_credentials_and_non_http_schemes() {
+        assert!(validate_destination("https://user:pass@example.test").is_err());
+        assert!(validate_destination("ftp://example.test").is_err());
+        assert!(validate_destination("file:///etc/passwd").is_err());
+        assert!(validate_destination("not a url").is_err());
+        assert!(validate_destination("https://api.example.test").is_ok());
+        // 本地/私网地址与 http 默认放行(经应用代理配置出网)。
+        assert!(validate_destination("http://127.0.0.1:8080").is_ok());
+        assert!(validate_destination("https://[::1]").is_ok());
+        assert!(validate_destination("http://192.168.1.10:3000").is_ok());
+        assert!(validate_destination("https://169.254.169.254/latest").is_ok());
     }
 
     #[tokio::test]
@@ -1518,7 +1366,7 @@ mod tests {
             body: None,
         };
 
-        let response = send_bounded_request(&request, true)
+        let response = send_bounded_request(&request)
             .await
             .expect("redirect response");
         assert_eq!(response.status, reqwest::StatusCode::FOUND);
@@ -1541,7 +1389,7 @@ mod tests {
             body: None,
         };
 
-        let failure = send_bounded_request(&request, true)
+        let failure = send_bounded_request(&request)
             .await
             .expect_err("oversized response must fail");
         assert_eq!(failure.kind, QueryFailureKind::Transient);
@@ -1550,23 +1398,26 @@ mod tests {
     }
 
     #[test]
-    fn standard_templates_require_https_and_same_origin() {
+    fn standard_templates_require_same_origin() {
         assert!(validate_standard_destination(
             "https://api.example.test/user/balance",
             "https://api.example.test/v1",
-            false,
+        )
+        .is_ok());
+        // 本地 http 端点(如自建 NewAPI)默认放行,但仍要求与 Base URL 同源。
+        assert!(validate_standard_destination(
+            "http://127.0.0.1:3000/user/balance",
+            "http://127.0.0.1:3000/v1",
         )
         .is_ok());
         assert!(validate_standard_destination(
             "https://other.example.test/user/balance",
             "https://api.example.test/v1",
-            false,
         )
         .is_err());
         assert!(validate_standard_destination(
             "http://api.example.test/user/balance",
             "https://api.example.test/v1",
-            true,
         )
         .is_err());
     }
@@ -2104,7 +1955,6 @@ mod tests {
                     String::new()
                 },
                 script: String::new(),
-                allow_local_network: false,
             },
         }
     }

@@ -21,7 +21,6 @@ export type UsageQueryProvider = {
   id: string;
   usageQuery?: {
     enabled?: boolean;
-    autoRefreshMinutes?: number;
   };
 };
 
@@ -44,6 +43,9 @@ export type UsageQuery = (
 ) => Promise<ProviderUsageResult | null>;
 
 type UsageRequestSource = "timer" | "other";
+
+// 自动刷新固定 5 分钟:仅对当前选中模型所属、已启用用量查询的供应商生效。
+export const AUTO_REFRESH_INTERVAL_MS = 5 * 60_000;
 
 export function reduceUsageState(
   state: ProviderUsageState,
@@ -73,8 +75,7 @@ export function getAutoRefreshProvider<T extends UsageQueryProvider>(
 ): T | null {
   if (!selectedModel) return null;
   const provider = providers.find((item) => item.id === selectedModel.customProviderId);
-  const autoRefreshMinutes = provider?.usageQuery?.autoRefreshMinutes ?? 0;
-  if (!provider?.usageQuery?.enabled || autoRefreshMinutes <= 0) return null;
+  if (!provider?.usageQuery?.enabled) return null;
   return provider;
 }
 
@@ -90,7 +91,7 @@ export function getUsageRefreshPlan<T extends UsageQueryProvider>(
     timer: autoRefreshProvider
       ? {
           providerId: autoRefreshProvider.id,
-          intervalMs: (autoRefreshProvider.usageQuery?.autoRefreshMinutes ?? 0) * 60_000,
+          intervalMs: AUTO_REFRESH_INTERVAL_MS,
         }
       : null,
   };
@@ -263,5 +264,12 @@ export function useProviderUsageWithQuery(
     [coordinator],
   );
 
-  return { ...snapshot, refreshProvider };
+  // 命中桌面端缓存的补水入口:模态框内测试已实刷后,供应商卡片用它同步
+  // 展示结果而不再重复打一次上游。
+  const hydrateProvider = useCallback(
+    (providerId: string) => coordinator.request(providerId, false),
+    [coordinator],
+  );
+
+  return { ...snapshot, refreshProvider, hydrateProvider };
 }

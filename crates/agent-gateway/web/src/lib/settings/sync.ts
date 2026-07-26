@@ -110,8 +110,6 @@ const DEFAULT_USAGE_QUERY_CONFIG: AppSettings["customProviders"][number]["usageQ
   accessKeyId: "",
   secretAccessKey: "",
   secretAccessKeyConfigured: false,
-  autoRefreshMinutes: 0,
-  allowLocalNetwork: false,
 };
 
 function usageQueryConfig(

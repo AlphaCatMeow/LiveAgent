@@ -65,7 +65,9 @@ import {
 } from "../../lib/providers/modelVendor";
 import {
   getProviderUsageCardDisplay,
+  type ProviderUsageEntry,
   type ProviderUsageState,
+  queryProviderUsage,
   useProviderUsage,
 } from "../../lib/providers/usageQuery";
 import {
@@ -353,6 +355,12 @@ function ProviderModal({ providerType, initialData, onSave, onTestUsage, onClose
   const canFetchModels = baseUrl.trim().length > 0 && apiKeyForRequest.length > 0;
   const persistedUsageQueryProviderId = getPersistedUsageQueryProviderId(initialData);
   const { confirm: requestUsageQueryConfirm, dialog: usageQueryConfirmDialog } = useConfirmDialog();
+  const [usageQueryTest, setUsageQueryTest] = useState<{
+    status: "idle" | "running" | "success" | "error";
+    entries: ProviderUsageEntry[];
+    error: string | null;
+  }>({ status: "idle", entries: [], error: null });
+  const usageQueryTestSeqRef = useRef(0);
 
   const doFetch = useCallback(
     async (url: string, key: string) => {
@@ -756,8 +764,28 @@ function ProviderModal({ providerType, initialData, onSave, onTestUsage, onClose
     });
   }
 
-  function handleTestUsageQuery() {
-    if (persistedUsageQueryProviderId) onTestUsage?.(persistedUsageQueryProviderId);
+  async function handleTestUsageQuery() {
+    if (!persistedUsageQueryProviderId) return;
+    const seq = ++usageQueryTestSeqRef.current;
+    setUsageQueryTest({ status: "running", entries: [], error: null });
+    try {
+      const result = await queryProviderUsage(persistedUsageQueryProviderId, true);
+      if (usageQueryTestSeqRef.current !== seq) return;
+      if (result?.error) {
+        setUsageQueryTest({ status: "error", entries: result.entries ?? [], error: result.error });
+      } else {
+        setUsageQueryTest({ status: "success", entries: result?.entries ?? [], error: null });
+      }
+      // 测试已实刷桌面端缓存;通知外层卡片按缓存补水,避免重复打上游。
+      onTestUsage?.(persistedUsageQueryProviderId);
+    } catch (error) {
+      if (usageQueryTestSeqRef.current !== seq) return;
+      setUsageQueryTest({
+        status: "error",
+        entries: [],
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   const isEditing = Boolean(initialData);
@@ -1883,69 +1911,68 @@ function ProviderModal({ providerType, initialData, onSave, onTestUsage, onClose
                   </div>
                 ) : null}
 
-                <div className="mt-4 rounded-xl border bg-card px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium">
-                        {t("settings.providerUsageAllowLocalNetwork")}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {t("settings.providerUsageAllowLocalNetworkHint")}
-                      </div>
-                    </div>
-                    <DialogSwitch
-                      checked={usageQuery.allowLocalNetwork}
-                      onCheckedChange={(allowLocalNetwork) =>
-                        setUsageQuery((previous) => ({ ...previous, allowLocalNetwork }))
-                      }
-                      ariaLabel={t("settings.providerUsageAllowLocalNetwork")}
+                <div className="mt-4 flex flex-wrap items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-10 gap-1.5"
+                    disabled={!persistedUsageQueryProviderId || usageQueryTest.status === "running"}
+                    onClick={() => void handleTestUsageQuery()}
+                    title={t("settings.providerUsageTest")}
+                    aria-label={t("settings.providerUsageTest")}
+                  >
+                    <RefreshCw
+                      className={cn(
+                        "h-3.5 w-3.5",
+                        usageQueryTest.status === "running" && "animate-spin",
+                      )}
                     />
-                  </div>
-                </div>
-
-                <div className="mt-4 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3 max-[720px]:grid-cols-1">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="usage-query-auto-refresh">
-                      {t("settings.providerUsageAutoRefresh")}
-                    </Label>
-                    <Input
-                      id="usage-query-auto-refresh"
-                      type="number"
-                      min="0"
-                      max="1440"
-                      value={usageQuery.autoRefreshMinutes}
-                      onChange={(event) => {
-                        const value = Number.parseInt(event.currentTarget.value, 10);
-                        setUsageQuery((previous) => ({
-                          ...previous,
-                          autoRefreshMinutes: Number.isFinite(value) ? Math.max(0, value) : 0,
-                        }));
-                      }}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <span className="block text-xs text-muted-foreground max-[720px]:hidden">
-                      &nbsp;
-                    </span>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-10 gap-1.5"
-                      disabled={!persistedUsageQueryProviderId}
-                      onClick={handleTestUsageQuery}
-                      title={t("settings.providerUsageTest")}
-                      aria-label={t("settings.providerUsageTest")}
-                    >
-                      <RefreshCw className="h-3.5 w-3.5" />
-                      {t("settings.providerUsageTest")}
-                    </Button>
-                  </div>
+                    {t("settings.providerUsageTest")}
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    {t("settings.providerUsageAutoRefreshFixedHint")}
+                  </span>
                 </div>
                 {!persistedUsageQueryProviderId ? (
                   <p className="mt-2 text-xs text-muted-foreground">
                     {t("settings.providerUsageTestSavedHint")}
                   </p>
+                ) : null}
+                {usageQueryTest.status !== "idle" ? (
+                  <div
+                    className="mt-3 rounded-xl border bg-card px-4 py-3 text-xs"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {usageQueryTest.status === "running" ? (
+                      <span className="text-muted-foreground">
+                        {t("settings.providerUsageTestRunning")}
+                      </span>
+                    ) : null}
+                    {usageQueryTest.status === "error" ? (
+                      <span className="text-destructive">
+                        {t("settings.providerUsageTestFailed")}
+                        {usageQueryTest.error ? `: ${usageQueryTest.error}` : ""}
+                      </span>
+                    ) : null}
+                    {usageQueryTest.status === "success" ? (
+                      usageQueryTest.entries.length > 0 ? (
+                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                          {usageQueryTest.entries.map((entry) => (
+                            <span key={entry.label} className="truncate">
+                              {entry.label}: {entry.value}
+                              {entry.unit ? ` ${entry.unit}` : ""}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">
+                          {t("settings.providerUsageTestEmpty")}
+                        </span>
+                      )
+                    ) : null}
+                  </div>
                 ) : null}
               </section>
             )}
@@ -2956,10 +2983,8 @@ export function ProvidersSection(props: SettingsSectionProps) {
   const [cherryImporting, setCherryImporting] = useState(false);
   const [cherryMessage, setCherryMessage] = useState<string | null>(null);
   const [cherryDataPath, setCherryDataPath] = useState<string | null>(readCherryDataPath);
-  const { usageByProvider, refreshingProviderIds, refreshProvider } = useProviderUsage(
-    settings.customProviders,
-    settings.selectedModel,
-  );
+  const { usageByProvider, refreshingProviderIds, refreshProvider, hydrateProvider } =
+    useProviderUsage(settings.customProviders, settings.selectedModel);
 
   async function refreshThirdPartyProviders() {
     setCcsLoading(true);
@@ -3424,7 +3449,7 @@ export function ProvidersSection(props: SettingsSectionProps) {
           providerType={activeTab}
           initialData={editingProvider ?? undefined}
           onSave={handleSave}
-          onTestUsage={(providerId) => void refreshProvider(providerId)}
+          onTestUsage={(providerId) => void hydrateProvider(providerId)}
           onClose={closeModal}
         />
       ) : null}

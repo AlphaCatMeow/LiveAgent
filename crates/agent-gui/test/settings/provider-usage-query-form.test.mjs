@@ -16,8 +16,6 @@ const usageQuery = {
   accessKeyId: "key-1",
   secretAccessKey: "",
   secretAccessKeyConfigured: true,
-  autoRefreshMinutes: 15,
-  allowLocalNetwork: false,
 };
 
 test("usage query draft preserves configured redacted secrets when saved", () => {

@@ -62,10 +62,10 @@ test("manual refresh queries only the requested provider", async () => {
   ]);
 });
 
-test("auto refresh selects only the active provider with an enabled interval", () => {
+test("auto refresh selects only the active provider with usage query enabled", () => {
   const providers = [
-    { id: "provider-a", usageQuery: { enabled: true, autoRefreshMinutes: 5 } },
-    { id: "provider-b", usageQuery: { enabled: true, autoRefreshMinutes: 0 } },
+    { id: "provider-a", usageQuery: { enabled: true } },
+    { id: "provider-b", usageQuery: { enabled: false } },
   ];
 
   assert.deepEqual(
@@ -81,15 +81,15 @@ test("auto refresh selects only the active provider with an enabled interval", (
 
 test("refresh plan hydrates every enabled provider and schedules only the selected provider", () => {
   const providers = [
-    { id: "interval-zero", usageQuery: { enabled: true, autoRefreshMinutes: 0 } },
-    { id: "selected", usageQuery: { enabled: true, autoRefreshMinutes: 5 } },
-    { id: "disabled", usageQuery: { enabled: false, autoRefreshMinutes: 1 } },
+    { id: "other-enabled", usageQuery: { enabled: true } },
+    { id: "selected", usageQuery: { enabled: true } },
+    { id: "disabled", usageQuery: { enabled: false } },
   ];
 
   assert.deepEqual(
     usage.getUsageRefreshPlan(providers, { customProviderId: "selected", model: "m" }),
     {
-      hydrateProviderIds: ["interval-zero", "selected"],
+      hydrateProviderIds: ["other-enabled", "selected"],
       timer: { providerId: "selected", intervalMs: 300_000 },
     },
   );
@@ -105,7 +105,7 @@ test("coordinator ignores an older overlapping response and keeps loading until 
     deferred.push(next);
     return next.promise;
   });
-  const provider = { id: "p", usageQuery: { enabled: true, autoRefreshMinutes: 1 } };
+  const provider = { id: "p", usageQuery: { enabled: true } };
   coordinator.syncProviders([provider]);
 
   const first = coordinator.request("p", false);
@@ -141,7 +141,7 @@ test("timer cleanup does not invalidate a manual refresh for the same provider",
         resolve = nextResolve;
       }),
   );
-  const provider = { id: "p", usageQuery: { enabled: true, autoRefreshMinutes: 1 } };
+  const provider = { id: "p", usageQuery: { enabled: true } };
   coordinator.syncProviders([provider]);
 
   const manualRefresh = coordinator.request("p", true);
@@ -160,7 +160,7 @@ test("timer cleanup invalidates the timer request it owns", async () => {
         resolve = nextResolve;
       }),
   );
-  const provider = { id: "p", usageQuery: { enabled: true, autoRefreshMinutes: 1 } };
+  const provider = { id: "p", usageQuery: { enabled: true } };
   coordinator.syncProviders([provider]);
 
   const timerRefresh = coordinator.request("p", true, "timer");
@@ -181,8 +181,8 @@ test("coordinator prunes deleted and replaced provider requests before they can 
     deferred.push(next);
     return next.promise;
   });
-  const original = { id: "p", usageQuery: { enabled: true, autoRefreshMinutes: 1 } };
-  const replacement = { id: "p", usageQuery: { enabled: true, autoRefreshMinutes: 1 } };
+  const original = { id: "p", usageQuery: { enabled: true } };
+  const replacement = { id: "p", usageQuery: { enabled: true } };
   coordinator.syncProviders([original]);
 
   const oldRequest = coordinator.request("p", false);
@@ -201,7 +201,7 @@ test("coordinator prunes deleted and replaced provider requests before they can 
 
 test("provider card display exposes stale error time and an accessible refresh action", () => {
   const display = usage.getProviderUsageCardDisplay(
-    { id: "p", usageQuery: { enabled: true, autoRefreshMinutes: 1 } },
+    { id: "p", usageQuery: { enabled: true } },
     {
       entries: [{ label: "USD", value: "4.20" }],
       queriedAt: 1_700_000_000_000,

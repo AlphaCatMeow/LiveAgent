@@ -1404,11 +1404,12 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.providerUsageUserId": "User ID",
     "settings.providerUsageAccessKeyId": "AccessKey ID",
     "settings.providerUsageSecretAccessKey": "SecretAccessKey",
-    "settings.providerUsageAllowLocalNetwork": "允许本地网络地址",
-    "settings.providerUsageAllowLocalNetworkHint": "仅在查询端点位于受信任内网时启用。",
-    "settings.providerUsageAutoRefresh": "自动刷新间隔（分钟）",
+    "settings.providerUsageAutoRefreshFixedHint": "启用后每 5 分钟自动刷新当前使用的供应商。",
     "settings.providerUsageTest": "测试查询",
     "settings.providerUsageTestSavedHint": "请先保存供应商，才能测试查询。",
+    "settings.providerUsageTestRunning": "正在查询…",
+    "settings.providerUsageTestFailed": "查询失败",
+    "settings.providerUsageTestEmpty": "查询成功，但没有返回可展示的数据。",
     "settings.providerUsageCustomConfirmTitle": "启用自定义用量脚本？",
     "settings.providerUsageCustomConfirmDescription":
       "自定义脚本可以向其定义的目标发起网络请求。请仅使用可信脚本和端点。",
@@ -3528,12 +3529,13 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.providerUsageUserId": "User ID",
     "settings.providerUsageAccessKeyId": "AccessKey ID",
     "settings.providerUsageSecretAccessKey": "SecretAccessKey",
-    "settings.providerUsageAllowLocalNetwork": "Allow local network addresses",
-    "settings.providerUsageAllowLocalNetworkHint":
-      "Enable only when the query endpoint is on a trusted local network.",
-    "settings.providerUsageAutoRefresh": "Auto-refresh interval (minutes)",
+    "settings.providerUsageAutoRefreshFixedHint":
+      "When enabled, the active provider refreshes automatically every 5 minutes.",
     "settings.providerUsageTest": "Test query",
     "settings.providerUsageTestSavedHint": "Save the provider before testing its query.",
+    "settings.providerUsageTestRunning": "Querying…",
+    "settings.providerUsageTestFailed": "Query failed",
+    "settings.providerUsageTestEmpty": "The query succeeded but returned no displayable data.",
     "settings.providerUsageCustomConfirmTitle": "Enable custom usage script?",
     "settings.providerUsageCustomConfirmDescription":
       "A custom script can make network requests to the destinations it defines. Use only trusted scripts and endpoints.",

@@ -304,8 +304,6 @@ export type UsageQueryConfig = {
   accessKeyId: string;
   secretAccessKey: string;
   secretAccessKeyConfigured?: boolean;
-  autoRefreshMinutes: number;
-  allowLocalNetwork: boolean;
 };
 
 export function getDefaultUsageQueryConfig(): UsageQueryConfig {
@@ -320,8 +318,6 @@ export function getDefaultUsageQueryConfig(): UsageQueryConfig {
     accessKeyId: "",
     secretAccessKey: "",
     secretAccessKeyConfigured: false,
-    autoRefreshMinutes: 0,
-    allowLocalNetwork: false,
   };
 }
 
@@ -1301,12 +1297,6 @@ function normalizeUsageQueryMode(input: unknown): UsageQueryMode {
   }
 }
 
-function normalizeUsageQueryAutoRefreshMinutes(input: unknown): number {
-  const value = typeof input === "number" || typeof input === "string" ? Number(input) : 0;
-  if (!Number.isFinite(value)) return 0;
-  return Math.min(1_440, Math.max(0, Math.floor(value)));
-}
-
 function normalizeUsageQueryConfig(input: unknown): UsageQueryConfig {
   const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
   const accessToken = normalizeApiKey(typeof obj.accessToken === "string" ? obj.accessToken : "");
@@ -1325,8 +1315,6 @@ function normalizeUsageQueryConfig(input: unknown): UsageQueryConfig {
     accessKeyId: typeof obj.accessKeyId === "string" ? obj.accessKeyId.trim() : "",
     secretAccessKey,
     secretAccessKeyConfigured: secretAccessKey.length > 0 || obj.secretAccessKeyConfigured === true,
-    autoRefreshMinutes: normalizeUsageQueryAutoRefreshMinutes(obj.autoRefreshMinutes),
-    allowLocalNetwork: obj.allowLocalNetwork === true,
   };
 }
 

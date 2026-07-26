@@ -222,7 +222,14 @@ export const RoundContent = memo(function RoundContent(props: {
       className={
         isLive
           ? "space-y-2"
-          : "space-y-2 [&_.todo-list-view_.animate-spin]:!animate-none [&_.todo-list-view_.shimmer]:!animate-none [&_.todo-list-view_[data-todo-incomplete]>span:last-child]:!text-muted-foreground/40 [&_.todo-list-view_[data-todo-incomplete]>span:last-child]:line-through"
+          : // Settled rounds freeze todo-card animations; the strike-through /
+            // dimming of incomplete items is reserved for aborted replies —
+            // a normally completed reply may legitimately leave todos open.
+            `space-y-2 [&_.todo-list-view_.animate-spin]:!animate-none [&_.todo-list-view_.shimmer]:!animate-none${
+              isAborted
+                ? " [&_.todo-list-view_[data-todo-incomplete]>span:last-child]:!text-muted-foreground/40 [&_.todo-list-view_[data-todo-incomplete]>span:last-child]:line-through"
+                : ""
+            }`
       }
     >
       {isActive &&

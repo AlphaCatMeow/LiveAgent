@@ -78,12 +78,15 @@ fn build_stdio_command(cmd: &str, args: &[String], cwd: Option<&Path>) -> Comman
     #[cfg(windows)]
     {
         if is_windows_batch_program(&program) {
+            use std::os::windows::process::CommandExt;
+
+            // .cmd/.bat 无法被 CreateProcess 直接执行，需经 cmd.exe 转发。
+            // /C 后的命令行必须用 raw_arg 原样传入：arg() 会按 MSVCRT 规则
+            // 把内嵌引号转义成 `\"`，cmd.exe 不识别该转义，子进程瞬退，
+            // stdin 写入报 os error 232（issue #205）。
             let mut command = Command::new("cmd.exe");
-            command
-                .arg("/D")
-                .arg("/S")
-                .arg("/C")
-                .arg(windows_batch_command_line(&program, args));
+            command.arg("/D").arg("/S").arg("/C");
+            command.raw_arg(windows_cmd_c_argument(&program, args));
             return command;
         }
     }
@@ -93,7 +96,7 @@ fn build_stdio_command(cmd: &str, args: &[String], cwd: Option<&Path>) -> Comman
     command
 }
 
-#[cfg(windows)]
+#[cfg_attr(not(windows), allow(dead_code))]
 fn is_windows_batch_program(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
@@ -101,18 +104,22 @@ fn is_windows_batch_program(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(windows)]
-fn windows_batch_command_line(program: &Path, args: &[String]) -> String {
-    std::iter::once(program.to_string_lossy().into_owned())
+/// 组装 `cmd.exe /S /C` 之后的整段命令行：外层再包一对引号，`/S` 语义下
+/// cmd 仅剥掉首尾引号，剩余部分按原样执行。
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_cmd_c_argument(program: &Path, args: &[String]) -> String {
+    let line = std::iter::once(program.to_string_lossy().into_owned())
         .chain(args.iter().cloned())
         .map(|value| windows_cmd_quote_arg(&value))
         .collect::<Vec<_>>()
-        .join(" ")
+        .join(" ");
+    format!("\"{line}\"")
 }
 
-#[cfg(windows)]
+#[cfg_attr(not(windows), allow(dead_code))]
 fn windows_cmd_quote_arg(value: &str) -> String {
-    let escaped = value.replace('"', "\\\"");
+    // cmd.exe 不识别反斜杠转义，内嵌引号按 cmd 惯例翻倍。
+    let escaped = value.replace('"', "\"\"");
     format!("\"{escaped}\"")
 }
 
@@ -1969,5 +1976,45 @@ mod tests {
             .expect("join contender")
             .expect("contender ensure eventually succeeds");
         holder.join().expect("join holder");
+    }
+
+    #[test]
+    fn detects_windows_batch_programs_by_extension() {
+        assert!(is_windows_batch_program(Path::new(
+            r"C:\Program Files\nodejs\npx.cmd"
+        )));
+        assert!(is_windows_batch_program(Path::new(r"C:\tools\run.BAT")));
+        assert!(!is_windows_batch_program(Path::new(
+            r"C:\Program Files\nodejs\node.exe"
+        )));
+        assert!(!is_windows_batch_program(Path::new("npx")));
+    }
+
+    #[test]
+    fn windows_cmd_quote_arg_doubles_embedded_quotes() {
+        // cmd.exe 不认 `\"` 转义，翻倍才能保持引号配对。
+        assert_eq!(windows_cmd_quote_arg("-y"), r#""-y""#);
+        assert_eq!(windows_cmd_quote_arg(r#"a"b"#), r#""a""b""#);
+        assert_eq!(windows_cmd_quote_arg("with space"), r#""with space""#);
+    }
+
+    #[test]
+    fn windows_cmd_c_argument_wraps_whole_line_for_slash_s() {
+        // `/S` 语义：cmd 剥掉首尾引号后必须还原出可执行的完整命令行。
+        let program = Path::new(r"C:\Program Files\nodejs\npx.cmd");
+        let args = vec!["-y".to_string(), "@playwright/mcp".to_string()];
+        assert_eq!(
+            windows_cmd_c_argument(program, &args),
+            r#"""C:\Program Files\nodejs\npx.cmd" "-y" "@playwright/mcp"""#
+        );
+    }
+
+    #[test]
+    fn windows_cmd_c_argument_without_args_still_quotes_program() {
+        let program = Path::new(r"C:\tools\npx.cmd");
+        assert_eq!(
+            windows_cmd_c_argument(program, &[]),
+            r#"""C:\tools\npx.cmd"""#
+        );
     }
 }

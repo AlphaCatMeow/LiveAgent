@@ -1763,11 +1763,8 @@ function ProviderModal({ providerType, initialData, onSave, onTestUsage, onClose
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="balance">
-                        {t("settings.providerUsageMode.balance")}
-                      </SelectItem>
-                      <SelectItem value="coding-plan">
-                        {t("settings.providerUsageMode.codingPlan")}
+                      <SelectItem value="custom">
+                        {t("settings.providerUsageMode.custom")}
                       </SelectItem>
                       <SelectItem value="general">
                         {t("settings.providerUsageMode.general")}
@@ -1775,8 +1772,8 @@ function ProviderModal({ providerType, initialData, onSave, onTestUsage, onClose
                       <SelectItem value="newapi">
                         {t("settings.providerUsageMode.newapi")}
                       </SelectItem>
-                      <SelectItem value="custom">
-                        {t("settings.providerUsageMode.custom")}
+                      <SelectItem value="coding-plan">
+                        {t("settings.providerUsageMode.codingPlan")}
                       </SelectItem>
                     </SelectContent>
                   </Select>

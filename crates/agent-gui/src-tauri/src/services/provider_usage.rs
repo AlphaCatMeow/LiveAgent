@@ -256,12 +256,6 @@ struct HttpRequest {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProviderAdapter {
-    DeepSeek,
-    StepFun,
-    SiliconFlowCn,
-    SiliconFlowEn,
-    OpenRouter,
-    Novita,
     Kimi,
     Zhipu,
     MiniMax,
@@ -336,7 +330,6 @@ fn prepare_query(provider: &StoredProvider) -> Result<PreparedQuery, String> {
     }
 
     match provider.usage_query.mode.as_str() {
-        "balance" => prepare_balance_query(provider),
         "coding-plan" => prepare_coding_plan_query(provider),
         "general" => prepare_script_query(provider, GENERAL_SCRIPT, true),
         "newapi" => prepare_script_query(provider, NEWAPI_SCRIPT, true),
@@ -381,46 +374,6 @@ fn prepare_script_query(
         },
         fallback: None,
     })
-}
-
-fn prepare_balance_query(provider: &StoredProvider) -> Result<PreparedQuery, String> {
-    if provider.api_key.trim().is_empty() {
-        return Err("Provider API key is not configured".to_string());
-    }
-    let base = validate_destination(&provider.base_url)?;
-    if base.scheme() != "https" {
-        return Err("Built-in usage adapters require HTTPS".to_string());
-    }
-    let host = base.host_str().unwrap_or_default().to_ascii_lowercase();
-    let (adapter, endpoint) = match host.as_str() {
-        "api.deepseek.com" => (
-            ProviderAdapter::DeepSeek,
-            "https://api.deepseek.com/user/balance",
-        ),
-        "api.stepfun.ai" | "api.stepfun.com" => (
-            ProviderAdapter::StepFun,
-            "https://api.stepfun.com/v1/accounts",
-        ),
-        "api.siliconflow.cn" => (
-            ProviderAdapter::SiliconFlowCn,
-            "https://api.siliconflow.cn/v1/user/info",
-        ),
-        "api.siliconflow.com" => (
-            ProviderAdapter::SiliconFlowEn,
-            "https://api.siliconflow.com/v1/user/info",
-        ),
-        "openrouter.ai" => (
-            ProviderAdapter::OpenRouter,
-            "https://openrouter.ai/api/v1/credits",
-        ),
-        "api.novita.ai" => (
-            ProviderAdapter::Novita,
-            "https://api.novita.ai/v3/user/balance",
-        ),
-        _ => return Err("No balance adapter matches this provider".to_string()),
-    };
-    let request = bearer_request(endpoint, &provider.api_key)?;
-    Ok(single_request_query(request, adapter))
 }
 
 fn prepare_coding_plan_query(provider: &StoredProvider) -> Result<PreparedQuery, String> {
@@ -723,37 +676,6 @@ fn parse_adapter_response(
     body: &Value,
 ) -> Result<Vec<ProviderUsageEntry>, String> {
     let entries = match adapter {
-        ProviderAdapter::DeepSeek => parse_deepseek(body)?,
-        ProviderAdapter::StepFun => vec![balance_entry(
-            "StepFun balance",
-            required_number(body, "balance")?,
-            "CNY",
-        )],
-        ProviderAdapter::SiliconFlowCn | ProviderAdapter::SiliconFlowEn => {
-            let data = body
-                .get("data")
-                .ok_or_else(|| "SiliconFlow response is missing data".to_string())?;
-            vec![balance_entry(
-                "SiliconFlow balance",
-                required_number(data, "totalBalance")?,
-                if adapter == ProviderAdapter::SiliconFlowCn {
-                    "CNY"
-                } else {
-                    "USD"
-                },
-            )]
-        }
-        ProviderAdapter::OpenRouter => {
-            let data = body.get("data").unwrap_or(body);
-            let total = required_number(data, "total_credits")?;
-            let used = required_number(data, "total_usage")?;
-            vec![balance_entry("OpenRouter balance", total - used, "USD")]
-        }
-        ProviderAdapter::Novita => vec![balance_entry(
-            "Novita balance",
-            required_number(body, "availableBalance")? / 10_000.0,
-            "USD",
-        )],
         ProviderAdapter::Kimi => parse_kimi(body),
         ProviderAdapter::Zhipu => parse_zhipu(body),
         ProviderAdapter::MiniMax => parse_minimax(body),
@@ -766,28 +688,6 @@ fn parse_adapter_response(
         return Err("Usage query returned too many entries".to_string());
     }
     Ok(entries)
-}
-
-fn parse_deepseek(body: &Value) -> Result<Vec<ProviderUsageEntry>, String> {
-    let infos = body
-        .get("balance_infos")
-        .and_then(Value::as_array)
-        .ok_or_else(|| "DeepSeek response is missing balance information".to_string())?;
-    infos
-        .iter()
-        .map(|info| {
-            let unit = info
-                .get("currency")
-                .and_then(Value::as_str)
-                .filter(|unit| !unit.is_empty())
-                .ok_or_else(|| "DeepSeek response has an invalid currency".to_string())?;
-            Ok(balance_entry(
-                "DeepSeek balance",
-                required_number(info, "total_balance")?,
-                unit,
-            ))
-        })
-        .collect()
 }
 
 fn parse_kimi(body: &Value) -> Vec<ProviderUsageEntry> {
@@ -938,21 +838,12 @@ fn parse_volcengine_coding(body: &Value) -> Vec<ProviderUsageEntry> {
         .collect()
 }
 
-fn balance_entry(label: &str, value: f64, unit: &str) -> ProviderUsageEntry {
-    quota_entry(label, value, Some(unit))
-}
-
 fn quota_entry(label: &str, value: f64, unit: Option<&str>) -> ProviderUsageEntry {
     ProviderUsageEntry {
         label: label.to_string(),
         value: format_number(value),
         unit: unit.map(str::to_string),
     }
-}
-
-fn required_number(value: &Value, field: &str) -> Result<f64, String> {
-    optional_number(value, field)
-        .ok_or_else(|| "Usage query response is missing a number".to_string())
 }
 
 fn optional_number(value: &Value, field: &str) -> Option<f64> {
@@ -1463,7 +1354,7 @@ mod tests {
     #[test]
     fn cache_requires_current_provider_identity_and_supports_invalidation() {
         let mut cache = UsageCache::default();
-        let original = test_provider("balance", "https://api.deepseek.com/v1");
+        let original = test_provider("coding-plan", "https://api.kimi.com/coding/v1");
         let original_identity = provider_query_identity(&original);
         cache.record_success(
             "provider-a",
@@ -1501,7 +1392,7 @@ mod tests {
     #[test]
     fn failure_only_results_are_not_reusable_cache_entries() {
         let mut cache = UsageCache::default();
-        let provider = test_provider("balance", "https://api.deepseek.com/v1");
+        let provider = test_provider("coding-plan", "https://api.kimi.com/coding/v1");
         let identity = provider_query_identity(&provider);
 
         let result = cache.record_failure("provider-a", identity, "request failed");
@@ -1509,49 +1400,6 @@ mod tests {
         assert!(result.entries.is_empty());
         assert_eq!(result.error.as_deref(), Some("request failed"));
         assert!(cache.get("provider-a", &identity).is_none());
-    }
-
-    #[test]
-    fn balance_adapters_build_expected_endpoints() {
-        let cases = [
-            (
-                "https://api.deepseek.com/v1",
-                ProviderAdapter::DeepSeek,
-                "/user/balance",
-            ),
-            (
-                "https://api.stepfun.com/v1",
-                ProviderAdapter::StepFun,
-                "/v1/accounts",
-            ),
-            (
-                "https://api.siliconflow.cn/v1",
-                ProviderAdapter::SiliconFlowCn,
-                "/v1/user/info",
-            ),
-            (
-                "https://api.siliconflow.com/v1",
-                ProviderAdapter::SiliconFlowEn,
-                "/v1/user/info",
-            ),
-            (
-                "https://openrouter.ai/api/v1",
-                ProviderAdapter::OpenRouter,
-                "/api/v1/credits",
-            ),
-            (
-                "https://api.novita.ai/v3/openai",
-                ProviderAdapter::Novita,
-                "/v3/user/balance",
-            ),
-        ];
-
-        for (base_url, expected_adapter, expected_path) in cases {
-            let query = test_provider("balance", base_url);
-            let prepared = prepare_query(&query).expect("prepare balance query");
-            assert_eq!(prepared.primary.adapter, expected_adapter);
-            assert_eq!(prepared.primary.request.url.path(), expected_path);
-        }
     }
 
     #[test]
@@ -1611,48 +1459,6 @@ mod tests {
             "https://API.ZENMUX.COM/v1/usage",
         ))
         .is_ok());
-    }
-
-    #[test]
-    fn balance_adapter_responses_are_normalized() {
-        let cases = [
-            (
-                ProviderAdapter::DeepSeek,
-                json!({"balance_infos": [{"currency": "CNY", "total_balance": "12.50"}]}),
-                "12.5",
-                "CNY",
-            ),
-            (
-                ProviderAdapter::StepFun,
-                json!({"balance": 9.25}),
-                "9.25",
-                "CNY",
-            ),
-            (
-                ProviderAdapter::SiliconFlowEn,
-                json!({"data": {"totalBalance": "8.75"}}),
-                "8.75",
-                "USD",
-            ),
-            (
-                ProviderAdapter::OpenRouter,
-                json!({"data": {"total_credits": 20, "total_usage": 3.5}}),
-                "16.5",
-                "USD",
-            ),
-            (
-                ProviderAdapter::Novita,
-                json!({"availableBalance": 42_000}),
-                "4.2",
-                "USD",
-            ),
-        ];
-
-        for (adapter, body, value, unit) in cases {
-            let entries = parse_adapter_response(adapter, &body).expect("parse adapter response");
-            assert_eq!(entries[0].value, value);
-            assert_eq!(entries[0].unit.as_deref(), Some(unit));
-        }
     }
 
     #[test]

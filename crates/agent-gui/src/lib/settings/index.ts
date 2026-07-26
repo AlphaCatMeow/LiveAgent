@@ -291,7 +291,7 @@ export type SshSettings = {
   projectHostAssociations: Record<string, string[]>;
 };
 
-export type UsageQueryMode = "balance" | "coding-plan" | "general" | "newapi" | "custom";
+export type UsageQueryMode = "coding-plan" | "general" | "newapi" | "custom";
 
 export type UsageQueryConfig = {
   enabled: boolean;
@@ -309,7 +309,7 @@ export type UsageQueryConfig = {
 export function getDefaultUsageQueryConfig(): UsageQueryConfig {
   return {
     enabled: false,
-    mode: "balance",
+    mode: "custom",
     script: "",
     baseUrl: "",
     accessToken: "",
@@ -1290,10 +1290,10 @@ function normalizeUsageQueryMode(input: unknown): UsageQueryMode {
     case "coding-plan":
     case "general":
     case "newapi":
-    case "custom":
       return input;
     default:
-      return "balance";
+      // 含历史配置中的 "balance"(余额适配器已移除)——统一回退自定义脚本。
+      return "custom";
   }
 }
 

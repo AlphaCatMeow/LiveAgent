@@ -2518,6 +2518,11 @@ test("usage query defaults disabled and redacts query credentials", () => {
   assert.equal(provider.usageQuery.enabled, false);
   assert.equal(provider.usageQuery.mode, "newapi");
 
+  // 余额适配器已移除:历史 "balance" 配置与未知值统一回退自定义脚本。
+  const legacy = settings.normalizeCustomProvider({ usageQuery: { mode: "balance" } });
+  assert.equal(legacy.usageQuery.mode, "custom");
+  assert.equal(settings.getDefaultUsageQueryConfig().mode, "custom");
+
   const redacted = sync.redactCustomProvidersForGateway([provider])[0];
   assert.equal(redacted.usageQuery.accessToken, "");
   assert.equal(redacted.usageQuery.secretAccessKey, "");

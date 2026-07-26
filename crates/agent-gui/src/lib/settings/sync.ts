@@ -101,7 +101,7 @@ function apiKeyConfiguredForProvider(provider: AppSettings["customProviders"][nu
 
 const DEFAULT_USAGE_QUERY_CONFIG: AppSettings["customProviders"][number]["usageQuery"] = {
   enabled: false,
-  mode: "balance",
+  mode: "custom",
   script: "",
   baseUrl: "",
   accessToken: "",

@@ -1771,12 +1771,13 @@ function ProviderModal({ providerType, initialData, onSave, onTestUsage, onClose
                       className="min-h-36 font-mono text-xs"
                       placeholder={t("settings.providerUsageScriptPlaceholder")}
                       spellCheck={false}
-                      onChange={(event) =>
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
                         setUsageQuery((previous) => ({
                           ...previous,
-                          script: event.currentTarget.value,
-                        }))
-                      }
+                          script: value,
+                        }));
+                      }}
                     />
                   </div>
                 ) : null}
@@ -1791,12 +1792,13 @@ function ProviderModal({ providerType, initialData, onSave, onTestUsage, onClose
                     <Input
                       id="usage-query-base-url"
                       value={usageQuery.baseUrl}
-                      onChange={(event) =>
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
                         setUsageQuery((previous) => ({
                           ...previous,
-                          baseUrl: event.currentTarget.value,
-                        }))
-                      }
+                          baseUrl: value,
+                        }));
+                      }}
                     />
                   </div>
                 ) : null}
@@ -1813,12 +1815,13 @@ function ProviderModal({ providerType, initialData, onSave, onTestUsage, onClose
                         value={usageQuery.accessToken}
                         autoComplete="off"
                         onFocus={(event) => event.currentTarget.select()}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                          const value = event.currentTarget.value;
                           setUsageQuery((previous) => ({
                             ...previous,
-                            accessToken: event.currentTarget.value,
-                          }))
-                        }
+                            accessToken: value,
+                          }));
+                        }}
                       />
                     </div>
                     <div className="space-y-1.5">
@@ -1828,12 +1831,13 @@ function ProviderModal({ providerType, initialData, onSave, onTestUsage, onClose
                       <Input
                         id="usage-query-user-id"
                         value={usageQuery.userId}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                          const value = event.currentTarget.value;
                           setUsageQuery((previous) => ({
                             ...previous,
-                            userId: event.currentTarget.value,
-                          }))
-                        }
+                            userId: value,
+                          }));
+                        }}
                       />
                     </div>
                   </div>
@@ -1848,12 +1852,13 @@ function ProviderModal({ providerType, initialData, onSave, onTestUsage, onClose
                       <Input
                         id="usage-query-access-key-id"
                         value={usageQuery.accessKeyId}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                          const value = event.currentTarget.value;
                           setUsageQuery((previous) => ({
                             ...previous,
-                            accessKeyId: event.currentTarget.value,
-                          }))
-                        }
+                            accessKeyId: value,
+                          }));
+                        }}
                       />
                     </div>
                     <div className="space-y-1.5">
@@ -1866,12 +1871,13 @@ function ProviderModal({ providerType, initialData, onSave, onTestUsage, onClose
                         value={usageQuery.secretAccessKey}
                         autoComplete="off"
                         onFocus={(event) => event.currentTarget.select()}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                          const value = event.currentTarget.value;
                           setUsageQuery((previous) => ({
                             ...previous,
-                            secretAccessKey: event.currentTarget.value,
-                          }))
-                        }
+                            secretAccessKey: value,
+                          }));
+                        }}
                       />
                     </div>
                   </div>

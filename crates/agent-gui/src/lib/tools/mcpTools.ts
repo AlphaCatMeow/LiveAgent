@@ -45,11 +45,16 @@ async function withMcpServerCallLock<T>(
   const tail = previous.catch(() => undefined).then(() => current);
   mcpServerCallLocks.set(serverId, tail);
 
-  await waitForAbortablePromise(
-    previous.catch(() => undefined),
-    signal,
-  );
+  // The abortable wait can throw, so it must live inside the same
+  // release/cleanup scope as run(): a waiter aborted while queued would
+  // otherwise leave `current` unresolved and deadlock every later call to
+  // this server. Releasing early is safe — `tail` still chains behind
+  // `previous`, so serialization is preserved for the next caller.
   try {
+    await waitForAbortablePromise(
+      previous.catch(() => undefined),
+      signal,
+    );
     return await run();
   } finally {
     release();

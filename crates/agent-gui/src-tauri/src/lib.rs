@@ -176,6 +176,10 @@ macro_rules! app_invoke_handler {
             commands::terminal::terminal_ssh_reconnect,
             commands::terminal::terminal_ssh_latency,
             commands::terminal::terminal_ssh_exec,
+            commands::terminal::terminal_ssh_local_forward_start,
+            commands::terminal::terminal_ssh_local_forward_list,
+            commands::terminal::terminal_ssh_local_forward_stop,
+            commands::terminal::terminal_ssh_local_forward_check_port,
             commands::terminal::ssh_terminal_tabs_list,
             commands::terminal::ssh_terminal_tab_open,
             commands::terminal::ssh_terminal_tab_close,
@@ -655,6 +659,7 @@ pub fn run() {
             } else {
                 // Real exit: reclaim every non-isolated managed process
                 // before the OS tears us down (Drop is not guaranteed).
+                terminal_registry.shutdown_cleanup();
                 managed_process_registry.shutdown_cleanup();
                 git_clone_task_registry.shutdown_cleanup();
                 power_activity.clear_all();

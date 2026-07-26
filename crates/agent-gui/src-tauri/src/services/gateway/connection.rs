@@ -458,6 +458,7 @@ impl GatewayController {
                 output_start_offset: None,
                 output_end_offset: None,
                 ssh_tabs: None,
+                ssh_local_forward: None,
             }))
             .await?;
             tokio::task::yield_now().await;

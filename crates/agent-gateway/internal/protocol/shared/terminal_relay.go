@@ -44,6 +44,10 @@ func TerminalEventAllowed(sm session.AgentView, event *gatewayv2.TerminalEvent) 
 	if strings.TrimSpace(event.GetKind()) == "ssh_tabs_updated" {
 		return sm.WebSshTerminalEnabled()
 	}
+	// 端口转发事件只随 SSH 权限走：session 缓存缺失时不得回落到本地终端门。
+	if strings.TrimSpace(event.GetKind()) == "ssh_local_forward" {
+		return sm.WebSshTerminalEnabled()
+	}
 	if ts := event.GetSession(); ts != nil {
 		return TerminalSessionAllowed(sm, ts)
 	}
@@ -58,7 +62,9 @@ func TerminalEventAllowed(sm session.AgentView, event *gatewayv2.TerminalEvent) 
 func TerminalRequestAllowed(sm session.AgentView, action string, sessionID string) bool {
 	switch action {
 	case "create_ssh", "answer_ssh_prompt", "cancel_ssh_prompt", "ssh_latency",
-		"ssh_reconnect", "ssh_tabs_list", "ssh_tab_open", "ssh_tab_close":
+		"ssh_reconnect", "ssh_tabs_list", "ssh_tab_open", "ssh_tab_close",
+		"ssh_local_forward_start", "ssh_local_forward_list", "ssh_local_forward_stop",
+		"ssh_local_forward_check_port":
 		return sm.WebSshTerminalEnabled()
 	case "list", "close_project":
 		return sm.WebTerminalEnabled() || sm.WebSshTerminalEnabled()
@@ -76,7 +82,9 @@ func TerminalRequestAllowed(sm session.AgentView, action string, sessionID strin
 func TerminalPermissionError(action string) string {
 	switch action {
 	case "create_ssh", "answer_ssh_prompt", "cancel_ssh_prompt", "ssh_latency",
-		"ssh_reconnect", "ssh_tabs_list", "ssh_tab_open", "ssh_tab_close":
+		"ssh_reconnect", "ssh_tabs_list", "ssh_tab_open", "ssh_tab_close",
+		"ssh_local_forward_start", "ssh_local_forward_list", "ssh_local_forward_stop",
+		"ssh_local_forward_check_port":
 		return "web SSH terminal is disabled in desktop Remote settings"
 	default:
 		return "web terminal is disabled in desktop Remote settings"

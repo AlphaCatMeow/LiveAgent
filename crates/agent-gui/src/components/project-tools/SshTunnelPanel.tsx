@@ -3,6 +3,9 @@ import { useLocale } from "../../i18n";
 import type { SshHostConfig } from "../../lib/settings";
 import { workspaceProjectPathKey } from "../../lib/settings";
 import { cn } from "../../lib/shared/utils";
+import type { SshLocalForwardState } from "../../lib/terminal/sshLocalForwardTypes";
+import { reduceSshLocalForwardState } from "../../lib/terminal/sshLocalForwardTypes";
+import { tauriSshLocalForwardClient } from "../../lib/terminal/tauriSshLocalForwardClient";
 import type {
   TerminalClient,
   TerminalSession,
@@ -12,10 +15,12 @@ import type {
 import {
   AlertTriangle,
   ArrowLeft,
+  Cable,
   Check,
   ChevronDown,
   Clock3,
   ConnectionIcon,
+  Copy,
   FolderTree,
   Globe,
   Key,
@@ -25,6 +30,7 @@ import {
   Settings,
   Shield,
   Terminal,
+  Trash2,
   Wifi,
   WifiOff,
   X,
@@ -37,6 +43,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
+import { SshPortForwardDialog } from "./SshPortForwardDialog";
 
 type SshTunnelScope = "project" | "all";
 type SshTunnelView = "list" | "settings" | "create";
@@ -160,6 +167,32 @@ function isTerminalSessionNotFoundError(error: unknown) {
   return message.includes("terminal session not found") || message.includes("session not found");
 }
 
+function writeTextToClipboard(text: string) {
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard.writeText(text).then(
+      () => true,
+      () => fallbackWriteTextToClipboard(text),
+    );
+  }
+  return Promise.resolve(fallbackWriteTextToClipboard(text));
+}
+
+function fallbackWriteTextToClipboard(text: string) {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "-9999px";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    return document.execCommand("copy");
+  } finally {
+    document.body.removeChild(textarea);
+  }
+}
+
 function HostMetaTags(props: { host: SshHostConfig }) {
   const { host } = props;
   const { t } = useLocale();
@@ -225,6 +258,17 @@ export function SshTunnelPanel(props: SshTunnelPanelProps) {
   const [promptAnswer, setPromptAnswer] = useState("");
   const [answeringPrompt, setAnsweringPrompt] = useState(false);
   const [latencyBySessionId, setLatencyBySessionId] = useState<Record<string, SshLatencyState>>({});
+  const [localForwards, setLocalForwards] = useState<SshLocalForwardState>({
+    forwards: [],
+    revision: 0,
+  });
+  // 新建映射的表单挪进了 SshPortForwardDialog；这里只记住哪个会话开着模态。
+  const [forwardModalSessionId, setForwardModalSessionId] = useState<string | null>(null);
+  const [stoppingForwardIds, setStoppingForwardIds] = useState<ReadonlySet<string>>(new Set());
+  const [forwardErrorsBySessionId, setForwardErrorsBySessionId] = useState<Record<string, string>>(
+    {},
+  );
+  const [copiedForwardId, setCopiedForwardId] = useState("");
   const latencyRequestsRef = useRef<Set<string>>(new Set());
   const pendingCreateRef = useRef<PendingSshCreate | null>(null);
   const onSshSessionsReconcileRef = useRef(onSshSessionsReconcile);
@@ -238,6 +282,10 @@ export function SshTunnelPanel(props: SshTunnelPanelProps) {
     () => sessions.filter((session) => session.kind === "ssh" && session.ssh),
     [sessions],
   );
+  // 会话被关闭/回收时模态随之消失：挂载与否直接跟着会话是否还在走。
+  const forwardModalSession = forwardModalSessionId
+    ? (sshSessions.find((session) => session.id === forwardModalSessionId) ?? null)
+    : null;
   const projectSshSessions = useMemo(
     () => sshSessions.filter((session) => sessionBelongsToProject(session, projectPathKey)),
     [projectPathKey, sshSessions],
@@ -304,6 +352,40 @@ export function SshTunnelPanel(props: SshTunnelPanelProps) {
     };
   }, [active, client]);
 
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
+    void tauriSshLocalForwardClient
+      .subscribe((event) => {
+        if (cancelled) return;
+        setLocalForwards((current) => reduceSshLocalForwardState(current, event));
+        if (event.kind === "failed" && event.forward.error) {
+          setForwardErrorsBySessionId((current) => ({
+            ...current,
+            [event.forward.sessionId]: event.forward.error ?? "",
+          }));
+        }
+      })
+      .then((nextUnsubscribe) => {
+        if (cancelled) nextUnsubscribe();
+        else unsubscribe = nextUnsubscribe;
+        if (cancelled) return;
+        return tauriSshLocalForwardClient.list().then((snapshot) => {
+          if (!cancelled) {
+            setLocalForwards((current) => reduceSshLocalForwardState(current, snapshot));
+          }
+        });
+      })
+      .catch((error) => {
+        if (!cancelled) setListError(errorMessage(error));
+      });
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [active]);
+
   const refreshSessionLatency = useCallback(
     (session: TerminalSession) => {
       if (!sshSessionConnected(session) || session.kind !== "ssh") return;
@@ -354,6 +436,55 @@ export function SshTunnelPanel(props: SshTunnelPanelProps) {
       return Object.keys(next).length === Object.keys(current).length ? current : next;
     });
   }, [visibleSessions]);
+
+  const clearForwardError = useCallback((sessionId: string) => {
+    setForwardErrorsBySessionId((current) => {
+      if (!current[sessionId]) return current;
+      return { ...current, [sessionId]: "" };
+    });
+  }, []);
+
+  const handleOpenForwardModal = useCallback(
+    (session: TerminalSession) => {
+      clearForwardError(session.id);
+      setForwardModalSessionId(session.id);
+    },
+    [clearForwardError],
+  );
+
+  const handleStopForward = useCallback((forwardId: string, sessionId: string) => {
+    setStoppingForwardIds((current) => new Set(current).add(forwardId));
+    setForwardErrorsBySessionId((current) => ({ ...current, [sessionId]: "" }));
+    void tauriSshLocalForwardClient
+      .stop({ forwardId, sessionId })
+      .then((response) => {
+        setLocalForwards((current) => reduceSshLocalForwardState(current, response));
+      })
+      .catch((error) => {
+        setForwardErrorsBySessionId((current) => ({
+          ...current,
+          [sessionId]: errorMessage(error),
+        }));
+      })
+      .finally(() => {
+        setStoppingForwardIds((current) => {
+          const next = new Set(current);
+          next.delete(forwardId);
+          return next;
+        });
+      });
+  }, []);
+
+  const handleCopyForward = useCallback((forwardId: string, address: string) => {
+    void writeTextToClipboard(address).then((copied) => {
+      if (!copied) return;
+      setCopiedForwardId(forwardId);
+      window.setTimeout(
+        () => setCopiedForwardId((current) => (current === forwardId ? "" : current)),
+        1500,
+      );
+    });
+  }, []);
 
   useEffect(() => {
     // Latency probes only run while the tab is visible. The interval callback
@@ -1148,6 +1279,10 @@ export function SshTunnelPanel(props: SshTunnelPanelProps) {
                   sshSessionStatus(session) === "reconnecting";
                 const sshStatus = sshSessionStatus(session);
                 const connected = sshSessionConnected(session);
+                const sessionForwards = localForwards.forwards.filter(
+                  (forward) => forward.sessionId === session.id,
+                );
+                const forwardError = forwardErrorsBySessionId[session.id] ?? "";
                 return (
                   <article
                     key={session.id}
@@ -1249,6 +1384,16 @@ export function SshTunnelPanel(props: SshTunnelPanelProps) {
                         ) : null}
                         <button
                           type="button"
+                          className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/60 bg-background/70 text-muted-foreground transition-colors hover:border-indigo-500/40 hover:bg-indigo-500/10 hover:text-indigo-600 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 dark:hover:text-indigo-400"
+                          title={t("projectTools.sshLocalForwardOpen")}
+                          aria-label={t("projectTools.sshLocalForwardOpen")}
+                          disabled={!connected || closing}
+                          onClick={() => handleOpenForwardModal(session)}
+                        >
+                          <Cable className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
                           className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/60 bg-background/70 text-muted-foreground transition-colors hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
                           title={t("projectTools.sshTunnelCloseSession")}
                           aria-label={t("projectTools.sshTunnelCloseSession")}
@@ -1263,6 +1408,107 @@ export function SshTunnelPanel(props: SshTunnelPanelProps) {
                         </button>
                       </div>
                     </div>
+
+                    {sessionForwards.length > 0 || forwardError ? (
+                      <div className="mt-3 border-t border-border/60 pt-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[calc(11px*var(--zone-font-scale,1))] font-semibold text-foreground">
+                            {t("projectTools.sshLocalForwardTitle")}
+                          </span>
+                          {sessionForwards.length > 0 ? (
+                            <span className="rounded-full bg-muted/80 px-1.5 py-px text-[calc(10.5px*var(--zone-font-scale,1))] tabular-nums text-muted-foreground">
+                              {sessionForwards.length}
+                            </span>
+                          ) : null}
+                        </div>
+                        {forwardError ? (
+                          <div className="mt-2 rounded-lg border border-destructive/20 bg-destructive/10 px-2.5 py-1.5 text-[calc(11px*var(--zone-font-scale,1))] text-destructive">
+                            {forwardError}
+                          </div>
+                        ) : null}
+                        {sessionForwards.length > 0 ? (
+                          <div className="mt-2 space-y-1.5">
+                            {sessionForwards.map((forward) => {
+                              const stopping = stoppingForwardIds.has(forward.id);
+                              const waitingForSsh = sshStatus !== "connected";
+                              const copied = copiedForwardId === forward.id;
+                              return (
+                                <div
+                                  key={forward.id}
+                                  className="flex items-center gap-2.5 rounded-lg border border-border/60 bg-background/70 px-2.5 py-2"
+                                >
+                                  <span
+                                    className={cn(
+                                      "h-1.5 w-1.5 shrink-0 rounded-full",
+                                      waitingForSsh
+                                        ? "animate-pulse bg-amber-500"
+                                        : "bg-emerald-500",
+                                    )}
+                                    aria-hidden="true"
+                                  />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex min-w-0 items-baseline gap-1.5 font-mono text-[calc(11px*var(--zone-font-scale,1))]">
+                                      <span className="shrink-0 font-medium tabular-nums text-foreground">
+                                        {forward.address}
+                                      </span>
+                                      <span className="shrink-0 text-muted-foreground/60">→</span>
+                                      <span className="truncate tabular-nums text-muted-foreground">
+                                        {forward.remoteHost}:{forward.remotePort}
+                                      </span>
+                                    </div>
+                                    <div className="mt-0.5 truncate text-[calc(10px*var(--zone-font-scale,1))] text-muted-foreground">
+                                      {waitingForSsh
+                                        ? t("projectTools.sshLocalForwardWaiting")
+                                        : t("projectTools.sshLocalForwardListening")}
+                                    </div>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className={cn(
+                                      "flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors",
+                                      copied
+                                        ? "text-emerald-600 dark:text-emerald-400"
+                                        : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+                                    )}
+                                    aria-label={
+                                      copied
+                                        ? t("projectTools.sshLocalForwardCopied")
+                                        : t("projectTools.sshLocalForwardCopy")
+                                    }
+                                    title={
+                                      copied
+                                        ? t("projectTools.sshLocalForwardCopied")
+                                        : t("projectTools.sshLocalForwardCopy")
+                                    }
+                                    onClick={() => handleCopyForward(forward.id, forward.address)}
+                                  >
+                                    {copied ? (
+                                      <Check className="h-3.5 w-3.5" />
+                                    ) : (
+                                      <Copy className="h-3.5 w-3.5" />
+                                    )}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                                    aria-label={t("projectTools.sshLocalForwardStop")}
+                                    title={t("projectTools.sshLocalForwardStop")}
+                                    disabled={stopping}
+                                    onClick={() => handleStopForward(forward.id, session.id)}
+                                  >
+                                    {stopping ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    )}
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </article>
                 );
               })}
@@ -1364,6 +1610,20 @@ export function SshTunnelPanel(props: SshTunnelPanelProps) {
         </div>
       ) : null}
       {closeSessionConfirmDialog}
+      {forwardModalSession ? (
+        <SshPortForwardDialog
+          sessionId={forwardModalSession.id}
+          projectPathKey={forwardModalSession.projectPathKey}
+          subtitle={`${sessionTitle(forwardModalSession, t("projectTools.sshTunnelTitle"))} · ${sessionEndpointLabel(forwardModalSession)}`}
+          client={tauriSshLocalForwardClient}
+          onClose={() => setForwardModalSessionId(null)}
+          onStarted={(action) => {
+            setLocalForwards((current) => reduceSshLocalForwardState(current, action));
+            clearForwardError(action.forward.sessionId);
+            setForwardModalSessionId(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

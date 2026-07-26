@@ -300,6 +300,10 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
   );
 
   function resolveStopConversationId() {
+    // Stop only ever targets the conversation the user is looking at (or the
+    // one the composer references). Never fall back to "any running
+    // conversation" — that silently kills an unrelated background run when
+    // the visible sending state and the running set are briefly out of sync.
     const visibleConversationId = currentConversationId.trim();
     if (visibleConversationId && runningConversationIds.has(visibleConversationId)) {
       return visibleConversationId;
@@ -308,8 +312,7 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
     if (referencedConversationId && runningConversationIds.has(referencedConversationId)) {
       return referencedConversationId;
     }
-    const runningConversationId = runningConversationIds.values().next().value;
-    return runningConversationId || visibleConversationId || referencedConversationId;
+    return visibleConversationId || referencedConversationId;
   }
 
   function stopConversation(conversationId: string) {

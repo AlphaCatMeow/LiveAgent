@@ -33,6 +33,7 @@ type UseGatewayBridgeListenersParams = GatewayBridgeRuntimeRefs & {
   getConversationAbortController: (conversationId: string) => AbortController | null;
   requestConversationStop: (conversationId: string) => boolean;
   requestActiveConversationStop: (conversationId: string, options: { force: boolean }) => boolean;
+  consumeConversationStop: (conversationId: string, expectedVersion?: number) => boolean;
 };
 
 type GatewayBridgeRequestRegistry = {
@@ -707,18 +708,28 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
     void listen<GatewayChatCancelEvent>("gateway:chat-cancel", (event) => {
       const requestId = event.payload.requestId.trim();
       const explicitConversationId = event.payload.conversationId.trim();
-      const conversationId =
-        getActiveGatewayBridgeRequestByRequestId(requestId)?.conversationId ??
-        explicitConversationId;
+      const activeRequest = getActiveGatewayBridgeRequestByRequestId(requestId);
+      const conversationId = activeRequest?.conversationId ?? explicitConversationId;
       if (!conversationId) {
         return;
       }
       latestParamsRef.current.requestConversationStop(conversationId);
-      latestParamsRef.current.requestActiveConversationStop(conversationId, {
+      const handled = latestParamsRef.current.requestActiveConversationStop(conversationId, {
         force: false,
       });
       const controller = latestParamsRef.current.getConversationAbortController(conversationId);
       controller?.abort();
+      // A cancel that found nothing to stop (no bridge request in flight, no
+      // handler, no controller, not running) must not leave the persistent
+      // stop intent behind — it would silently swallow the next send().
+      if (
+        !activeRequest &&
+        !handled &&
+        !controller &&
+        !latestParamsRef.current.isConversationRunning(conversationId)
+      ) {
+        latestParamsRef.current.consumeConversationStop(conversationId);
+      }
     }).then((dispose) => {
       if (disposed) {
         dispose();

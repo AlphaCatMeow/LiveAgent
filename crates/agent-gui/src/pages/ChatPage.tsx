@@ -1234,6 +1234,7 @@ export function ChatPage(props: ChatPageProps) {
     getConversationAbortController,
     requestConversationStop,
     requestActiveConversationStop,
+    consumeConversationStop,
   });
 
   const { send } = useSendChatTurn({

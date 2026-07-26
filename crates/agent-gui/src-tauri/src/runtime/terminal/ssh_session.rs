@@ -9,7 +9,7 @@ use crate::commands::settings::{
     RuntimeSshKnownHostStatus,
 };
 use crate::runtime::project_path::project_path_key as normalize_project_path_key;
-use crate::runtime::shell_runner::{wait_for_cancel, ShellCancelToken};
+use crate::runtime::shell_runner::ShellCancelToken;
 
 use super::*;
 
@@ -854,7 +854,7 @@ impl TerminalSessionRegistry {
         let result = if let Some(cancel_token) = cancel_token {
             tokio::select! {
                 result = &mut execution => result,
-                _ = wait_for_cancel(cancel_token) => {
+                _ = cancel_token.cancelled() => {
                     return Err("Cancelled".to_string());
                 }
             }

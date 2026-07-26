@@ -17,7 +17,11 @@ import {
   resolveBashTimeoutPolicy,
 } from "./bashTimeoutPolicy";
 import { type BuiltinToolBundle, createBuiltinMetadataMap } from "./builtinTypes";
-import { invokeWithAbort, throwIfToolInvocationAborted } from "./invokeWithAbort";
+import {
+  invokeWithAbort,
+  requestRuntimeCancel,
+  throwIfToolInvocationAborted,
+} from "./invokeWithAbort";
 import { formatResolvedTarget, type ResolvedPath, ToolPathResolver } from "./pathUtils";
 import { assertSkillPathAllowedByPolicy, type SkillAccessPolicy } from "./skillAccessPolicy";
 
@@ -36,10 +40,6 @@ type ShellRunResponse = {
   stdio_open_after_exit?: boolean;
   effective_timeout_ms: number;
   duration_ms: number;
-};
-
-type ShellCancelResponse = {
-  cancelled: boolean;
 };
 
 type ManagedProcessRecord = {
@@ -91,10 +91,6 @@ function createShellRunId(toolCallId: string) {
   return `bash-${toolCallId || "tool"}-${createUuid()}`;
 }
 
-function delay(ms: number) {
-  return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
-}
-
 function strictToolParameters(properties: Record<string, unknown>) {
   return Type.Object(properties as any, { additionalProperties: false });
 }
@@ -108,22 +104,6 @@ function assertKnownArguments(toolName: string, args: unknown, allowed: readonly
       `${toolName} received unsupported argument${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}`,
     );
   }
-}
-
-function requestShellCancel(runId: string) {
-  void (async () => {
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      try {
-        const response = await invoke<ShellCancelResponse>("shell_cancel", {
-          run_id: runId,
-        } as any);
-        if (response.cancelled) return;
-      } catch {
-        return;
-      }
-      await delay(50);
-    }
-  })();
 }
 
 type ShellSyntaxScan = {
@@ -1028,7 +1008,7 @@ export function createShellTools(params: {
     const timeout_ms = normalizeBashTimeoutMs(timeoutRaw, timeoutPolicy);
     const run_id = createShellRunId(toolCall.id);
     const abortHandler = () => {
-      requestShellCancel(run_id);
+      requestRuntimeCancel(run_id);
     };
 
     try {

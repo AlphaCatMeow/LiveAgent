@@ -20,8 +20,12 @@ export function throwIfToolInvocationAborted(signal?: AbortSignal) {
 
 export function createToolRunId(prefix: string, toolCallId: string) {
   const normalizedPrefix = prefix.trim() || "tool";
-  const normalizedToolCallId = toolCallId.trim() || crypto.randomUUID();
-  return `${normalizedPrefix}:${normalizedToolCallId}`;
+  const normalizedToolCallId = toolCallId.trim() || "call";
+  // Provider tool-call ids are not globally unique (local models commonly
+  // reuse ids like "call_1" across conversations), and registering a
+  // duplicate run id cancels the previous registration's token — so a uuid
+  // suffix is required to keep runs from cancelling each other.
+  return `${normalizedPrefix}:${normalizedToolCallId}:${crypto.randomUUID()}`;
 }
 
 function delay(ms: number) {
@@ -39,7 +43,7 @@ export function requestRuntimeCancel(runId: string) {
         } as any);
         if (response.cancelled) return;
       } catch {
-        return;
+        // Transient IPC failure — keep retrying; the loop is bounded.
       }
       await delay(50);
     }

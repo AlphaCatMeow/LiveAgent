@@ -308,18 +308,18 @@ test("SSHManager exec abort requests runtime cancellation", async () => {
 
   assert.equal(result.isError, true);
   assert.match(result.content[0].text, /Cancelled/);
-  assert.ok(
-    invocations.some(
-      (call) =>
-        call.command === "terminal_ssh_exec" &&
-        call.args.run_id === "ssh-exec:call-ssh",
-    ),
+  const execCall = invocations.find(
+    (call) =>
+      call.command === "terminal_ssh_exec" &&
+      typeof call.args.run_id === "string" &&
+      call.args.run_id.startsWith("ssh-exec:call-ssh:"),
   );
+  assert.ok(execCall, "exec must carry a unique ssh-exec run id");
   assert.ok(
     invocations.some(
-      (call) =>
-        call.command === "runtime_cancel" && call.args.run_id === "ssh-exec:call-ssh",
+      (call) => call.command === "runtime_cancel" && call.args.run_id === execCall.args.run_id,
     ),
+    "runtime cancel must target the same run id as the exec call",
   );
 
   resolveExec({ exitCode: 0, stdout: "", stderr: "", timedOut: false });

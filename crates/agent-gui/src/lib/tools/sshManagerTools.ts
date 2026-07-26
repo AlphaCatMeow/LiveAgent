@@ -961,29 +961,38 @@ async function executeSSHManager(
           ? await resolveLocalTransferPath(args.local_path, "read", "SSHManager.local_path")
           : await resolveLocalTransferPath(args.local_path, "write", "SSHManager.local_path");
       const remotePath = requireString(args, "remote_path");
-      const result = await invokeTool<{ transfer?: { id?: string } }>("sftp_transfer", {
-        session_id: session.session_id,
-        project_path_key: params.projectPathKey,
-        workdir: params.workdir,
-        direction,
-        source_path: direction === "upload" ? localPath : remotePath,
-        target_path: direction === "upload" ? remotePath : localPath,
-        recursive: normalizeBool(args.recursive, false),
-        overwrite: normalizeBool(args.overwrite, false),
-      });
+      const cancelTransferById = (transferId: string) => {
+        void invoke("sftp_cancel_transfer", {
+          session_id: session.session_id,
+          transfer_id: transferId,
+        }).catch(() => undefined);
+      };
+      const result = await invokeWithAbort<{ transfer?: { id?: string } }>(
+        "sftp_transfer",
+        {
+          session_id: session.session_id,
+          project_path_key: params.projectPathKey,
+          workdir: params.workdir,
+          direction,
+          source_path: direction === "upload" ? localPath : remotePath,
+          target_path: direction === "upload" ? remotePath : localPath,
+          recursive: normalizeBool(args.recursive, false),
+          overwrite: normalizeBool(args.overwrite, false),
+        },
+        signal,
+        {
+          // An abort during the start call releases the caller before the
+          // transfer id is known; cancel it as soon as the late result
+          // surfaces the id — the Rust-side transfer keeps running otherwise.
+          onLateResult: (lateResult) => {
+            const lateTransferId = lateResult?.transfer?.id?.trim();
+            if (lateTransferId) cancelTransferById(lateTransferId);
+          },
+        },
+      );
       const transferId = result.transfer?.id?.trim() ?? "";
-      if (signal && transferId) {
-        const cancelTransfer = () => {
-          void invoke("sftp_cancel_transfer", {
-            session_id: session.session_id,
-            transfer_id: transferId,
-          }).catch(() => undefined);
-        };
-        if (signal.aborted) {
-          cancelTransfer();
-        } else {
-          signal.addEventListener("abort", cancelTransfer, { once: true });
-        }
+      if (signal?.aborted && transferId) {
+        cancelTransferById(transferId);
       }
       return okResult({
         toolCall,

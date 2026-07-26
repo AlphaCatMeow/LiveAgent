@@ -23,13 +23,42 @@ pub(crate) const MAX_SHELL_TIMEOUT_MS: u64 = 10 * 60_000;
 const TERMINATION_GRACE_MS: u64 = 300;
 const STREAM_EOF_GRACE_MS: u64 = 300;
 
-pub(crate) type ShellCancelToken = Arc<AtomicBool>;
+/// Cancellation flag shared between the (possibly blocking) run body and the
+/// async cancel watchers. Blocking code polls `is_cancelled`; async code
+/// awaits `cancelled()`, which is event-driven via `Notify` — no polling.
+#[derive(Default)]
+pub(crate) struct ShellCancelFlag {
+    cancelled: AtomicBool,
+    notify: tokio::sync::Notify,
+}
 
-pub(crate) async fn wait_for_cancel(token: ShellCancelToken) {
-    while !token.load(Ordering::SeqCst) {
-        tokio::time::sleep(Duration::from_millis(25)).await;
+impl ShellCancelFlag {
+    pub(crate) fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+        self.notify.notify_waiters();
+    }
+
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+
+    /// Resolves once `cancel` has been called.
+    pub(crate) async fn cancelled(&self) {
+        while !self.is_cancelled() {
+            let notified = self.notify.notified();
+            tokio::pin!(notified);
+            // Register interest before the re-check so a `cancel` landing
+            // between the check and the await cannot be missed.
+            notified.as_mut().enable();
+            if self.is_cancelled() {
+                return;
+            }
+            notified.await;
+        }
     }
 }
+
+pub(crate) type ShellCancelToken = Arc<ShellCancelFlag>;
 
 #[derive(Default)]
 pub(crate) struct ShellRunRegistry {
@@ -38,14 +67,14 @@ pub(crate) struct ShellRunRegistry {
 
 impl ShellRunRegistry {
     pub(crate) fn register(&self, run_id: &str) -> ShellCancelToken {
-        let token = Arc::new(AtomicBool::new(false));
+        let token = Arc::new(ShellCancelFlag::default());
         let previous = self
             .runs
             .lock()
             .expect("shell run registry poisoned")
             .insert(run_id.to_string(), Arc::clone(&token));
         if let Some(previous) = previous {
-            previous.store(true, Ordering::SeqCst);
+            previous.cancel();
         }
         token
     }
@@ -60,7 +89,7 @@ impl ShellRunRegistry {
         else {
             return false;
         };
-        token.store(true, Ordering::SeqCst);
+        token.cancel();
         true
     }
 
@@ -309,7 +338,7 @@ fn normalize_timeout_ms(timeout_ms: Option<u64>, max_timeout_ms: Option<u64>) ->
 
 fn is_cancelled(cancel_token: Option<&ShellCancelToken>) -> bool {
     cancel_token
-        .map(|token| token.load(Ordering::SeqCst))
+        .map(|token| token.is_cancelled())
         .unwrap_or(false)
 }
 
@@ -910,9 +939,9 @@ mod tests {
     fn shell_registry_cancel_marks_registered_run() {
         let registry = ShellRunRegistry::default();
         let token = registry.register("run-1");
-        assert!(!token.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(!token.is_cancelled());
         assert!(registry.cancel("run-1"));
-        assert!(token.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(token.is_cancelled());
         registry.unregister("run-1", &token);
         assert!(!registry.cancel("run-1"));
     }
@@ -923,10 +952,10 @@ mod tests {
         let first = registry.register("same-run");
         let second = registry.register("same-run");
 
-        assert!(first.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(first.is_cancelled());
         registry.unregister("same-run", &first);
         assert!(registry.cancel("same-run"));
-        assert!(second.load(std::sync::atomic::Ordering::SeqCst));
+        assert!(second.is_cancelled());
 
         registry.unregister("same-run", &second);
         assert!(!registry.cancel("same-run"));

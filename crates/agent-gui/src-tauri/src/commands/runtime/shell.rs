@@ -47,16 +47,8 @@ pub async fn shell_run(
     join_result.map_err(|e| format!("shell_run join failed: {e}"))?
 }
 
-#[tauri::command(rename_all = "snake_case")]
-pub fn shell_cancel(
-    registry: State<'_, Arc<ShellRunRegistry>>,
-    run_id: String,
-) -> ShellCancelResponse {
-    ShellCancelResponse {
-        cancelled: registry.cancel(run_id.trim()),
-    }
-}
-
+/// Cancels any run registered in the shared `ShellRunRegistry` — shell
+/// commands, MCP tool calls, and SSH exec all park their cancel tokens there.
 #[tauri::command(rename_all = "snake_case")]
 pub fn runtime_cancel(
     registry: State<'_, Arc<ShellRunRegistry>>,

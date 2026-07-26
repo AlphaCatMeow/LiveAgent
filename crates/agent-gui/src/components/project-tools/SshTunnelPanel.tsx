@@ -1615,6 +1615,7 @@ export function SshTunnelPanel(props: SshTunnelPanelProps) {
           sessionId={forwardModalSession.id}
           projectPathKey={forwardModalSession.projectPathKey}
           subtitle={`${sessionTitle(forwardModalSession, t("projectTools.sshTunnelTitle"))} · ${sessionEndpointLabel(forwardModalSession)}`}
+          client={tauriSshLocalForwardClient}
           onClose={() => setForwardModalSessionId(null)}
           onStarted={(action) => {
             setLocalForwards((current) => reduceSshLocalForwardState(current, action));

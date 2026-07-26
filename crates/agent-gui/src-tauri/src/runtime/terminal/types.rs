@@ -121,7 +121,7 @@ pub struct SshLocalForwardActionResponse {
     pub revision: u64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SshLocalForwardEventPayload {
     pub kind: String,
@@ -206,6 +206,8 @@ pub struct TerminalEventPayload {
     pub output_end_offset: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ssh_tabs: Option<SshTerminalTabsSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ssh_local_forward: Option<SshLocalForwardEventPayload>,
 }
 
 #[derive(Debug, Clone)]

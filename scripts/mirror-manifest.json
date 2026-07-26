@@ -105,6 +105,8 @@
     "pages/settings/SystemToolsSection.tsx",
     "pages/settings/SshSection.tsx",
     "lib/terminal/types.ts",
+    "lib/terminal/sshLocalForwardTypes.ts",
+    "components/project-tools/SshPortForwardDialog.tsx",
     "components/ui/confirm-dialog.tsx",
     "pages/mcp-hub/McpHubPage.tsx",
     "pages/mcp-hub/McpImportView.tsx"

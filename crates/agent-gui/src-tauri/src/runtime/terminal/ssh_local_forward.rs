@@ -376,10 +376,37 @@ impl TerminalSessionRegistry {
             forward: record,
             revision,
         };
+        // The desktop webview listens on the dedicated channel; gateway
+        // subscribers get a terminal event so the WebUI shares the stream
+        // without a second event pipeline.
         if let Ok(app_handle) = self.app_handle.lock() {
             if let Some(app_handle) = app_handle.as_ref() {
-                let _ = app_handle.emit(SSH_LOCAL_FORWARD_EVENT_NAME, payload);
+                let _ = app_handle.emit(SSH_LOCAL_FORWARD_EVENT_NAME, payload.clone());
             }
+        }
+        let subscribers = self
+            .subscribers
+            .lock()
+            .map(|subscribers| subscribers.values().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        if subscribers.is_empty() {
+            return;
+        }
+        let event = TerminalEvent {
+            payload: TerminalEventPayload {
+                kind: "ssh_local_forward".to_string(),
+                session_id: payload.forward.session_id.clone(),
+                project_path_key: payload.forward.project_path_key.clone(),
+                session: None,
+                data: None,
+                output_start_offset: None,
+                output_end_offset: None,
+                ssh_tabs: None,
+                ssh_local_forward: Some(payload),
+            },
+        };
+        for subscriber in subscribers {
+            let _ = subscriber.send(event.clone());
         }
     }
 

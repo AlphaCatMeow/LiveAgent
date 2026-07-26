@@ -9,6 +9,13 @@ import {
 } from "./index";
 
 export type GatewayProviderApiKeyUpdates = Record<string, string>;
+export type GatewayProviderUsageQuerySecretUpdates = Record<
+  string,
+  {
+    accessToken?: string;
+    secretAccessKey?: string;
+  }
+>;
 export type GatewaySshSecretUpdates = Record<
   string,
   {
@@ -58,6 +65,7 @@ export type GatewaySettingsSyncPayload = {
   locale: AppSettings["locale"];
   sshPatch?: GatewaySshSyncPatch;
   providerApiKeyUpdates?: GatewayProviderApiKeyUpdates;
+  providerUsageQuerySecretUpdates?: GatewayProviderUsageQuerySecretUpdates;
   sshSecretUpdates?: GatewaySshSecretUpdates;
   // systemProxy 密码回传 sidecar（仿 providerApiKeyUpdates 的简化范式）：
   // system 字段本身出口必被脱敏，明文密码只经此通道回到桌面端落库。
@@ -91,6 +99,40 @@ function apiKeyConfiguredForProvider(provider: AppSettings["customProviders"][nu
   return provider.apiKey.trim().length > 0 || provider.apiKeyConfigured === true;
 }
 
+const DEFAULT_USAGE_QUERY_CONFIG: AppSettings["customProviders"][number]["usageQuery"] = {
+  enabled: false,
+  mode: "custom",
+  script: "",
+  baseUrl: "",
+  accessToken: "",
+  accessTokenConfigured: false,
+  userId: "",
+  accessKeyId: "",
+  secretAccessKey: "",
+  secretAccessKeyConfigured: false,
+};
+
+function usageQueryConfig(
+  provider: AppSettings["customProviders"][number],
+): AppSettings["customProviders"][number]["usageQuery"] {
+  return provider.usageQuery ?? DEFAULT_USAGE_QUERY_CONFIG;
+}
+
+function redactUsageQueryConfig(
+  usageQuery: AppSettings["customProviders"][number]["usageQuery"] | undefined,
+) {
+  const config = usageQuery ?? DEFAULT_USAGE_QUERY_CONFIG;
+  return {
+    ...config,
+    accessToken: "",
+    accessTokenConfigured:
+      config.accessToken.trim().length > 0 || config.accessTokenConfigured === true,
+    secretAccessKey: "",
+    secretAccessKeyConfigured:
+      config.secretAccessKey.trim().length > 0 || config.secretAccessKeyConfigured === true,
+  };
+}
+
 export function redactCustomProvidersForGateway(
   customProviders: AppSettings["customProviders"],
 ): GatewaySettingsSyncProvider[] {
@@ -98,6 +140,7 @@ export function redactCustomProvidersForGateway(
     const { apiKey: _apiKey, ...rest } = provider;
     return {
       ...rest,
+      usageQuery: redactUsageQueryConfig(provider.usageQuery),
       apiKeyConfigured: apiKeyConfiguredForProvider(provider),
     };
   });
@@ -109,6 +152,7 @@ export function redactCustomProvidersForWebStorage(
   return customProviders.map((provider) => ({
     ...provider,
     apiKey: "",
+    usageQuery: redactUsageQueryConfig(provider.usageQuery),
     apiKeyConfigured: apiKeyConfiguredForProvider(provider),
   }));
 }
@@ -177,6 +221,50 @@ function collectProviderApiKeyUpdates(
     if (provider.id.trim() && apiKey) {
       updates[provider.id] = apiKey;
     }
+  }
+  return Object.keys(updates).length > 0 ? updates : undefined;
+}
+
+function collectProviderUsageQuerySecretUpdates(
+  customProviders: AppSettings["customProviders"],
+): GatewayProviderUsageQuerySecretUpdates | undefined {
+  const updates: GatewayProviderUsageQuerySecretUpdates = {};
+  for (const provider of customProviders) {
+    const id = provider.id.trim();
+    if (!id) continue;
+    const update: GatewayProviderUsageQuerySecretUpdates[string] = {};
+    const usageQuery = usageQueryConfig(provider);
+    if (usageQuery.accessToken.trim()) {
+      update.accessToken = usageQuery.accessToken.trim();
+    }
+    if (usageQuery.secretAccessKey.trim()) {
+      update.secretAccessKey = usageQuery.secretAccessKey.trim();
+    }
+    if (Object.keys(update).length > 0) updates[id] = update;
+  }
+  return Object.keys(updates).length > 0 ? updates : undefined;
+}
+
+function collectChangedProviderUsageQuerySecretUpdates(
+  previous: AppSettings["customProviders"],
+  next: AppSettings["customProviders"],
+): GatewayProviderUsageQuerySecretUpdates | undefined {
+  const previousById = new Map(previous.map((provider) => [provider.id, provider]));
+  const updates: GatewayProviderUsageQuerySecretUpdates = {};
+  for (const provider of next) {
+    const id = provider.id.trim();
+    if (!id) continue;
+    const previousProvider = previousById.get(id);
+    const previousUsageQuery = previousProvider ? usageQueryConfig(previousProvider) : undefined;
+    const usageQuery = usageQueryConfig(provider);
+    const update: GatewayProviderUsageQuerySecretUpdates[string] = {};
+    if (usageQuery.accessToken !== previousUsageQuery?.accessToken) {
+      update.accessToken = usageQuery.accessToken.trim();
+    }
+    if (usageQuery.secretAccessKey !== previousUsageQuery?.secretAccessKey) {
+      update.secretAccessKey = usageQuery.secretAccessKey.trim();
+    }
+    if (Object.keys(update).length > 0) updates[id] = update;
   }
   return Object.keys(updates).length > 0 ? updates : undefined;
 }
@@ -518,6 +606,66 @@ function normalizeProviderApiKeyUpdates(value: unknown): GatewayProviderApiKeyUp
   return updates;
 }
 
+function normalizeProviderUsageQuerySecretUpdates(
+  value: unknown,
+): GatewayProviderUsageQuerySecretUpdates {
+  const source = asObject(value);
+  const updates: GatewayProviderUsageQuerySecretUpdates = {};
+  for (const [id, rawUpdate] of Object.entries(source)) {
+    const normalizedId = id.trim();
+    if (!normalizedId) continue;
+    const updateSource = asObject(rawUpdate);
+    const update: GatewayProviderUsageQuerySecretUpdates[string] = {};
+    if (
+      Object.hasOwn(updateSource, "accessToken") &&
+      typeof updateSource.accessToken === "string"
+    ) {
+      update.accessToken = updateSource.accessToken.trim();
+    }
+    if (
+      Object.hasOwn(updateSource, "secretAccessKey") &&
+      typeof updateSource.secretAccessKey === "string"
+    ) {
+      update.secretAccessKey = updateSource.secretAccessKey.trim();
+    }
+    if (Object.keys(update).length > 0) updates[normalizedId] = update;
+  }
+  return updates;
+}
+
+function mergeSyncedUsageQuery(
+  current: AppSettings["customProviders"][number]["usageQuery"] | undefined,
+  incoming: unknown,
+  update: GatewayProviderUsageQuerySecretUpdates[string] | undefined,
+) {
+  const source = asObject(incoming);
+  const accessToken =
+    (update && Object.hasOwn(update, "accessToken") ? update.accessToken : undefined) ??
+    (typeof source.accessToken === "string" && source.accessToken.trim()
+      ? source.accessToken.trim()
+      : (current?.accessToken ?? ""));
+  const secretAccessKey =
+    (update && Object.hasOwn(update, "secretAccessKey") ? update.secretAccessKey : undefined) ??
+    (typeof source.secretAccessKey === "string" && source.secretAccessKey.trim()
+      ? source.secretAccessKey.trim()
+      : (current?.secretAccessKey ?? ""));
+
+  return {
+    ...source,
+    accessToken,
+    accessTokenConfigured:
+      accessToken.length > 0 ||
+      source.accessTokenConfigured === true ||
+      (!Object.hasOwn(source, "accessTokenConfigured") && current?.accessTokenConfigured === true),
+    secretAccessKey,
+    secretAccessKeyConfigured:
+      secretAccessKey.length > 0 ||
+      source.secretAccessKeyConfigured === true ||
+      (!Object.hasOwn(source, "secretAccessKeyConfigured") &&
+        current?.secretAccessKeyConfigured === true),
+  };
+}
+
 function normalizeSshSecretUpdates(value: unknown): GatewaySshSecretUpdates {
   const source = asObject(value);
   const updates: GatewaySshSecretUpdates = {};
@@ -555,6 +703,7 @@ function mergeSyncedCustomProviders(
   current: AppSettings["customProviders"],
   incoming: unknown,
   apiKeyUpdates: GatewayProviderApiKeyUpdates,
+  usageQuerySecretUpdates: GatewayProviderUsageQuerySecretUpdates,
 ): AppSettings["customProviders"] {
   if (!Array.isArray(incoming)) {
     return current;
@@ -569,6 +718,13 @@ function mergeSyncedCustomProviders(
     const sourceApiKey = typeof source.apiKey === "string" ? source.apiKey.trim() : "";
     const apiKey = (apiKeyUpdate ?? sourceApiKey) || currentProvider?.apiKey || "";
     const sourceHasConfiguredFlag = Object.hasOwn(source, "apiKeyConfigured");
+    const usageQuery = Object.hasOwn(source, "usageQuery")
+      ? mergeSyncedUsageQuery(
+          currentProvider?.usageQuery,
+          source.usageQuery,
+          id ? usageQuerySecretUpdates[id] : undefined,
+        )
+      : currentProvider && usageQueryConfig(currentProvider);
 
     return {
       ...source,
@@ -577,6 +733,7 @@ function mergeSyncedCustomProviders(
         apiKey.length > 0 ||
         source.apiKeyConfigured === true ||
         (!sourceHasConfiguredFlag && currentProvider?.apiKeyConfigured === true),
+      ...(usageQuery ? { usageQuery } : {}),
     };
   }) as AppSettings["customProviders"];
 }
@@ -881,6 +1038,12 @@ export function buildGatewaySettingsSyncPayload(
   if (providerApiKeyUpdates) {
     payload.providerApiKeyUpdates = providerApiKeyUpdates;
   }
+  const providerUsageQuerySecretUpdates = options.includeProviderApiKeyUpdates
+    ? collectProviderUsageQuerySecretUpdates(settings.customProviders)
+    : undefined;
+  if (providerUsageQuerySecretUpdates) {
+    payload.providerUsageQuerySecretUpdates = providerUsageQuerySecretUpdates;
+  }
   const sshSecretUpdates = options.includeProviderApiKeyUpdates
     ? collectSshSecretUpdates(settings.ssh)
     : undefined;
@@ -925,6 +1088,13 @@ export function buildGatewaySettingsSyncUpdatePayload(
     update.customProviders ??= nextPayload.customProviders;
     update.providerApiKeyUpdates = providerApiKeyUpdates;
   }
+  const providerUsageQuerySecretUpdates = options.includeProviderApiKeyUpdates
+    ? collectChangedProviderUsageQuerySecretUpdates(prev.customProviders, next.customProviders)
+    : undefined;
+  if (providerUsageQuerySecretUpdates) {
+    update.customProviders ??= nextPayload.customProviders;
+    update.providerUsageQuerySecretUpdates = providerUsageQuerySecretUpdates;
+  }
   const sshSecretUpdates = options.includeProviderApiKeyUpdates
     ? collectChangedSshSecretUpdates(prev.ssh, next.ssh)
     : undefined;
@@ -950,6 +1120,9 @@ export function applyGatewaySettingsSyncPayload(
 ): AppSettings {
   const source = asObject(payload);
   const providerApiKeyUpdates = normalizeProviderApiKeyUpdates(source.providerApiKeyUpdates);
+  const providerUsageQuerySecretUpdates = normalizeProviderUsageQuerySecretUpdates(
+    source.providerUsageQuerySecretUpdates,
+  );
   const sshSecretUpdates = normalizeSshSecretUpdates(source.sshSecretUpdates);
   const systemProxyPasswordUpdate =
     typeof source.systemProxyPasswordUpdate === "string" && source.systemProxyPasswordUpdate.trim()
@@ -977,6 +1150,7 @@ export function applyGatewaySettingsSyncPayload(
       current.customProviders,
       source.customProviders,
       providerApiKeyUpdates,
+      providerUsageQuerySecretUpdates,
     ),
     mcp: (source.mcp as AppSettings["mcp"] | undefined) ?? current.mcp,
     agents: (source.agents as AppSettings["agents"] | undefined) ?? current.agents,

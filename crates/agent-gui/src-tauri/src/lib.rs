@@ -279,6 +279,7 @@ macro_rules! app_invoke_handler {
             commands::gateway::gateway_tunnel_close,
             commands::gateway::gateway_tunnel_check,
             commands::gateway::workspace_watch_set,
+            commands::gateway::provider_usage_query,
             services::proxy::proxy_get_server_info,
         ]
     };
@@ -492,6 +493,8 @@ pub fn run() {
     let memory_store = Arc::new(
         services::memory::MemoryStore::open().expect("failed to initialize LiveAgent memory store"),
     );
+    let provider_usage_service =
+        Arc::new(services::provider_usage::ProviderUsageService::default());
     let power_activity = Arc::new(services::power_activity::PowerActivityManager::default());
     let managed_process_registry =
         Arc::new(runtime::managed_process::ManagedProcessRegistry::open());
@@ -527,6 +530,7 @@ pub fn run() {
         .manage(Arc::new(commands::app::WindowPinState::default()))
         .manage(Arc::new(commands::mcp::McpRuntimeManager::default()))
         .manage(Arc::clone(&memory_store))
+        .manage(Arc::clone(&provider_usage_service))
         .manage(Arc::clone(&power_activity))
         .manage(Arc::new(runtime::shell_runner::ShellRunRegistry::default()))
         .manage(Arc::clone(&managed_process_registry))
@@ -544,6 +548,7 @@ pub fn run() {
             let sftp_registry = Arc::clone(&sftp_registry);
             let managed_process_registry = Arc::clone(&managed_process_registry);
             let git_clone_task_registry = Arc::clone(&git_clone_task_registry);
+            let provider_usage_service = Arc::clone(&provider_usage_service);
             move |app| {
                 commands::history_db::initialize_history_db()?;
                 configure_system_tray(
@@ -567,6 +572,7 @@ pub fn run() {
                     app.handle().clone(),
                     Arc::clone(&automation_store),
                     Arc::clone(&memory_store),
+                    Arc::clone(&provider_usage_service),
                     Arc::clone(&terminal_registry),
                     Arc::clone(&sftp_registry),
                     Arc::clone(&managed_process_registry),

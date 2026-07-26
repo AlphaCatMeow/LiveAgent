@@ -291,6 +291,36 @@ export type SshSettings = {
   projectHostAssociations: Record<string, string[]>;
 };
 
+export type UsageQueryMode = "coding-plan" | "general" | "newapi" | "custom";
+
+export type UsageQueryConfig = {
+  enabled: boolean;
+  mode: UsageQueryMode;
+  script: string;
+  baseUrl: string;
+  accessToken: string;
+  accessTokenConfigured?: boolean;
+  userId: string;
+  accessKeyId: string;
+  secretAccessKey: string;
+  secretAccessKeyConfigured?: boolean;
+};
+
+export function getDefaultUsageQueryConfig(): UsageQueryConfig {
+  return {
+    enabled: false,
+    mode: "custom",
+    script: "",
+    baseUrl: "",
+    accessToken: "",
+    accessTokenConfigured: false,
+    userId: "",
+    accessKeyId: "",
+    secretAccessKey: "",
+    secretAccessKeyConfigured: false,
+  };
+}
+
 export type CustomProvider = {
   id: string;
   name: string;
@@ -309,6 +339,7 @@ export type CustomProvider = {
   promptCacheRetention?: "short" | "long";
   nativeWebSearchEnabled: boolean;
   useSystemProxy: boolean;
+  usageQuery: UsageQueryConfig;
 };
 
 export type EffectiveTheme = "light" | "dark";
@@ -434,6 +465,7 @@ export function getBuiltinCustomProviders(): CustomProvider[] {
       promptCachingEnabled: true,
       nativeWebSearchEnabled: true,
       useSystemProxy: false,
+      usageQuery: getDefaultUsageQueryConfig(),
     },
     {
       id: "builtin-codex",
@@ -449,6 +481,7 @@ export function getBuiltinCustomProviders(): CustomProvider[] {
       promptCachingEnabled: true,
       nativeWebSearchEnabled: true,
       useSystemProxy: false,
+      usageQuery: getDefaultUsageQueryConfig(),
     },
     {
       id: "builtin-gemini",
@@ -463,6 +496,7 @@ export function getBuiltinCustomProviders(): CustomProvider[] {
       promptCachingEnabled: false,
       nativeWebSearchEnabled: true,
       useSystemProxy: false,
+      usageQuery: getDefaultUsageQueryConfig(),
     },
     {
       id: "builtin-xai",
@@ -478,6 +512,7 @@ export function getBuiltinCustomProviders(): CustomProvider[] {
       promptCachingEnabled: false,
       nativeWebSearchEnabled: true,
       useSystemProxy: false,
+      usageQuery: getDefaultUsageQueryConfig(),
     },
   ];
 }
@@ -1250,6 +1285,39 @@ function normalizeProviderModelOrder(
   return order;
 }
 
+function normalizeUsageQueryMode(input: unknown): UsageQueryMode {
+  switch (input) {
+    case "coding-plan":
+    case "general":
+    case "newapi":
+      return input;
+    default:
+      // 含历史配置中的 "balance"(余额适配器已移除)——统一回退自定义脚本。
+      return "custom";
+  }
+}
+
+function normalizeUsageQueryConfig(input: unknown): UsageQueryConfig {
+  const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const accessToken = normalizeApiKey(typeof obj.accessToken === "string" ? obj.accessToken : "");
+  const secretAccessKey = normalizeApiKey(
+    typeof obj.secretAccessKey === "string" ? obj.secretAccessKey : "",
+  );
+
+  return {
+    enabled: obj.enabled === true,
+    mode: normalizeUsageQueryMode(obj.mode),
+    script: typeof obj.script === "string" ? obj.script.trim() : "",
+    baseUrl: normalizeBaseUrl(typeof obj.baseUrl === "string" ? obj.baseUrl : ""),
+    accessToken,
+    accessTokenConfigured: accessToken.length > 0 || obj.accessTokenConfigured === true,
+    userId: typeof obj.userId === "string" ? obj.userId.trim() : "",
+    accessKeyId: typeof obj.accessKeyId === "string" ? obj.accessKeyId.trim() : "",
+    secretAccessKey,
+    secretAccessKeyConfigured: secretAccessKey.length > 0 || obj.secretAccessKeyConfigured === true,
+  };
+}
+
 export function normalizeCustomProvider(input: unknown): CustomProvider {
   const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
   const type = normalizeProviderId(obj.type);
@@ -1293,6 +1361,7 @@ export function normalizeCustomProvider(input: unknown): CustomProvider {
       : {}),
     nativeWebSearchEnabled: obj.nativeWebSearchEnabled !== false,
     useSystemProxy: obj.useSystemProxy === true,
+    usageQuery: normalizeUsageQueryConfig(obj.usageQuery),
   };
 }
 

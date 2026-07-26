@@ -6,6 +6,7 @@ import {
   normalizeProviderModelConfigs,
   type ProviderId,
   type ProviderModelConfig,
+  type UsageQueryConfig,
 } from "../../lib/settings";
 import { normalizeBaseUrl } from "../../lib/settings/normalize";
 
@@ -16,6 +17,67 @@ const ANTHROPIC_API_VERSION = "2023-06-01";
 
 // Gateway WebUI 判定移至 lib/runtimeEnv 单一真源；此处再导出保持既有调用方不变。
 export { isGatewayWebuiRuntime };
+
+const REDACTED_USAGE_QUERY_SECRET_DISPLAY = "••••••••";
+
+export function createUsageQueryDraft(
+  usageQuery: UsageQueryConfig,
+  useRedactedSecrets: boolean,
+): UsageQueryConfig {
+  const accessTokenIsRedacted =
+    useRedactedSecrets && !usageQuery.accessToken && usageQuery.accessTokenConfigured === true;
+  const secretAccessKeyIsRedacted =
+    useRedactedSecrets &&
+    !usageQuery.secretAccessKey &&
+    usageQuery.secretAccessKeyConfigured === true;
+
+  return {
+    ...usageQuery,
+    accessToken: accessTokenIsRedacted
+      ? REDACTED_USAGE_QUERY_SECRET_DISPLAY
+      : usageQuery.accessToken,
+    secretAccessKey: secretAccessKeyIsRedacted
+      ? REDACTED_USAGE_QUERY_SECRET_DISPLAY
+      : usageQuery.secretAccessKey,
+  };
+}
+
+export function serializeUsageQueryDraft(
+  usageQuery: UsageQueryConfig,
+  useRedactedSecrets: boolean,
+): UsageQueryConfig {
+  const accessTokenIsRedacted =
+    useRedactedSecrets && usageQuery.accessToken === REDACTED_USAGE_QUERY_SECRET_DISPLAY;
+  const secretAccessKeyIsRedacted =
+    useRedactedSecrets && usageQuery.secretAccessKey === REDACTED_USAGE_QUERY_SECRET_DISPLAY;
+  const accessToken = accessTokenIsRedacted ? "" : usageQuery.accessToken.trim();
+  const secretAccessKey = secretAccessKeyIsRedacted ? "" : usageQuery.secretAccessKey.trim();
+
+  return {
+    ...usageQuery,
+    script: usageQuery.script.trim(),
+    baseUrl: usageQuery.baseUrl.trim(),
+    accessToken,
+    accessTokenConfigured: accessToken.length > 0 || accessTokenIsRedacted,
+    userId: usageQuery.userId.trim(),
+    accessKeyId: usageQuery.accessKeyId.trim(),
+    secretAccessKey,
+    secretAccessKeyConfigured: secretAccessKey.length > 0 || secretAccessKeyIsRedacted,
+  };
+}
+
+export function getPersistedUsageQueryProviderId(provider: { id?: string } | null | undefined) {
+  const id = provider?.id?.trim();
+  return id || null;
+}
+
+export function requiresCustomUsageQueryConfirmation(
+  usageQuery: Pick<UsageQueryConfig, "enabled" | "mode">,
+  customUsageQueryConfirmed: boolean,
+) {
+  return usageQuery.enabled && usageQuery.mode === "custom" && !customUsageQueryConfirmed;
+}
+
 export function formatTokenCount(value: number): string {
   if (value < 1_000) return String(value);
   if (value < 1_000_000) return `${String(Math.round(value / 1_000))}K`;

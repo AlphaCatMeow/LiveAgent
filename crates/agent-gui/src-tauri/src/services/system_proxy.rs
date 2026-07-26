@@ -298,6 +298,12 @@ pub fn blocking_client_builder() -> Result<reqwest::blocking::ClientBuilder, Str
     blocking_client_builder_for_mode(&current_snapshot().mode)
 }
 
+/// 异步版 `blocking_client_builder()`：显式 no_proxy 语义,供需要自定义
+/// 超时/重定向等选项、无法直接复用 `cached_client()` 的出网点使用。
+pub fn async_client_builder() -> Result<reqwest::ClientBuilder, String> {
+    async_client_builder_for_mode(&current_snapshot().mode)
+}
+
 /// Resolved proxy URL for consumers that configure their own HTTP client rather
 /// than using `cached_client()`/`blocking_client_builder()` (e.g.
 /// `tauri-plugin-updater`, which only accepts a `Url` on its builder).

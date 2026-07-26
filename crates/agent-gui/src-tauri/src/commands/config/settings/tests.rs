@@ -314,6 +314,10 @@ mod tests {
                     "id": "provider-a",
                     "name": "A",
                     "apiKey": "secret-key",
+                    "usageQuery": {
+                        "accessToken": "usage-token",
+                        "secretAccessKey": "usage-secret"
+                    },
                     "apiKeyConfigured": false
                 },
                 {
@@ -330,8 +334,36 @@ mod tests {
             load_gateway_settings_sync_snapshot(&conn).expect("load gateway settings snapshot");
         assert_eq!(snapshot["customProviders"][0]["apiKey"], Value::Null);
         assert_eq!(snapshot["customProviders"][0]["apiKeyConfigured"], true);
+        assert_eq!(snapshot["customProviders"][0]["usageQuery"]["accessToken"], Value::Null);
+        assert_eq!(
+            snapshot["customProviders"][0]["usageQuery"]["accessTokenConfigured"],
+            true
+        );
+        assert_eq!(
+            snapshot["customProviders"][0]["usageQuery"]["secretAccessKey"],
+            Value::Null
+        );
+        assert_eq!(
+            snapshot["customProviders"][0]["usageQuery"]["secretAccessKeyConfigured"],
+            true
+        );
         assert_eq!(snapshot["customProviders"][1]["apiKey"], Value::Null);
         assert_eq!(snapshot["customProviders"][1]["apiKeyConfigured"], true);
+    }
+
+    #[test]
+    fn gateway_settings_payload_removes_usage_query_secret_sidecar() {
+        let redacted = redact_gateway_settings_sync_payload(json!({
+            "providerUsageQuerySecretUpdates": {
+                "provider-a": {
+                    "accessToken": "usage-token",
+                    "secretAccessKey": "usage-secret"
+                }
+            }
+        }))
+        .expect("redact gateway settings payload");
+
+        assert_eq!(redacted.get("providerUsageQuerySecretUpdates"), None);
     }
 
     #[test]

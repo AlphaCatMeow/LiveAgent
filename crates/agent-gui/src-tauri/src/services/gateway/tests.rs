@@ -12,8 +12,56 @@ use super::{
     GATEWAY_WEBVIEW_REPORT_FRESH_WINDOW,
 };
 use crate::commands::settings::RemoteSettingsPayload;
+use crate::services::gateway_bridge;
+use crate::services::provider_usage::{ProviderUsageEntry, ProviderUsageResult};
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
+
+#[test]
+fn provider_usage_response_serializes_only_result_json() {
+    let response = gateway_bridge::provider_usage_response(ProviderUsageResult {
+        entries: vec![ProviderUsageEntry {
+            label: "Balance".to_string(),
+            value: "4.20".to_string(),
+            unit: Some("USD".to_string()),
+        }],
+        queried_at: Some(1_772_000_000_000),
+        error: None,
+        is_stale: false,
+    })
+    .expect("provider usage response should serialize");
+
+    let expected_result_json = concat!(
+        r#"{"entries":[{"label":"Balance","value":"4.20","unit":"USD"}],"#,
+        r#""queriedAt":1772000000000,"error":null,"isStale":false}"#,
+    );
+    assert_eq!(response.result_json, expected_result_json);
+
+    let result: Value =
+        serde_json::from_str(&response.result_json).expect("result_json should be valid JSON");
+    assert_eq!(
+        result,
+        json!({
+            "entries": [{ "label": "Balance", "value": "4.20", "unit": "USD" }],
+            "queriedAt": 1_772_000_000_000_i64,
+            "error": null,
+            "isStale": false,
+        })
+    );
+    assert!(!response.result_json.contains("apiKey"));
+    assert!(!response.result_json.contains("accessToken"));
+    assert!(!response.result_json.contains("secretAccessKey"));
+
+    let envelope = super::envelope_handler::provider_usage_agent_envelope(
+        "provider-usage-request".to_string(),
+        response,
+    );
+    assert_eq!(envelope.request_id, "provider-usage-request");
+    let Some(proto::agent_envelope::Payload::ProviderUsageResp(response)) = envelope.payload else {
+        panic!("expected provider usage response payload");
+    };
+    assert_eq!(response.result_json, expected_result_json);
+}
 
 fn gateway_chat_request(
     request_id: &str,
@@ -442,6 +490,12 @@ fn local_settings_update_event_keeps_private_api_key_updates_only_at_root() {
         },
         "providerApiKeyUpdates": {
             "provider-a": "new-key"
+        },
+        "providerUsageQuerySecretUpdates": {
+            "provider-a": {
+                "accessToken": "usage-token",
+                "secretAccessKey": "usage-secret"
+            }
         }
     });
 
@@ -456,6 +510,14 @@ fn local_settings_update_event_keeps_private_api_key_updates_only_at_root() {
     assert_eq!(
         event_payload["providerApiKeyUpdates"]["provider-a"],
         "new-key"
+    );
+    assert_eq!(
+        event_payload["providerUsageQuerySecretUpdates"]["provider-a"]["accessToken"],
+        "usage-token"
+    );
+    assert_eq!(
+        event_payload["providerUsageQuerySecretUpdates"]["provider-a"]["secretAccessKey"],
+        "usage-secret"
     );
 }
 

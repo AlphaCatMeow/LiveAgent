@@ -8,6 +8,7 @@ import {
   GeminiIcon,
   Globe,
   GrokIcon,
+  Key,
   List,
   OpenaiChatgptIcon,
   Pencil,
@@ -22,6 +23,7 @@ import {
 } from "../../components/icons";
 
 import { Button } from "../../components/ui/button";
+import { useConfirmDialog } from "../../components/ui/confirm-dialog";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import {
@@ -31,6 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../../components/ui/select";
+import { Textarea } from "../../components/ui/textarea";
 import { useVerticalListReorder } from "../../components/ui/useVerticalListReorder";
 import { useLocale } from "../../i18n";
 import { buildModelOptions } from "../../lib/chat/chatPageHelpers";
@@ -46,9 +49,17 @@ import {
   findNewModelIds,
 } from "../../lib/providers/modelVendor";
 import {
+  getProviderUsageCardDisplay,
+  type ProviderUsageEntry,
+  type ProviderUsageState,
+  queryProviderUsage,
+  useProviderUsage,
+} from "../../lib/providers/usageQuery";
+import {
   CODEX_REQUEST_FORMAT_LABELS,
   type CodexRequestFormat,
   type CustomProvider,
+  getDefaultUsageQueryConfig,
   type ProviderId,
   type ProviderModelConfig,
   updateCustomProviders,
@@ -62,12 +73,16 @@ import {
   applyModelBulkActiveState,
   buildProviderModelsFetchKey,
   createDraftModelConfig,
+  createUsageQueryDraft,
   fetchModelsFromApi,
   formatTokenCount,
   getModelBulkActionCounts,
+  getPersistedUsageQueryProviderId,
   isGatewayWebuiRuntime,
   mergeFetchedModels,
   normalizeFetchedModels,
+  requiresCustomUsageQueryConfirmation,
+  serializeUsageQueryDraft,
 } from "./providerUtils";
 import { ConfirmDeletePopover } from "./shared";
 import type { SettingsSectionProps } from "./types";
@@ -76,10 +91,11 @@ type ModalProps = {
   providerType: ProviderId;
   initialData?: CustomProvider;
   onSave: (data: Omit<CustomProvider, "id">) => void;
+  onTestUsage?: (providerId: string) => void;
   onClose: () => void;
 };
 
-type ProviderDialogPanel = "general" | "request";
+type ProviderDialogPanel = "general" | "request" | "usage";
 
 type ModelEditDraft = {
   model: ProviderModelConfig;
@@ -194,7 +210,7 @@ function itemsByIdOrder<T extends { id: string }>(items: readonly T[], order: re
   });
 }
 
-function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProps) {
+function ProviderModal({ providerType, initialData, onSave, onTestUsage, onClose }: ModalProps) {
   const { t } = useLocale();
   const isGatewayWebui = isGatewayWebuiRuntime();
   const initialApiKey = initialData?.apiKey ?? "";
@@ -232,6 +248,12 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
   );
   const [promptCacheRetention, setPromptCacheRetention] = useState<"short" | "long">(
     initialData?.promptCacheRetention === "long" ? "long" : "short",
+  );
+  const [usageQuery, setUsageQuery] = useState(() =>
+    createUsageQueryDraft(initialData?.usageQuery ?? getDefaultUsageQueryConfig(), isGatewayWebui),
+  );
+  const [customUsageQueryConfirmed, setCustomUsageQueryConfirmed] = useState(
+    () => initialData?.usageQuery?.enabled === true && initialData.usageQuery.mode === "custom",
   );
   const [fetchingModels, setFetchingModels] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -275,6 +297,14 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
   const apiKeyIsRedactedDisplay = initialUsesRedactedApiKey && apiKey === REDACTED_API_KEY_DISPLAY;
   const apiKeyForRequest = apiKeyIsRedactedDisplay ? "" : apiKey.trim();
   const canFetchModels = baseUrl.trim().length > 0 && apiKeyForRequest.length > 0;
+  const persistedUsageQueryProviderId = getPersistedUsageQueryProviderId(initialData);
+  const { confirm: requestUsageQueryConfirm, dialog: usageQueryConfirmDialog } = useConfirmDialog();
+  const [usageQueryTest, setUsageQueryTest] = useState<{
+    status: "idle" | "running" | "success" | "error";
+    entries: ProviderUsageEntry[];
+    error: string | null;
+  }>({ status: "idle", entries: [], error: null });
+  const usageQueryTestSeqRef = useRef(0);
 
   const doFetch = useCallback(
     async (url: string, key: string) => {
@@ -618,7 +648,7 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
     focusCustomHeader(headerSuggest.index, "value");
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!name.trim()) return;
     const invalidHeaderIndex = customHeaders.findIndex(
       (header) => getCustomHeaderKeyIssue(header.key, true) !== null,
@@ -629,6 +659,18 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
       setActivePanel("request");
       focusCustomHeader(invalidHeaderIndex, "key");
       return;
+    }
+    if (requiresCustomUsageQueryConfirmation(usageQuery, customUsageQueryConfirmed)) {
+      const confirmed = await requestUsageQueryConfirm({
+        title: t("settings.providerUsageCustomConfirmTitle"),
+        description: t("settings.providerUsageCustomConfirmDescription"),
+        detail: t("settings.providerUsageCustomConfirmDetail"),
+        confirmLabel: t("settings.providerUsageCustomConfirmAction"),
+        cancelLabel: t("settings.cancel"),
+        tone: "warning",
+      });
+      if (!confirmed) return;
+      setCustomUsageQueryConfirmed(true);
     }
     const nextApiKey = apiKeyIsRedactedDisplay ? "" : apiKey.trim();
     onSave({
@@ -662,8 +704,33 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
           : undefined,
       nativeWebSearchEnabled: initialData?.nativeWebSearchEnabled ?? true,
       useSystemProxy,
+      usageQuery: serializeUsageQueryDraft(usageQuery, isGatewayWebui),
     });
     requestClose();
+  }
+
+  async function handleTestUsageQuery() {
+    if (!persistedUsageQueryProviderId) return;
+    const seq = ++usageQueryTestSeqRef.current;
+    setUsageQueryTest({ status: "running", entries: [], error: null });
+    try {
+      const result = await queryProviderUsage(persistedUsageQueryProviderId, true);
+      if (usageQueryTestSeqRef.current !== seq) return;
+      if (result?.error) {
+        setUsageQueryTest({ status: "error", entries: result.entries ?? [], error: result.error });
+      } else {
+        setUsageQueryTest({ status: "success", entries: result?.entries ?? [], error: null });
+      }
+      // 测试已实刷桌面端缓存;通知外层卡片按缓存补水,避免重复打上游。
+      onTestUsage?.(persistedUsageQueryProviderId);
+    } catch (error) {
+      if (usageQueryTestSeqRef.current !== seq) return;
+      setUsageQueryTest({
+        status: "error",
+        entries: [],
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   const isEditing = Boolean(initialData);
@@ -850,6 +917,21 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
                   {customHeaders.length}
                 </span>
               ) : null}
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "flex h-10 items-center gap-2 rounded-lg px-3 text-left text-sm text-muted-foreground max-[720px]:min-w-max max-[720px]:flex-1 max-[720px]:justify-center max-[720px]:px-2 max-[720px]:text-xs transition-colors hover:bg-accent/50 hover:text-foreground",
+                activePanel === "usage" && "bg-primary/10 font-medium text-primary",
+              )}
+              onClick={() => {
+                exitModelBulkMode();
+                setActivePanel("usage");
+              }}
+              aria-current={activePanel === "usage" ? "page" : undefined}
+            >
+              <Key className="h-4 w-4 shrink-0 max-[720px]:h-3.5 max-[720px]:w-3.5" />
+              {t("settings.providerUsageQuery")}
             </button>
           </nav>
 
@@ -1279,7 +1361,7 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
                   </div>
                 </div>
               </section>
-            ) : (
+            ) : activePanel === "request" ? (
               <section key="request" className="provider-panel-enter">
                 <div className="text-sm font-semibold">{t("settings.providerDialogRequest")}</div>
 
@@ -1599,6 +1681,245 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
                     )
                   : null}
               </section>
+            ) : (
+              <section key="usage" className="provider-panel-enter">
+                <div className="flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold">{t("settings.providerUsageQuery")}</div>
+                  </div>
+                  <DialogSwitch
+                    checked={usageQuery.enabled}
+                    onCheckedChange={(enabled) =>
+                      setUsageQuery((previous) => ({ ...previous, enabled }))
+                    }
+                    ariaLabel={t("settings.providerUsageEnabled")}
+                  />
+                </div>
+
+                <div className="mt-4 space-y-1.5">
+                  <Label>{t("settings.providerUsageMode")}</Label>
+                  <Select
+                    value={usageQuery.mode}
+                    onValueChange={(mode) =>
+                      setUsageQuery((previous) => ({
+                        ...previous,
+                        mode: mode as typeof previous.mode,
+                      }))
+                    }
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="custom">
+                        {t("settings.providerUsageMode.custom")}
+                      </SelectItem>
+                      <SelectItem value="general">
+                        {t("settings.providerUsageMode.general")}
+                      </SelectItem>
+                      <SelectItem value="newapi">
+                        {t("settings.providerUsageMode.newapi")}
+                      </SelectItem>
+                      <SelectItem value="coding-plan">
+                        {t("settings.providerUsageMode.codingPlan")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {usageQuery.mode === "general" || usageQuery.mode === "newapi" ? (
+                  <p className="mt-3 rounded-lg border bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                    {usageQuery.mode === "general"
+                      ? t("settings.providerUsageTemplate.general")
+                      : t("settings.providerUsageTemplate.newapi")}
+                  </p>
+                ) : null}
+
+                {usageQuery.mode === "custom" ? (
+                  <div className="mt-4 space-y-1.5">
+                    <Label htmlFor="usage-query-script">{t("settings.providerUsageScript")}</Label>
+                    <Textarea
+                      id="usage-query-script"
+                      value={usageQuery.script}
+                      className="min-h-36 font-mono text-xs"
+                      placeholder={t("settings.providerUsageScriptPlaceholder")}
+                      spellCheck={false}
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
+                        setUsageQuery((previous) => ({
+                          ...previous,
+                          script: value,
+                        }));
+                      }}
+                    />
+                  </div>
+                ) : null}
+
+                {usageQuery.mode === "general" ||
+                usageQuery.mode === "newapi" ||
+                usageQuery.mode === "custom" ? (
+                  <div className="mt-4 space-y-1.5">
+                    <Label htmlFor="usage-query-base-url">
+                      {t("settings.providerUsageBaseUrl")}
+                    </Label>
+                    <Input
+                      id="usage-query-base-url"
+                      value={usageQuery.baseUrl}
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
+                        setUsageQuery((previous) => ({
+                          ...previous,
+                          baseUrl: value,
+                        }));
+                      }}
+                    />
+                  </div>
+                ) : null}
+
+                {usageQuery.mode === "newapi" ? (
+                  <div className="mt-4 grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="usage-query-access-token">
+                        {t("settings.providerUsageAccessToken")}
+                      </Label>
+                      <Input
+                        id="usage-query-access-token"
+                        type="password"
+                        value={usageQuery.accessToken}
+                        autoComplete="off"
+                        onFocus={(event) => event.currentTarget.select()}
+                        onChange={(event) => {
+                          const value = event.currentTarget.value;
+                          setUsageQuery((previous) => ({
+                            ...previous,
+                            accessToken: value,
+                          }));
+                        }}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="usage-query-user-id">
+                        {t("settings.providerUsageUserId")}
+                      </Label>
+                      <Input
+                        id="usage-query-user-id"
+                        value={usageQuery.userId}
+                        onChange={(event) => {
+                          const value = event.currentTarget.value;
+                          setUsageQuery((previous) => ({
+                            ...previous,
+                            userId: value,
+                          }));
+                        }}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+
+                {usageQuery.mode === "coding-plan" ? (
+                  <div className="mt-4 grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="usage-query-access-key-id">
+                        {t("settings.providerUsageAccessKeyId")}
+                      </Label>
+                      <Input
+                        id="usage-query-access-key-id"
+                        value={usageQuery.accessKeyId}
+                        onChange={(event) => {
+                          const value = event.currentTarget.value;
+                          setUsageQuery((previous) => ({
+                            ...previous,
+                            accessKeyId: value,
+                          }));
+                        }}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="usage-query-secret-access-key">
+                        {t("settings.providerUsageSecretAccessKey")}
+                      </Label>
+                      <Input
+                        id="usage-query-secret-access-key"
+                        type="password"
+                        value={usageQuery.secretAccessKey}
+                        autoComplete="off"
+                        onFocus={(event) => event.currentTarget.select()}
+                        onChange={(event) => {
+                          const value = event.currentTarget.value;
+                          setUsageQuery((previous) => ({
+                            ...previous,
+                            secretAccessKey: value,
+                          }));
+                        }}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="mt-4 flex flex-wrap items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-10 gap-1.5"
+                    disabled={!persistedUsageQueryProviderId || usageQueryTest.status === "running"}
+                    onClick={() => void handleTestUsageQuery()}
+                    title={t("settings.providerUsageTest")}
+                    aria-label={t("settings.providerUsageTest")}
+                  >
+                    <RefreshCw
+                      className={cn(
+                        "h-3.5 w-3.5",
+                        usageQueryTest.status === "running" && "animate-spin",
+                      )}
+                    />
+                    {t("settings.providerUsageTest")}
+                  </Button>
+                  <span className="text-xs text-muted-foreground">
+                    {t("settings.providerUsageAutoRefreshFixedHint")}
+                  </span>
+                </div>
+                {!persistedUsageQueryProviderId ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {t("settings.providerUsageTestSavedHint")}
+                  </p>
+                ) : null}
+                {usageQueryTest.status !== "idle" ? (
+                  <div
+                    className="mt-3 rounded-xl border bg-card px-4 py-3 text-xs"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {usageQueryTest.status === "running" ? (
+                      <span className="text-muted-foreground">
+                        {t("settings.providerUsageTestRunning")}
+                      </span>
+                    ) : null}
+                    {usageQueryTest.status === "error" ? (
+                      <span className="text-destructive">
+                        {t("settings.providerUsageTestFailed")}
+                        {usageQueryTest.error ? `: ${usageQueryTest.error}` : ""}
+                      </span>
+                    ) : null}
+                    {usageQueryTest.status === "success" ? (
+                      usageQueryTest.entries.length > 0 ? (
+                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                          {usageQueryTest.entries.map((entry) => (
+                            <span key={entry.label} className="truncate">
+                              {entry.label}: {entry.value}
+                              {entry.unit ? ` ${entry.unit}` : ""}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-muted-foreground">
+                          {t("settings.providerUsageTestEmpty")}
+                        </span>
+                      )
+                    ) : null}
+                  </div>
+                ) : null}
+              </section>
             )}
           </div>
         </div>
@@ -1669,6 +1990,7 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
             {t("settings.save")}
           </Button>
         </div>
+        {usageQueryConfirmDialog}
       </div>
     </div>,
     document.body,
@@ -1817,9 +2139,22 @@ function ProviderList(props: {
   onEdit: (provider: CustomProvider) => void;
   onDelete: (id: string) => void;
   onReorder: (type: ProviderId, nextIds: string[]) => void;
+  usageByProvider: ProviderUsageState;
+  refreshingProviderIds: ReadonlySet<string>;
+  onRefreshUsage: (providerId: string) => void;
 }) {
   const { t } = useLocale();
-  const { type, providers, onAdd, onEdit, onDelete, onReorder } = props;
+  const {
+    type,
+    providers,
+    onAdd,
+    onEdit,
+    onDelete,
+    onReorder,
+    usageByProvider,
+    refreshingProviderIds,
+    onRefreshUsage,
+  } = props;
   const filtered = providers.filter((provider) => provider.type === type);
   const {
     draggingItemId: draggingProviderId,
@@ -1865,65 +2200,102 @@ function ProviderList(props: {
           </div>
         ) : (
           <div className="space-y-2 pb-1">
-            {filtered.map((provider) => (
-              <div
-                key={provider.id}
-                {...getProviderReorderProps(provider.id)}
-                className={cn(
-                  "settings-card-row group flex items-center gap-3 rounded-xl border bg-card px-4 py-3 transition-colors hover:bg-accent/30",
-                  draggingProviderId === provider.id && "bg-accent shadow-lg",
-                )}
-              >
-                {renderProviderDragHandle(provider.id, provider.name)}
-                <div className="flex w-5 shrink-0 items-center justify-center text-lg text-foreground">
-                  <ProviderBrandIcon type={type} />
-                </div>
-                <div className="min-w-0 flex-1 max-[720px]:basis-[calc(100%-3rem)]">
-                  <div className="flex items-center gap-1.5">
-                    <span className="truncate text-sm font-medium">{provider.name}</span>
-                    {provider.useSystemProxy ? (
-                      <span
-                        className="shrink-0 text-blue-500 dark:text-blue-400"
-                        title={t("settings.providerUseSystemProxy")}
-                      >
-                        <Waypoints className="h-3 w-3" />
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="truncate text-xs text-muted-foreground">
-                    {provider.baseUrl || t("settings.noBaseUrl")} {" · "}
-                    {provider.activeModels.length} {t("settings.activeModels")}
-                  </div>
-                </div>
-                <div className="settings-card-actions settings-hover-actions flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                    onClick={() => onEdit(provider)}
-                    title={t("settings.edit")}
+            {filtered.map((provider) =>
+              (() => {
+                const usage = usageByProvider[provider.id];
+                const refreshing = refreshingProviderIds.has(provider.id);
+                const usageDisplay = getProviderUsageCardDisplay(provider, usage, refreshing);
+                return (
+                  <div
+                    key={provider.id}
+                    {...getProviderReorderProps(provider.id)}
+                    className={cn(
+                      "settings-card-row group flex items-center gap-3 rounded-xl border bg-card px-4 py-3 transition-colors hover:bg-accent/30",
+                      draggingProviderId === provider.id && "bg-accent shadow-lg",
+                    )}
                   >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                  <ConfirmDeletePopover
-                    name={provider.name}
-                    onConfirm={() => onDelete(provider.id)}
-                  >
-                    {(open) => (
+                    {renderProviderDragHandle(provider.id, provider.name)}
+                    <div className="flex w-5 shrink-0 items-center justify-center text-lg text-foreground">
+                      <ProviderBrandIcon type={type} />
+                    </div>
+                    <div className="min-w-0 flex-1 max-[720px]:basis-[calc(100%-3rem)]">
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate text-sm font-medium">{provider.name}</span>
+                        {provider.useSystemProxy ? (
+                          <span
+                            className="shrink-0 text-blue-500 dark:text-blue-400"
+                            title={t("settings.providerUseSystemProxy")}
+                          >
+                            <Waypoints className="h-3 w-3" />
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="truncate text-xs text-muted-foreground">
+                        {provider.baseUrl || t("settings.noBaseUrl")} {" · "}
+                        {provider.activeModels.length} {t("settings.activeModels")}
+                      </div>
+                      {usageDisplay.show ? (
+                        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                          {usageDisplay.entries.map((entry) => (
+                            <span key={entry.label} className="truncate">
+                              {entry.label}: {entry.value}
+                              {entry.unit ? ` ${entry.unit}` : ""}
+                            </span>
+                          ))}
+                          {usageDisplay.isStale ? (
+                            <span title="Stale usage data">Stale</span>
+                          ) : null}
+                          {usageDisplay.error ? (
+                            <span className="text-destructive">{usageDisplay.error}</span>
+                          ) : null}
+                          {usageDisplay.updatedAt ? <time>{usageDisplay.updatedAt}</time> : null}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="settings-card-actions settings-hover-actions flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                      {usageDisplay.show ? (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                          disabled={usageDisplay.refresh.disabled}
+                          onClick={() => onRefreshUsage(provider.id)}
+                          title={usageDisplay.refresh.ariaLabel}
+                          aria-label={usageDisplay.refresh.ariaLabel}
+                        >
+                          <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
+                        </Button>
+                      ) : null}
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                        onClick={open}
-                        title={t("settings.delete")}
+                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                        onClick={() => onEdit(provider)}
+                        title={t("settings.edit")}
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <Pencil className="h-3.5 w-3.5" />
                       </Button>
-                    )}
-                  </ConfirmDeletePopover>
-                </div>
-              </div>
-            ))}
+                      <ConfirmDeletePopover
+                        name={provider.name}
+                        onConfirm={() => onDelete(provider.id)}
+                      >
+                        {(open) => (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                            onClick={open}
+                            title={t("settings.delete")}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </ConfirmDeletePopover>
+                    </div>
+                  </div>
+                );
+              })(),
+            )}
           </div>
         )}
       </div>
@@ -1939,6 +2311,8 @@ export function ProvidersSection(props: SettingsSectionProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const [customSettingsOpen, setCustomSettingsOpen] = useState(false);
   const [editingProvider, setEditingProvider] = useState<CustomProvider | null>(null);
+  const { usageByProvider, refreshingProviderIds, refreshProvider, hydrateProvider } =
+    useProviderUsage(settings.customProviders, settings.selectedModel);
 
   function openAdd() {
     setEditingProvider(null);
@@ -2053,6 +2427,9 @@ export function ProvidersSection(props: SettingsSectionProps) {
                 onEdit={openEdit}
                 onDelete={handleDelete}
                 onReorder={handleProviderReorder}
+                usageByProvider={usageByProvider}
+                refreshingProviderIds={refreshingProviderIds}
+                onRefreshUsage={(providerId) => void refreshProvider(providerId)}
               />
             </div>
           ))}
@@ -2064,6 +2441,7 @@ export function ProvidersSection(props: SettingsSectionProps) {
           providerType={activeTab}
           initialData={editingProvider ?? undefined}
           onSave={handleSave}
+          onTestUsage={(providerId) => void hydrateProvider(providerId)}
           onClose={closeModal}
         />
       ) : null}

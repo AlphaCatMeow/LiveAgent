@@ -2505,3 +2505,57 @@ test("persisted degenerate limits are repaired at normalize time for every provi
   );
   assert.equal(codex.maxOutputToken, 32_000);
 });
+
+test("usage query defaults disabled and redacts query credentials", () => {
+  const provider = settings.normalizeCustomProvider({
+    usageQuery: {
+      mode: "newapi",
+      accessToken: "access-token",
+      secretAccessKey: "secret-access-key",
+    },
+  });
+
+  assert.equal(provider.usageQuery.enabled, false);
+  assert.equal(provider.usageQuery.mode, "newapi");
+
+  // 余额适配器已移除:历史 "balance" 配置与未知值统一回退自定义脚本。
+  const legacy = settings.normalizeCustomProvider({ usageQuery: { mode: "balance" } });
+  assert.equal(legacy.usageQuery.mode, "custom");
+  assert.equal(settings.getDefaultUsageQueryConfig().mode, "custom");
+
+  const redacted = sync.redactCustomProvidersForGateway([provider])[0];
+  assert.equal(redacted.usageQuery.accessToken, "");
+  assert.equal(redacted.usageQuery.secretAccessKey, "");
+  assert.equal(redacted.usageQuery.accessTokenConfigured, true);
+  assert.equal(redacted.usageQuery.secretAccessKeyConfigured, true);
+});
+
+test("usage query secret updates are emitted and applied without exposing the values", () => {
+  const previous = settings.normalizeSettings({
+    customProviders: [{ id: "provider-1", usageQuery: { accessToken: "old-token" } }],
+  });
+  const next = settings.normalizeSettings({
+    customProviders: [
+      {
+        id: "provider-1",
+        usageQuery: { accessToken: "new-token", secretAccessKey: "new-secret" },
+      },
+    ],
+  });
+
+  const update = sync.buildGatewaySettingsSyncUpdatePayload(previous, next, {
+    includeProviderApiKeyUpdates: true,
+  });
+  assert.deepEqual(update.providerUsageQuerySecretUpdates, {
+    "provider-1": { accessToken: "new-token", secretAccessKey: "new-secret" },
+  });
+  assert.equal(update.customProviders[0].usageQuery.accessToken, "");
+  assert.equal(update.customProviders[0].usageQuery.secretAccessKey, "");
+
+  const applied = sync.applyGatewaySettingsSyncPayload(previous, {
+    customProviders: update.customProviders,
+    providerUsageQuerySecretUpdates: update.providerUsageQuerySecretUpdates,
+  });
+  assert.equal(applied.customProviders[0].usageQuery.accessToken, "new-token");
+  assert.equal(applied.customProviders[0].usageQuery.secretAccessKey, "new-secret");
+});

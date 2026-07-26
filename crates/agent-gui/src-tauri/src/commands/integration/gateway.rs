@@ -7,10 +7,20 @@ use crate::services::gateway::{
     GatewayChatClaimedRequest, GatewayChatQueueEventInput, GatewayChatQueueResponseInput,
     GatewayChatRuntimeSnapshot, GatewayController, GatewayStatusSnapshot,
 };
+use crate::services::provider_usage::{ProviderUsageResult, ProviderUsageService};
 use crate::services::tunnel::{
     GatewayTunnelCreateInput, GatewayTunnelUpdateInput, TunnelStatePayload,
 };
 use crate::services::workspace_watch::WatchSource;
+
+#[tauri::command]
+pub async fn provider_usage_query(
+    provider_id: String,
+    refresh: bool,
+    provider_usage_service: tauri::State<'_, Arc<ProviderUsageService>>,
+) -> Result<ProviderUsageResult, String> {
+    Ok(provider_usage_service.query(&provider_id, refresh).await)
+}
 
 #[tauri::command]
 pub async fn gateway_connect(

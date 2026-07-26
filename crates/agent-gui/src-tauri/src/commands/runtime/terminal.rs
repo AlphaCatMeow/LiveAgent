@@ -3,6 +3,7 @@ use std::sync::Arc;
 use tauri::State;
 
 use crate::runtime::sftp::SftpSessionRegistry;
+use crate::runtime::shell_runner::ShellRunRegistry;
 use crate::runtime::terminal::{
     normalize_ssh_local_forward_local_port, ssh_local_forward_local_port_available,
     terminal_shell_options as runtime_terminal_shell_options, SshLocalForwardActionResponse,
@@ -105,17 +106,37 @@ pub async fn terminal_ssh_latency(
 #[tauri::command(rename_all = "snake_case")]
 pub async fn terminal_ssh_exec(
     registry: State<'_, Arc<TerminalSessionRegistry>>,
+    run_registry: State<'_, Arc<ShellRunRegistry>>,
     session_id: String,
     command: String,
     cwd: Option<String>,
     timeout_ms: Option<u64>,
     max_bytes: Option<usize>,
+    run_id: Option<String>,
 ) -> Result<TerminalSshExecResponse, String> {
-    registry
+    let normalized_run_id = run_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let cancel_token = normalized_run_id
+        .as_deref()
+        .map(|id| run_registry.register(id));
+    let registered_token = cancel_token.clone();
+    let result = registry
         .inner()
         .clone()
-        .ssh_exec(session_id, command, cwd, timeout_ms, max_bytes)
-        .await
+        .ssh_exec(
+            session_id,
+            command,
+            cwd,
+            timeout_ms,
+            max_bytes,
+            cancel_token,
+        )
+        .await;
+    if let (Some(run_id), Some(token)) = (normalized_run_id.as_deref(), registered_token.as_ref()) {
+        run_registry.unregister(run_id, token);
+    }
+    result
 }
 
 #[tauri::command(rename_all = "snake_case")]

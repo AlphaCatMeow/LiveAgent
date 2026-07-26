@@ -207,6 +207,11 @@ jobs:
           CARGO_TERM_COLOR: always
         run: cargo test --manifest-path crates/agent-gui/src-tauri/Cargo.toml ssh_local_forward --lib
 
+      - name: Test Tauri shell-runner cancellation
+        env:
+          CARGO_TERM_COLOR: always
+        run: cargo test --manifest-path crates/agent-gui/src-tauri/Cargo.toml shell_runner --lib
+
   mirror:
     name: GUI/WebUI Mirror Check
     runs-on: ubuntu-latest

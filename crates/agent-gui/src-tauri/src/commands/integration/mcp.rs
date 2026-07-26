@@ -16,6 +16,7 @@ use crate::runtime::platform::{
     expand_tilde_path, maybe_augment_macos_path, resolve_program_path_with_current_dir,
 };
 use crate::runtime::process::{configure_child_process_group, kill_child_process_tree_best_effort};
+use crate::runtime::shell_runner::ShellRunRegistry;
 
 const DEFAULT_TIMEOUT_MS: u64 = 60_000;
 const LEGACY_SSE_ENDPOINT_WAIT_MS: u64 = 3_000;
@@ -1656,13 +1657,22 @@ pub async fn mcp_list_tools(
 #[tauri::command(rename_all = "snake_case")]
 pub async fn mcp_call_tool(
     state: tauri::State<'_, Arc<McpRuntimeManager>>,
+    run_registry: tauri::State<'_, Arc<ShellRunRegistry>>,
     server_id: String,
     tool_name: String,
     arguments: Value,
+    run_id: Option<String>,
 ) -> Result<McpCallToolResponse, String> {
     // IMPORTANT: tool call can block (network / pipes / SSE). Offload.
     let manager = state.inner().clone();
-    run_blocking("mcp_call_tool", move || {
+    let normalized_run_id = run_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let cancel_token = normalized_run_id
+        .as_deref()
+        .map(|id| run_registry.register(id));
+    let registered_token = cancel_token.clone();
+    let mut task = tauri::async_runtime::spawn_blocking(move || {
         let id = server_id.trim().to_string();
         if id.is_empty() {
             return Err("server_id cannot be empty".to_string());
@@ -1684,8 +1694,22 @@ pub async fn mcp_call_tool(
             .lock()
             .map_err(|_| "Failed to lock MCP client".to_string())?;
         locked.tools_call(tool_name.trim(), arguments)
-    })
-    .await
+    });
+    let result = if let Some(cancel_token) = cancel_token {
+        tokio::select! {
+            join = &mut task => {
+                join.map_err(|error| format!("mcp_call_tool join failed: {error}"))?
+            }
+            _ = cancel_token.cancelled() => Err("Cancelled".to_string()),
+        }
+    } else {
+        task.await
+            .map_err(|error| format!("mcp_call_tool join failed: {error}"))?
+    };
+    if let (Some(run_id), Some(token)) = (normalized_run_id.as_deref(), registered_token.as_ref()) {
+        run_registry.unregister(run_id, token);
+    }
+    result
 }
 
 #[tauri::command(rename_all = "snake_case")]

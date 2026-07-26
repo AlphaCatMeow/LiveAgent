@@ -160,7 +160,7 @@ macro_rules! app_invoke_handler {
             commands::cron::automation_complete_prompt_run,
             // Local command execution
             commands::shell::shell_run,
-            commands::shell::shell_cancel,
+            commands::shell::runtime_cancel,
             commands::process::managed_process_start,
             commands::process::managed_process_status,
             commands::process::managed_process_stop,
@@ -261,6 +261,7 @@ macro_rules! app_invoke_handler {
             commands::gateway::gateway_chat_claim_next,
             commands::gateway::gateway_chat_mark_started,
             commands::gateway::gateway_chat_mark_local_started,
+            commands::gateway::gateway_chat_mark_local_cancelled,
             commands::gateway::gateway_chat_mark_queued_in_gui,
             commands::gateway::gateway_chat_complete,
             commands::gateway::gateway_chat_fail,

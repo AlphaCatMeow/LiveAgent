@@ -4617,6 +4617,10 @@ export default function GatewayApp() {
                   <section
                     ref={transcriptStageRef}
                     className="gateway-transcript-stage"
+                    // Preferred (persisted) width, so a fresh mount paints at
+                    // the user's width instead of the default.
+                    // TranscriptWidthControls narrows this same variable to
+                    // the stage in a layout effect — see its header.
                     style={
                       {
                         [CHAT_TRANSCRIPT_WIDTH_CSS_VAR]: `${settings.customSettings.chatTranscript.width}px`,

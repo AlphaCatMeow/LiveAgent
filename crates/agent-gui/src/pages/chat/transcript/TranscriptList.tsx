@@ -32,7 +32,10 @@ import type { GitClient } from "../../../lib/git/types";
 import { createEntranceRegistry } from "../../../lib/transcript-virtual/entranceOnce";
 import { extractLiveRange } from "../../../lib/transcript-virtual/liveRangeExtractor";
 import { createLiveRowScrollAdjustPolicy } from "../../../lib/transcript-virtual/liveScrollAdjustPolicy";
-import { createTranscriptMeasurementsLru } from "../../../lib/transcript-virtual/measurementsLru";
+import {
+  buildTranscriptLayoutKey,
+  createTranscriptMeasurementsLru,
+} from "../../../lib/transcript-virtual/measurementsLru";
 import { AssistantRow } from "./AssistantRow";
 import { createTranscriptRowModel } from "./rowModel";
 import { UserMessageRow } from "./UserMessageRow";
@@ -244,7 +247,7 @@ export const TranscriptList = memo(function TranscriptList(props: TranscriptList
       (scrollViewport
         ? transcriptMeasurementsLru.restore(
             conversationId,
-            `${scrollViewport.clientWidth}:${layoutWidth}`,
+            buildTranscriptLayoutKey(scrollViewport.clientWidth, layoutWidth),
           )
         : null) ?? [],
   );
@@ -468,7 +471,7 @@ export const TranscriptList = memo(function TranscriptList(props: TranscriptList
     if (!scrollViewport) return;
     transcriptMeasurementsLru.save(
       conversationId,
-      `${scrollViewport.clientWidth}:${layoutWidth}`,
+      buildTranscriptLayoutKey(scrollViewport.clientWidth, layoutWidth),
       virtualizer.takeSnapshot(),
     );
   };

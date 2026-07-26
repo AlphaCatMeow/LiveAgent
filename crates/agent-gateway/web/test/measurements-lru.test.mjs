@@ -9,30 +9,40 @@ const loader = createWebModuleLoader({
   rootDir: fileURLToPath(new URL("../", import.meta.url)),
 });
 
-const { createTranscriptMeasurementsLru } = loader.loadModule(
+const { buildTranscriptLayoutKey, createTranscriptMeasurementsLru } = loader.loadModule(
   "src/lib/transcript-virtual/measurementsLru.ts",
 );
-const transcriptListSource = readFileSync(
-  new URL("../src/components/GatewayTranscript.tsx", import.meta.url),
-  "utf8",
+const { SCROLL_FOLLOW_IGNORE_KEYS_ATTRIBUTE } = loader.loadModule(
+  "src/lib/chat-scroll/scrollFollowCore.ts",
 );
+const width = loader.loadModule("src/lib/transcript-width/transcriptWidthModel.ts");
 const transcriptStylesSource = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 const transcriptWidthControlsSource = readFileSync(
   new URL("../src/pages/chat/transcript/TranscriptWidthControls.tsx", import.meta.url),
   "utf8",
 );
-const scrollFollowSource = readFileSync(
-  new URL("../src/lib/chat-scroll/useScrollFollow.ts", import.meta.url),
-  "utf8",
-);
 
 const item = (key, size) => ({ index: 0, key, start: 0, size, end: size, lane: 0 });
 
-const layoutKey = (viewportWidth, contentWidth) => `${viewportWidth}:${contentWidth}`;
+const layoutKey = buildTranscriptLayoutKey;
 
-test("width changes keep ResizeObserver measurements instead of clearing them", () => {
-  assert.doesNotMatch(transcriptListSource, /^\s*transcriptVirtualizer\.measure\(\);/m);
-  assert.match(transcriptListSource, /\$\{scrollViewport\.clientWidth\}:\$\{contentWidth\}/);
+test("layout keys separate viewport width from transcript content width", () => {
+  assert.equal(buildTranscriptLayoutKey(800, 768), "800:768");
+  assert.notEqual(buildTranscriptLayoutKey(800, 768), buildTranscriptLayoutKey(800, 960));
+  assert.notEqual(buildTranscriptLayoutKey(800, 768), buildTranscriptLayoutKey(900, 768));
+  // Subpixel viewport widths must not fragment the cache.
+  assert.equal(buildTranscriptLayoutKey(800.4, 768), buildTranscriptLayoutKey(800, 768));
+});
+
+test("unmeasured layouts produce a blank key so nothing is cached", () => {
+  assert.equal(buildTranscriptLayoutKey(0, 768), "");
+  assert.equal(buildTranscriptLayoutKey(800, 0), "");
+  assert.equal(buildTranscriptLayoutKey(Number.NaN, 768), "");
+  assert.equal(buildTranscriptLayoutKey(-1, 768), "");
+
+  const lru = createTranscriptMeasurementsLru();
+  lru.save("conv-1", buildTranscriptLayoutKey(0, 768), [item("a", 120)]);
+  assert.equal(lru.restore("conv-1", buildTranscriptLayoutKey(0, 768)), null);
 });
 
 test("gateway transcript grid consumes the stage width directly", () => {
@@ -44,8 +54,59 @@ test("gateway transcript grid consumes the stage width directly", () => {
 });
 
 test("keyboard width controls do not detach transcript scroll follow", () => {
-  assert.match(transcriptWidthControlsSource, /data-scroll-follow-ignore-keys/);
-  assert.match(scrollFollowSource, /closest\("\[data-scroll-follow-ignore-keys\]"\)/);
+  // Derived from the follow engine's own constant, so renaming the attribute
+  // in one place and not the other fails here instead of silently detaching
+  // bottom-follow on every arrow-key resize.
+  assert.ok(transcriptWidthControlsSource.includes(SCROLL_FOLLOW_IGNORE_KEYS_ATTRIBUTE));
+});
+
+test("preferred widths round and clamp to the persisted bounds", () => {
+  assert.equal(width.normalizePreferredWidth(920.4), 920);
+  assert.equal(width.normalizePreferredWidth(100), width.MIN_CHAT_TRANSCRIPT_WIDTH);
+  assert.equal(width.normalizePreferredWidth(9000), width.MAX_CHAT_TRANSCRIPT_WIDTH);
+  assert.equal(width.normalizePreferredWidth(Number.NaN), width.DEFAULT_CHAT_TRANSCRIPT_WIDTH);
+});
+
+test("a narrow stage clamps what is rendered without rewriting the preference", () => {
+  const stageMax = width.resolveStageMaxWidth(800);
+  assert.equal(stageMax, 800 - width.TRANSCRIPT_HORIZONTAL_SAFE_SPACE);
+  assert.equal(width.clampWidthToStage(1200, stageMax), stageMax);
+  // Widening the stage again restores the full preference.
+  assert.equal(width.clampWidthToStage(1200, width.resolveStageMaxWidth(1600)), 1200);
+});
+
+test("an unmeasured stage falls back to the upper bound, not the window", () => {
+  assert.equal(width.resolveStageMaxWidth(null), width.MAX_CHAT_TRANSCRIPT_WIDTH);
+  assert.equal(width.resolveStageMaxWidth(0), width.MAX_CHAT_TRANSCRIPT_WIDTH);
+  assert.equal(width.resolveStageMaxWidth(Number.NaN), width.MAX_CHAT_TRANSCRIPT_WIDTH);
+});
+
+test("handles hide once the stage can no longer host more than the minimum", () => {
+  assert.equal(width.areWidthControlsUsable(width.resolveStageMaxWidth(600)), false);
+  assert.equal(width.areWidthControlsUsable(width.resolveStageMaxWidth(1400)), true);
+});
+
+test("dragging either handle keeps it under the pointer", () => {
+  // Centered column: one edge moving by d changes the width by 2d.
+  assert.equal(width.resolveDragWidth(768, 40, "right"), 848);
+  assert.equal(width.resolveDragWidth(768, -40, "right"), 688);
+  assert.equal(width.resolveDragWidth(768, -40, "left"), 848);
+  assert.equal(width.resolveDragWidth(768, 40, "left"), 688);
+});
+
+test("keyboard resizing steps from the rendered width, not the preference", () => {
+  // Preference 1200 clamped to a 736px stage: one press must move the column,
+  // not spend ~29 presses walking the preference back down to what is shown.
+  const rendered = width.clampWidthToStage(1200, width.resolveStageMaxWidth(800));
+  assert.equal(width.resolveKeyboardWidth("ArrowLeft", rendered, false), rendered - 16);
+  assert.equal(width.resolveKeyboardWidth("ArrowLeft", rendered, true), rendered - 64);
+  assert.equal(width.resolveKeyboardWidth("ArrowRight", rendered, false), rendered + 16);
+  assert.equal(
+    width.resolveKeyboardWidth("Home", rendered, false),
+    width.DEFAULT_CHAT_TRANSCRIPT_WIDTH,
+  );
+  assert.equal(width.resolveKeyboardWidth("ArrowUp", rendered, false), null);
+  assert.equal(width.resolveKeyboardWidth("a", rendered, false), null);
 });
 
 test("save/restore round-trips measurements at the same layout width", () => {

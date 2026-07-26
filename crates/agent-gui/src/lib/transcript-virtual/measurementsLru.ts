@@ -13,6 +13,16 @@ export type TranscriptMeasurementsLru = {
   restore: (conversationId: string, layoutKey: string) => VirtualItem[] | null;
 };
 
+// The composite key both callers must use. Owning the shape here keeps the two
+// frontends from drifting, and returning "" for an unmeasured viewport or
+// column re-establishes the guard the plain-number key used to carry: save()
+// and restore() both reject blank keys, so a zero-width layout is never stored.
+export function buildTranscriptLayoutKey(viewportWidth: number, contentWidth: number): string {
+  if (!Number.isFinite(viewportWidth) || viewportWidth <= 0) return "";
+  if (!Number.isFinite(contentWidth) || contentWidth <= 0) return "";
+  return `${Math.round(viewportWidth)}:${Math.round(contentWidth)}`;
+}
+
 const DEFAULT_CAPACITY = 12;
 
 export function createTranscriptMeasurementsLru(

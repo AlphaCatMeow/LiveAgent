@@ -4,20 +4,35 @@ import {
   type RefObject,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 
-import {
-  DEFAULT_CHAT_TRANSCRIPT_WIDTH,
-  MAX_CHAT_TRANSCRIPT_WIDTH,
-  MIN_CHAT_TRANSCRIPT_WIDTH,
-} from "../../../lib/settings";
 import { cn } from "../../../lib/shared/utils";
+import {
+  areWidthControlsUsable,
+  clampWidthToStage,
+  DEFAULT_CHAT_TRANSCRIPT_WIDTH,
+  MIN_CHAT_TRANSCRIPT_WIDTH,
+  normalizePreferredWidth,
+  resolveDragWidth,
+  resolveKeyboardWidth,
+  resolveStageMaxWidth,
+  TRANSCRIPT_HORIZONTAL_SAFE_SPACE,
+  TRANSCRIPT_WIDTH_CONTROLS_HIDDEN_MEDIA_QUERY,
+  type TranscriptResizeSide,
+} from "../../../lib/transcript-width/transcriptWidthModel";
 
 export const CHAT_TRANSCRIPT_WIDTH_CSS_VAR = "--chat-transcript-content-width";
 
-const TRANSCRIPT_HORIZONTAL_SAFE_SPACE = 64;
+// Who writes CHAT_TRANSCRIPT_WIDTH_CSS_VAR: the host element's own inline
+// style carries the *preferred* (persisted) width, so a fresh mount already
+// paints at the user's width. This component then narrows that to what the
+// stage can host — from a layout effect, before paint. A passive effect lands
+// after paint and would flash the unclamped width for a frame whenever a
+// commit has to be clamped.
 
 type TranscriptWidthControlsProps = {
   hostRef: RefObject<HTMLElement | null>;
@@ -27,26 +42,22 @@ type TranscriptWidthControlsProps = {
   resetLabel: string;
 };
 
-type ResizeSide = "left" | "right";
-
-function normalizePreferredWidth(width: number) {
-  return Math.min(
-    MAX_CHAT_TRANSCRIPT_WIDTH,
-    Math.max(MIN_CHAT_TRANSCRIPT_WIDTH, Math.round(width)),
-  );
+function subscribeControlsHidden(onChange: () => void) {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return () => {};
+  }
+  const query = window.matchMedia(TRANSCRIPT_WIDTH_CONTROLS_HIDDEN_MEDIA_QUERY);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
 }
 
-function clampWidth(width: number, maxWidth: number) {
-  return Math.min(maxWidth, normalizePreferredWidth(width));
+function readControlsHidden() {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
+  return window.matchMedia(TRANSCRIPT_WIDTH_CONTROLS_HIDDEN_MEDIA_QUERY).matches;
 }
 
-function getMaxWidth(host: HTMLElement | null) {
-  const hostWidth = host?.getBoundingClientRect().width ?? globalThis.innerWidth ?? 0;
-  if (!Number.isFinite(hostWidth) || hostWidth <= 0) return MAX_CHAT_TRANSCRIPT_WIDTH;
-  return Math.max(
-    MIN_CHAT_TRANSCRIPT_WIDTH,
-    Math.min(MAX_CHAT_TRANSCRIPT_WIDTH, Math.floor(hostWidth - TRANSCRIPT_HORIZONTAL_SAFE_SPACE)),
-  );
+function measureStageMaxWidth(host: HTMLElement | null) {
+  return resolveStageMaxWidth(host?.getBoundingClientRect().width ?? null);
 }
 
 function applyWidth(host: HTMLElement | null, width: number) {
@@ -55,28 +66,41 @@ function applyWidth(host: HTMLElement | null, width: number) {
 
 export function TranscriptWidthControls(props: TranscriptWidthControlsProps) {
   const { hostRef, width, onWidthChange, resizeLabel, resetLabel } = props;
-  const [maxWidth, setMaxWidth] = useState(MAX_CHAT_TRANSCRIPT_WIDTH);
+  const [maxWidth, setMaxWidth] = useState(() => resolveStageMaxWidth(null));
   const [resizingWidth, setResizingWidth] = useState<number | null>(null);
   const pendingWidthRef = useRef(width);
   const resizingRef = useRef(false);
   const resizeFrameRef = useRef<number | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
-  const effectiveWidth = clampWidth(resizingWidth ?? width, maxWidth);
+  // Read by the stage observer, which must outlive individual width commits.
+  const widthRef = useRef(width);
+  widthRef.current = width;
+  const effectiveWidth = clampWidthToStage(resizingWidth ?? width, maxWidth);
+  // Same gate as the CSS that hides the handles, so a coarse pointer neither
+  // renders them nor pays for their listeners.
+  const controlsHidden = useSyncExternalStore(
+    subscribeControlsHidden,
+    readControlsHidden,
+    () => true,
+  );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    // Mid-drag the pointer owns the variable; that drag's commit reconciles it.
     if (resizingWidth !== null) return;
-    applyWidth(hostRef.current, clampWidth(width, maxWidth));
+    applyWidth(hostRef.current, clampWidthToStage(width, maxWidth));
   }, [hostRef, maxWidth, resizingWidth, width]);
 
+  // Keyed off the host alone on purpose: re-arming the observer on every width
+  // commit would tear it down and rebuild it mid-interaction for nothing.
   useEffect(() => {
     const host = hostRef.current;
     let frameId = 0;
     const updateMaxWidth = () => {
       frameId = 0;
-      const nextMaxWidth = getMaxWidth(host);
+      const nextMaxWidth = measureStageMaxWidth(host);
       setMaxWidth(nextMaxWidth);
       if (!resizingRef.current) {
-        applyWidth(host, clampWidth(width, nextMaxWidth));
+        applyWidth(host, clampWidthToStage(widthRef.current, nextMaxWidth));
       }
     };
     const scheduleUpdate = () => {
@@ -93,7 +117,7 @@ export function TranscriptWidthControls(props: TranscriptWidthControlsProps) {
       if (frameId !== 0) cancelAnimationFrame(frameId);
       observer?.disconnect();
     };
-  }, [hostRef, width]);
+  }, [hostRef]);
 
   useEffect(
     () => () => {
@@ -106,7 +130,10 @@ export function TranscriptWidthControls(props: TranscriptWidthControlsProps) {
   const commitWidth = useCallback(
     (nextWidth: number) => {
       const preferredWidth = normalizePreferredWidth(nextWidth);
-      const effectiveNextWidth = clampWidth(preferredWidth, getMaxWidth(hostRef.current));
+      const effectiveNextWidth = clampWidthToStage(
+        preferredWidth,
+        measureStageMaxWidth(hostRef.current),
+      );
       applyWidth(hostRef.current, effectiveNextWidth);
       pendingWidthRef.current = effectiveNextWidth;
       setResizingWidth(null);
@@ -116,16 +143,16 @@ export function TranscriptWidthControls(props: TranscriptWidthControlsProps) {
   );
 
   const handleResizeStart = useCallback(
-    (side: ResizeSide, event: ReactPointerEvent<HTMLButtonElement>) => {
+    (side: TranscriptResizeSide, event: ReactPointerEvent<HTMLButtonElement>) => {
       if (event.button !== 0 || event.pointerType === "touch") return;
       event.preventDefault();
       event.stopPropagation();
       cleanupRef.current?.();
 
       const host = hostRef.current;
-      const dragMaxWidth = getMaxWidth(host);
+      const dragMaxWidth = measureStageMaxWidth(host);
       const startX = event.clientX;
-      const startWidth = clampWidth(width, dragMaxWidth);
+      const startWidth = clampWidthToStage(width, dragMaxWidth);
       const previousCursor = document.body.style.cursor;
       const previousUserSelect = document.body.style.userSelect;
       pendingWidthRef.current = startWidth;
@@ -137,7 +164,7 @@ export function TranscriptWidthControls(props: TranscriptWidthControlsProps) {
       document.body.style.userSelect = "none";
 
       const scheduleWidth = (nextWidth: number) => {
-        pendingWidthRef.current = clampWidth(nextWidth, dragMaxWidth);
+        pendingWidthRef.current = clampWidthToStage(nextWidth, dragMaxWidth);
         if (resizeFrameRef.current !== null) return;
         resizeFrameRef.current = requestAnimationFrame(() => {
           resizeFrameRef.current = null;
@@ -163,8 +190,7 @@ export function TranscriptWidthControls(props: TranscriptWidthControlsProps) {
       };
 
       const handleMove = (moveEvent: PointerEvent) => {
-        const delta = moveEvent.clientX - startX;
-        scheduleWidth(startWidth + (side === "right" ? delta * 2 : -delta * 2));
+        scheduleWidth(resolveDragWidth(startWidth, moveEvent.clientX - startX, side));
       };
 
       const handleEnd = () => {
@@ -183,54 +209,63 @@ export function TranscriptWidthControls(props: TranscriptWidthControlsProps) {
 
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLButtonElement>) => {
-      const step = event.shiftKey ? 64 : 16;
-      let nextWidth: number | null = null;
-      if (event.key === "ArrowLeft") nextWidth = width - step;
-      if (event.key === "ArrowRight") nextWidth = width + step;
-      if (event.key === "Home") nextWidth = DEFAULT_CHAT_TRANSCRIPT_WIDTH;
+      const nextWidth = resolveKeyboardWidth(event.key, effectiveWidth, event.shiftKey);
       if (nextWidth === null) return;
       event.preventDefault();
       commitWidth(nextWidth);
     },
-    [commitWidth, width],
+    [commitWidth, effectiveWidth],
   );
 
   const resetWidth = useCallback(() => {
     commitWidth(DEFAULT_CHAT_TRANSCRIPT_WIDTH);
   }, [commitWidth]);
 
-  if (maxWidth <= MIN_CHAT_TRANSCRIPT_WIDTH) return null;
+  if (controlsHidden || !areWidthControlsUsable(maxWidth)) return null;
 
-  const renderHandle = (side: ResizeSide) => (
-    <button
-      type="button"
-      role="separator"
-      data-scroll-follow-ignore-keys
-      aria-label={resizeLabel}
-      aria-orientation="vertical"
-      aria-valuemin={MIN_CHAT_TRANSCRIPT_WIDTH}
-      aria-valuemax={maxWidth}
-      aria-valuenow={effectiveWidth}
-      title={side === "right" ? `${resizeLabel} · ${resetLabel}` : resetLabel}
-      tabIndex={side === "right" ? 0 : -1}
-      onPointerDown={(event) => handleResizeStart(side, event)}
-      onDoubleClick={resetWidth}
-      onKeyDown={side === "right" ? handleKeyDown : undefined}
-      className={cn(
-        "group pointer-events-auto absolute inset-y-0 z-10 w-3 touch-none cursor-col-resize border-0 bg-transparent p-0 focus-visible:outline-none",
-        side === "left" ? "left-0 -translate-x-1/2" : "right-0 translate-x-1/2",
-      )}
-    >
-      <span
-        aria-hidden="true"
+  const handleTitle = `${resizeLabel} · ${resetLabel}`;
+
+  // Only the right handle is exposed to assistive tech. Both handles drive one
+  // value, and aria-value* is only meaningful on a focusable separator — so
+  // the left handle stays a pointer-only affordance instead of advertising
+  // values nothing can focus to change.
+  const renderHandle = (side: TranscriptResizeSide) => {
+    const isPrimary = side === "right";
+    return (
+      <button
+        type="button"
+        {...(isPrimary
+          ? {
+              role: "separator",
+              "aria-label": resizeLabel,
+              "aria-orientation": "vertical" as const,
+              "aria-valuemin": MIN_CHAT_TRANSCRIPT_WIDTH,
+              "aria-valuemax": maxWidth,
+              "aria-valuenow": effectiveWidth,
+              tabIndex: 0,
+              onKeyDown: handleKeyDown,
+            }
+          : { "aria-hidden": true, tabIndex: -1 })}
+        data-scroll-follow-ignore-keys
+        title={handleTitle}
+        onPointerDown={(event) => handleResizeStart(side, event)}
+        onDoubleClick={resetWidth}
         className={cn(
-          "absolute left-1/2 top-1/2 h-10 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-muted-foreground/25 opacity-0 shadow-sm transition-[height,background-color,opacity] duration-150",
-          "group-hover:h-16 group-hover:bg-primary/60 group-hover:opacity-100 group-focus-visible:h-16 group-focus-visible:bg-primary group-focus-visible:opacity-100",
-          resizingWidth !== null && "h-20 bg-primary opacity-100",
+          "group pointer-events-auto absolute inset-y-0 z-10 w-3 touch-none cursor-col-resize border-0 bg-transparent p-0 focus-visible:outline-none",
+          isPrimary ? "right-0 translate-x-1/2" : "left-0 -translate-x-1/2",
         )}
-      />
-    </button>
-  );
+      >
+        <span
+          aria-hidden="true"
+          className={cn(
+            "absolute left-1/2 top-1/2 h-10 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-muted-foreground/25 opacity-0 shadow-sm transition-[height,background-color,opacity] duration-150",
+            "group-hover:h-16 group-hover:bg-primary/60 group-hover:opacity-100 group-focus-visible:h-16 group-focus-visible:bg-primary group-focus-visible:opacity-100",
+            resizingWidth !== null && "h-20 bg-primary opacity-100",
+          )}
+        />
+      </button>
+    );
+  };
 
   return (
     <div

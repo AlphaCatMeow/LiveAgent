@@ -15,6 +15,11 @@ import {
 import { createUuid } from "../shared/id";
 import { mergeAlwaysEnabledSkillNames } from "../skills/builtin";
 import { SYSTEM_TOOL_OPTIONS, type SystemToolId } from "../tools/systemToolOptions";
+import {
+  DEFAULT_CHAT_TRANSCRIPT_WIDTH,
+  MAX_CHAT_TRANSCRIPT_WIDTH,
+  MIN_CHAT_TRANSCRIPT_WIDTH,
+} from "../transcript-width/transcriptWidthModel";
 import { normalizeApiKey, normalizeBaseUrl, normalizeModels } from "./normalize";
 
 export { normalizeFontFamily } from "../fontFamily";
@@ -134,9 +139,9 @@ export type FontScaleSettings = {
   rightDock: number;
 };
 
-export const DEFAULT_CHAT_TRANSCRIPT_WIDTH = 768;
-export const MIN_CHAT_TRANSCRIPT_WIDTH = 560;
-export const MAX_CHAT_TRANSCRIPT_WIDTH = 1200;
+// Bounds live with the geometry that enforces them; re-exported here so
+// settings consumers keep a single import site.
+export { DEFAULT_CHAT_TRANSCRIPT_WIDTH, MAX_CHAT_TRANSCRIPT_WIDTH, MIN_CHAT_TRANSCRIPT_WIDTH };
 
 export type ChatTranscriptSettings = {
   width: number;

@@ -53,6 +53,7 @@
     "lib/transcript-virtual/liveRangeExtractor.ts",
     "lib/transcript-virtual/liveScrollAdjustPolicy.ts",
     "lib/transcript-virtual/measurementsLru.ts",
+    "lib/transcript-width/transcriptWidthModel.ts",
     "lib/transcript-virtual/rowEstimates.ts",
     "lib/workspace-activity/types.ts",
     "lib/workspace-activity/useWorkspaceInvalidation.ts",

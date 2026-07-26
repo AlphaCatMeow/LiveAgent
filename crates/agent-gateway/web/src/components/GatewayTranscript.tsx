@@ -39,7 +39,10 @@ import { DEFAULT_CHAT_TRANSCRIPT_WIDTH } from "@/lib/settings";
 import { cn } from "@/lib/shared/utils";
 import { extractLiveRange } from "@/lib/transcript-virtual/liveRangeExtractor";
 import { createLiveRowScrollAdjustPolicy } from "@/lib/transcript-virtual/liveScrollAdjustPolicy";
-import { createTranscriptMeasurementsLru } from "@/lib/transcript-virtual/measurementsLru";
+import {
+  buildTranscriptLayoutKey,
+  createTranscriptMeasurementsLru,
+} from "@/lib/transcript-virtual/measurementsLru";
 import {
   CHECKPOINT_ROW_ESTIMATE_PX,
   estimateAssistantRowHeight,
@@ -1324,7 +1327,7 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
       (conversationId && scrollViewport
         ? transcriptMeasurementsLru.restore(
             conversationId,
-            `${scrollViewport.clientWidth}:${contentWidth}`,
+            buildTranscriptLayoutKey(scrollViewport.clientWidth, contentWidth),
           )
         : null) ?? [],
   );
@@ -1515,7 +1518,7 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
     if (!conversationId || !scrollViewport) return;
     transcriptMeasurementsLru.save(
       conversationId,
-      `${scrollViewport.clientWidth}:${contentWidth}`,
+      buildTranscriptLayoutKey(scrollViewport.clientWidth, contentWidth),
       transcriptVirtualizer.takeSnapshot(),
     );
   };

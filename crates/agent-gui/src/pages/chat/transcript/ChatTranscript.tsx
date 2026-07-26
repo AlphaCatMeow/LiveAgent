@@ -227,6 +227,9 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
     <div
       ref={transcriptRootRef}
       className="relative min-h-0 flex-1"
+      // Preferred (persisted) width, so a fresh mount paints at the user's
+      // width instead of the default. TranscriptWidthControls narrows this
+      // same variable to the stage in a layout effect — see its header.
       style={
         {
           [CHAT_TRANSCRIPT_WIDTH_CSS_VAR]: `${contentWidth}px`,

@@ -9,6 +9,7 @@ import {
   isDominantVerticalWheel,
   POINTER_DRAG_SLOP_PX,
   reduceFollowEvent,
+  SCROLL_FOLLOW_IGNORE_KEYS_ATTRIBUTE,
 } from "./scrollFollowCore";
 
 // Below this the element cannot meaningfully scroll; wheel/touch on it must
@@ -24,7 +25,7 @@ function shouldIgnoreScrollKeyTarget(target: EventTarget | null) {
     target instanceof HTMLInputElement ||
     target instanceof HTMLTextAreaElement ||
     target instanceof HTMLSelectElement ||
-    target.closest("[data-scroll-follow-ignore-keys]") !== null
+    target.closest(`[${SCROLL_FOLLOW_IGNORE_KEYS_ATTRIBUTE}]`) !== null
   );
 }
 

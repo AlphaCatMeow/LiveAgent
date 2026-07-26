@@ -93,7 +93,6 @@ type PendingModelLayout = {
   topById: Map<string, number>;
   scrollContainer: HTMLDivElement | null;
   scrollTop: number | null;
-  animate: boolean;
 };
 
 const NEW_MODEL_SORT_DELAY_MS = 1_200;
@@ -343,7 +342,7 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
     [],
   );
 
-  function captureModelLayout(animate = true) {
+  function captureModelLayout() {
     const rows = modelListRef.current?.querySelectorAll<HTMLElement>("[data-model-row-id]");
     const topById = new Map<string, number>();
     for (const row of rows ?? []) {
@@ -356,7 +355,6 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
       topById,
       scrollContainer,
       scrollTop: scrollContainer?.scrollTop ?? null,
-      animate,
     };
   }
 
@@ -683,7 +681,7 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
     if (pending.scrollTop !== null && pending.scrollContainer) {
       pending.scrollContainer.scrollTop = pending.scrollTop;
     }
-    if (!pending.animate || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const rows = modelListRef.current?.querySelectorAll<HTMLElement>("[data-model-row-id]");
     for (const row of rows ?? []) {
       const id = row.dataset.modelRowId;

@@ -1,3 +1,5 @@
+import type { SshLocalForwardEvent } from "./sshLocalForwardTypes";
+
 export type TerminalSession = {
   id: string;
   projectPathKey: string;
@@ -97,6 +99,7 @@ export type TerminalEvent = {
   outputStartOffset?: number;
   outputEndOffset?: number;
   sshTabs?: SshTerminalTabsSnapshot;
+  sshLocalForward?: SshLocalForwardEvent;
 };
 
 export type TerminalStreamChunk = {

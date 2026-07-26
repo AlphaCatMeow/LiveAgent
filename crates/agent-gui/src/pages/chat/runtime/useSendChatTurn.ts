@@ -625,6 +625,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
         conversationId,
         titleSourceText,
         content,
+        locale: settings.locale,
         sidebarStore,
         titleJobRef,
         gatewayBridgeEvents,

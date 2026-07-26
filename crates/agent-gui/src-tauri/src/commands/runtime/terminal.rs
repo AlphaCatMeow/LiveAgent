@@ -5,8 +5,10 @@ use tauri::State;
 use crate::runtime::sftp::SftpSessionRegistry;
 use crate::runtime::shell_runner::ShellRunRegistry;
 use crate::runtime::terminal::{
-    terminal_shell_options as runtime_terminal_shell_options, SshTerminalTabsSnapshot,
-    TerminalListResponse, TerminalReadTailResponse, TerminalSessionRecord, TerminalSessionRegistry,
+    normalize_ssh_local_forward_local_port, ssh_local_forward_local_port_available,
+    terminal_shell_options as runtime_terminal_shell_options, SshLocalForwardActionResponse,
+    SshLocalForwardListResponse, SshTerminalTabsSnapshot, TerminalListResponse,
+    TerminalReadTailResponse, TerminalSessionRecord, TerminalSessionRegistry,
     TerminalShellOptionsResponse, TerminalSnapshotResponse, TerminalSshCreateResponse,
     TerminalSshExecResponse, TerminalSshLatencyResponse, TerminalStreamSnapshotResponse,
 };
@@ -135,6 +137,58 @@ pub async fn terminal_ssh_exec(
         run_registry.unregister(run_id, token);
     }
     result
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn terminal_ssh_local_forward_start(
+    registry: State<'_, Arc<TerminalSessionRegistry>>,
+    session_id: String,
+    project_path_key: Option<String>,
+    remote_host: String,
+    remote_port: u32,
+    local_port: Option<u32>,
+) -> Result<SshLocalForwardActionResponse, String> {
+    registry
+        .inner()
+        .clone()
+        .ssh_local_forward_start(
+            session_id,
+            project_path_key,
+            remote_host,
+            remote_port,
+            local_port,
+        )
+        .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn terminal_ssh_local_forward_list(
+    registry: State<'_, Arc<TerminalSessionRegistry>>,
+    session_id: Option<String>,
+    project_path_key: Option<String>,
+) -> Result<SshLocalForwardListResponse, String> {
+    registry.ssh_local_forward_list(session_id, project_path_key)
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn terminal_ssh_local_forward_stop(
+    registry: State<'_, Arc<TerminalSessionRegistry>>,
+    forward_id: String,
+    session_id: Option<String>,
+) -> Result<SshLocalForwardActionResponse, String> {
+    registry
+        .ssh_local_forward_stop(forward_id, session_id)
+        .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn terminal_ssh_local_forward_check_port(local_port: u32) -> Result<bool, String> {
+    let port = normalize_ssh_local_forward_local_port(Some(local_port))?;
+    if port == 0 {
+        // Auto-assign never conflicts; the OS picks a free port at bind time.
+        return Ok(true);
+    }
+    Ok(ssh_local_forward_local_port_available(port).await)
 }
 
 #[tauri::command(rename_all = "snake_case")]

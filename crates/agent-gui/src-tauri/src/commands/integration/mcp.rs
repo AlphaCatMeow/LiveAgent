@@ -78,12 +78,23 @@ fn build_stdio_command(cmd: &str, args: &[String], cwd: Option<&Path>) -> Comman
     #[cfg(windows)]
     {
         if is_windows_batch_program(&program) {
+            use std::os::windows::process::CommandExt;
+
+            // .cmd/.bat 无法被 CreateProcess 直接执行，需经 cmd.exe 转发。
+            // /C 后的命令行必须用 raw_arg 原样传入：arg() 会按 MSVCRT 规则
+            // 把内嵌引号转义成 `\"`，cmd.exe 不识别该转义，子进程瞬退，
+            // stdin 写入报 os error 232（issue #205）。
+            // /E:ON 保证命令扩展可用（`%%cd:~,` 防展开 hack 依赖它），
+            // /V:OFF 关闭延迟展开，防止参数里的 `!VAR!` 被替换；
+            // 均与 std `make_bat_command_line` 的 `/e:ON /v:OFF` 对齐。
             let mut command = Command::new("cmd.exe");
             command
+                .arg("/E:ON")
+                .arg("/V:OFF")
                 .arg("/D")
                 .arg("/S")
-                .arg("/C")
-                .arg(windows_batch_command_line(&program, args));
+                .arg("/C");
+            command.raw_arg(windows_cmd_c_argument(&program, args));
             return command;
         }
     }
@@ -93,7 +104,7 @@ fn build_stdio_command(cmd: &str, args: &[String], cwd: Option<&Path>) -> Comman
     command
 }
 
-#[cfg(windows)]
+#[cfg_attr(not(windows), allow(dead_code))]
 fn is_windows_batch_program(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
@@ -101,19 +112,46 @@ fn is_windows_batch_program(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(windows)]
-fn windows_batch_command_line(program: &Path, args: &[String]) -> String {
-    std::iter::once(program.to_string_lossy().into_owned())
+/// 组装 `cmd.exe /S /C` 之后的整段命令行：外层再包一对引号，`/S` 语义下
+/// cmd 仅剥掉首尾引号，剩余部分按原样执行。
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_cmd_c_argument(program: &Path, args: &[String]) -> String {
+    let line = std::iter::once(program.to_string_lossy().into_owned())
         .chain(args.iter().cloned())
         .map(|value| windows_cmd_quote_arg(&value))
         .collect::<Vec<_>>()
-        .join(" ")
+        .join(" ");
+    format!("\"{line}\"")
 }
 
-#[cfg(windows)]
+/// 引号包裹单个参数，转义规则对齐 std `sys/args/windows.rs::append_bat_arg`：
+/// - 内嵌引号前的反斜杠补齐至 2n 再把引号翻倍（cmd.exe 不识别 `\"`）；
+/// - 收尾引号前的尾部反斜杠同样翻倍，防止 `C:\dir\` 这类参数把闭合引号
+///   转义掉、与后一个参数粘连；
+/// - `%`/`\r` 前插入 `%%cd:~,` no-op（yt-dlp hack，依赖 `/E:ON`），阻止
+///   `%VAR%` 被 cmd 当环境变量展开，子进程仍收到原文。
+#[cfg_attr(not(windows), allow(dead_code))]
 fn windows_cmd_quote_arg(value: &str) -> String {
-    let escaped = value.replace('"', "\\\"");
-    format!("\"{escaped}\"")
+    let mut escaped = String::with_capacity(value.len() + 2);
+    escaped.push('"');
+    let mut backslashes = 0usize;
+    for ch in value.chars() {
+        if ch == '\\' {
+            backslashes += 1;
+        } else {
+            if ch == '"' {
+                escaped.extend(std::iter::repeat_n('\\', backslashes));
+                escaped.push('"');
+            } else if ch == '%' || ch == '\r' {
+                escaped.push_str("%%cd:~,");
+            }
+            backslashes = 0;
+        }
+        escaped.push(ch);
+    }
+    escaped.extend(std::iter::repeat_n('\\', backslashes));
+    escaped.push('"');
+    escaped
 }
 
 #[derive(Debug, Serialize)]
@@ -1969,5 +2007,79 @@ mod tests {
             .expect("join contender")
             .expect("contender ensure eventually succeeds");
         holder.join().expect("join holder");
+    }
+
+    #[test]
+    fn detects_windows_batch_programs_by_extension() {
+        assert!(is_windows_batch_program(Path::new(
+            r"C:\Program Files\nodejs\npx.cmd"
+        )));
+        assert!(is_windows_batch_program(Path::new(r"C:\tools\run.BAT")));
+        assert!(!is_windows_batch_program(Path::new(
+            r"C:\Program Files\nodejs\node.exe"
+        )));
+        assert!(!is_windows_batch_program(Path::new("npx")));
+    }
+
+    #[test]
+    fn windows_cmd_quote_arg_doubles_embedded_quotes() {
+        // cmd.exe 不认 `\"` 转义，翻倍才能保持引号配对。
+        assert_eq!(windows_cmd_quote_arg("-y"), r#""-y""#);
+        assert_eq!(windows_cmd_quote_arg(r#"a"b"#), r#""a""b""#);
+        assert_eq!(windows_cmd_quote_arg("with space"), r#""with space""#);
+    }
+
+    #[test]
+    fn windows_cmd_quote_arg_doubles_backslashes_before_quotes() {
+        // 内嵌引号前的反斜杠须补齐至 2n，重解析后还原为 n 个反斜杠 + 字面引号。
+        assert_eq!(windows_cmd_quote_arg(r#"a\"b"#), r#""a\\""b""#);
+        // 尾部反斜杠若不翻倍会把闭合引号转义掉，与后一个参数粘连。
+        assert_eq!(windows_cmd_quote_arg(r"C:\data\"), r#""C:\data\\""#);
+        // 非贴引号的反斜杠保持原样（路径分隔符不受影响）。
+        assert_eq!(windows_cmd_quote_arg(r"C:\a\b"), r#""C:\a\b""#);
+        assert_eq!(windows_cmd_quote_arg(""), r#""""#);
+    }
+
+    #[test]
+    fn windows_cmd_quote_arg_neutralizes_percent_expansion() {
+        // `%%cd:~,` no-op 打断 %VAR% 配对，cmd 展开后子进程仍收到原文。
+        assert_eq!(windows_cmd_quote_arg("%PATH%"), r#""%%cd:~,%PATH%%cd:~,%""#);
+        assert_eq!(windows_cmd_quote_arg("100%"), r#""100%%cd:~,%""#);
+        assert_eq!(windows_cmd_quote_arg("a\rb"), "\"a%%cd:~,\rb\"");
+    }
+
+    #[test]
+    fn windows_cmd_c_argument_wraps_whole_line_for_slash_s() {
+        // `/S` 语义：cmd 剥掉首尾引号后必须还原出可执行的完整命令行。
+        let program = Path::new(r"C:\Program Files\nodejs\npx.cmd");
+        let args = vec!["-y".to_string(), "@playwright/mcp".to_string()];
+        assert_eq!(
+            windows_cmd_c_argument(program, &args),
+            r#"""C:\Program Files\nodejs\npx.cmd" "-y" "@playwright/mcp"""#
+        );
+    }
+
+    #[test]
+    fn windows_cmd_c_argument_without_args_still_quotes_program() {
+        let program = Path::new(r"C:\tools\npx.cmd");
+        assert_eq!(
+            windows_cmd_c_argument(program, &[]),
+            r#"""C:\tools\npx.cmd"""#
+        );
+    }
+
+    #[test]
+    fn windows_cmd_c_argument_survives_trailing_backslash_arg() {
+        // filesystem 类 MCP server 常见传法：目录参数带尾部反斜杠。
+        let program = Path::new(r"C:\Program Files\nodejs\npx.cmd");
+        let args = vec![
+            "-y".to_string(),
+            "@modelcontextprotocol/server-filesystem".to_string(),
+            r"C:\Users\me\docs\".to_string(),
+        ];
+        assert_eq!(
+            windows_cmd_c_argument(program, &args),
+            r#"""C:\Program Files\nodejs\npx.cmd" "-y" "@modelcontextprotocol/server-filesystem" "C:\Users\me\docs\\"""#
+        );
     }
 }

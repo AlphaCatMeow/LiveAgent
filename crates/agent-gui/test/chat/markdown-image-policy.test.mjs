@@ -257,7 +257,10 @@ test("agent tool rules keep workspace and Skills deletion on Delete", () => {
   assert.match(suffix, /`git rm`, `git clean`, PowerShell `Remove-Item`/);
   assert.match(suffix, /cmd `del` \/ `erase` \/ `rd`/);
   assert.match(suffix, /record the path in Edited Files and the file ledger/);
-  assert.match(suffix, /call Delete first[\s\S]*`git add -u`/);
+  assert.match(
+    suffix,
+    /stage only that path[\s\S]*`git add -u -- <exact-workspace-relative-path>`/,
+  );
 });
 
 test("agent tool rules route installed Skill scripts through skill cwd", () => {

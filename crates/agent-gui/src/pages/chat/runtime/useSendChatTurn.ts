@@ -150,6 +150,7 @@ type UseSendChatTurnParams = {
   clearAbortSnapshot: LiveTranscriptController["clearAbortSnapshot"];
   getAbortSnapshot: LiveTranscriptController["getAbortSnapshot"];
   resetLiveTranscript: LiveTranscriptController["resetLiveTranscript"];
+  settleLiveTranscript: LiveTranscriptController["settleLiveTranscript"];
   appendDraftAssistantText: LiveTranscriptController["appendDraftAssistantText"];
   batchLiveRoundsUpdate: LiveTranscriptController["batchLiveRoundsUpdate"];
   updateToolStatus: LiveTranscriptController["updateToolStatus"];
@@ -221,6 +222,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     clearAbortSnapshot,
     getAbortSnapshot,
     resetLiveTranscript,
+    settleLiveTranscript,
     appendDraftAssistantText,
     batchLiveRoundsUpdate,
     updateToolStatus,
@@ -1222,7 +1224,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
 
       const finalState = appendMessagesToConversation(nextConversationState, partialMessages);
       abortedConversationCommitted = true;
-      resetLiveTranscript(transcriptStore);
+      settleLiveTranscript(transcriptStore);
       updateConversationRuntimeEntry(conversationId, (prev) => ({
         ...prev,
         state: finalState,
@@ -1262,7 +1264,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
         errorAssistant,
       ]);
       abortedConversationCommitted = true;
-      resetLiveTranscript(transcriptStore);
+      settleLiveTranscript(transcriptStore);
       updateConversationRuntimeEntry(conversationId, (prev) => ({
         ...prev,
         state: finalState,
@@ -1357,6 +1359,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
             compaction,
             cancellation,
             resetLiveTranscript,
+            settleLiveTranscript,
             batchLiveRoundsUpdate,
             updateToolStatus,
             updateRetryAttempts: updateGatewayBridgeRetryAttempts,
@@ -1397,6 +1400,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
             compaction,
             cancellation,
             resetLiveTranscript,
+            settleLiveTranscript,
             appendDraftAssistantText,
             batchLiveRoundsUpdate,
             updateGatewayBridgeToolStatus,

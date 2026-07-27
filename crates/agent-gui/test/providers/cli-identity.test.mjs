@@ -11,7 +11,7 @@ const settings = loader.loadModule("src/lib/settings/index.ts");
 
 test("CLI 身份默认值与 UA 模板保持供应商协议语义", () => {
   const profiles = core.getDefaultCliIdentitySettings();
-  assert.equal(profiles.claude_code.mode, "notify");
+  assert.equal(profiles.claude_code.mode, "auto");
   assert.equal(profiles.claude_code.version, "2.1.71");
   assert.equal(
     core.formatCliIdentityUserAgent("claude_code", "2.1.212"),
@@ -41,12 +41,13 @@ test("CLI 身份只接受稳定 SemVer 并按数值比较", () => {
   assert.equal(core.normalizeStableCliVersion(`${"9".repeat(65)}.0.0`), undefined);
 });
 
-test("CLI 身份支持确认应用、自动模式、内置模式与单步回滚", () => {
+test("CLI 身份支持版本应用、内置模式与单步回滚", () => {
   const initial = core.getDefaultCliIdentitySettings().codex;
   const updated = core.applyCliIdentityVersion(initial, "0.145.0");
   assert.equal(updated.version, "0.145.0");
   assert.equal(updated.previousVersion, "0.72.0");
-  assert.equal(core.cliIdentityUpdateAvailable("codex", updated), false);
+  // 已在最新版上，自动跟随无事可做。
+  assert.equal(core.followLatestCliIdentityVersion(updated), updated);
 
   const rolledBack = core.rollbackCliIdentityVersion(updated);
   assert.equal(rolledBack.version, "0.72.0");
@@ -149,7 +150,7 @@ test("全局身份只填补默认 UA，自定义覆盖和协议例外保持优�
   );
 });
 
-test("后台检查只查询过期身份，确认模式仅提示，自动模式立即应用", () => {
+test("后台检查只查询过期身份，内置模式只记录不应用，自动跟随立即应用", () => {
   const rootDir = fileURLToPath(new URL("../..", import.meta.url));
   const hubFetchPath = path.join(rootDir, "src/lib/hubFetch.ts");
   const runtimeEnvPath = path.join(rootDir, "src/lib/runtimeEnv.ts");
@@ -163,8 +164,7 @@ test("后台检查只查询过期身份，确认模式仅提示，自动模式�
   const now = 1_900_000_000_000;
   const identities = core.getDefaultCliIdentitySettings();
   identities.claude_code.lastCheckedAt = now;
-  identities.codex.mode = "auto";
-  identities.xai.mode = "builtin";
+  identities.xai = core.setCliIdentityMode("xai", identities.xai, "builtin");
 
   assert.deepEqual(updates.cliIdentityProvidersNeedingCheck(identities, now), ["codex"]);
   identities.claude_code.lastCheckedAt = now + 1;
@@ -182,17 +182,18 @@ test("后台检查只查询过期身份，确认模式仅提示，自动模式�
     identities,
     [
       { providerId: "claude_code", status: "success", version: "2.1.212" },
-      { providerId: "codex", status: "success", version: "0.145.0" },
-      { providerId: "xai", status: "error", message: "offline" },
+      { providerId: "codex", status: "error", message: "offline" },
+      { providerId: "xai", status: "success", version: "0.2.112" },
     ],
     now + 1,
   );
-  assert.equal(merged.identities.claude_code.version, "2.1.71");
+  assert.equal(merged.identities.claude_code.version, "2.1.212");
+  assert.equal(merged.identities.claude_code.previousVersion, "2.1.71");
   assert.equal(merged.identities.claude_code.latestVersion, "2.1.212");
-  assert.equal(merged.identities.codex.version, "0.145.0");
-  assert.equal(merged.identities.codex.previousVersion, "0.72.0");
-  assert.equal(merged.identities.xai.lastCheckedAt, undefined);
-  assert.equal(merged.errors.xai, "offline");
+  assert.equal(merged.identities.xai.version, "0.2.110");
+  assert.equal(merged.identities.xai.latestVersion, "0.2.112");
+  assert.equal(merged.identities.codex.lastCheckedAt, undefined);
+  assert.equal(merged.errors.codex, "offline");
   assert.equal(merged.changed, true);
 });
 
@@ -229,17 +230,22 @@ test("在线检查使用固定官方包和稳定 dist-tag，单个失败不阻�
   assert.ok(requested.every((url) => url.startsWith("https://registry.npmjs.org/-/package/")));
 });
 
-test("内置兼容模式不报可更新：提示了也无法应用", () => {
+test("内置兼容恒用内置版本且不自动跟随，切回自动跟随立即补装最新版", () => {
   const profile = {
     ...core.getDefaultCliIdentitySettings().claude_code,
     latestVersion: "2.1.212",
   };
-  assert.equal(core.cliIdentityUpdateAvailable("claude_code", profile), true);
-
   const pinned = core.setCliIdentityMode("claude_code", profile, "builtin");
   assert.equal(pinned.mode, "builtin");
   assert.equal(core.getAppliedCliIdentityVersion("claude_code", pinned), "2.1.71");
-  assert.equal(core.cliIdentityUpdateAvailable("claude_code", pinned), false);
+  assert.equal(core.followLatestCliIdentityVersion(pinned), pinned);
+
+  const followed = core.followLatestCliIdentityVersion(
+    core.setCliIdentityMode("claude_code", pinned, "auto"),
+  );
+  assert.equal(followed.mode, "auto");
+  assert.equal(followed.version, "2.1.212");
+  assert.equal(followed.previousVersion, "2.1.71");
 });
 
 test("回滚记下被否决版本，自动跟随不得把它装回去但更高版本照常跟随", () => {
@@ -262,7 +268,7 @@ test("回滚记下被否决版本，自动跟随不得把它装回去但更高�
   });
   assert.equal(rolled.version, "2.1.71");
   assert.equal(rolled.rejectedVersion, "2.1.212");
-  assert.equal(core.cliIdentityUpdateAvailable("claude_code", rolled), false);
+  assert.equal(core.followLatestCliIdentityVersion(rolled), rolled);
 
   const identities = { ...core.getDefaultCliIdentitySettings(), claude_code: rolled };
   const rechecked = updates.mergeCliIdentityCheckResults(
@@ -278,10 +284,6 @@ test("回滚记下被否决版本，自动跟随不得把它装回去但更高�
     now,
   );
   assert.equal(bumped.identities.claude_code.version, "2.1.213");
-
-  const readopted = core.applyCliIdentityVersion(rolled, "2.1.212");
-  assert.equal(readopted.version, "2.1.212");
-  assert.equal(readopted.rejectedVersion, undefined);
 });
 
 test("检查失败进入退避窗口，成功后清除失败标记", () => {
@@ -330,7 +332,7 @@ test("检查失败进入退避窗口，成功后清除失败标记", () => {
   assert.equal(recovered.identities.claude_code.lastCheckedAt, now + 1);
 });
 
-test("身份配置经规范化保留否决版本与失败时间戳", () => {
+test("身份配置经规范化保留否决版本与失败时间戳，遗留确认模式归一为自动跟随", () => {
   const normalized = settings.normalizeCustomSettings({
     providerIdentities: {
       claude_code: {
@@ -340,10 +342,13 @@ test("身份配置经规范化保留否决版本与失败时间戳", () => {
         lastFailedAt: 1_900_000_000_000,
       },
       codex: { mode: "notify", version: "0.72.0", rejectedVersion: "not-a-version" },
+      xai: { mode: "builtin", version: "0.2.110" },
     },
   }).providerIdentities;
 
   assert.equal(normalized.claude_code.rejectedVersion, "2.1.212");
   assert.equal(normalized.claude_code.lastFailedAt, 1_900_000_000_000);
+  assert.equal(normalized.codex.mode, "auto");
   assert.equal(normalized.codex.rejectedVersion, undefined);
+  assert.equal(normalized.xai.mode, "builtin");
 });

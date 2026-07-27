@@ -14,11 +14,11 @@ import {
 import { Button } from "../../components/ui/button";
 import { useLocale } from "../../i18n";
 import {
-  applyCliIdentityVersion,
   CLI_IDENTITY_METADATA,
   type CliIdentityMode,
   type CliIdentityProfile,
-  cliIdentityUpdateAvailable,
+  compareCliVersions,
+  followLatestCliIdentityVersion,
   formatCliIdentityUserAgent,
   getAppliedCliIdentityVersion,
   MANAGED_CLI_IDENTITY_PROVIDER_IDS,
@@ -77,9 +77,9 @@ function IdentityModeControl(props: {
 }) {
   const { value, onChange } = props;
   const { t } = useLocale();
-  const modes: CliIdentityMode[] = ["builtin", "notify", "auto"];
+  const modes: CliIdentityMode[] = ["builtin", "auto"];
   return (
-    <div className="grid grid-cols-3 rounded-lg bg-muted p-1">
+    <div className="grid grid-cols-2 rounded-lg bg-muted p-1">
       {modes.map((mode) => (
         <button
           key={mode}
@@ -105,11 +105,9 @@ function IdentityRow(props: {
   checking: boolean;
   error?: string;
   onModeChange: (mode: CliIdentityMode) => void;
-  onApply: () => void;
   onRollback: () => void;
 }) {
-  const { providerId, profile, providers, checking, error, onModeChange, onApply, onRollback } =
-    props;
+  const { providerId, profile, providers, checking, error, onModeChange, onRollback } = props;
   const { locale, t } = useLocale();
   const currentVersion = getAppliedCliIdentityVersion(providerId, profile);
   const effectiveUserAgent = formatCliIdentityUserAgent(providerId, currentVersion);
@@ -122,8 +120,9 @@ function IdentityRow(props: {
       customUserAgent(provider.customHeaders) === undefined &&
       cliIdentityDisabled(providerId, provider.apiKey, provider.requestFormat),
   ).length;
-  const updateAvailable = cliIdentityUpdateAvailable(providerId, profile);
-  const upToDate = Boolean(profile.latestVersion) && !updateAvailable;
+  const upToDate = Boolean(
+    profile.latestVersion && compareCliVersions(currentVersion, profile.latestVersion) >= 0,
+  );
 
   return (
     <section className="rounded-xl border border-border/70 bg-background/80 p-4 shadow-sm dark:bg-foreground/[0.025] dark:shadow-none">
@@ -134,11 +133,7 @@ function IdentityRow(props: {
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="text-sm font-semibold">{PROVIDER_LABELS[providerId]}</span>
-            {updateAvailable ? (
-              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
-                {t("settings.cliIdentityUpdateAvailable")}
-              </span>
-            ) : upToDate ? (
+            {upToDate ? (
               <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
                 <CheckCircle2 className="h-3 w-3" />
                 {t("settings.cliIdentityUpToDate")}
@@ -189,21 +184,14 @@ function IdentityRow(props: {
       </div>
 
       <div className="mt-3 flex min-h-10 items-center gap-2">
-        {updateAvailable ? (
-          <Button type="button" size="sm" className="h-9 flex-1 gap-1.5" onClick={onApply}>
-            <RefreshCw className="h-3.5 w-3.5" />
-            {t("settings.cliIdentityApply").replace("{version}", profile.latestVersion ?? "")}
-          </Button>
-        ) : (
-          <div className="min-w-0 flex-1 text-[11px] leading-relaxed text-muted-foreground">
-            {error
-              ? t("settings.cliIdentityCheckFailed")
-              : t("settings.cliIdentityLastChecked").replace(
-                  "{time}",
-                  checkedAtLabel(profile.lastCheckedAt, locale),
-                )}
-          </div>
-        )}
+        <div className="min-w-0 flex-1 text-[11px] leading-relaxed text-muted-foreground">
+          {error
+            ? t("settings.cliIdentityCheckFailed")
+            : t("settings.cliIdentityLastChecked").replace(
+                "{time}",
+                checkedAtLabel(profile.lastCheckedAt, locale),
+              )}
+        </div>
         <Button
           type="button"
           variant="outline"
@@ -362,23 +350,8 @@ export function ProviderIdentityDrawer(props: SettingsSectionProps & { onClose: 
                 checking={checking}
                 error={errors[providerId]}
                 onModeChange={(mode) =>
-                  updateProfile(providerId, (profile) => {
-                    const next = setCliIdentityMode(providerId, profile, mode);
-                    return mode === "auto" &&
-                      next.latestVersion &&
-                      cliIdentityUpdateAvailable(providerId, next)
-                      ? applyCliIdentityVersion(next, next.latestVersion)
-                      : next;
-                  })
-                }
-                onApply={() =>
                   updateProfile(providerId, (profile) =>
-                    profile.latestVersion
-                      ? applyCliIdentityVersion(
-                          profile.mode === "builtin" ? { ...profile, mode: "notify" } : profile,
-                          profile.latestVersion,
-                        )
-                      : profile,
+                    followLatestCliIdentityVersion(setCliIdentityMode(providerId, profile, mode)),
                   )
                 }
                 onRollback={() =>

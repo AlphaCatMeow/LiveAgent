@@ -1,7 +1,7 @@
 export const MANAGED_CLI_IDENTITY_PROVIDER_IDS = ["claude_code", "codex", "xai"] as const;
 
 export type ManagedCliIdentityProviderId = (typeof MANAGED_CLI_IDENTITY_PROVIDER_IDS)[number];
-export type CliIdentityMode = "builtin" | "notify" | "auto";
+export type CliIdentityMode = "builtin" | "auto";
 
 export type CliIdentityProfile = {
   mode: CliIdentityMode;
@@ -78,7 +78,8 @@ function normalizeTimestamp(value: unknown): number | undefined {
 }
 
 function normalizeCliIdentityMode(value: unknown): CliIdentityMode {
-  return value === "builtin" || value === "auto" || value === "notify" ? value : "notify";
+  // 历史遗留的 "notify"（更新时确认）与其它未知值一律归一为自动跟随。
+  return value === "builtin" ? "builtin" : "auto";
 }
 
 export function getDefaultCliIdentitySettings(): CliIdentitySettings {
@@ -86,7 +87,7 @@ export function getDefaultCliIdentitySettings(): CliIdentitySettings {
     MANAGED_CLI_IDENTITY_PROVIDER_IDS.map((providerId) => [
       providerId,
       {
-        mode: "notify" as const,
+        mode: "auto" as const,
         version: CLI_IDENTITY_METADATA[providerId].builtinVersion,
       },
     ]),
@@ -152,15 +153,12 @@ export function applyCliIdentityVersion(
 ): CliIdentityProfile {
   const normalizedVersion = normalizeStableCliVersion(version);
   if (!normalizedVersion || normalizedVersion === profile.version) return profile;
-  const next: CliIdentityProfile = {
+  return {
     ...profile,
     version: normalizedVersion,
     previousVersion: profile.version,
     latestVersion: normalizedVersion,
   };
-  // 重新装回被回滚过的版本（只可能是用户在确认模式下手动点的）即撤销否决。
-  if (next.rejectedVersion === normalizedVersion) delete next.rejectedVersion;
-  return next;
 }
 
 export function rollbackCliIdentityVersion(profile: CliIdentityProfile): CliIdentityProfile {
@@ -190,16 +188,15 @@ export function setCliIdentityMode(
   };
 }
 
-export function cliIdentityUpdateAvailable(
-  providerId: ManagedCliIdentityProviderId,
-  profile: CliIdentityProfile,
-): boolean {
-  // 内置兼容模式恒用内置版本，提示了也无法应用，因此不报更新。
-  if (profile.mode === "builtin") return false;
-  return Boolean(
-    profile.latestVersion &&
-      profile.latestVersion !== profile.rejectedVersion &&
-      compareCliVersions(profile.latestVersion, getAppliedCliIdentityVersion(providerId, profile)) >
-        0,
-  );
+// 自动跟随把已知最新版装为当前版本的唯一路径：内置兼容模式恒不跟随；
+// 用户回滚否决过的版本不得被装回去，更高的新版本照常跟随。
+export function followLatestCliIdentityVersion(profile: CliIdentityProfile): CliIdentityProfile {
+  if (profile.mode !== "auto" || !profile.latestVersion) return profile;
+  if (
+    profile.latestVersion === profile.rejectedVersion ||
+    compareCliVersions(profile.latestVersion, profile.version) <= 0
+  ) {
+    return profile;
+  }
+  return applyCliIdentityVersion(profile, profile.latestVersion);
 }

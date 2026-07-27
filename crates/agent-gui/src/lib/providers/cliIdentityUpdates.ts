@@ -1,11 +1,10 @@
 import { hubFetch } from "../hubFetch";
 import { isGatewayWebuiRuntime } from "../runtimeEnv";
 import {
-  applyCliIdentityVersion,
   CLI_IDENTITY_METADATA,
   type CliIdentityProfile,
   type CliIdentitySettings,
-  compareCliVersions,
+  followLatestCliIdentityVersion,
   MANAGED_CLI_IDENTITY_PROVIDER_IDS,
   type ManagedCliIdentityProviderId,
   normalizeStableCliVersion,
@@ -134,13 +133,7 @@ export function mergeCliIdentityCheckResults(
       lastCheckedAt: checkedAt,
     };
     delete profile.lastFailedAt;
-    if (
-      profile.mode === "auto" &&
-      result.version !== profile.rejectedVersion &&
-      compareCliVersions(result.version, profile.version) > 0
-    ) {
-      profile = applyCliIdentityVersion(profile, result.version);
-    }
+    profile = followLatestCliIdentityVersion(profile);
     next[result.providerId] = profile;
     changed =
       changed ||

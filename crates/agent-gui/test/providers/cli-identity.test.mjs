@@ -228,3 +228,122 @@ test("在线检查使用固定官方包和稳定 dist-tag，单个失败不阻�
   assert.equal(requested.length, 3);
   assert.ok(requested.every((url) => url.startsWith("https://registry.npmjs.org/-/package/")));
 });
+
+test("内置兼容模式不报可更新：提示了也无法应用", () => {
+  const profile = {
+    ...core.getDefaultCliIdentitySettings().claude_code,
+    latestVersion: "2.1.212",
+  };
+  assert.equal(core.cliIdentityUpdateAvailable("claude_code", profile), true);
+
+  const pinned = core.setCliIdentityMode("claude_code", profile, "builtin");
+  assert.equal(pinned.mode, "builtin");
+  assert.equal(core.getAppliedCliIdentityVersion("claude_code", pinned), "2.1.71");
+  assert.equal(core.cliIdentityUpdateAvailable("claude_code", pinned), false);
+});
+
+test("回滚记下被否决版本，自动跟随不得把它装回去但更高版本照常跟随", () => {
+  const rootDir = fileURLToPath(new URL("../..", import.meta.url));
+  const hubFetchPath = path.join(rootDir, "src/lib/hubFetch.ts");
+  const runtimeEnvPath = path.join(rootDir, "src/lib/runtimeEnv.ts");
+  const updates = createTsModuleLoader({
+    mocks: {
+      [hubFetchPath]: { hubFetch: async () => new Response() },
+      [runtimeEnvPath]: { isGatewayWebuiRuntime: () => false },
+    },
+  }).loadModule("src/lib/providers/cliIdentityUpdates.ts");
+  const now = 1_900_000_000_000;
+
+  const rolled = core.rollbackCliIdentityVersion({
+    mode: "auto",
+    version: "2.1.212",
+    previousVersion: "2.1.71",
+    latestVersion: "2.1.212",
+  });
+  assert.equal(rolled.version, "2.1.71");
+  assert.equal(rolled.rejectedVersion, "2.1.212");
+  assert.equal(core.cliIdentityUpdateAvailable("claude_code", rolled), false);
+
+  const identities = { ...core.getDefaultCliIdentitySettings(), claude_code: rolled };
+  const rechecked = updates.mergeCliIdentityCheckResults(
+    identities,
+    [{ providerId: "claude_code", status: "success", version: "2.1.212" }],
+    now,
+  );
+  assert.equal(rechecked.identities.claude_code.version, "2.1.71");
+
+  const bumped = updates.mergeCliIdentityCheckResults(
+    identities,
+    [{ providerId: "claude_code", status: "success", version: "2.1.213" }],
+    now,
+  );
+  assert.equal(bumped.identities.claude_code.version, "2.1.213");
+
+  const readopted = core.applyCliIdentityVersion(rolled, "2.1.212");
+  assert.equal(readopted.version, "2.1.212");
+  assert.equal(readopted.rejectedVersion, undefined);
+});
+
+test("检查失败进入退避窗口，成功后清除失败标记", () => {
+  const rootDir = fileURLToPath(new URL("../..", import.meta.url));
+  const hubFetchPath = path.join(rootDir, "src/lib/hubFetch.ts");
+  const runtimeEnvPath = path.join(rootDir, "src/lib/runtimeEnv.ts");
+  const updates = createTsModuleLoader({
+    mocks: {
+      [hubFetchPath]: { hubFetch: async () => new Response() },
+      [runtimeEnvPath]: { isGatewayWebuiRuntime: () => false },
+    },
+  }).loadModule("src/lib/providers/cliIdentityUpdates.ts");
+  const now = 1_900_000_000_000;
+
+  const failed = updates.mergeCliIdentityCheckResults(
+    core.getDefaultCliIdentitySettings(),
+    [{ providerId: "claude_code", status: "error", message: "offline" }],
+    now,
+  );
+  assert.equal(failed.identities.claude_code.lastFailedAt, now);
+  assert.equal(failed.identities.claude_code.lastCheckedAt, undefined);
+  assert.equal(failed.changed, true);
+
+  assert.ok(
+    !updates.cliIdentityProvidersNeedingCheck(failed.identities, now + 1).includes("claude_code"),
+  );
+  assert.ok(
+    updates
+      .cliIdentityProvidersNeedingCheck(
+        failed.identities,
+        now + updates.CLI_IDENTITY_FAILURE_BACKOFF_MS,
+      )
+      .includes("claude_code"),
+  );
+  // 时钟回拨不得永久卡住检查。
+  assert.ok(
+    updates.cliIdentityProvidersNeedingCheck(failed.identities, now - 1).includes("claude_code"),
+  );
+
+  const recovered = updates.mergeCliIdentityCheckResults(
+    failed.identities,
+    [{ providerId: "claude_code", status: "success", version: "2.1.212" }],
+    now + 1,
+  );
+  assert.equal(recovered.identities.claude_code.lastFailedAt, undefined);
+  assert.equal(recovered.identities.claude_code.lastCheckedAt, now + 1);
+});
+
+test("身份配置经规范化保留否决版本与失败时间戳", () => {
+  const normalized = settings.normalizeCustomSettings({
+    providerIdentities: {
+      claude_code: {
+        mode: "auto",
+        version: "2.1.71",
+        rejectedVersion: "2.1.212",
+        lastFailedAt: 1_900_000_000_000,
+      },
+      codex: { mode: "notify", version: "0.72.0", rejectedVersion: "not-a-version" },
+    },
+  }).providerIdentities;
+
+  assert.equal(normalized.claude_code.rejectedVersion, "2.1.212");
+  assert.equal(normalized.claude_code.lastFailedAt, 1_900_000_000_000);
+  assert.equal(normalized.codex.rejectedVersion, undefined);
+});

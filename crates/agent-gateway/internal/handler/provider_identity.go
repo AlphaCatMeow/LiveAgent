@@ -63,7 +63,7 @@ func providerIdentityVersionWithClient(client outboundHTTPClient) http.HandlerFu
 			writeError(w, http.StatusBadGateway, fmt.Sprintf("version lookup failed: %v", err))
 			return
 		}
-		defer response.Body.Close()
+		defer func() { _ = response.Body.Close() }()
 		if response.StatusCode < 200 || response.StatusCode >= 300 {
 			writeError(w, http.StatusBadGateway, fmt.Sprintf("version registry returned HTTP %d", response.StatusCode))
 			return

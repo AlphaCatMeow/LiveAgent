@@ -12,6 +12,9 @@ import {
 } from "./cliIdentityCore";
 
 export const CLI_IDENTITY_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1_000;
+// 检查失败后的退避窗口：失败不写 lastCheckedAt，否则会把失败伪装成一次成功检查；
+// 但也不能每次窗口聚焦都重试，离线时那是持续的失败请求流。
+export const CLI_IDENTITY_FAILURE_BACKOFF_MS = 60 * 60 * 1_000;
 const GATEWAY_TOKEN_STORAGE_KEY = "liveagent.gateway.token";
 
 export type CliIdentityCheckResult =
@@ -88,6 +91,14 @@ export function cliIdentityProvidersNeedingCheck(
   return MANAGED_CLI_IDENTITY_PROVIDER_IDS.filter((providerId) => {
     const profile = identities[providerId];
     if (!includeBuiltin && profile.mode === "builtin") return false;
+    // 失败退避：时钟回拨（lastFailedAt 在未来）按已过期处理，避免永久卡住。
+    if (
+      profile.lastFailedAt &&
+      profile.lastFailedAt <= now &&
+      now - profile.lastFailedAt < CLI_IDENTITY_FAILURE_BACKOFF_MS
+    ) {
+      return false;
+    }
     return (
       !profile.lastCheckedAt ||
       profile.lastCheckedAt > now ||
@@ -109,17 +120,25 @@ export function mergeCliIdentityCheckResults(
   const errors: Partial<Record<ManagedCliIdentityProviderId, string>> = {};
   let changed = false;
   for (const result of results) {
+    const current = next[result.providerId];
     if (result.status === "error") {
       errors[result.providerId] = result.message;
+      // 记录失败时间以便退避；lastCheckedAt 保持不动，失败不算一次成功检查。
+      next[result.providerId] = { ...current, lastFailedAt: checkedAt };
+      changed = changed || current.lastFailedAt !== checkedAt;
       continue;
     }
-    const current = next[result.providerId];
     let profile: CliIdentityProfile = {
       ...current,
       latestVersion: result.version,
       lastCheckedAt: checkedAt,
     };
-    if (profile.mode === "auto" && compareCliVersions(result.version, profile.version) > 0) {
+    delete profile.lastFailedAt;
+    if (
+      profile.mode === "auto" &&
+      result.version !== profile.rejectedVersion &&
+      compareCliVersions(result.version, profile.version) > 0
+    ) {
       profile = applyCliIdentityVersion(profile, result.version);
     }
     next[result.providerId] = profile;
@@ -127,8 +146,10 @@ export function mergeCliIdentityCheckResults(
       changed ||
       current.latestVersion !== profile.latestVersion ||
       current.lastCheckedAt !== profile.lastCheckedAt ||
+      current.lastFailedAt !== profile.lastFailedAt ||
       current.version !== profile.version ||
-      current.previousVersion !== profile.previousVersion;
+      current.previousVersion !== profile.previousVersion ||
+      current.rejectedVersion !== profile.rejectedVersion;
   }
   return { identities: next, errors, changed };
 }

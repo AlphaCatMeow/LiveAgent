@@ -102,15 +102,6 @@ function findHeaderKey(
   return Object.keys(headers).find((key) => key.toLowerCase() === expected);
 }
 
-export function readHeaderValue(
-  headers: Record<string, string | null | undefined> | undefined,
-  name: string,
-): string | undefined {
-  if (!headers) return undefined;
-  const key = findHeaderKey(headers, name);
-  return key === undefined ? undefined : (headers[key] ?? undefined);
-}
-
 export function readCustomHeaderValue(
   headers: CustomProvider["customHeaders"] | undefined,
   name: string,
@@ -157,6 +148,7 @@ export function resolveProviderCustomHeaders(
     ...customHeaders,
   ];
 }
+
 export function isValidCustomHeaderKey(key: string): boolean {
   return HTTP_HEADER_TOKEN_PATTERN.test(key);
 }

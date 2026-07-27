@@ -8,7 +8,11 @@ export type CliIdentityProfile = {
   version: string;
   previousVersion?: string;
   latestVersion?: string;
+  // 用户主动回滚掉的版本：自动跟随模式下不得再把它装回去，否则回滚会被下一次
+  // 后台检查静默撤销。更高的新版本仍然照常跟随。
+  rejectedVersion?: string;
   lastCheckedAt?: number;
+  lastFailedAt?: number;
 };
 
 export type CliIdentitySettings = Record<ManagedCliIdentityProviderId, CliIdentityProfile>;
@@ -105,10 +109,14 @@ export function normalizeCliIdentitySettings(input: unknown): CliIdentitySetting
       };
       const previousVersion = normalizeStableCliVersion(raw.previousVersion);
       const latestVersion = normalizeStableCliVersion(raw.latestVersion);
+      const rejectedVersion = normalizeStableCliVersion(raw.rejectedVersion);
       const lastCheckedAt = normalizeTimestamp(raw.lastCheckedAt);
+      const lastFailedAt = normalizeTimestamp(raw.lastFailedAt);
       if (previousVersion) profile.previousVersion = previousVersion;
       if (latestVersion) profile.latestVersion = latestVersion;
+      if (rejectedVersion) profile.rejectedVersion = rejectedVersion;
       if (lastCheckedAt) profile.lastCheckedAt = lastCheckedAt;
+      if (lastFailedAt) profile.lastFailedAt = lastFailedAt;
       return [providerId, profile];
     }),
   ) as CliIdentitySettings;
@@ -144,12 +152,15 @@ export function applyCliIdentityVersion(
 ): CliIdentityProfile {
   const normalizedVersion = normalizeStableCliVersion(version);
   if (!normalizedVersion || normalizedVersion === profile.version) return profile;
-  return {
+  const next: CliIdentityProfile = {
     ...profile,
     version: normalizedVersion,
     previousVersion: profile.version,
     latestVersion: normalizedVersion,
   };
+  // 重新装回被回滚过的版本（只可能是用户在确认模式下手动点的）即撤销否决。
+  if (next.rejectedVersion === normalizedVersion) delete next.rejectedVersion;
+  return next;
 }
 
 export function rollbackCliIdentityVersion(profile: CliIdentityProfile): CliIdentityProfile {
@@ -159,6 +170,8 @@ export function rollbackCliIdentityVersion(profile: CliIdentityProfile): CliIden
     ...profile,
     version: previousVersion,
     previousVersion: profile.version,
+    // 回滚就是"这个版本有问题"的信号，记下来供自动跟随模式跳过。
+    rejectedVersion: profile.version,
   };
 }
 
@@ -181,8 +194,11 @@ export function cliIdentityUpdateAvailable(
   providerId: ManagedCliIdentityProviderId,
   profile: CliIdentityProfile,
 ): boolean {
+  // 内置兼容模式恒用内置版本，提示了也无法应用，因此不报更新。
+  if (profile.mode === "builtin") return false;
   return Boolean(
     profile.latestVersion &&
+      profile.latestVersion !== profile.rejectedVersion &&
       compareCliVersions(profile.latestVersion, getAppliedCliIdentityVersion(providerId, profile)) >
         0,
   );

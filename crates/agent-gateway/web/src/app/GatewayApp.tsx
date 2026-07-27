@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { AppErrorBoundary } from "@/components/AppErrorBoundary";
+import { CliIdentityUpdateHost } from "@/components/CliIdentityUpdateHost";
 import type {
   MentionComposerDraft,
   MentionComposerHandle,
@@ -4484,6 +4485,7 @@ export default function GatewayApp() {
     <LocaleContext.Provider value={localeContextValue}>
       <AppErrorBoundary>
         <div className="gateway-shell">
+          <CliIdentityUpdateHost settings={settings} setSettings={setSettings} />
           <input
             ref={fileInputRef}
             type="file"

@@ -111,18 +111,32 @@ export function readHeaderValue(
   return key === undefined ? undefined : (headers[key] ?? undefined);
 }
 
+export function readCustomHeaderValue(
+  headers: CustomProvider["customHeaders"] | undefined,
+  name: string,
+): string | undefined {
+  const expected = name.toLowerCase();
+  for (let index = (headers?.length ?? 0) - 1; index >= 0; index -= 1) {
+    const header = headers?.[index];
+    if (
+      header?.key.toLowerCase() === expected &&
+      isValidCustomHeaderKey(header.key) &&
+      isValidCustomHeaderValue(header.value)
+    ) {
+      return header.value;
+    }
+  }
+  return undefined;
+}
+
 export function resolveProviderCustomHeaders(
   provider: Pick<CustomProvider, "type" | "apiKey" | "requestFormat" | "customHeaders">,
   identities: CliIdentitySettings,
 ): CustomProvider["customHeaders"] {
   const customHeaders = provider.customHeaders ?? [];
   if (!isManagedCliIdentityProviderId(provider.type)) return customHeaders;
-  if (
-    readHeaderValue(
-      Object.fromEntries(customHeaders.map((header) => [header.key, header.value])),
-      "User-Agent",
-    ) !== undefined
-  ) {
+  const customUserAgent = readCustomHeaderValue(customHeaders, "User-Agent");
+  if (customUserAgent !== undefined && isValidCustomHeaderValue(customUserAgent)) {
     return customHeaders;
   }
   if (provider.type === "claude_code" && isAnthropicOAuthApiKey(provider.apiKey)) {

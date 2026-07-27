@@ -31,9 +31,14 @@ test("CLI 身份只接受稳定 SemVer 并按数值比较", () => {
   assert.equal(core.normalizeStableCliVersion(" 0.145.0 "), "0.145.0");
   assert.equal(core.normalizeStableCliVersion("0.146.0-alpha.1"), undefined);
   assert.equal(core.normalizeStableCliVersion("01.2.3"), undefined);
-  assert.equal(core.compareCliVersions("0.145.0", "0.72.0"), 73);
+  assert.equal(core.compareCliVersions("0.145.0", "0.72.0"), 1);
   assert.equal(core.compareCliVersions("2.1.10", "2.1.9") > 0, true);
   assert.equal(core.compareCliVersions("2.1.9", "2.1.9"), 0);
+  assert.equal(
+    core.compareCliVersions("999999999999999999999.0.0", "999999999999999999998.0.0"),
+    1,
+  );
+  assert.equal(core.normalizeStableCliVersion(`${"9".repeat(65)}.0.0`), undefined);
 });
 
 test("CLI 身份支持确认应用、自动模式、内置模式与单步回滚", () => {
@@ -104,6 +109,30 @@ test("全局身份只填补默认 UA，自定义覆盖和协议例外保持优�
     ),
     custom,
   );
+  assert.equal(
+    headers.resolveProviderCustomHeaders(
+      {
+        type: "codex",
+        apiKey: "secret",
+        requestFormat: "openai-responses",
+        customHeaders: [{ key: "User-Agent", value: "" }],
+      },
+      identities,
+    )[0].value,
+    "",
+  );
+  assert.equal(
+    headers.resolveProviderCustomHeaders(
+      {
+        type: "codex",
+        apiKey: "secret",
+        requestFormat: "openai-responses",
+        customHeaders: [{ key: "User-Agent", value: "bad\nvalue" }],
+      },
+      identities,
+    )[0].value,
+    "codex_cli_rs/0.145.0 (Ubuntu 24.4.0; x86_64) WindowsTerminal",
+  );
   assert.deepEqual(
     headers.resolveProviderCustomHeaders(
       { type: "codex", apiKey: "secret", requestFormat: "openai-completions", customHeaders: [] },
@@ -118,6 +147,53 @@ test("全局身份只填补默认 UA，自定义覆盖和协议例外保持优�
     ),
     [],
   );
+});
+
+test("后台检查只查询过期身份，确认模式仅提示，自动模式立即应用", () => {
+  const rootDir = fileURLToPath(new URL("../..", import.meta.url));
+  const hubFetchPath = path.join(rootDir, "src/lib/hubFetch.ts");
+  const runtimeEnvPath = path.join(rootDir, "src/lib/runtimeEnv.ts");
+  const updateLoader = createTsModuleLoader({
+    mocks: {
+      [hubFetchPath]: { hubFetch: async () => new Response() },
+      [runtimeEnvPath]: { isGatewayWebuiRuntime: () => false },
+    },
+  });
+  const updates = updateLoader.loadModule("src/lib/providers/cliIdentityUpdates.ts");
+  const now = 1_900_000_000_000;
+  const identities = core.getDefaultCliIdentitySettings();
+  identities.claude_code.lastCheckedAt = now;
+  identities.codex.mode = "auto";
+  identities.xai.mode = "builtin";
+
+  assert.deepEqual(updates.cliIdentityProvidersNeedingCheck(identities, now), ["codex"]);
+  identities.claude_code.lastCheckedAt = now + 1;
+  assert.deepEqual(updates.cliIdentityProvidersNeedingCheck(identities, now), [
+    "claude_code",
+    "codex",
+  ]);
+  identities.claude_code.lastCheckedAt = now;
+  assert.deepEqual(updates.cliIdentityProvidersNeedingCheck(identities, now, true), [
+    "codex",
+    "xai",
+  ]);
+
+  const merged = updates.mergeCliIdentityCheckResults(
+    identities,
+    [
+      { providerId: "claude_code", status: "success", version: "2.1.212" },
+      { providerId: "codex", status: "success", version: "0.145.0" },
+      { providerId: "xai", status: "error", message: "offline" },
+    ],
+    now + 1,
+  );
+  assert.equal(merged.identities.claude_code.version, "2.1.71");
+  assert.equal(merged.identities.claude_code.latestVersion, "2.1.212");
+  assert.equal(merged.identities.codex.version, "0.145.0");
+  assert.equal(merged.identities.codex.previousVersion, "0.72.0");
+  assert.equal(merged.identities.xai.lastCheckedAt, undefined);
+  assert.equal(merged.errors.xai, "offline");
+  assert.equal(merged.changed, true);
 });
 
 test("在线检查使用固定官方包和稳定 dist-tag，单个失败不阻塞其它供应商", async () => {

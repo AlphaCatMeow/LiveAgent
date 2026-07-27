@@ -34,6 +34,7 @@
     "components/chat/fileTypeIcons.tsx",
     "components/chat/ComposerAttachmentCard.tsx",
     "components/chat/AskUserQuestionCard.tsx",
+    "components/CliIdentityUpdateHost.tsx",
     "lib/chat/askUserQuestion.ts",
     "components/Markdown.tsx",
     "lib/normalizeLatexDelimiters.ts",

@@ -48,20 +48,21 @@ export function isManagedCliIdentityProviderId(
 export function normalizeStableCliVersion(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const normalized = value.trim();
-  return STABLE_SEMVER_PATTERN.test(normalized) ? normalized : undefined;
+  return normalized.length <= 64 && STABLE_SEMVER_PATTERN.test(normalized) ? normalized : undefined;
 }
 
-function versionTuple(version: string): [number, number, number] {
+function versionTuple(version: string): [bigint, bigint, bigint] {
   const match = STABLE_SEMVER_PATTERN.exec(version);
-  if (!match) return [0, 0, 0];
-  return [Number(match[1]), Number(match[2]), Number(match[3])];
+  if (!match) return [0n, 0n, 0n];
+  return [BigInt(match[1]), BigInt(match[2]), BigInt(match[3])];
 }
 
 export function compareCliVersions(left: string, right: string): number {
   const leftTuple = versionTuple(left);
   const rightTuple = versionTuple(right);
   for (let index = 0; index < leftTuple.length; index += 1) {
-    if (leftTuple[index] !== rightTuple[index]) return leftTuple[index] - rightTuple[index];
+    if (leftTuple[index] !== rightTuple[index])
+      return leftTuple[index] > rightTuple[index] ? 1 : -1;
   }
   return 0;
 }

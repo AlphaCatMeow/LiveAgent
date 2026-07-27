@@ -1392,6 +1392,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.cliIdentityTitle": "CLI 身份",
     "settings.cliIdentityDescription": "统一管理供应商请求使用的 CLI 版本标识。",
     "settings.cliIdentityOpen": "管理 CLI 身份",
+    "settings.cliIdentityUpdatesReady": "{count} 个 CLI 身份可更新",
     "settings.cliIdentityClose": "关闭 CLI 身份管理",
     "settings.cliIdentityCheck": "检查更新",
     "settings.cliIdentityCurrent": "当前生效",
@@ -1402,8 +1403,11 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.cliIdentityApply": "更新到 v{version}",
     "settings.cliIdentityRollback": "回滚到上一版本",
     "settings.cliIdentityLastChecked": "上次检查：{time}",
-    "settings.cliIdentityImpact": "跟随全局 {count} 个，独立覆盖 {overrides} 个",
-    "settings.cliIdentitySafetyNote": "只读取官方版本号，完整 UA 在本地生成。",
+    "settings.cliIdentityCheckFailed": "检查失败，请稍后重试",
+    "settings.cliIdentityImpact":
+      "应用全局 {count} 个，自定义覆盖 {overrides} 个，协议不注入 {disabled} 个",
+    "settings.cliIdentitySafetyNote":
+      "只读取官方版本号，完整 UA 在本地生成；更新后新请求立即生效。",
     "settings.cliIdentityMode.builtin": "内置兼容",
     "settings.cliIdentityMode.notify": "更新时确认",
     "settings.cliIdentityMode.auto": "自动跟随",
@@ -3654,6 +3658,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.cliIdentityTitle": "CLI identity",
     "settings.cliIdentityDescription": "Manage the CLI version identity used by provider requests.",
     "settings.cliIdentityOpen": "Manage CLI identity",
+    "settings.cliIdentityUpdatesReady": "{count} CLI identities can be updated",
     "settings.cliIdentityClose": "Close CLI identity manager",
     "settings.cliIdentityCheck": "Check for updates",
     "settings.cliIdentityCurrent": "Current",
@@ -3664,9 +3669,11 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.cliIdentityApply": "Update to v{version}",
     "settings.cliIdentityRollback": "Roll back to previous version",
     "settings.cliIdentityLastChecked": "Last checked: {time}",
-    "settings.cliIdentityImpact": "{count} follow global, {overrides} independently overridden",
+    "settings.cliIdentityCheckFailed": "Check failed. Please try again later.",
+    "settings.cliIdentityImpact":
+      "{count} use global, {overrides} custom, {disabled} disabled by protocol",
     "settings.cliIdentitySafetyNote":
-      "Only official version numbers are fetched; complete UAs are generated locally.",
+      "Only official version numbers are fetched; complete UAs are generated locally and new requests use updates immediately.",
     "settings.cliIdentityMode.builtin": "Compatible",
     "settings.cliIdentityMode.notify": "Confirm updates",
     "settings.cliIdentityMode.auto": "Auto-follow",

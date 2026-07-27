@@ -39,6 +39,10 @@ import { useVerticalListReorder } from "../../components/ui/useVerticalListReord
 import { useLocale } from "../../i18n";
 import { buildModelOptions } from "../../lib/chat/chatPageHelpers";
 import {
+  cliIdentityUpdateAvailable,
+  MANAGED_CLI_IDENTITY_PROVIDER_IDS,
+} from "../../lib/providers/cliIdentityCore";
+import {
   getCustomHeaderKeyPresets,
   isReservedCustomHeaderKey,
   isValidCustomHeaderKey,
@@ -2838,6 +2842,12 @@ function ProviderList(props: {
 export function ProvidersSection(props: SettingsSectionProps) {
   const { settings, setSettings } = props;
   const { t } = useLocale();
+  const identityUpdateCount = MANAGED_CLI_IDENTITY_PROVIDER_IDS.filter((providerId) =>
+    cliIdentityUpdateAvailable(providerId, settings.customSettings.providerIdentities[providerId]),
+  ).length;
+  const identityButtonLabel = identityUpdateCount
+    ? t("settings.cliIdentityUpdatesReady").replace("{count}", String(identityUpdateCount))
+    : t("settings.cliIdentityOpen");
 
   const [activeTab, setActiveTab] = useState<ProviderId>("claude_code");
   const [modalOpen, setModalOpen] = useState(false);
@@ -2934,12 +2944,15 @@ export function ProvidersSection(props: SettingsSectionProps) {
             type="button"
             variant="ghost"
             size="icon"
-            className="h-9 w-9 shrink-0 text-muted-foreground hover:text-foreground"
+            className="relative h-9 w-9 shrink-0 text-muted-foreground hover:text-foreground"
             onClick={() => setIdentityDrawerOpen(true)}
-            title={t("settings.cliIdentityOpen")}
-            aria-label={t("settings.cliIdentityOpen")}
+            title={identityButtonLabel}
+            aria-label={identityButtonLabel}
           >
             <Waypoints className="h-4 w-4" />
+            {identityUpdateCount > 0 ? (
+              <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-primary ring-2 ring-background" />
+            ) : null}
           </Button>
           <Button
             type="button"

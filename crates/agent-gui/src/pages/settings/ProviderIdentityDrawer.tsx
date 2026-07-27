@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import {
   CheckCircle2,
@@ -19,7 +19,6 @@ import {
   type CliIdentityMode,
   type CliIdentityProfile,
   cliIdentityUpdateAvailable,
-  compareCliVersions,
   formatCliIdentityUserAgent,
   getAppliedCliIdentityVersion,
   MANAGED_CLI_IDENTITY_PROVIDER_IDS,
@@ -27,13 +26,16 @@ import {
   rollbackCliIdentityVersion,
   setCliIdentityMode,
 } from "../../lib/providers/cliIdentityCore";
-import { checkCliIdentityVersions } from "../../lib/providers/cliIdentityUpdates";
-import { readHeaderValue } from "../../lib/providers/customHeaders";
+import {
+  checkCliIdentityVersions,
+  cliIdentityProvidersNeedingCheck,
+  mergeCliIdentityCheckResults,
+} from "../../lib/providers/cliIdentityUpdates";
+import { isAnthropicOAuthApiKey, readCustomHeaderValue } from "../../lib/providers/customHeaders";
 import { type AppSettings, updateCustomSettings } from "../../lib/settings";
 import { cn } from "../../lib/shared/utils";
 import type { SettingsSectionProps } from "./types";
 
-const AUTO_CHECK_CACHE_MS = 24 * 60 * 60 * 1_000;
 const CHECK_TIMEOUT_MS = 8_000;
 
 const PROVIDER_LABELS: Record<ManagedCliIdentityProviderId, string> = {
@@ -51,14 +53,22 @@ function ProviderIdentityIcon({ providerId }: { providerId: ManagedCliIdentityPr
 function customUserAgent(
   customHeaders: AppSettings["customProviders"][number]["customHeaders"],
 ): string | undefined {
-  return readHeaderValue(
-    Object.fromEntries((customHeaders ?? []).map((header) => [header.key, header.value])),
-    "User-Agent",
+  return readCustomHeaderValue(customHeaders, "User-Agent");
+}
+
+function cliIdentityDisabled(
+  providerId: ManagedCliIdentityProviderId,
+  apiKey: string,
+  requestFormat: AppSettings["customProviders"][number]["requestFormat"],
+): boolean {
+  return (
+    (providerId === "claude_code" && isAnthropicOAuthApiKey(apiKey)) ||
+    (providerId === "codex" && requestFormat === "openai-completions")
   );
 }
 
-function checkedAtLabel(timestamp: number | undefined): string {
-  return timestamp ? new Date(timestamp).toLocaleString() : "-";
+function checkedAtLabel(timestamp: number | undefined, locale: string): string {
+  return timestamp ? new Date(timestamp).toLocaleString(locale) : "-";
 }
 
 function IdentityModeControl(props: {
@@ -100,12 +110,17 @@ function IdentityRow(props: {
 }) {
   const { providerId, profile, providers, checking, error, onModeChange, onApply, onRollback } =
     props;
-  const { t } = useLocale();
+  const { locale, t } = useLocale();
   const currentVersion = getAppliedCliIdentityVersion(providerId, profile);
   const effectiveUserAgent = formatCliIdentityUserAgent(providerId, currentVersion);
   const relatedProviders = providers.filter((provider) => provider.type === providerId);
   const overrideCount = relatedProviders.filter(
     (provider) => customUserAgent(provider.customHeaders) !== undefined,
+  ).length;
+  const disabledCount = relatedProviders.filter(
+    (provider) =>
+      customUserAgent(provider.customHeaders) === undefined &&
+      cliIdentityDisabled(providerId, provider.apiKey, provider.requestFormat),
   ).length;
   const updateAvailable = cliIdentityUpdateAvailable(providerId, profile);
   const upToDate = Boolean(profile.latestVersion) && !updateAvailable;
@@ -181,11 +196,12 @@ function IdentityRow(props: {
           </Button>
         ) : (
           <div className="min-w-0 flex-1 text-[11px] leading-relaxed text-muted-foreground">
-            {error ??
-              t("settings.cliIdentityLastChecked").replace(
-                "{time}",
-                checkedAtLabel(profile.lastCheckedAt),
-              )}
+            {error
+              ? t("settings.cliIdentityCheckFailed")
+              : t("settings.cliIdentityLastChecked").replace(
+                  "{time}",
+                  checkedAtLabel(profile.lastCheckedAt, locale),
+                )}
           </div>
         )}
         <Button
@@ -204,8 +220,9 @@ function IdentityRow(props: {
 
       <div className="mt-2 text-[10px] text-muted-foreground">
         {t("settings.cliIdentityImpact")
-          .replace("{count}", String(relatedProviders.length - overrideCount))
-          .replace("{overrides}", String(overrideCount))}
+          .replace("{count}", String(relatedProviders.length - overrideCount - disabledCount))
+          .replace("{overrides}", String(overrideCount))
+          .replace("{disabled}", String(disabledCount))}
       </div>
     </section>
   );
@@ -222,19 +239,13 @@ export function ProviderIdentityDrawer(props: SettingsSectionProps & { onClose: 
   const autoCheckStartedRef = useRef(false);
   const profiles = settings.customSettings.providerIdentities;
 
-  const checksAreFresh = useMemo(
-    () =>
-      MANAGED_CLI_IDENTITY_PROVIDER_IDS.every(
-        (providerId) =>
-          profiles[providerId].lastCheckedAt &&
-          Date.now() - (profiles[providerId].lastCheckedAt ?? 0) < AUTO_CHECK_CACHE_MS,
-      ),
-    [profiles],
-  );
-
   const runCheck = useCallback(
     async (force: boolean) => {
-      if (checking || (!force && checksAreFresh)) return;
+      if (checking) return;
+      const providerIds = force
+        ? [...MANAGED_CLI_IDENTITY_PROVIDER_IDS]
+        : cliIdentityProvidersNeedingCheck(profiles);
+      if (providerIds.length === 0) return;
       checkAbortRef.current?.abort();
       const controller = new AbortController();
       checkAbortRef.current = controller;
@@ -242,42 +253,30 @@ export function ProviderIdentityDrawer(props: SettingsSectionProps & { onClose: 
       setChecking(true);
       setErrors({});
       try {
-        const results = await checkCliIdentityVersions(
-          MANAGED_CLI_IDENTITY_PROVIDER_IDS,
-          controller.signal,
-        );
-        const checkedAt = Date.now();
-        const nextErrors: Partial<Record<ManagedCliIdentityProviderId, string>> = {};
+        const results = await checkCliIdentityVersions(providerIds, controller.signal);
         setSettings((previous) => {
-          const next = { ...previous.customSettings.providerIdentities };
-          for (const result of results) {
-            if (result.status === "error") {
-              nextErrors[result.providerId] = result.message;
-              continue;
-            }
-            let profile: CliIdentityProfile = {
-              ...next[result.providerId],
-              latestVersion: result.version,
-              lastCheckedAt: checkedAt,
-            };
-            if (
-              profile.mode === "auto" &&
-              compareCliVersions(result.version, profile.version) > 0
-            ) {
-              profile = applyCliIdentityVersion(profile, result.version);
-            }
-            next[result.providerId] = profile;
-          }
-          return updateCustomSettings(previous, { providerIdentities: next });
+          const merged = mergeCliIdentityCheckResults(
+            previous.customSettings.providerIdentities,
+            results,
+          );
+          return merged.changed
+            ? updateCustomSettings(previous, { providerIdentities: merged.identities })
+            : previous;
         });
-        setErrors(nextErrors);
+        setErrors(
+          Object.fromEntries(
+            results
+              .filter((result) => result.status === "error")
+              .map((result) => [result.providerId, result.message]),
+          ),
+        );
       } finally {
         clearTimeout(timeout);
         if (checkAbortRef.current === controller) checkAbortRef.current = null;
         setChecking(false);
       }
     },
-    [checking, checksAreFresh, setSettings],
+    [checking, profiles, setSettings],
   );
 
   useEffect(() => {
@@ -423,17 +422,16 @@ export function ProviderIdentitySummary(props: {
   const { t } = useLocale();
   if (providerId === "gemini") return null;
   const custom = customUserAgent(customHeaders);
-  const identityDisabled =
-    (providerId === "claude_code" && apiKey.includes("sk-ant-oat")) ||
-    (providerId === "codex" && requestFormat === "openai-completions");
+  const identityDisabled = cliIdentityDisabled(providerId, apiKey, requestFormat);
   const version = getAppliedCliIdentityVersion(providerId, identities[providerId]);
   const userAgent =
     custom ?? (identityDisabled ? "-" : formatCliIdentityUserAgent(providerId, version));
-  const source = custom
-    ? t("settings.cliIdentitySourceCustom")
-    : identityDisabled
-      ? t("settings.cliIdentitySourceDisabled")
-      : t("settings.cliIdentitySourceGlobal");
+  const source =
+    custom !== undefined
+      ? t("settings.cliIdentitySourceCustom")
+      : identityDisabled
+        ? t("settings.cliIdentitySourceDisabled")
+        : t("settings.cliIdentitySourceGlobal");
 
   return (
     <div className="mb-5 rounded-lg bg-muted/45 px-3 py-2.5">

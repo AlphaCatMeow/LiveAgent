@@ -872,7 +872,11 @@ export function useGitReviewData(options: UseGitReviewDataOptions) {
   }, [handleWorkspaceInvalidate]);
 
   // Invalidation stays keyed to the workspace folder: activity events cover
-  // subdirectory repositories because they live inside the workspace tree.
+  // subdirectory repositories because they live inside the workspace tree,
+  // and the desktop watcher additionally covers the git metadata (index,
+  // HEAD, refs) of a repository that contains the workspace folder as a
+  // subfolder or links it as a worktree (services/workspace_watch). Worktree
+  // file edits outside the workspace subtree still need a manual refresh.
   useWorkspaceInvalidation({
     client: workspaceActivityClient,
     workdir: workspaceCwd,

@@ -13,17 +13,18 @@ use super::{
 };
 use crate::commands::settings::RemoteSettingsPayload;
 use crate::services::gateway_bridge;
-use crate::services::provider_usage::{ProviderUsageEntry, ProviderUsageResult};
+use crate::services::provider_usage::{ProviderUsageResult, UsageData};
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
 
 #[test]
 fn provider_usage_response_serializes_only_result_json() {
     let response = gateway_bridge::provider_usage_response(ProviderUsageResult {
-        entries: vec![ProviderUsageEntry {
-            label: "Balance".to_string(),
-            value: "4.20".to_string(),
+        data: vec![UsageData {
+            plan_name: Some("Balance".to_string()),
+            remaining: Some(4.2),
             unit: Some("USD".to_string()),
+            ..UsageData::default()
         }],
         queried_at: Some(1_772_000_000_000),
         error: None,
@@ -32,7 +33,7 @@ fn provider_usage_response_serializes_only_result_json() {
     .expect("provider usage response should serialize");
 
     let expected_result_json = concat!(
-        r#"{"entries":[{"label":"Balance","value":"4.20","unit":"USD"}],"#,
+        r#"{"data":[{"planName":"Balance","remaining":4.2,"unit":"USD"}],"#,
         r#""queriedAt":1772000000000,"error":null,"isStale":false}"#,
     );
     assert_eq!(response.result_json, expected_result_json);
@@ -42,7 +43,7 @@ fn provider_usage_response_serializes_only_result_json() {
     assert_eq!(
         result,
         json!({
-            "entries": [{ "label": "Balance", "value": "4.20", "unit": "USD" }],
+            "data": [{ "planName": "Balance", "remaining": 4.2, "unit": "USD" }],
             "queriedAt": 1_772_000_000_000_i64,
             "error": null,
             "isStale": false,

@@ -47,7 +47,15 @@ pub async fn handle_provider_usage(
     service: Arc<ProviderUsageService>,
     request: proto::ProviderUsageRequest,
 ) -> Result<proto::ProviderUsageResponse, String> {
-    provider_usage_response(service.query(&request.provider_id, request.refresh).await)
+    // config_json 非空 = 按草稿测试(忽略启用开关、不读写缓存);空 = 常规查询。
+    let result = if request.config_json.is_empty() {
+        service.query(&request.provider_id, request.refresh).await
+    } else {
+        service
+            .test(&request.provider_id, &request.config_json)
+            .await
+    };
+    provider_usage_response(result)
 }
 
 #[derive(Debug, Deserialize)]

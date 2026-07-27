@@ -11247,9 +11247,12 @@ func (x *ProviderModelsResponse) GetModelsJson() string {
 }
 
 type ProviderUsageRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ProviderId    string                 `protobuf:"bytes,1,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
-	Refresh       bool                   `protobuf:"varint,2,opt,name=refresh,proto3" json:"refresh,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	ProviderId string                 `protobuf:"bytes,1,opt,name=provider_id,json=providerId,proto3" json:"provider_id,omitempty"`
+	Refresh    bool                   `protobuf:"varint,2,opt,name=refresh,proto3" json:"refresh,omitempty"`
+	// 非空时为「按草稿测试」:桌面端按此 JSON 配置(UsageQueryConfig 形状)执行
+	// 一次查询——忽略启用开关、不落库、不读写缓存;空串为常规查询。
+	ConfigJson    string `protobuf:"bytes,3,opt,name=config_json,json=configJson,proto3" json:"config_json,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -11296,6 +11299,13 @@ func (x *ProviderUsageRequest) GetRefresh() bool {
 		return x.Refresh
 	}
 	return false
+}
+
+func (x *ProviderUsageRequest) GetConfigJson() string {
+	if x != nil {
+		return x.ConfigJson
+	}
+	return ""
 }
 
 type ProviderUsageResponse struct {
@@ -12272,11 +12282,13 @@ const file_proto_v2_gateway_proto_rawDesc = "" +
 	"\x10use_system_proxy\x18\x04 \x01(\bR\x0euseSystemProxy\"9\n" +
 	"\x16ProviderModelsResponse\x12\x1f\n" +
 	"\vmodels_json\x18\x01 \x01(\tR\n" +
-	"modelsJson\"Q\n" +
+	"modelsJson\"r\n" +
 	"\x14ProviderUsageRequest\x12\x1f\n" +
 	"\vprovider_id\x18\x01 \x01(\tR\n" +
 	"providerId\x12\x18\n" +
-	"\arefresh\x18\x02 \x01(\bR\arefresh\"8\n" +
+	"\arefresh\x18\x02 \x01(\bR\arefresh\x12\x1f\n" +
+	"\vconfig_json\x18\x03 \x01(\tR\n" +
+	"configJson\"8\n" +
 	"\x15ProviderUsageResponse\x12\x1f\n" +
 	"\vresult_json\x18\x01 \x01(\tR\n" +
 	"resultJson*\xc6\x04\n" +

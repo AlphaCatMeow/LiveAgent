@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import {
   Check,
   ClaudeIcon,
+  ExternalLink,
   Eye,
   EyeOff,
   GeminiIcon,
@@ -50,10 +51,14 @@ import {
 } from "../../lib/providers/modelVendor";
 import {
   getProviderUsageCardDisplay,
-  type ProviderUsageEntry,
+  getUsagePlanDisplay,
   type ProviderUsageState,
-  queryProviderUsage,
+  testProviderUsage,
+  type UsageData,
+  type UsagePlanDisplay,
+  type UsageRelativeTime,
   useProviderUsage,
+  useUsageNowTicker,
 } from "../../lib/providers/usageQuery";
 import {
   CODEX_REQUEST_FORMAT_LABELS,
@@ -62,6 +67,7 @@ import {
   getDefaultUsageQueryConfig,
   type ProviderId,
   type ProviderModelConfig,
+  type UsageQueryMode,
   updateCustomProviders,
   updateCustomSettings,
 } from "../../lib/settings";
@@ -71,18 +77,24 @@ import { cn } from "../../lib/shared/utils";
 import { ModelPicker } from "./modelPicker";
 import {
   applyModelBulkActiveState,
+  applyUsageQueryModePreset,
   buildProviderModelsFetchKey,
+  clampUsageQueryTimeoutSecs,
   createDraftModelConfig,
   createUsageQueryDraft,
+  detectCodingPlanProvider,
   fetchModelsFromApi,
   formatTokenCount,
   getModelBulkActionCounts,
   getPersistedUsageQueryProviderId,
   isGatewayWebuiRuntime,
+  matchBalanceProviders,
   mergeFetchedModels,
   normalizeFetchedModels,
   requiresCustomUsageQueryConfirmation,
   serializeUsageQueryDraft,
+  setUsageQueryScript,
+  USAGE_QUERY_CODING_PLAN_PROVIDERS,
 } from "./providerUtils";
 import { ConfirmDeletePopover } from "./shared";
 import type { SettingsSectionProps } from "./types";
@@ -91,9 +103,87 @@ type ModalProps = {
   providerType: ProviderId;
   initialData?: CustomProvider;
   onSave: (data: Omit<CustomProvider, "id">) => void;
-  onTestUsage?: (providerId: string) => void;
   onClose: () => void;
 };
+
+// 脚本编写说明里的示例代码(纯代码,locale 无关);语义须与 Rust 沙箱执行
+// 契约一致:声明式单请求 + extractor 接收响应 JSON。
+const USAGE_QUERY_SCRIPT_HELP_EXAMPLE = `({
+  request: {
+    url: "{{baseUrl}}/api/usage",
+    method: "GET",
+    headers: {
+      "Authorization": "Bearer {{apiKey}}"
+    }
+  },
+  extractor: function (response) {
+    return {
+      planName: "Pro",
+      remaining: response.balance,
+      total: response.quota,
+      unit: "USD"
+    };
+  }
+})`;
+
+function usagePlanTitleText(
+  t: (key: string) => string,
+  title: UsagePlanDisplay["title"],
+): string | null {
+  if (title.kind === "window") return t(`settings.providerUsageWindow.${title.token}`);
+  if (title.kind === "text") return title.text;
+  return null;
+}
+
+function usageRelativeTimeText(t: (key: string) => string, time: UsageRelativeTime): string {
+  switch (time.kind) {
+    case "justNow":
+      return t("settings.providerUsageUpdated.justNow");
+    case "minutesAgo":
+      return t("settings.providerUsageUpdated.minutesAgo").replace("{count}", String(time.value));
+    case "hoursAgo":
+      return t("settings.providerUsageUpdated.hoursAgo").replace("{count}", String(time.value));
+    case "daysAgo":
+      return t("settings.providerUsageUpdated.daysAgo").replace("{count}", String(time.value));
+  }
+}
+
+// 单个套餐/余额行:失效红、余量 <10% 橙、正常绿(对齐 cc-switch UsageFooter 分级)。
+function UsagePlanLine({ plan }: { plan: UsagePlanDisplay }) {
+  const { t } = useLocale();
+  const title = usagePlanTitleText(t, plan.title);
+  if (plan.invalid) {
+    return (
+      <span className="flex min-w-0 items-baseline gap-1.5 text-destructive">
+        {title ? <span className="truncate">{title}</span> : null}
+        <span className="truncate">
+          {plan.invalidMessage ?? t("settings.providerUsageInvalid")}
+        </span>
+      </span>
+    );
+  }
+  return (
+    <span className="flex min-w-0 items-baseline gap-1.5">
+      {title ? <span className="truncate">{title}</span> : null}
+      <span
+        className={cn(
+          "whitespace-nowrap font-medium",
+          plan.severity === "low"
+            ? "text-amber-500 dark:text-amber-400"
+            : "text-emerald-600 dark:text-emerald-400",
+        )}
+      >
+        {plan.amount ?? "—"}
+        {plan.total ? ` / ${plan.total}` : ""}
+        {plan.unit ? ` ${plan.unit}` : ""}
+      </span>
+      {plan.percent !== null && plan.unit !== "%" ? (
+        <span className="whitespace-nowrap text-muted-foreground">{plan.percent}%</span>
+      ) : null}
+      {plan.extra ? <span className="truncate text-muted-foreground">{plan.extra}</span> : null}
+    </span>
+  );
+}
 
 type ProviderDialogPanel = "general" | "request" | "usage";
 
@@ -210,7 +300,7 @@ function itemsByIdOrder<T extends { id: string }>(items: readonly T[], order: re
   });
 }
 
-function ProviderModal({ providerType, initialData, onSave, onTestUsage, onClose }: ModalProps) {
+function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProps) {
   const { t } = useLocale();
   const isGatewayWebui = isGatewayWebuiRuntime();
   const initialApiKey = initialData?.apiKey ?? "";
@@ -249,9 +339,14 @@ function ProviderModal({ providerType, initialData, onSave, onTestUsage, onClose
   const [promptCacheRetention, setPromptCacheRetention] = useState<"short" | "long">(
     initialData?.promptCacheRetention === "long" ? "long" : "short",
   );
-  const [usageQuery, setUsageQuery] = useState(() =>
-    createUsageQueryDraft(initialData?.usageQuery ?? getDefaultUsageQueryConfig(), isGatewayWebui),
-  );
+  const [usageQuery, setUsageQuery] = useState(() => {
+    const draft = createUsageQueryDraft(
+      initialData?.usageQuery ?? getDefaultUsageQueryConfig(),
+      isGatewayWebui,
+    );
+    // general/newapi 是可编辑脚本预设:脚本为空的存量配置打开时即在编辑器填充预设。
+    return applyUsageQueryModePreset(draft, draft.mode);
+  });
   const [customUsageQueryConfirmed, setCustomUsageQueryConfirmed] = useState(
     () => initialData?.usageQuery?.enabled === true && initialData.usageQuery.mode === "custom",
   );
@@ -301,10 +396,29 @@ function ProviderModal({ providerType, initialData, onSave, onTestUsage, onClose
   const { confirm: requestUsageQueryConfirm, dialog: usageQueryConfirmDialog } = useConfirmDialog();
   const [usageQueryTest, setUsageQueryTest] = useState<{
     status: "idle" | "running" | "success" | "error";
-    entries: ProviderUsageEntry[];
+    data: UsageData[];
     error: string | null;
-  }>({ status: "idle", entries: [], error: null });
+  }>({ status: "idle", data: [], error: null });
   const usageQueryTestSeqRef = useRef(0);
+  // 数字输入用本地草稿字符串,blur 时 clamp 后写回 usageQuery。
+  const [usageTimeoutInput, setUsageTimeoutInput] = useState(() => String(usageQuery.timeoutSecs));
+  // 自定义模式的"支持的变量"面板:apiKey 打码,眼睛切换明文。
+  const [showUsageVariableApiKey, setShowUsageVariableApiKey] = useState(false);
+  // 变量实际生效值:查询专用覆盖优先,留空回退供应商自身配置(与 Rust
+  // prepare_script_query 的解析顺序一致)。
+  const usageVariableBaseUrl = usageQuery.baseUrl.trim() || baseUrl.trim();
+  const usageVariableApiKey = usageQuery.apiKey.trim() || apiKey.trim();
+  // Token Plan 供应商:显式选择优先,否则按 Base URL 自动检测。
+  const activeCodingPlanProvider =
+    usageQuery.codingPlanProvider || detectCodingPlanProvider(baseUrl);
+  const matchedBalanceProviders = matchBalanceProviders(baseUrl);
+
+  function commitUsageTimeoutInput() {
+    const raw = usageTimeoutInput.trim();
+    const next = clampUsageQueryTimeoutSecs(raw === "" ? Number.NaN : Number(raw));
+    setUsageTimeoutInput(String(next));
+    setUsageQuery((previous) => ({ ...previous, timeoutSecs: next }));
+  }
 
   const doFetch = useCallback(
     async (url: string, key: string) => {
@@ -712,22 +826,23 @@ function ProviderModal({ providerType, initialData, onSave, onTestUsage, onClose
   async function handleTestUsageQuery() {
     if (!persistedUsageQueryProviderId) return;
     const seq = ++usageQueryTestSeqRef.current;
-    setUsageQueryTest({ status: "running", entries: [], error: null });
+    setUsageQueryTest({ status: "running", data: [], error: null });
     try {
-      const result = await queryProviderUsage(persistedUsageQueryProviderId, true);
+      // 测试永远以编辑器里的草稿为准(忽略启用开关,不落库、不进缓存);
+      // 秘密占位符经 serialize 还原为空串,由桌面端按 *Configured 沿用已存密钥。
+      const draft = serializeUsageQueryDraft(usageQuery, isGatewayWebui);
+      const result = await testProviderUsage(persistedUsageQueryProviderId, draft);
       if (usageQueryTestSeqRef.current !== seq) return;
       if (result?.error) {
-        setUsageQueryTest({ status: "error", entries: result.entries ?? [], error: result.error });
+        setUsageQueryTest({ status: "error", data: result.data ?? [], error: result.error });
       } else {
-        setUsageQueryTest({ status: "success", entries: result?.entries ?? [], error: null });
+        setUsageQueryTest({ status: "success", data: result?.data ?? [], error: null });
       }
-      // 测试已实刷桌面端缓存;通知外层卡片按缓存补水,避免重复打上游。
-      onTestUsage?.(persistedUsageQueryProviderId);
     } catch (error) {
       if (usageQueryTestSeqRef.current !== seq) return;
       setUsageQueryTest({
         status: "error",
-        entries: [],
+        data: [],
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -1696,228 +1811,562 @@ function ProviderModal({ providerType, initialData, onSave, onTestUsage, onClose
                   />
                 </div>
 
-                <div className="mt-4 space-y-1.5">
-                  <Label>{t("settings.providerUsageMode")}</Label>
-                  <Select
-                    value={usageQuery.mode}
-                    onValueChange={(mode) =>
-                      setUsageQuery((previous) => ({
-                        ...previous,
-                        mode: mode as typeof previous.mode,
-                      }))
-                    }
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="custom">
-                        {t("settings.providerUsageMode.custom")}
-                      </SelectItem>
-                      <SelectItem value="general">
-                        {t("settings.providerUsageMode.general")}
-                      </SelectItem>
-                      <SelectItem value="newapi">
-                        {t("settings.providerUsageMode.newapi")}
-                      </SelectItem>
-                      <SelectItem value="coding-plan">
-                        {t("settings.providerUsageMode.codingPlan")}
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {usageQuery.mode === "general" || usageQuery.mode === "newapi" ? (
-                  <p className="mt-3 rounded-lg border bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground">
-                    {usageQuery.mode === "general"
-                      ? t("settings.providerUsageTemplate.general")
-                      : t("settings.providerUsageTemplate.newapi")}
-                  </p>
-                ) : null}
-
-                {usageQuery.mode === "custom" ? (
-                  <div className="mt-4 space-y-1.5">
-                    <Label htmlFor="usage-query-script">{t("settings.providerUsageScript")}</Label>
-                    <Textarea
-                      id="usage-query-script"
-                      value={usageQuery.script}
-                      className="min-h-36 font-mono text-xs"
-                      placeholder={t("settings.providerUsageScriptPlaceholder")}
-                      spellCheck={false}
-                      onChange={(event) => {
-                        const value = event.currentTarget.value;
-                        setUsageQuery((previous) => ({
-                          ...previous,
-                          script: value,
-                        }));
-                      }}
-                    />
-                  </div>
-                ) : null}
-
-                {usageQuery.mode === "general" ||
-                usageQuery.mode === "newapi" ||
-                usageQuery.mode === "custom" ? (
-                  <div className="mt-4 space-y-1.5">
-                    <Label htmlFor="usage-query-base-url">
-                      {t("settings.providerUsageBaseUrl")}
-                    </Label>
-                    <Input
-                      id="usage-query-base-url"
-                      value={usageQuery.baseUrl}
-                      onChange={(event) => {
-                        const value = event.currentTarget.value;
-                        setUsageQuery((previous) => ({
-                          ...previous,
-                          baseUrl: value,
-                        }));
-                      }}
-                    />
-                  </div>
-                ) : null}
-
-                {usageQuery.mode === "newapi" ? (
-                  <div className="mt-4 grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="usage-query-access-token">
-                        {t("settings.providerUsageAccessToken")}
-                      </Label>
-                      <Input
-                        id="usage-query-access-token"
-                        type="password"
-                        value={usageQuery.accessToken}
-                        autoComplete="off"
-                        onFocus={(event) => event.currentTarget.select()}
-                        onChange={(event) => {
-                          const value = event.currentTarget.value;
-                          setUsageQuery((previous) => ({
-                            ...previous,
-                            accessToken: value,
-                          }));
-                        }}
-                      />
+                {/* 未启用时隐藏全部配置与测试入口,只留开关。 */}
+                {usageQuery.enabled ? (
+                  <>
+                    {/* 功能出处:居中带字分隔线,项目名是带图标的主色链接。 */}
+                    <div className="mt-3 flex items-center gap-2 text-xs leading-5 text-muted-foreground">
+                      <span aria-hidden="true" className="h-px min-w-0 flex-1 bg-border" />
+                      <span className="shrink-0">{t("settings.providerUsageCredit")}</span>
+                      <a
+                        href="https://github.com/farion1231/cc-switch"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex shrink-0 items-center gap-1 font-medium text-primary transition-colors hover:underline"
+                        title={t("settings.providerUsageCreditOpen")}
+                        aria-label={t("settings.providerUsageCreditOpen")}
+                      >
+                        cc-switch
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                      <span aria-hidden="true" className="h-px min-w-0 flex-1 bg-border" />
                     </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="usage-query-user-id">
-                        {t("settings.providerUsageUserId")}
-                      </Label>
-                      <Input
-                        id="usage-query-user-id"
-                        value={usageQuery.userId}
-                        onChange={(event) => {
-                          const value = event.currentTarget.value;
-                          setUsageQuery((previous) => ({
-                            ...previous,
-                            userId: value,
-                          }));
-                        }}
-                      />
-                    </div>
-                  </div>
-                ) : null}
 
-                {usageQuery.mode === "coding-plan" ? (
-                  <div className="mt-4 grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="usage-query-access-key-id">
-                        {t("settings.providerUsageAccessKeyId")}
-                      </Label>
-                      <Input
-                        id="usage-query-access-key-id"
-                        value={usageQuery.accessKeyId}
-                        onChange={(event) => {
-                          const value = event.currentTarget.value;
-                          setUsageQuery((previous) => ({
-                            ...previous,
-                            accessKeyId: value,
-                          }));
-                        }}
-                      />
+                    <div className="mt-4 space-y-1.5">
+                      <Label>{t("settings.providerUsageMode")}</Label>
+                      <Select
+                        value={usageQuery.mode}
+                        onValueChange={(mode) =>
+                          setUsageQuery((previous) =>
+                            applyUsageQueryModePreset(previous, mode as UsageQueryMode),
+                          )
+                        }
+                      >
+                        <SelectTrigger className="w-full">
+                          {/* value≠label:闭合态必须显式渲染本地化标签(coding-plan → codingPlan 键)。 */}
+                          <SelectValue>
+                            {t(
+                              usageQuery.mode === "coding-plan"
+                                ? "settings.providerUsageMode.codingPlan"
+                                : `settings.providerUsageMode.${usageQuery.mode}`,
+                            )}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="custom">
+                            {t("settings.providerUsageMode.custom")}
+                          </SelectItem>
+                          <SelectItem value="general">
+                            {t("settings.providerUsageMode.general")}
+                          </SelectItem>
+                          <SelectItem value="newapi">
+                            {t("settings.providerUsageMode.newapi")}
+                          </SelectItem>
+                          <SelectItem value="balance">
+                            {t("settings.providerUsageMode.balance")}
+                          </SelectItem>
+                          <SelectItem value="coding-plan">
+                            {t("settings.providerUsageMode.codingPlan")}
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="usage-query-secret-access-key">
-                        {t("settings.providerUsageSecretAccessKey")}
-                      </Label>
-                      <Input
-                        id="usage-query-secret-access-key"
-                        type="password"
-                        value={usageQuery.secretAccessKey}
-                        autoComplete="off"
-                        onFocus={(event) => event.currentTarget.select()}
-                        onChange={(event) => {
-                          const value = event.currentTarget.value;
-                          setUsageQuery((previous) => ({
-                            ...previous,
-                            secretAccessKey: value,
-                          }));
-                        }}
-                      />
-                    </div>
-                  </div>
-                ) : null}
 
-                <div className="mt-4 flex flex-wrap items-center gap-3">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-10 gap-1.5"
-                    disabled={!persistedUsageQueryProviderId || usageQueryTest.status === "running"}
-                    onClick={() => void handleTestUsageQuery()}
-                    title={t("settings.providerUsageTest")}
-                    aria-label={t("settings.providerUsageTest")}
-                  >
-                    <RefreshCw
-                      className={cn(
-                        "h-3.5 w-3.5",
-                        usageQueryTest.status === "running" && "animate-spin",
-                      )}
-                    />
-                    {t("settings.providerUsageTest")}
-                  </Button>
-                  <span className="text-xs text-muted-foreground">
-                    {t("settings.providerUsageAutoRefreshFixedHint")}
-                  </span>
-                </div>
-                {!persistedUsageQueryProviderId ? (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    {t("settings.providerUsageTestSavedHint")}
-                  </p>
-                ) : null}
-                {usageQueryTest.status !== "idle" ? (
-                  <div
-                    className="mt-3 rounded-xl border bg-card px-4 py-3 text-xs"
-                    role="status"
-                    aria-live="polite"
-                  >
-                    {usageQueryTest.status === "running" ? (
-                      <span className="text-muted-foreground">
-                        {t("settings.providerUsageTestRunning")}
-                      </span>
+                    {usageQuery.mode !== "custom" ? (
+                      <p className="mt-3 rounded-lg border bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                        {usageQuery.mode === "general"
+                          ? t("settings.providerUsageTemplate.general")
+                          : usageQuery.mode === "newapi"
+                            ? t("settings.providerUsageTemplate.newapi")
+                            : usageQuery.mode === "balance"
+                              ? t("settings.providerUsageTemplate.balance")
+                              : t("settings.providerUsageTemplate.codingPlan")}
+                      </p>
                     ) : null}
-                    {usageQueryTest.status === "error" ? (
-                      <span className="text-destructive">
-                        {t("settings.providerUsageTestFailed")}
-                        {usageQueryTest.error ? `: ${usageQueryTest.error}` : ""}
-                      </span>
+
+                    {/* 官方余额:按 Base URL 匹配到的供应商徽章。 */}
+                    {usageQuery.mode === "balance" && matchedBalanceProviders.length > 0 ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {matchedBalanceProviders.map((entry) => (
+                          <span
+                            key={entry.id}
+                            className="inline-flex items-center rounded-md bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary"
+                          >
+                            {entry.label}
+                          </span>
+                        ))}
+                      </div>
                     ) : null}
-                    {usageQueryTest.status === "success" ? (
-                      usageQueryTest.entries.length > 0 ? (
-                        <div className="flex flex-wrap gap-x-4 gap-y-1">
-                          {usageQueryTest.entries.map((entry) => (
-                            <span key={entry.label} className="truncate">
-                              {entry.label}: {entry.value}
-                              {entry.unit ? ` ${entry.unit}` : ""}
+
+                    {/* 只有通用模板需要用户自行填写 baseUrl / apiKey 覆盖。 */}
+                    {usageQuery.mode === "general" ? (
+                      <div className="mt-4 grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
+                        <div className="space-y-1.5">
+                          <Label htmlFor="usage-query-base-url">
+                            {t("settings.providerUsageBaseUrl")}
+                          </Label>
+                          <Input
+                            id="usage-query-base-url"
+                            value={usageQuery.baseUrl}
+                            placeholder={baseUrl.trim() || undefined}
+                            onChange={(event) => {
+                              const value = event.currentTarget.value;
+                              setUsageQuery((previous) => ({
+                                ...previous,
+                                baseUrl: value,
+                              }));
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="usage-query-api-key">
+                            {t("settings.providerUsageApiKey")}
+                          </Label>
+                          <Input
+                            id="usage-query-api-key"
+                            type="password"
+                            value={usageQuery.apiKey}
+                            autoComplete="off"
+                            onFocus={(event) => event.currentTarget.select()}
+                            onChange={(event) => {
+                              const value = event.currentTarget.value;
+                              setUsageQuery((previous) => ({
+                                ...previous,
+                                apiKey: value,
+                              }));
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {/* 自定义模式:只读展示变量的实际生效值(对齐 cc-switch 支持的变量区)。 */}
+                    {usageQuery.mode === "custom" ? (
+                      <div className="mt-4 rounded-lg border bg-muted/30 px-3 py-2.5 text-xs leading-5">
+                        <div className="font-medium text-foreground">
+                          {t("settings.providerUsageVariables")}
+                        </div>
+                        <div className="mt-2 flex min-w-0 items-center gap-2">
+                          <code className="shrink-0 font-mono text-emerald-600 dark:text-emerald-400">
+                            {"{{baseUrl}}"}
+                          </code>
+                          <span className="text-muted-foreground/60">=</span>
+                          {usageVariableBaseUrl ? (
+                            <code className="break-all font-mono text-muted-foreground">
+                              {usageVariableBaseUrl}
+                            </code>
+                          ) : (
+                            <span className="text-muted-foreground/60 italic">
+                              {t("settings.providerUsageVariableNotSet")}
                             </span>
+                          )}
+                        </div>
+                        <div className="mt-1 flex min-w-0 items-center gap-2">
+                          <code className="shrink-0 font-mono text-emerald-600 dark:text-emerald-400">
+                            {"{{apiKey}}"}
+                          </code>
+                          <span className="text-muted-foreground/60">=</span>
+                          {usageVariableApiKey ? (
+                            <>
+                              <code className="break-all font-mono text-muted-foreground">
+                                {!isGatewayWebui && showUsageVariableApiKey
+                                  ? usageVariableApiKey
+                                  : "••••••••"}
+                              </code>
+                              {/* WebUI 永不下发明文 apiKey,查看按钮只在桌面端提供。 */}
+                              {!isGatewayWebui ? (
+                                <button
+                                  type="button"
+                                  className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+                                  onClick={() =>
+                                    setShowUsageVariableApiKey((previous) => !previous)
+                                  }
+                                  title={
+                                    showUsageVariableApiKey
+                                      ? t("settings.hideApiKey")
+                                      : t("settings.showApiKey")
+                                  }
+                                  aria-label={
+                                    showUsageVariableApiKey
+                                      ? t("settings.hideApiKey")
+                                      : t("settings.showApiKey")
+                                  }
+                                >
+                                  {showUsageVariableApiKey ? (
+                                    <EyeOff className="h-3 w-3" />
+                                  ) : (
+                                    <Eye className="h-3 w-3" />
+                                  )}
+                                </button>
+                              ) : null}
+                            </>
+                          ) : (
+                            <span className="text-muted-foreground/60 italic">
+                              {t("settings.providerUsageVariableNotSet")}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {usageQuery.mode === "newapi" ? (
+                      <div className="mt-4 grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
+                        <div className="space-y-1.5">
+                          <Label htmlFor="usage-query-access-token">
+                            {t("settings.providerUsageAccessToken")}
+                          </Label>
+                          <Input
+                            id="usage-query-access-token"
+                            type="password"
+                            value={usageQuery.accessToken}
+                            autoComplete="off"
+                            onFocus={(event) => event.currentTarget.select()}
+                            onChange={(event) => {
+                              const value = event.currentTarget.value;
+                              setUsageQuery((previous) => ({
+                                ...previous,
+                                accessToken: value,
+                              }));
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="usage-query-user-id">
+                            {t("settings.providerUsageUserId")}
+                          </Label>
+                          <Input
+                            id="usage-query-user-id"
+                            value={usageQuery.userId}
+                            onChange={(event) => {
+                              const value = event.currentTarget.value;
+                              setUsageQuery((previous) => ({
+                                ...previous,
+                                userId: value,
+                              }));
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {usageQuery.mode === "coding-plan" ? (
+                      <>
+                        {/* 内置供应商选择(一比一复刻 cc-switch Token Plan):
+                            显式选择优先,否则按 Base URL 自动检测高亮。 */}
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {USAGE_QUERY_CODING_PLAN_PROVIDERS.map((entry) => (
+                            <Button
+                              key={entry.id}
+                              type="button"
+                              size="sm"
+                              variant={
+                                activeCodingPlanProvider === entry.id ? "default" : "outline"
+                              }
+                              onClick={() =>
+                                setUsageQuery((previous) => ({
+                                  ...previous,
+                                  codingPlanProvider: entry.id,
+                                }))
+                              }
+                            >
+                              {entry.label}
+                            </Button>
                           ))}
                         </div>
-                      ) : (
-                        <span className="text-muted-foreground">
-                          {t("settings.providerUsageTestEmpty")}
-                        </span>
-                      )
+
+                        {activeCodingPlanProvider === "zenmux" ? (
+                          <div className="mt-4 grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
+                            <div className="space-y-1.5">
+                              <Label htmlFor="usage-query-zenmux-base-url">
+                                {t("settings.providerUsageBaseUrl")}
+                              </Label>
+                              <Input
+                                id="usage-query-zenmux-base-url"
+                                value={usageQuery.baseUrl}
+                                placeholder="https://api.zenmux.com/v1/..."
+                                onChange={(event) => {
+                                  const value = event.currentTarget.value;
+                                  setUsageQuery((previous) => ({
+                                    ...previous,
+                                    baseUrl: value,
+                                  }));
+                                }}
+                              />
+                            </div>
+                            <div className="space-y-1.5">
+                              <Label htmlFor="usage-query-zenmux-api-key">
+                                {t("settings.providerUsageApiKey")}
+                              </Label>
+                              <Input
+                                id="usage-query-zenmux-api-key"
+                                type="password"
+                                value={usageQuery.apiKey}
+                                autoComplete="off"
+                                placeholder="sk-..."
+                                onFocus={(event) => event.currentTarget.select()}
+                                onChange={(event) => {
+                                  const value = event.currentTarget.value;
+                                  setUsageQuery((previous) => ({
+                                    ...previous,
+                                    apiKey: value,
+                                  }));
+                                }}
+                              />
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {activeCodingPlanProvider === "zhipu_team" ? (
+                          <>
+                            <p className="mt-3 rounded-lg border bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                              {t("settings.providerUsageZhipuTeamHint")}{" "}
+                              {t("settings.providerUsageZhipuTeamConsoleLink")}{" "}
+                              <a
+                                href="https://bigmodel.cn/coding-plan/team/usage-stats"
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-primary hover:underline"
+                              >
+                                bigmodel.cn/coding-plan/team/usage-stats
+                              </a>
+                            </p>
+                            <div className="mt-4 grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
+                              <div className="space-y-1.5">
+                                <Label htmlFor="usage-query-team-organization-id">
+                                  {t("settings.providerUsageOrganizationId")}
+                                </Label>
+                                <Input
+                                  id="usage-query-team-organization-id"
+                                  value={usageQuery.teamOrganizationId}
+                                  placeholder={t("settings.providerUsageOrganizationIdPlaceholder")}
+                                  onChange={(event) => {
+                                    const value = event.currentTarget.value;
+                                    setUsageQuery((previous) => ({
+                                      ...previous,
+                                      teamOrganizationId: value,
+                                    }));
+                                  }}
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <Label htmlFor="usage-query-team-project-id">
+                                  {t("settings.providerUsageProjectId")}
+                                </Label>
+                                <Input
+                                  id="usage-query-team-project-id"
+                                  value={usageQuery.teamProjectId}
+                                  placeholder={t("settings.providerUsageProjectIdPlaceholder")}
+                                  onChange={(event) => {
+                                    const value = event.currentTarget.value;
+                                    setUsageQuery((previous) => ({
+                                      ...previous,
+                                      teamProjectId: value,
+                                    }));
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          </>
+                        ) : null}
+
+                        {activeCodingPlanProvider === "volcengine" ? (
+                          <>
+                            <p className="mt-3 rounded-lg border bg-muted/30 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                              {t("settings.providerUsageVolcengineHint")}{" "}
+                              {t("settings.providerUsageVolcengineConsoleLink")}{" "}
+                              <a
+                                href="https://console.volcengine.com/iam/keymanage"
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-primary hover:underline"
+                              >
+                                console.volcengine.com/iam/keymanage
+                              </a>
+                            </p>
+                            <div className="mt-4 grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
+                              <div className="space-y-1.5">
+                                <Label htmlFor="usage-query-access-key-id">
+                                  {t("settings.providerUsageAccessKeyId")}
+                                </Label>
+                                <Input
+                                  id="usage-query-access-key-id"
+                                  value={usageQuery.accessKeyId}
+                                  onChange={(event) => {
+                                    const value = event.currentTarget.value;
+                                    setUsageQuery((previous) => ({
+                                      ...previous,
+                                      accessKeyId: value,
+                                    }));
+                                  }}
+                                />
+                              </div>
+                              <div className="space-y-1.5">
+                                <Label htmlFor="usage-query-secret-access-key">
+                                  {t("settings.providerUsageSecretAccessKey")}
+                                </Label>
+                                <Input
+                                  id="usage-query-secret-access-key"
+                                  type="password"
+                                  value={usageQuery.secretAccessKey}
+                                  autoComplete="off"
+                                  onFocus={(event) => event.currentTarget.select()}
+                                  onChange={(event) => {
+                                    const value = event.currentTarget.value;
+                                    setUsageQuery((previous) => ({
+                                      ...previous,
+                                      secretAccessKey: value,
+                                    }));
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          </>
+                        ) : null}
+                      </>
                     ) : null}
-                  </div>
+
+                    <div className="mt-4 grid grid-cols-2 gap-3 max-[720px]:grid-cols-1">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="usage-query-timeout">
+                          {t("settings.providerUsageTimeout")}
+                        </Label>
+                        <Input
+                          id="usage-query-timeout"
+                          inputMode="numeric"
+                          value={usageTimeoutInput}
+                          onChange={(event) => {
+                            const value = event.currentTarget.value;
+                            setUsageTimeoutInput(value);
+                          }}
+                          onBlur={commitUsageTimeoutInput}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          {t("settings.providerUsageTimeoutHint")}
+                        </p>
+                      </div>
+                    </div>
+
+                    {usageQuery.mode === "custom" ||
+                    usageQuery.mode === "general" ||
+                    usageQuery.mode === "newapi" ? (
+                      <div className="mt-4 space-y-1.5">
+                        <Label htmlFor="usage-query-script">
+                          {t("settings.providerUsageScript")}
+                        </Label>
+                        <Textarea
+                          id="usage-query-script"
+                          value={usageQuery.script}
+                          className="min-h-36 font-mono text-xs"
+                          placeholder={t("settings.providerUsageScriptPlaceholder")}
+                          spellCheck={false}
+                          onChange={(event) => {
+                            const value = event.currentTarget.value;
+                            // 同步写入当前模式的独立脚本槽位,切换查询方式互不串扰。
+                            setUsageQuery((previous) => setUsageQueryScript(previous, value));
+                          }}
+                        />
+                      </div>
+                    ) : null}
+
+                    {/* 测试查询:独占一行的 card——按钮居左,结果内容就地靠左展示。 */}
+                    <div className="mt-4 flex items-center gap-3 rounded-xl border bg-card px-4 py-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-10 shrink-0 gap-1.5"
+                        disabled={
+                          !persistedUsageQueryProviderId || usageQueryTest.status === "running"
+                        }
+                        onClick={() => void handleTestUsageQuery()}
+                        title={t("settings.providerUsageTest")}
+                        aria-label={t("settings.providerUsageTest")}
+                      >
+                        <RefreshCw
+                          className={cn(
+                            "h-3.5 w-3.5",
+                            usageQueryTest.status === "running" && "animate-spin",
+                          )}
+                        />
+                        {t("settings.providerUsageTest")}
+                      </Button>
+                      <div className="min-w-0 flex-1 text-xs" role="status" aria-live="polite">
+                        {usageQueryTest.status === "running" ? (
+                          <span className="text-muted-foreground">
+                            {t("settings.providerUsageTestRunning")}
+                          </span>
+                        ) : null}
+                        {usageQueryTest.status === "error" ? (
+                          <span className="text-destructive">
+                            {t("settings.providerUsageTestFailed")}
+                            {usageQueryTest.error ? `: ${usageQueryTest.error}` : ""}
+                          </span>
+                        ) : null}
+                        {usageQueryTest.status === "success" ? (
+                          usageQueryTest.data.length > 0 ? (
+                            <div className="flex flex-col gap-1">
+                              {usageQueryTest.data.map((plan, index) => (
+                                <UsagePlanLine
+                                  key={`${plan.planName ?? ""}:${
+                                    // biome-ignore lint/suspicious/noArrayIndexKey: 套餐无稳定 id,索引即位置语义
+                                    index
+                                  }`}
+                                  plan={getUsagePlanDisplay(plan)}
+                                />
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">
+                              {t("settings.providerUsageTestEmpty")}
+                            </span>
+                          )
+                        ) : null}
+                        {usageQueryTest.status === "idle" && !persistedUsageQueryProviderId ? (
+                          <span className="text-muted-foreground">
+                            {t("settings.providerUsageTestSavedHint")}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    {usageQuery.mode === "custom" ||
+                    usageQuery.mode === "general" ||
+                    usageQuery.mode === "newapi" ? (
+                      <div className="mt-4 rounded-lg border bg-muted/30 px-3 py-2.5 text-xs leading-5 text-muted-foreground">
+                        <div className="font-medium text-foreground">
+                          {t("settings.providerUsageScriptHelp")}
+                        </div>
+                        <div className="mt-2 font-medium">
+                          {t("settings.providerUsageScriptHelpFormat")}
+                        </div>
+                        <pre className="mt-1 overflow-x-auto rounded-md border bg-background/60 p-2 font-mono text-[11px] leading-4">
+                          {USAGE_QUERY_SCRIPT_HELP_EXAMPLE}
+                        </pre>
+                        <div className="mt-2 font-medium">
+                          {t("settings.providerUsageScriptHelpExtractor")}
+                        </div>
+                        <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                          <li>{t("settings.providerUsageScriptHelpField.planName")}</li>
+                          <li>{t("settings.providerUsageScriptHelpField.total")}</li>
+                          <li>{t("settings.providerUsageScriptHelpField.used")}</li>
+                          <li>{t("settings.providerUsageScriptHelpField.remaining")}</li>
+                          <li>{t("settings.providerUsageScriptHelpField.unit")}</li>
+                          <li>{t("settings.providerUsageScriptHelpField.isValid")}</li>
+                          <li>{t("settings.providerUsageScriptHelpField.invalidMessage")}</li>
+                          <li>{t("settings.providerUsageScriptHelpField.extra")}</li>
+                        </ul>
+                        <div className="mt-2 font-medium">
+                          {t("settings.providerUsageScriptHelpTips")}
+                        </div>
+                        <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                          <li>{t("settings.providerUsageScriptHelpTip.variables")}</li>
+                          <li>{t("settings.providerUsageScriptHelpTip.sandbox")}</li>
+                          <li>{t("settings.providerUsageScriptHelpTip.wrap")}</li>
+                          <li>{t("settings.providerUsageScriptHelpTip.origin")}</li>
+                        </ul>
+                      </div>
+                    ) : null}
+                  </>
                 ) : null}
               </section>
             )}
@@ -2156,6 +2605,23 @@ function ProviderList(props: {
     onRefreshUsage,
   } = props;
   const filtered = providers.filter((provider) => provider.type === type);
+  // 30s ticker 驱动"N 分钟前"相对时间;多套餐行的展开态是纯本地 UI 状态。
+  const usageNow = useUsageNowTicker(
+    filtered.some((provider) => provider.usageQuery?.enabled) ||
+      Object.keys(usageByProvider).length > 0,
+  );
+  const [expandedUsageProviderIds, setExpandedUsageProviderIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+
+  function toggleUsageExpanded(providerId: string) {
+    setExpandedUsageProviderIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(providerId)) next.delete(providerId);
+      else next.add(providerId);
+      return next;
+    });
+  }
   const {
     draggingItemId: draggingProviderId,
     getItemProps: getProviderReorderProps,
@@ -2204,7 +2670,17 @@ function ProviderList(props: {
               (() => {
                 const usage = usageByProvider[provider.id];
                 const refreshing = refreshingProviderIds.has(provider.id);
-                const usageDisplay = getProviderUsageCardDisplay(provider, usage, refreshing);
+                const usageDisplay = getProviderUsageCardDisplay(
+                  provider,
+                  usage,
+                  refreshing,
+                  usageNow,
+                );
+                const usageExpanded = expandedUsageProviderIds.has(provider.id);
+                const visibleUsagePlans =
+                  usageDisplay.plans.length > 1 && !usageExpanded
+                    ? usageDisplay.plans.slice(0, 1)
+                    : usageDisplay.plans;
                 return (
                   <div
                     key={provider.id}
@@ -2235,20 +2711,43 @@ function ProviderList(props: {
                         {provider.activeModels.length} {t("settings.activeModels")}
                       </div>
                       {usageDisplay.show ? (
-                        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-                          {usageDisplay.entries.map((entry) => (
-                            <span key={entry.label} className="truncate">
-                              {entry.label}: {entry.value}
-                              {entry.unit ? ` ${entry.unit}` : ""}
-                            </span>
+                        <div className="mt-1 flex min-w-0 flex-col gap-0.5 text-xs text-muted-foreground">
+                          {visibleUsagePlans.map((plan, index) => (
+                            <UsagePlanLine
+                              key={`${plan.title.kind === "text" ? plan.title.text : plan.title.kind}:${
+                                // biome-ignore lint/suspicious/noArrayIndexKey: 套餐无稳定 id,索引即位置语义
+                                index
+                              }`}
+                              plan={plan}
+                            />
                           ))}
-                          {usageDisplay.isStale ? (
-                            <span title="Stale usage data">Stale</span>
-                          ) : null}
-                          {usageDisplay.error ? (
-                            <span className="text-destructive">{usageDisplay.error}</span>
-                          ) : null}
-                          {usageDisplay.updatedAt ? <time>{usageDisplay.updatedAt}</time> : null}
+                          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+                            {usageDisplay.plans.length > 1 ? (
+                              <button
+                                type="button"
+                                className="text-primary hover:underline"
+                                onClick={() => toggleUsageExpanded(provider.id)}
+                              >
+                                {usageExpanded
+                                  ? t("settings.providerUsageCollapse")
+                                  : t("settings.providerUsageMorePlans").replace(
+                                      "{count}",
+                                      String(usageDisplay.plans.length - 1),
+                                    )}
+                              </button>
+                            ) : null}
+                            {usageDisplay.isStale ? (
+                              <span title={t("settings.providerUsageStaleTitle")}>
+                                {t("settings.providerUsageStale")}
+                              </span>
+                            ) : null}
+                            {usageDisplay.error ? (
+                              <span className="text-destructive">{usageDisplay.error}</span>
+                            ) : null}
+                            {usageDisplay.updatedAt ? (
+                              <time>{usageRelativeTimeText(t, usageDisplay.updatedAt)}</time>
+                            ) : null}
+                          </div>
                         </div>
                       ) : null}
                     </div>
@@ -2258,10 +2757,10 @@ function ProviderList(props: {
                           variant="ghost"
                           size="icon"
                           className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                          disabled={usageDisplay.refresh.disabled}
+                          disabled={usageDisplay.refreshDisabled}
                           onClick={() => onRefreshUsage(provider.id)}
-                          title={usageDisplay.refresh.ariaLabel}
-                          aria-label={usageDisplay.refresh.ariaLabel}
+                          title={t("settings.providerUsageRefresh")}
+                          aria-label={t("settings.providerUsageRefresh")}
                         >
                           <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} />
                         </Button>
@@ -2311,8 +2810,9 @@ export function ProvidersSection(props: SettingsSectionProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const [customSettingsOpen, setCustomSettingsOpen] = useState(false);
   const [editingProvider, setEditingProvider] = useState<CustomProvider | null>(null);
-  const { usageByProvider, refreshingProviderIds, refreshProvider, hydrateProvider } =
-    useProviderUsage(settings.customProviders, settings.selectedModel);
+  const { usageByProvider, refreshingProviderIds, refreshProvider } = useProviderUsage(
+    settings.customProviders,
+  );
 
   function openAdd() {
     setEditingProvider(null);
@@ -2441,7 +2941,6 @@ export function ProvidersSection(props: SettingsSectionProps) {
           providerType={activeTab}
           initialData={editingProvider ?? undefined}
           onSave={handleSave}
-          onTestUsage={(providerId) => void hydrateProvider(providerId)}
           onClose={closeModal}
         />
       ) : null}

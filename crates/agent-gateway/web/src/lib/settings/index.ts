@@ -273,33 +273,68 @@ export type SshSettings = {
   projectHostAssociations: Record<string, string[]>;
 };
 
-export type UsageQueryMode = "coding-plan" | "general" | "newapi" | "custom";
+export type UsageQueryMode = "coding-plan" | "balance" | "general" | "newapi" | "custom";
+
+export type UsageQueryScripts = Partial<Record<"custom" | "general" | "newapi", string>>;
+
+export type UsageQueryCodingPlanProvider =
+  | ""
+  | "kimi"
+  | "zhipu"
+  | "zhipu_team"
+  | "minimax"
+  | "zenmux"
+  | "volcengine";
 
 export type UsageQueryConfig = {
   enabled: boolean;
   mode: UsageQueryMode;
+  /** 当前模式的生效脚本(Rust 执行层只读这一个字段)。 */
   script: string;
+  /** 每种脚本模式各自的脚本:切换查询方式互不串扰,未填写过的显示模板预设。 */
+  scripts: UsageQueryScripts;
   baseUrl: string;
+  /** 查询专用 API Key 覆盖(空则回退供应商自身的 apiKey)。 */
+  apiKey: string;
+  apiKeyConfigured?: boolean;
   accessToken: string;
   accessTokenConfigured?: boolean;
   userId: string;
   accessKeyId: string;
   secretAccessKey: string;
   secretAccessKeyConfigured?: boolean;
+  /** Token Plan 供应商(空=按 Base URL 自动检测;智谱团队必须显式选择)。 */
+  codingPlanProvider: UsageQueryCodingPlanProvider;
+  /** 智谱团队套餐:组织/项目 ID(作为 bigmodel-organization / bigmodel-project 请求头)。 */
+  teamOrganizationId: string;
+  teamProjectId: string;
+  /** 请求超时(秒,2-30)。 */
+  timeoutSecs: number;
 };
+
+export const USAGE_QUERY_TIMEOUT_MIN_SECS = 2;
+export const USAGE_QUERY_TIMEOUT_MAX_SECS = 30;
+export const USAGE_QUERY_TIMEOUT_DEFAULT_SECS = 10;
 
 export function getDefaultUsageQueryConfig(): UsageQueryConfig {
   return {
     enabled: false,
-    mode: "custom",
+    mode: "newapi",
     script: "",
+    scripts: {},
     baseUrl: "",
+    apiKey: "",
+    apiKeyConfigured: false,
     accessToken: "",
     accessTokenConfigured: false,
     userId: "",
     accessKeyId: "",
     secretAccessKey: "",
     secretAccessKeyConfigured: false,
+    codingPlanProvider: "",
+    teamOrganizationId: "",
+    teamProjectId: "",
+    timeoutSecs: USAGE_QUERY_TIMEOUT_DEFAULT_SECS,
   };
 }
 
@@ -1329,17 +1364,50 @@ function normalizeProviderModelOrder(
 function normalizeUsageQueryMode(input: unknown): UsageQueryMode {
   switch (input) {
     case "coding-plan":
+    case "balance":
     case "general":
-    case "newapi":
+    case "custom":
       return input;
     default:
-      // 含历史配置中的 "balance"(余额适配器已移除)——统一回退自定义脚本。
-      return "custom";
+      // 缺省与未知模式统一回退 NewAPI 模板(默认查询方式)。
+      return "newapi";
   }
+}
+
+function normalizeUsageQueryCodingPlanProvider(input: unknown): UsageQueryCodingPlanProvider {
+  switch (input) {
+    case "kimi":
+    case "zhipu":
+    case "zhipu_team":
+    case "minimax":
+    case "zenmux":
+    case "volcengine":
+      return input;
+    default:
+      return "";
+  }
+}
+
+function normalizeUsageQueryScripts(input: unknown): UsageQueryScripts {
+  const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const scripts: UsageQueryScripts = {};
+  for (const mode of ["custom", "general", "newapi"] as const) {
+    const value = obj[mode];
+    if (typeof value === "string" && value.trim()) {
+      scripts[mode] = value.trim();
+    }
+  }
+  return scripts;
+}
+
+function clampInt(input: unknown, min: number, max: number, fallback: number): number {
+  const value = typeof input === "number" && Number.isFinite(input) ? Math.round(input) : fallback;
+  return Math.min(max, Math.max(min, value));
 }
 
 function normalizeUsageQueryConfig(input: unknown): UsageQueryConfig {
   const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const apiKey = normalizeApiKey(typeof obj.apiKey === "string" ? obj.apiKey : "");
   const accessToken = normalizeApiKey(typeof obj.accessToken === "string" ? obj.accessToken : "");
   const secretAccessKey = normalizeApiKey(
     typeof obj.secretAccessKey === "string" ? obj.secretAccessKey : "",
@@ -1349,13 +1417,26 @@ function normalizeUsageQueryConfig(input: unknown): UsageQueryConfig {
     enabled: obj.enabled === true,
     mode: normalizeUsageQueryMode(obj.mode),
     script: typeof obj.script === "string" ? obj.script.trim() : "",
+    scripts: normalizeUsageQueryScripts(obj.scripts),
     baseUrl: normalizeBaseUrl(typeof obj.baseUrl === "string" ? obj.baseUrl : ""),
+    apiKey,
+    apiKeyConfigured: apiKey.length > 0 || obj.apiKeyConfigured === true,
     accessToken,
     accessTokenConfigured: accessToken.length > 0 || obj.accessTokenConfigured === true,
     userId: typeof obj.userId === "string" ? obj.userId.trim() : "",
     accessKeyId: typeof obj.accessKeyId === "string" ? obj.accessKeyId.trim() : "",
     secretAccessKey,
     secretAccessKeyConfigured: secretAccessKey.length > 0 || obj.secretAccessKeyConfigured === true,
+    codingPlanProvider: normalizeUsageQueryCodingPlanProvider(obj.codingPlanProvider),
+    teamOrganizationId:
+      typeof obj.teamOrganizationId === "string" ? obj.teamOrganizationId.trim() : "",
+    teamProjectId: typeof obj.teamProjectId === "string" ? obj.teamProjectId.trim() : "",
+    timeoutSecs: clampInt(
+      obj.timeoutSecs,
+      USAGE_QUERY_TIMEOUT_MIN_SECS,
+      USAGE_QUERY_TIMEOUT_MAX_SECS,
+      USAGE_QUERY_TIMEOUT_DEFAULT_SECS,
+    ),
   };
 }
 

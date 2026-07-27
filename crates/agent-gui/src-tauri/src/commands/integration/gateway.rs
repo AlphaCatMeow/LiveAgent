@@ -23,6 +23,17 @@ pub async fn provider_usage_query(
 }
 
 #[tauri::command]
+pub async fn provider_usage_test(
+    provider_id: String,
+    config_json: String,
+    provider_usage_service: tauri::State<'_, Arc<ProviderUsageService>>,
+) -> Result<ProviderUsageResult, String> {
+    Ok(provider_usage_service
+        .test(&provider_id, &config_json)
+        .await)
+}
+
+#[tauri::command]
 pub async fn gateway_connect(
     payload: Option<Value>,
     gateway_controller: tauri::State<'_, Arc<GatewayController>>,

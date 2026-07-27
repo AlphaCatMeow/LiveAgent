@@ -146,6 +146,22 @@
     max-width: 100%;
     max-height: 100%;
   }
+
+  /*
+   * Streamdown pan-zoom always attaches `transition-transform duration-150`.
+   * That eases zoom-button / wheel scale changes nicely, but it also eases
+   * every pointermove pan update — large diagrams lag and jitter while
+   * dragging. Keep the idle transition; drop it only for an active drag:
+   * `:active` covers the pointerdown frame before React flips the cursor,
+   * and the grabbing cursor (set on the pan surface) covers the rest of the
+   * gesture, including pointer-captured moves outside the element.
+   */
+  [data-streamdown="mermaid"] [role="application"]:active,
+  [data-streamdown="mermaid"] [style*="cursor: grabbing"] [role="application"],
+  [data-streamdown="mermaid"] [style*="cursor:grabbing"] [role="application"] {
+    transition: none !important;
+    transition-property: none !important;
+  }
 }
 
 @layer base {
@@ -2500,6 +2516,18 @@ body > div:has([data-streamdown="table-fullscreen"]):not(#root) {
 body > div:not(#root) [data-streamdown="mermaid"] svg {
   -webkit-transform: translateZ(0);
   transform: translateZ(0);
+}
+/*
+ * The SVG translateZ above promotes a second compositor layer under the pan
+ * transform. Fine while idle, but during drag WebKit thrash-composites the
+ * nested layers on large diagrams. Drop the SVG's own transform for the
+ * gesture; the portal layer above still keeps the fullscreen paint fix.
+ */
+body > div:not(#root) [data-streamdown="mermaid"]:has([role="application"]:active) svg,
+body > div:not(#root) [data-streamdown="mermaid"]:has([style*="cursor: grabbing"]) svg,
+body > div:not(#root) [data-streamdown="mermaid"]:has([style*="cursor:grabbing"]) svg {
+  -webkit-transform: none;
+  transform: none;
 }
 
 .chat-history-sidebar,

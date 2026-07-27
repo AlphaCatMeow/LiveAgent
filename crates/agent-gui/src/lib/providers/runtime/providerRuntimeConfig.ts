@@ -5,6 +5,8 @@ import {
   getChatRuntimeReasoningLevelsForProvider,
   normalizeChatRuntimeControlsForProvider,
 } from "../../settings";
+import type { CliIdentitySettings } from "../cliIdentityCore";
+import { resolveProviderCustomHeaders } from "../customHeaders";
 import type { ProviderRuntimeConfig } from "./types";
 
 /**
@@ -15,6 +17,7 @@ export function createProviderRuntimeConfig(
   provider: CustomProvider,
   model: string,
   controlsInput?: ChatRuntimeControls,
+  providerIdentities?: CliIdentitySettings,
 ): ProviderRuntimeConfig {
   const reasoningParams = {
     providerId: provider.type,
@@ -26,7 +29,9 @@ export function createProviderRuntimeConfig(
   return {
     baseUrl: provider.baseUrl,
     apiKey: provider.apiKey,
-    customHeaders: provider.customHeaders,
+    customHeaders: providerIdentities
+      ? resolveProviderCustomHeaders(provider, providerIdentities)
+      : provider.customHeaders,
     requestFormat: provider.requestFormat,
     reasoning: reasoningSupported
       ? controls.thinkingEnabled

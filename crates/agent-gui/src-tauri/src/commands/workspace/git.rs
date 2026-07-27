@@ -1014,9 +1014,20 @@ pub(crate) fn git_status_sync(workdir: String) -> Result<GitRepositoryState, Str
     let Some(repo_root) = discover_repo(&workdir)? else {
         return Ok(not_repo_state(&workdir));
     };
+    // --untracked-files=all: without it git collapses a fully-untracked
+    // directory into a single `dir/` entry, so the files inside never show up
+    // in the review list (and the collapsed entry has no diff). The explicit
+    // flag also overrides a user-level `status.showUntrackedFiles = no`.
     let output = git_output(
         &repo_root,
-        &["status", "--porcelain=v2", "--branch", "--show-stash", "-z"],
+        &[
+            "status",
+            "--porcelain=v2",
+            "--branch",
+            "--show-stash",
+            "--untracked-files=all",
+            "-z",
+        ],
     )?;
     if !output.status.success() {
         return Ok(GitRepositoryState {
@@ -4051,6 +4062,64 @@ mod tests {
         assert!(discarded_all.state.entries.is_empty());
         assert!(!temp.path().join("bulk-staged.txt").exists());
         assert!(!temp.path().join("bulk-untracked.txt").exists());
+    }
+
+    #[test]
+    fn git_status_lists_files_inside_untracked_directories() {
+        let Some(repo) = init_temp_repo() else {
+            return;
+        };
+        let workdir = repo.path().to_string_lossy().to_string();
+        fs::create_dir_all(repo.path().join("newdir").join("nested")).expect("create untracked");
+        fs::write(repo.path().join("newdir").join("a.txt"), "a\n").expect("write a");
+        fs::write(
+            repo.path().join("newdir").join("nested").join("b.txt"),
+            "b\n",
+        )
+        .expect("write b");
+
+        // --untracked-files=all: every file inside the untracked directory is
+        // listed individually instead of one collapsed `newdir/` entry.
+        let state = git_status_sync(workdir.clone()).expect("status");
+        assert_eq!(state.status, "ready");
+        let untracked: Vec<&str> = state
+            .entries
+            .iter()
+            .filter(|entry| entry.untracked)
+            .map(|entry| entry.path.as_str())
+            .collect();
+        assert!(
+            untracked.contains(&"newdir/a.txt"),
+            "entries: {untracked:?}"
+        );
+        assert!(
+            untracked.contains(&"newdir/nested/b.txt"),
+            "entries: {untracked:?}"
+        );
+        assert!(!untracked.contains(&"newdir/"), "entries: {untracked:?}");
+        assert_eq!(state.dirty_counts.untracked, 2);
+
+        // The per-file entries stay actionable end to end: diff, stage, discard.
+        let diff = git_diff_sync(
+            workdir.clone(),
+            Some("working_tree".to_string()),
+            Some("newdir/a.txt".to_string()),
+        )
+        .expect("untracked diff");
+        assert!(diff.patch.contains("+a"), "diff patch:\n{}", diff.patch);
+        let staged = git_stage_sync(workdir.clone(), "newdir/a.txt".to_string()).expect("stage");
+        assert!(staged.ok, "stage failed: {}", staged.message);
+        assert_eq!(staged.state.dirty_counts.staged, 1);
+        assert_eq!(staged.state.dirty_counts.untracked, 1);
+        let discarded = git_discard_sync(workdir.clone(), "newdir/nested/b.txt".to_string(), None)
+            .expect("discard untracked");
+        assert!(discarded.ok, "discard failed: {}", discarded.message);
+        assert!(!repo
+            .path()
+            .join("newdir")
+            .join("nested")
+            .join("b.txt")
+            .exists());
     }
 
     #[test]

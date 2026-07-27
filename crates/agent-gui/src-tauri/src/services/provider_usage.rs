@@ -21,17 +21,32 @@ const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 const MAX_HEADERS: usize = 64;
 const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_ENTRIES: usize = 16;
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const SCRIPT_TIMEOUT: Duration = Duration::from_millis(100);
+const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 10;
+const MIN_REQUEST_TIMEOUT_SECS: u64 = 2;
+const MAX_REQUEST_TIMEOUT_SECS: u64 = 30;
 
+// KEEP IN SYNC:内置预设脚本与两端 providerUtils.ts 的 USAGE_QUERY_PRESET_SCRIPTS
+// 逐字符一致(前端选模板时填充可编辑副本;脚本为空的存量配置由这里兜底执行)。
+// 内容一比一复刻 cc-switch UsageScriptModal 的 GENERAL/NEW_API 模板,仅
+// User-Agent 品牌与 NewAPI 文案默认值(套餐名/失败消息须 locale 无关)不同。
 const GENERAL_SCRIPT: &str = r#"({
   request: {
     url: "{{baseUrl}}/user/balance",
     method: "GET",
-    headers: { "Authorization": "Bearer {{apiKey}}" }
+    headers: {
+      "Authorization": "Bearer {{apiKey}}",
+      "User-Agent": "LiveAgent/1.0"
+    }
   },
-  extractor: (response) => ({ remaining: response.balance, unit: "USD" })
+  extractor: function(response) {
+    return {
+      isValid: response.is_active || true,
+      remaining: response.balance,
+      unit: "USD"
+    };
+  }
 })"#;
 
 const NEWAPI_SCRIPT: &str = r#"({
@@ -41,28 +56,52 @@ const NEWAPI_SCRIPT: &str = r#"({
     headers: {
       "Content-Type": "application/json",
       "Authorization": "Bearer {{accessToken}}",
+      "User-Agent": "LiveAgent/1.0",
       "New-Api-User": "{{userId}}"
-    }
+    },
   },
-  extractor: (response) => ({
-    label: response.data && response.data.group ? response.data.group : "Balance",
-    remaining: response.data ? response.data.quota / 500000 : null,
-    unit: "USD"
-  })
+  extractor: function (response) {
+    if (response.success && response.data) {
+      return {
+        planName: response.data.group || "Balance",
+        remaining: response.data.quota / 500000,
+        used: response.data.used_quota / 500000,
+        total: (response.data.quota + response.data.used_quota) / 500000,
+        unit: "USD",
+      };
+    }
+    return {
+      isValid: false,
+      invalidMessage: response.message || "NewAPI usage query failed"
+    };
+  },
 })"#;
 
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct ProviderUsageEntry {
-    pub label: String,
-    pub value: String,
+pub struct UsageData {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extra: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_valid: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invalid_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub used: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remaining: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub unit: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderUsageResult {
-    pub entries: Vec<ProviderUsageEntry>,
+    pub data: Vec<UsageData>,
     pub queried_at: Option<i64>,
     pub error: Option<String>,
     pub is_stale: bool,
@@ -97,14 +136,14 @@ impl ProviderUsageService {
         }
 
         match execute_prepared_query(&prepared).await {
-            Ok(entries) if entries.is_empty() => self.cache().record_failure(
-                provider_id,
-                identity,
-                "Usage query returned no entries",
-            ),
-            Ok(entries) => {
+            Ok(data) if data.is_empty() => {
+                // 空结果视为脚本/配置问题(确定性失败),不再展示旧值。
+                self.cache().invalidate(provider_id);
+                failed_result("Usage query returned no entries".to_string())
+            }
+            Ok(data) => {
                 let result = ProviderUsageResult {
-                    entries,
+                    data,
                     queried_at: Some(now_millis()),
                     error: None,
                     is_stale: false,
@@ -113,8 +152,31 @@ impl ProviderUsageService {
                     .record_success(provider_id, identity, result.clone());
                 result
             }
-            Err(error) => self.cache().record_failure(provider_id, identity, &error),
+            // 确定性失败(4xx 鉴权/配置、脚本错误)清掉快照立即透出;瞬时失败
+            // (网络/超时/5xx/429)保留上次成功值并标 isStale。
+            Err(failure) if failure.deterministic => {
+                self.cache().invalidate(provider_id);
+                failed_result(failure.message)
+            }
+            Err(failure) => self
+                .cache()
+                .record_failure(provider_id, identity, &failure.message),
         }
+    }
+
+    /// 「测试查询」:按前端草稿配置执行一次查询——忽略启用开关、不读写缓存、
+    /// 不落库。草稿以编辑器当前内容为准;WebUI 草稿的秘密被脱敏为空串,
+    /// *Configured=true 表示沿用已存密钥。
+    pub async fn test(&self, provider_id: &str, draft_json: &str) -> ProviderUsageResult {
+        let provider = match load_provider(provider_id) {
+            Ok(provider) => provider,
+            Err(error) => return failed_result(error),
+        };
+        let draft = match serde_json::from_str::<UsageQueryConfig>(draft_json) {
+            Ok(draft) => draft,
+            Err(_) => return failed_result("Usage query draft is invalid".to_string()),
+        };
+        execute_draft_test(provider, draft).await
     }
 
     fn cache(&self) -> std::sync::MutexGuard<'_, UsageCache> {
@@ -122,6 +184,45 @@ impl ProviderUsageService {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
+}
+
+async fn execute_draft_test(
+    mut provider: StoredProvider,
+    draft: UsageQueryConfig,
+) -> ProviderUsageResult {
+    provider.usage_query = merge_draft_config(draft, &provider.usage_query);
+    // 测试永远按草稿执行,不受启用开关限制。
+    provider.usage_query.enabled = true;
+    let prepared = match prepare_query(&provider) {
+        Ok(prepared) => prepared,
+        Err(error) => return failed_result(error),
+    };
+    match execute_prepared_query(&prepared).await {
+        Ok(data) if data.is_empty() => failed_result("Usage query returned no entries".to_string()),
+        Ok(data) => ProviderUsageResult {
+            data,
+            queried_at: Some(now_millis()),
+            error: None,
+            is_stale: false,
+        },
+        Err(failure) => failed_result(failure.message),
+    }
+}
+
+fn merge_draft_config(
+    mut draft: UsageQueryConfig,
+    persisted: &UsageQueryConfig,
+) -> UsageQueryConfig {
+    if draft.api_key.trim().is_empty() && draft.api_key_configured {
+        draft.api_key = persisted.api_key.clone();
+    }
+    if draft.access_token.trim().is_empty() && draft.access_token_configured {
+        draft.access_token = persisted.access_token.clone();
+    }
+    if draft.secret_access_key.trim().is_empty() && draft.secret_access_key_configured {
+        draft.secret_access_key = persisted.secret_access_key.clone();
+    }
+    draft
 }
 
 type ProviderQueryIdentity = [u8; 32];
@@ -144,7 +245,7 @@ impl UsageCache {
     ) -> Option<&ProviderUsageResult> {
         self.values
             .get(provider_id)
-            .filter(|cached| &cached.identity == identity && !cached.result.entries.is_empty())
+            .filter(|cached| &cached.identity == identity && !cached.result.data.is_empty())
             .map(|cached| &cached.result)
     }
 
@@ -169,7 +270,7 @@ impl UsageCache {
         if let Some(cached) = self
             .values
             .get_mut(provider_id)
-            .filter(|cached| cached.identity == identity && !cached.result.entries.is_empty())
+            .filter(|cached| cached.identity == identity && !cached.result.data.is_empty())
         {
             cached.result.error = Some(error.to_string());
             cached.result.is_stale = true;
@@ -186,7 +287,7 @@ impl UsageCache {
 
 fn failed_result(error: String) -> ProviderUsageResult {
     ProviderUsageResult {
-        entries: Vec::new(),
+        data: Vec::new(),
         queried_at: None,
         error: Some(error),
         is_stale: false,
@@ -211,21 +312,114 @@ struct UsageQueryConfig {
     mode: String,
     script: String,
     base_url: String,
+    // 查询专用 API Key 覆盖(空则回退供应商自身的 apiKey)。
+    #[serde(default)]
+    api_key: String,
     access_token: String,
     user_id: String,
     access_key_id: String,
     secret_access_key: String,
+    // Token Plan 供应商(空=按 Base URL 自动检测;智谱团队与个人版 base_url
+    // 相同,必须靠显式选择路由)。
+    #[serde(default)]
+    coding_plan_provider: String,
+    // 智谱团队套餐:组织/项目 ID(作为 bigmodel-organization / bigmodel-project
+    // 请求头,沿用供应商自身 API Key)。
+    #[serde(default)]
+    team_organization_id: String,
+    #[serde(default)]
+    team_project_id: String,
+    // *Configured 标志仅在「按草稿测试」时使用:WebUI 草稿的秘密被脱敏为空串,
+    // true 表示沿用已存密钥;常规查询路径不读。
+    #[serde(default)]
+    api_key_configured: bool,
+    #[serde(default)]
+    access_token_configured: bool,
+    #[serde(default)]
+    secret_access_key_configured: bool,
+    // 每供应商请求超时(秒,clamp 2-30,缺省 10)。
+    #[serde(default)]
+    timeout_secs: Option<f64>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum UsageQueryMode {
+    CodingPlan,
+    Balance,
+    General,
+    Newapi,
+    Custom,
+}
+
+fn parse_usage_mode(mode: &str) -> Result<UsageQueryMode, String> {
+    match mode {
+        "coding-plan" => Ok(UsageQueryMode::CodingPlan),
+        "balance" => Ok(UsageQueryMode::Balance),
+        "general" => Ok(UsageQueryMode::General),
+        "newapi" => Ok(UsageQueryMode::Newapi),
+        "custom" => Ok(UsageQueryMode::Custom),
+        _ => Err("Unsupported usage query mode".to_string()),
+    }
+}
+
+/// 脚本类模式的生效脚本:general/newapi 允许用户编辑后的副本,为空时回退
+/// 内置预设(护住只选了模板未落脚本的存量配置);custom 必须非空。
+fn effective_script(
+    mode: UsageQueryMode,
+    config: &UsageQueryConfig,
+) -> Result<Option<&str>, String> {
+    match mode {
+        UsageQueryMode::CodingPlan | UsageQueryMode::Balance => Ok(None),
+        UsageQueryMode::General | UsageQueryMode::Newapi => {
+            let preset = if mode == UsageQueryMode::General {
+                GENERAL_SCRIPT
+            } else {
+                NEWAPI_SCRIPT
+            };
+            Ok(Some(if config.script.trim().is_empty() {
+                preset
+            } else {
+                config.script.as_str()
+            }))
+        }
+        UsageQueryMode::Custom => {
+            if config.script.trim().is_empty() {
+                Err("Custom usage script is empty".to_string())
+            } else {
+                Ok(Some(config.script.as_str()))
+            }
+        }
+    }
+}
+
+fn resolve_timeout(config: &UsageQueryConfig) -> Duration {
+    let secs = config
+        .timeout_secs
+        .filter(|secs| secs.is_finite())
+        .map(|secs| secs.round() as i64)
+        .unwrap_or(DEFAULT_REQUEST_TIMEOUT_SECS as i64);
+    Duration::from_secs(secs.clamp(
+        MIN_REQUEST_TIMEOUT_SECS as i64,
+        MAX_REQUEST_TIMEOUT_SECS as i64,
+    ) as u64)
 }
 
 fn provider_query_identity(provider: &StoredProvider) -> ProviderQueryIdentity {
+    // 缓存 identity 用生效脚本而非原始 script 字段:general/newapi 空脚本走
+    // 内置预设,预设升级(应用版本变化)也应正确失效缓存。
+    let script_identity = parse_usage_mode(provider.usage_query.mode.as_str())
+        .ok()
+        .and_then(|mode| effective_script(mode, &provider.usage_query).ok().flatten())
+        .unwrap_or(provider.usage_query.script.as_str());
     let mut digest = Sha256::new();
     for value in [
         provider.provider_type.as_str(),
         provider.base_url.as_str(),
         provider.api_key.as_str(),
         provider.usage_query.mode.as_str(),
-        provider.usage_query.script.as_str(),
+        script_identity,
         provider.usage_query.base_url.as_str(),
+        provider.usage_query.api_key.as_str(),
         provider.usage_query.access_token.as_str(),
         provider.usage_query.user_id.as_str(),
         provider.usage_query.access_key_id.as_str(),
@@ -234,6 +428,11 @@ fn provider_query_identity(provider: &StoredProvider) -> ProviderQueryIdentity {
         digest.update((value.len() as u64).to_be_bytes());
         digest.update(value.as_bytes());
     }
+    digest.update(
+        resolve_timeout(&provider.usage_query)
+            .as_secs()
+            .to_be_bytes(),
+    );
     digest.update([provider.usage_query.enabled as u8]);
     digest.finalize().into()
 }
@@ -256,6 +455,13 @@ struct HttpRequest {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ProviderAdapter {
+    DeepSeek,
+    StepFun,
+    StepFunIntl,
+    SiliconFlowCn,
+    SiliconFlowEn,
+    OpenRouter,
+    Novita,
     Kimi,
     Zhipu,
     MiniMax,
@@ -275,6 +481,7 @@ struct PreparedRequest {
 struct PreparedQuery {
     primary: PreparedRequest,
     fallback: Option<PreparedRequest>,
+    timeout: Duration,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -287,6 +494,9 @@ enum QueryFailureKind {
 #[derive(Debug)]
 struct QueryFailure {
     kind: QueryFailureKind,
+    // 确定性失败(鉴权/配置/脚本错误)清快照立即透出;瞬时失败(网络、
+    // 5xx、429)保留上次成功值标 isStale。与前端展示语义耦合,勿随意改判。
+    deterministic: bool,
     message: String,
 }
 
@@ -294,9 +504,29 @@ impl QueryFailure {
     fn new(kind: QueryFailureKind, message: impl Into<String>) -> Self {
         Self {
             kind,
+            deterministic: !matches!(kind, QueryFailureKind::Transient),
             message: message.into(),
         }
     }
+
+    fn http(status: reqwest::StatusCode, message: impl Into<String>) -> Self {
+        Self {
+            kind: QueryFailureKind::Soft,
+            deterministic: deterministic_http_status(status),
+            message: message.into(),
+        }
+    }
+}
+
+// 4xx 通常是鉴权/配置错(确定性),但超时/限流类除外:408/425/429 按瞬时处理。
+fn deterministic_http_status(status: reqwest::StatusCode) -> bool {
+    status.is_client_error()
+        && !matches!(
+            status,
+            reqwest::StatusCode::REQUEST_TIMEOUT
+                | reqwest::StatusCode::TOO_EARLY
+                | reqwest::StatusCode::TOO_MANY_REQUESTS
+        )
 }
 
 #[derive(Debug)]
@@ -329,17 +559,16 @@ fn prepare_query(provider: &StoredProvider) -> Result<PreparedQuery, String> {
         return Err("Usage query is disabled".to_string());
     }
 
-    match provider.usage_query.mode.as_str() {
-        "coding-plan" => prepare_coding_plan_query(provider),
-        "general" => prepare_script_query(provider, GENERAL_SCRIPT, true),
-        "newapi" => prepare_script_query(provider, NEWAPI_SCRIPT, true),
-        "custom" => {
-            if provider.usage_query.script.trim().is_empty() {
-                return Err("Custom usage script is empty".to_string());
-            }
-            prepare_script_query(provider, &provider.usage_query.script, false)
+    let mode = parse_usage_mode(provider.usage_query.mode.as_str())?;
+    match mode {
+        UsageQueryMode::CodingPlan => prepare_coding_plan_query(provider),
+        UsageQueryMode::Balance => prepare_balance_query(provider),
+        UsageQueryMode::General | UsageQueryMode::Newapi | UsageQueryMode::Custom => {
+            let script = effective_script(mode, &provider.usage_query)?
+                .ok_or_else(|| "Usage script is unavailable".to_string())?;
+            // custom 之外的脚本模式强制与 Base URL 同源(HTTPS 由同源校验连带保证)。
+            prepare_script_query(provider, script, mode != UsageQueryMode::Custom)
         }
-        _ => Err("Unsupported usage query mode".to_string()),
     }
 }
 
@@ -353,8 +582,13 @@ fn prepare_script_query(
     } else {
         provider.usage_query.base_url.trim()
     };
+    let api_key = if provider.usage_query.api_key.trim().is_empty() {
+        provider.api_key.as_str()
+    } else {
+        provider.usage_query.api_key.as_str()
+    };
     let variables = ScriptVariables {
-        api_key: provider.api_key.clone(),
+        api_key: api_key.to_string(),
         base_url: base_url.trim_end_matches('/').to_string(),
         access_token: provider.usage_query.access_token.clone(),
         user_id: provider.usage_query.user_id.clone(),
@@ -373,11 +607,117 @@ fn prepare_script_query(
             script: Some((script.to_string(), variables)),
         },
         fallback: None,
+        timeout: resolve_timeout(&provider.usage_query),
     })
 }
 
-fn prepare_coding_plan_query(provider: &StoredProvider) -> Result<PreparedQuery, String> {
+fn prepare_balance_query(provider: &StoredProvider) -> Result<PreparedQuery, String> {
+    if provider.api_key.trim().is_empty() {
+        return Err("Provider API key is not configured".to_string());
+    }
     let base = validate_destination(&provider.base_url)?;
+    if base.scheme() != "https" {
+        return Err("Built-in usage adapters require HTTPS".to_string());
+    }
+    let host = base.host_str().unwrap_or_default().to_ascii_lowercase();
+    let (adapter, endpoint) = match host.as_str() {
+        "api.deepseek.com" => (
+            ProviderAdapter::DeepSeek,
+            "https://api.deepseek.com/user/balance",
+        ),
+        // 国内站(CNY)与国际站(USD)是两套独立账号体系,按 host 直连各自端点。
+        "api.stepfun.com" => (
+            ProviderAdapter::StepFun,
+            "https://api.stepfun.com/v1/accounts",
+        ),
+        "api.stepfun.ai" => (
+            ProviderAdapter::StepFunIntl,
+            "https://api.stepfun.ai/v1/accounts",
+        ),
+        "api.siliconflow.cn" => (
+            ProviderAdapter::SiliconFlowCn,
+            "https://api.siliconflow.cn/v1/user/info",
+        ),
+        "api.siliconflow.com" => (
+            ProviderAdapter::SiliconFlowEn,
+            "https://api.siliconflow.com/v1/user/info",
+        ),
+        "openrouter.ai" => (
+            ProviderAdapter::OpenRouter,
+            "https://openrouter.ai/api/v1/credits",
+        ),
+        "api.novita.ai" => (
+            ProviderAdapter::Novita,
+            "https://api.novita.ai/v3/user/balance",
+        ),
+        _ => return Err("No balance adapter matches this provider".to_string()),
+    };
+    let request = bearer_request(endpoint, &provider.api_key)?;
+    Ok(single_request_query(
+        request,
+        adapter,
+        resolve_timeout(&provider.usage_query),
+    ))
+}
+
+fn prepare_coding_plan_query(provider: &StoredProvider) -> Result<PreparedQuery, String> {
+    let timeout = resolve_timeout(&provider.usage_query);
+    let plan = provider
+        .usage_query
+        .coding_plan_provider
+        .trim()
+        .to_ascii_lowercase();
+
+    // 智谱团队套餐:base_url 与个人版相同无法自动区分,必须显式选择路由。
+    // 固定国内站,quota 同路径 + `?type=2` + 组织/项目请求头;响应 shape 与
+    // 个人版一致,复用 Zhipu 解析器(对齐 cc-switch query_zhipu_team)。
+    if plan == "zhipu_team" {
+        let organization = provider.usage_query.team_organization_id.trim();
+        let project = provider.usage_query.team_project_id.trim();
+        if provider.api_key.trim().is_empty() || organization.is_empty() || project.is_empty() {
+            return Err(
+                "Zhipu team plan needs the API key + organization ID + project ID".to_string(),
+            );
+        }
+        let mut request = raw_authorization_request(
+            "https://open.bigmodel.cn/api/monitor/usage/quota/limit?type=2",
+            &provider.api_key,
+        )?;
+        request.headers.insert(
+            "bigmodel-organization".to_string(),
+            organization.to_string(),
+        );
+        request
+            .headers
+            .insert("bigmodel-project".to_string(), project.to_string());
+        request
+            .headers
+            .insert("Content-Type".to_string(), "application/json".to_string());
+        request
+            .headers
+            .insert("Accept-Language".to_string(), "en-US,en".to_string());
+        return Ok(single_request_query(
+            request,
+            ProviderAdapter::Zhipu,
+            timeout,
+        ));
+    }
+
+    // ZenMux 支持查询专用 baseUrl/apiKey 覆盖(cc-switch 同款);其余供应商
+    // 一律用供应商自身凭据与地址。
+    let zenmux = plan == "zenmux";
+    let base_source = if zenmux && !provider.usage_query.base_url.trim().is_empty() {
+        provider.usage_query.base_url.trim()
+    } else {
+        provider.base_url.as_str()
+    };
+    let api_key = if zenmux && !provider.usage_query.api_key.trim().is_empty() {
+        provider.usage_query.api_key.as_str()
+    } else {
+        provider.api_key.as_str()
+    };
+
+    let base = validate_destination(base_source)?;
     if base.scheme() != "https" {
         return Err("Built-in usage adapters require HTTPS".to_string());
     }
@@ -390,14 +730,14 @@ fn prepare_coding_plan_query(provider: &StoredProvider) -> Result<PreparedQuery,
         }
         let now = chrono::Utc::now();
         let primary = build_volcengine_request(
-            &provider.base_url,
+            base_source,
             &provider.usage_query.access_key_id,
             &provider.usage_query.secret_access_key,
             "GetAFPUsage",
             now,
         )?;
         let fallback = build_volcengine_request(
-            &provider.base_url,
+            base_source,
             &provider.usage_query.access_key_id,
             &provider.usage_query.secret_access_key,
             "GetCodingPlanUsage",
@@ -414,55 +754,57 @@ fn prepare_coding_plan_query(provider: &StoredProvider) -> Result<PreparedQuery,
                 adapter: ProviderAdapter::VolcengineCoding,
                 script: None,
             }),
+            timeout,
         });
     }
-    if provider.api_key.trim().is_empty() {
+    if api_key.trim().is_empty() {
         return Err("Provider API key is not configured".to_string());
     }
 
     let (adapter, request) = match host.as_str() {
         "api.kimi.com" if base.path().contains("/coding") => (
             ProviderAdapter::Kimi,
-            bearer_request("https://api.kimi.com/coding/v1/usages", &provider.api_key)?,
+            bearer_request("https://api.kimi.com/coding/v1/usages", api_key)?,
         ),
         "open.bigmodel.cn" => (
             ProviderAdapter::Zhipu,
             raw_authorization_request(
                 "https://open.bigmodel.cn/api/monitor/usage/quota/limit",
-                &provider.api_key,
+                api_key,
             )?,
         ),
         "api.z.ai" => (
             ProviderAdapter::Zhipu,
-            raw_authorization_request(
-                "https://api.z.ai/api/monitor/usage/quota/limit",
-                &provider.api_key,
-            )?,
+            raw_authorization_request("https://api.z.ai/api/monitor/usage/quota/limit", api_key)?,
         ),
         "api.minimaxi.com" => (
             ProviderAdapter::MiniMax,
             bearer_request(
                 "https://api.minimaxi.com/v1/api/openplatform/coding_plan/remains",
-                &provider.api_key,
+                api_key,
             )?,
         ),
         "api.minimax.io" => (
             ProviderAdapter::MiniMax,
             bearer_request(
                 "https://api.minimax.io/v1/api/openplatform/coding_plan/remains",
-                &provider.api_key,
+                api_key,
             )?,
         ),
         "api.zenmux.com" => (
             ProviderAdapter::ZenMux,
-            bearer_request(base.as_str(), &provider.api_key)?,
+            bearer_request(base.as_str(), api_key)?,
         ),
         _ => return Err("No Coding Plan adapter matches this provider".to_string()),
     };
-    Ok(single_request_query(request, adapter))
+    Ok(single_request_query(request, adapter, timeout))
 }
 
-fn single_request_query(request: HttpRequest, adapter: ProviderAdapter) -> PreparedQuery {
+fn single_request_query(
+    request: HttpRequest,
+    adapter: ProviderAdapter,
+    timeout: Duration,
+) -> PreparedQuery {
     PreparedQuery {
         primary: PreparedRequest {
             request,
@@ -470,6 +812,7 @@ fn single_request_query(request: HttpRequest, adapter: ProviderAdapter) -> Prepa
             script: None,
         },
         fallback: None,
+        timeout,
     }
 }
 
@@ -515,24 +858,20 @@ fn validate_destination(raw: &str) -> Result<Url, String> {
     Ok(url)
 }
 
-async fn execute_prepared_query(query: &PreparedQuery) -> Result<Vec<ProviderUsageEntry>, String> {
-    match execute_prepared_request(&query.primary).await {
+async fn execute_prepared_query(query: &PreparedQuery) -> Result<Vec<UsageData>, QueryFailure> {
+    match execute_prepared_request(&query.primary, query.timeout).await {
         Ok(primary) if !primary.is_empty() => Ok(primary),
         Ok(primary) => match &query.fallback {
-            Some(fallback) => execute_prepared_request(fallback)
-                .await
-                .map_err(|failure| failure.message),
+            Some(fallback) => execute_prepared_request(fallback, query.timeout).await,
             None => Ok(primary),
         },
         Err(failure) => {
             if should_try_fallback(failure.kind) {
                 if let Some(fallback) = &query.fallback {
-                    return execute_prepared_request(fallback)
-                        .await
-                        .map_err(|failure| failure.message);
+                    return execute_prepared_request(fallback, query.timeout).await;
                 }
             }
-            Err(failure.message)
+            Err(failure)
         }
     }
 }
@@ -543,8 +882,9 @@ fn should_try_fallback(kind: QueryFailureKind) -> bool {
 
 async fn execute_prepared_request(
     prepared: &PreparedRequest,
-) -> Result<Vec<ProviderUsageEntry>, QueryFailure> {
-    let response = send_bounded_request(&prepared.request).await?;
+    timeout: Duration,
+) -> Result<Vec<UsageData>, QueryFailure> {
+    let response = send_bounded_request(&prepared.request, timeout).await?;
     let body = serde_json::from_slice::<Value>(&response.body).ok();
     let volcengine = matches!(
         prepared.adapter,
@@ -557,7 +897,14 @@ async fn execute_prepared_request(
                 QueryFailureKind::Soft => "Volcengine usage API rejected the request",
                 QueryFailureKind::Transient => "Volcengine usage request failed",
             };
-            return Err(QueryFailure::new(kind, message));
+            let mut failure = QueryFailure::new(kind, message);
+            // 火山错误体只区分 Auth/Soft(Soft 才触发 fallback);限流/服务端故障
+            // (429/5xx + FlowLimitExceeded 等错误体)的确定性以 HTTP 状态为准,
+            // 保住 keep-last-good 快照。
+            if kind != QueryFailureKind::Auth && !response.status.is_success() {
+                failure.deterministic = deterministic_http_status(response.status);
+            }
+            return Err(failure);
         }
     }
     if response.status == reqwest::StatusCode::UNAUTHORIZED
@@ -569,8 +916,8 @@ async fn execute_prepared_request(
         ));
     }
     if !response.status.is_success() {
-        return Err(QueryFailure::new(
-            QueryFailureKind::Soft,
+        return Err(QueryFailure::http(
+            response.status,
             format!("Usage query failed with HTTP {}", response.status),
         ));
     }
@@ -619,14 +966,25 @@ fn classify_volcengine_error(body: &Value) -> Option<QueryFailureKind> {
     })
 }
 
-async fn send_bounded_request(request: &HttpRequest) -> Result<HttpResponse, QueryFailure> {
+async fn send_bounded_request(
+    request: &HttpRequest,
+    timeout: Duration,
+) -> Result<HttpResponse, QueryFailure> {
     // 出网统一走应用代理配置(显式 no_proxy 语义,代理未启用即直连);本地
     // 与公网地址均默认放行,代理配置无效时 fail fast。
-    let client = crate::services::system_proxy::async_client_builder()
-        .map_err(|message| QueryFailure::new(QueryFailureKind::Transient, message))?
+    // 例外:回环目标(localhost/127.x/::1)永远直连——代理侧的 localhost 指向
+    // 代理所在机器,经代理必然打不到本机服务(本地 NewAPI/one-api 中转是用量
+    // 查询的常见目标)。
+    let builder = if is_loopback_destination(&request.url) {
+        reqwest::Client::builder().no_proxy()
+    } else {
+        crate::services::system_proxy::async_client_builder()
+            .map_err(|message| QueryFailure::new(QueryFailureKind::Transient, message))?
+    };
+    let client = builder
         .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(CONNECT_TIMEOUT)
-        .timeout(REQUEST_TIMEOUT)
+        .connect_timeout(CONNECT_TIMEOUT.min(timeout))
+        .timeout(timeout)
         .build()
         .map_err(|_| {
             QueryFailure::new(
@@ -652,6 +1010,20 @@ async fn send_bounded_request(request: &HttpRequest) -> Result<HttpResponse, Que
     Ok(HttpResponse { status, body })
 }
 
+fn is_loopback_destination(url: &Url) -> bool {
+    let Some(host) = url.host_str() else {
+        return false;
+    };
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.trim_start_matches('[')
+        .trim_end_matches(']')
+        .parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
+}
+
 async fn read_limited_response(response: reqwest::Response) -> Result<Vec<u8>, String> {
     if response
         .content_length()
@@ -674,8 +1046,56 @@ async fn read_limited_response(response: reqwest::Response) -> Result<Vec<u8>, S
 fn parse_adapter_response(
     adapter: ProviderAdapter,
     body: &Value,
-) -> Result<Vec<ProviderUsageEntry>, String> {
+) -> Result<Vec<UsageData>, String> {
     let entries = match adapter {
+        ProviderAdapter::DeepSeek => parse_deepseek(body)?,
+        ProviderAdapter::StepFun => vec![balance_data(
+            "StepFun",
+            required_number(body, "balance")?,
+            "CNY",
+        )],
+        ProviderAdapter::StepFunIntl => vec![balance_data(
+            "StepFun",
+            required_number(body, "balance")?,
+            "USD",
+        )],
+        ProviderAdapter::SiliconFlowCn | ProviderAdapter::SiliconFlowEn => {
+            let data = body
+                .get("data")
+                .ok_or_else(|| "SiliconFlow response is missing data".to_string())?;
+            vec![balance_data(
+                "SiliconFlow",
+                required_number(data, "totalBalance")?,
+                if adapter == ProviderAdapter::SiliconFlowCn {
+                    "CNY"
+                } else {
+                    "USD"
+                },
+            )]
+        }
+        ProviderAdapter::OpenRouter => {
+            let data = body.get("data").unwrap_or(body);
+            let total = required_number(data, "total_credits")?;
+            let used = required_number(data, "total_usage")?;
+            let remaining = total - used;
+            vec![UsageData {
+                total: Some(total),
+                used: Some(used),
+                ..invalid_when(
+                    balance_data("OpenRouter", remaining, "USD"),
+                    remaining <= 0.0,
+                    "No credits remaining",
+                )
+            }]
+        }
+        ProviderAdapter::Novita => {
+            let remaining = required_number(body, "availableBalance")? / 10_000.0;
+            vec![invalid_when(
+                balance_data("Novita", remaining, "USD"),
+                remaining <= 0.0,
+                "No balance remaining",
+            )]
+        }
         ProviderAdapter::Kimi => parse_kimi(body),
         ProviderAdapter::Zhipu => parse_zhipu(body),
         ProviderAdapter::MiniMax => parse_minimax(body),
@@ -690,28 +1110,61 @@ fn parse_adapter_response(
     Ok(entries)
 }
 
-fn parse_kimi(body: &Value) -> Vec<ProviderUsageEntry> {
+fn parse_deepseek(body: &Value) -> Result<Vec<UsageData>, String> {
+    // 对齐 cc-switch:顶层 is_available=false 表示账户不可用(欠费/暂停)。
+    let unavailable = body.get("is_available").and_then(Value::as_bool) == Some(false);
+    let infos = body
+        .get("balance_infos")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "DeepSeek response is missing balance information".to_string())?;
+    infos
+        .iter()
+        .map(|info| {
+            let unit = info
+                .get("currency")
+                .and_then(Value::as_str)
+                .filter(|unit| !unit.is_empty())
+                .ok_or_else(|| "DeepSeek response has an invalid currency".to_string())?;
+            Ok(invalid_when(
+                balance_data("DeepSeek", required_number(info, "total_balance")?, unit),
+                unavailable,
+                "Insufficient balance",
+            ))
+        })
+        .collect()
+}
+
+fn parse_kimi(body: &Value) -> Vec<UsageData> {
     let mut entries = Vec::new();
     if let Some(limits) = body.get("limits").and_then(Value::as_array) {
         for limit in limits {
-            if let Some(remaining) = limit
-                .get("detail")
-                .and_then(|detail| optional_number(detail, "remaining"))
-            {
-                entries.push(quota_entry("5-hour remaining", remaining, None));
+            let Some(detail) = limit.get("detail") else {
+                continue;
+            };
+            if let Some(remaining) = optional_number(detail, "remaining") {
+                entries.push(window_usage(
+                    WINDOW_5H,
+                    remaining,
+                    optional_number(detail, "limit"),
+                    None,
+                ));
             }
         }
     }
-    if let Some(remaining) = body
-        .get("usage")
-        .and_then(|usage| optional_number(usage, "remaining"))
-    {
-        entries.push(quota_entry("Weekly remaining", remaining, None));
+    if let Some(usage) = body.get("usage") {
+        if let Some(remaining) = optional_number(usage, "remaining") {
+            entries.push(window_usage(
+                WINDOW_WEEKLY,
+                remaining,
+                optional_number(usage, "limit"),
+                None,
+            ));
+        }
     }
     entries
 }
 
-fn parse_zhipu(body: &Value) -> Vec<ProviderUsageEntry> {
+fn parse_zhipu(body: &Value) -> Vec<UsageData> {
     let Some(limits) = body
         .get("data")
         .and_then(|data| data.get("limits"))
@@ -728,17 +1181,17 @@ fn parse_zhipu(body: &Value) -> Vec<ProviderUsageEntry> {
         })
         .filter_map(|item| {
             let used = optional_number(item, "percentage")?;
-            let label = match item.get("unit").and_then(Value::as_i64) {
-                Some(3) => "5-hour remaining",
-                Some(6) => "Weekly remaining",
-                _ => "Quota remaining",
+            let token = match item.get("unit").and_then(Value::as_i64) {
+                Some(3) => WINDOW_5H,
+                Some(6) => WINDOW_WEEKLY,
+                _ => WINDOW_QUOTA,
             };
-            Some(quota_entry(label, 100.0 - used, Some("%")))
+            Some(percent_usage(token, 100.0 - used))
         })
         .collect()
 }
 
-fn parse_minimax(body: &Value) -> Vec<ProviderUsageEntry> {
+fn parse_minimax(body: &Value) -> Vec<UsageData> {
     let Some(remains) = body.get("model_remains").and_then(Value::as_array) else {
         return Vec::new();
     };
@@ -751,17 +1204,17 @@ fn parse_minimax(body: &Value) -> Vec<ProviderUsageEntry> {
     };
     let mut entries = Vec::new();
     if let Some(remaining) = optional_number(general, "current_interval_remaining_percent") {
-        entries.push(quota_entry("5-hour remaining", remaining, Some("%")));
+        entries.push(percent_usage(WINDOW_5H, remaining));
     }
     if general.get("current_weekly_status").and_then(Value::as_i64) == Some(1) {
         if let Some(remaining) = optional_number(general, "current_weekly_remaining_percent") {
-            entries.push(quota_entry("Weekly remaining", remaining, Some("%")));
+            entries.push(percent_usage(WINDOW_WEEKLY, remaining));
         }
     }
     entries
 }
 
-fn parse_zenmux(body: &Value) -> Result<Vec<ProviderUsageEntry>, String> {
+fn parse_zenmux(body: &Value) -> Result<Vec<UsageData>, String> {
     if body.get("success").and_then(Value::as_bool) != Some(true) {
         return Err("ZenMux usage query failed".to_string());
     }
@@ -769,27 +1222,24 @@ fn parse_zenmux(body: &Value) -> Result<Vec<ProviderUsageEntry>, String> {
         return Ok(Vec::new());
     };
     let mut entries = Vec::new();
-    for (field, label) in [
-        ("quota_5_hour", "5-hour remaining"),
-        ("quota_7_day", "Weekly remaining"),
-    ] {
+    for (field, token) in [("quota_5_hour", WINDOW_5H), ("quota_7_day", WINDOW_WEEKLY)] {
         if let Some(used) = data
             .get(field)
             .and_then(|quota| optional_number(quota, "usage_percentage"))
         {
-            entries.push(quota_entry(label, (1.0 - used) * 100.0, Some("%")));
+            entries.push(percent_usage(token, (1.0 - used) * 100.0));
         }
     }
     Ok(entries)
 }
 
-fn parse_volcengine_afp(body: &Value) -> Vec<ProviderUsageEntry> {
+fn parse_volcengine_afp(body: &Value) -> Vec<UsageData> {
     let result = body.get("Result").unwrap_or(body);
     let mut entries = Vec::new();
-    for (field, label) in [
-        ("AFPFiveHour", "5-hour remaining"),
-        ("AFPWeekly", "Weekly remaining"),
-        ("AFPMonthly", "Monthly remaining"),
+    for (field, token) in [
+        ("AFPFiveHour", WINDOW_5H),
+        ("AFPWeekly", WINDOW_WEEKLY),
+        ("AFPMonthly", WINDOW_MONTHLY),
     ] {
         let Some(window) = result.get(field) else {
             continue;
@@ -801,12 +1251,12 @@ fn parse_volcengine_afp(body: &Value) -> Vec<ProviderUsageEntry> {
             continue;
         }
         let used = optional_number(window, "Used").unwrap_or(0.0);
-        entries.push(quota_entry(label, quota - used, None));
+        entries.push(window_usage(token, quota - used, Some(quota), None));
     }
     entries
 }
 
-fn parse_volcengine_coding(body: &Value) -> Vec<ProviderUsageEntry> {
+fn parse_volcengine_coding(body: &Value) -> Vec<UsageData> {
     let result = body.get("Result").unwrap_or(body);
     let Some(usages) = result
         .get("QuotaUsage")
@@ -824,26 +1274,61 @@ fn parse_volcengine_coding(body: &Value) -> Vec<ProviderUsageEntry> {
                 .or_else(|| item.get("Type"))
                 .or_else(|| item.get("Period"))
                 .and_then(Value::as_str)?;
-            let label = match level.to_ascii_lowercase().as_str() {
-                "session" | "5h" | "fivehour" | "five_hour" | "rolling_5h" => "5-hour remaining",
-                "weekly" | "week" | "7d" => "Weekly remaining",
-                "monthly" | "month" => "Monthly remaining",
+            let token = match level.to_ascii_lowercase().as_str() {
+                "session" | "5h" | "fivehour" | "five_hour" | "rolling_5h" => WINDOW_5H,
+                "weekly" | "week" | "7d" => WINDOW_WEEKLY,
+                "monthly" | "month" => WINDOW_MONTHLY,
                 _ => return None,
             };
             let used = optional_number(item, "Percent")
                 .or_else(|| optional_number(item, "UsedPercent"))
                 .or_else(|| optional_number(item, "UsagePercent"))?;
-            Some(quota_entry(label, 100.0 - used, Some("%")))
+            Some(percent_usage(token, 100.0 - used))
         })
         .collect()
 }
 
-fn quota_entry(label: &str, value: f64, unit: Option<&str>) -> ProviderUsageEntry {
-    ProviderUsageEntry {
-        label: label.to_string(),
-        value: format_number(value),
+// 配额窗口用稳定 token 作 planName(前端 i18n 映射;未识别 token 原样展示)。
+const WINDOW_5H: &str = "window:5h";
+const WINDOW_WEEKLY: &str = "window:weekly";
+const WINDOW_MONTHLY: &str = "window:monthly";
+const WINDOW_QUOTA: &str = "window:quota";
+
+fn window_usage(token: &str, remaining: f64, total: Option<f64>, unit: Option<&str>) -> UsageData {
+    UsageData {
+        plan_name: Some(token.to_string()),
+        remaining: Some(remaining),
+        total,
+        used: total.map(|total| total - remaining),
         unit: unit.map(str::to_string),
+        ..UsageData::default()
     }
+}
+
+fn percent_usage(token: &str, remaining: f64) -> UsageData {
+    window_usage(token, remaining, Some(100.0), Some("%"))
+}
+
+fn balance_data(brand: &str, remaining: f64, unit: &str) -> UsageData {
+    UsageData {
+        plan_name: Some(brand.to_string()),
+        remaining: Some(remaining),
+        unit: Some(unit.to_string()),
+        ..UsageData::default()
+    }
+}
+
+fn invalid_when(mut data: UsageData, invalid: bool, message: &str) -> UsageData {
+    if invalid {
+        data.is_valid = Some(false);
+        data.invalid_message = Some(message.to_string());
+    }
+    data
+}
+
+fn required_number(value: &Value, field: &str) -> Result<f64, String> {
+    optional_number(value, field)
+        .ok_or_else(|| "Usage query response is missing a number".to_string())
 }
 
 fn optional_number(value: &Value, field: &str) -> Option<f64> {
@@ -852,17 +1337,6 @@ fn optional_number(value: &Value, field: &str) -> Option<f64> {
         .as_f64()
         .or_else(|| value.as_str().and_then(|value| value.parse::<f64>().ok()))?;
     number.is_finite().then_some(number)
-}
-
-fn format_number(value: f64) -> String {
-    if value == 0.0 {
-        return "0".to_string();
-    }
-    let formatted = format!("{value:.6}");
-    formatted
-        .trim_end_matches('0')
-        .trim_end_matches('.')
-        .to_string()
 }
 
 fn build_volcengine_request(
@@ -1005,7 +1479,7 @@ fn extract_script_entries(
     script: &str,
     _variables: &ScriptVariables,
     response: &Value,
-) -> Result<Vec<ProviderUsageEntry>, String> {
+) -> Result<Vec<UsageData>, String> {
     validate_script_size(script)?;
     let rendered = render_script(script, &ScriptVariables::default())?;
     let response_json = serde_json::to_vec(response)
@@ -1166,7 +1640,10 @@ fn validate_script_request(request: ScriptRequest) -> Result<HttpRequest, String
     })
 }
 
-fn parse_script_result(result: &Value) -> Result<Vec<ProviderUsageEntry>, String> {
+// extractor 返回值校验:对齐 cc-switch validate_single_usage——单对象自动包
+// 数组、八字段全可选、null 视为缺失、类型不符逐字段报错;total 允许 -1(前端
+// 渲染 ∞)。完全空的条目视为脚本缺陷。
+fn parse_script_result(result: &Value) -> Result<Vec<UsageData>, String> {
     let items = if let Some(items) = result.as_array() {
         if items.is_empty() {
             return Err("Usage script returned an empty result".to_string());
@@ -1178,41 +1655,70 @@ fn parse_script_result(result: &Value) -> Result<Vec<ProviderUsageEntry>, String
     if items.len() > MAX_ENTRIES {
         return Err("Usage script returned too many entries".to_string());
     }
-    items
-        .into_iter()
-        .map(|item| {
-            let object = item
-                .as_object()
-                .ok_or_else(|| "Usage script result entries must be objects".to_string())?;
-            let remaining = object
-                .get("remaining")
-                .and_then(Value::as_f64)
-                .filter(|value| value.is_finite())
-                .ok_or_else(|| {
-                    "Usage script result must include a finite remaining value".to_string()
-                })?;
-            let label = object
-                .get("label")
-                .or_else(|| object.get("planName"))
-                .and_then(Value::as_str)
-                .unwrap_or("Remaining");
-            let unit = object.get("unit").and_then(|value| {
-                if value.is_null() {
-                    None
-                } else {
-                    value.as_str()
-                }
-            });
-            if label.is_empty() || label.len() > 128 || unit.is_some_and(|unit| unit.len() > 64) {
-                return Err("Usage script result contains an invalid label or unit".to_string());
+    items.into_iter().map(parse_script_usage).collect()
+}
+
+fn parse_script_usage(item: &Value) -> Result<UsageData, String> {
+    let object = item
+        .as_object()
+        .ok_or_else(|| "Usage script result entries must be objects".to_string())?;
+    let data = UsageData {
+        // 兼容旧脚本的 label 字段;planName 优先。
+        plan_name: script_string(object, "planName", 128)?.or(script_string(object, "label", 128)?),
+        extra: script_string(object, "extra", 256)?,
+        is_valid: script_bool(object, "isValid")?,
+        invalid_message: script_string(object, "invalidMessage", 256)?,
+        total: script_number(object, "total")?,
+        used: script_number(object, "used")?,
+        remaining: script_number(object, "remaining")?,
+        unit: script_string(object, "unit", 64)?,
+    };
+    if data == UsageData::default() {
+        return Err("Usage script result entry is empty".to_string());
+    }
+    Ok(data)
+}
+
+fn script_string(
+    object: &serde_json::Map<String, Value>,
+    field: &str,
+    max_len: usize,
+) -> Result<Option<String>, String> {
+    match object.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) => {
+            if value.len() > max_len {
+                return Err(format!("Usage script field `{field}` is too long"));
             }
-            Ok(ProviderUsageEntry {
-                label: label.to_string(),
-                value: format_number(remaining),
-                unit: unit.map(str::to_string),
-            })
-        })
-        .collect()
+            Ok((!value.is_empty()).then(|| value.clone()))
+        }
+        Some(_) => Err(format!("Usage script field `{field}` must be a string")),
+    }
+}
+
+fn script_number(
+    object: &serde_json::Map<String, Value>,
+    field: &str,
+) -> Result<Option<f64>, String> {
+    match object.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value
+            .as_f64()
+            .filter(|value| value.is_finite())
+            .map(Some)
+            .ok_or_else(|| format!("Usage script field `{field}` must be a finite number")),
+    }
+}
+
+fn script_bool(
+    object: &serde_json::Map<String, Value>,
+    field: &str,
+) -> Result<Option<bool>, String> {
+    match object.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(value)) => Ok(Some(*value)),
+        Some(_) => Err(format!("Usage script field `{field}` must be a boolean")),
+    }
 }
 
 fn now_millis() -> i64 {
@@ -1227,6 +1733,33 @@ mod tests {
     use super::*;
     use serde_json::json;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[test]
+    fn loopback_destinations_bypass_the_app_proxy() {
+        for raw in [
+            "http://localhost:3457/account/summary",
+            "http://LOCALHOST:3457/x",
+            "http://127.0.0.1:8080/x",
+            "http://127.8.8.8/x",
+            "https://[::1]:9000/x",
+        ] {
+            assert!(
+                is_loopback_destination(&Url::parse(raw).expect("url")),
+                "{raw} must be treated as loopback",
+            );
+        }
+        for raw in [
+            "https://api.example.test/x",
+            "http://192.168.1.10:3000/x",
+            "http://10.0.0.1/x",
+            "http://localhost.example.test/x",
+        ] {
+            assert!(
+                !is_loopback_destination(&Url::parse(raw).expect("url")),
+                "{raw} must not be treated as loopback",
+            );
+        }
+    }
 
     #[test]
     fn destination_policy_rejects_credentials_and_non_http_schemes() {
@@ -1257,7 +1790,7 @@ mod tests {
             body: None,
         };
 
-        let response = send_bounded_request(&request)
+        let response = send_bounded_request(&request, Duration::from_secs(5))
             .await
             .expect("redirect response");
         assert_eq!(response.status, reqwest::StatusCode::FOUND);
@@ -1280,10 +1813,11 @@ mod tests {
             body: None,
         };
 
-        let failure = send_bounded_request(&request)
+        let failure = send_bounded_request(&request, Duration::from_secs(5))
             .await
             .expect_err("oversized response must fail");
         assert_eq!(failure.kind, QueryFailureKind::Transient);
+        assert!(!failure.deterministic);
         assert_eq!(failure.message, "Usage query response is too large");
         server.await.expect("server task");
     }
@@ -1321,11 +1855,7 @@ mod tests {
             "provider-a",
             identity,
             ProviderUsageResult {
-                entries: vec![ProviderUsageEntry {
-                    label: "Balance".to_string(),
-                    value: "4.20".to_string(),
-                    unit: Some("USD".to_string()),
-                }],
+                data: vec![balance_data("Balance", 4.2, "USD")],
                 queried_at: Some(123),
                 error: None,
                 is_stale: false,
@@ -1334,7 +1864,7 @@ mod tests {
         cache.record_failure("provider-a", identity, "request timed out");
 
         let result = cache.get("provider-a", &identity).expect("cached result");
-        assert_eq!(result.entries[0].value, "4.20");
+        assert_eq!(result.data[0].remaining, Some(4.2));
         assert_eq!(result.error.as_deref(), Some("request timed out"));
         assert!(result.is_stale);
     }
@@ -1345,7 +1875,7 @@ mod tests {
         let identity = [7_u8; 32];
         let result = cache.record_failure("provider-a", identity, "request failed");
 
-        assert!(result.entries.is_empty());
+        assert!(result.data.is_empty());
         assert_eq!(result.error.as_deref(), Some("request failed"));
         assert!(!result.is_stale);
         assert!(cache.get("provider-a", &identity).is_none());
@@ -1360,11 +1890,7 @@ mod tests {
             "provider-a",
             original_identity,
             ProviderUsageResult {
-                entries: vec![ProviderUsageEntry {
-                    label: "Balance".to_string(),
-                    value: "4.20".to_string(),
-                    unit: Some("USD".to_string()),
-                }],
+                data: vec![balance_data("Balance", 4.2, "USD")],
                 queried_at: Some(123),
                 error: None,
                 is_stale: false,
@@ -1390,6 +1916,29 @@ mod tests {
     }
 
     #[test]
+    fn query_identity_tracks_credential_overrides_timeout_and_effective_script() {
+        let base = test_provider("general", "https://api.example.test/v1");
+        let base_identity = provider_query_identity(&base);
+
+        let mut key_override = base.clone();
+        key_override.usage_query.api_key = "query-only-secret".to_string();
+        assert_ne!(base_identity, provider_query_identity(&key_override));
+
+        let mut timeout = base.clone();
+        timeout.usage_query.timeout_secs = Some(20.0);
+        assert_ne!(base_identity, provider_query_identity(&timeout));
+
+        // general 空脚本走内置预设:显式落一份与预设一致的脚本不改变 identity,
+        // 改动脚本内容才改变。
+        let mut explicit = base.clone();
+        explicit.usage_query.script = GENERAL_SCRIPT.to_string();
+        assert_eq!(base_identity, provider_query_identity(&explicit));
+        let mut edited = base.clone();
+        edited.usage_query.script = GENERAL_SCRIPT.replace("USD", "CNY");
+        assert_ne!(base_identity, provider_query_identity(&edited));
+    }
+
+    #[test]
     fn failure_only_results_are_not_reusable_cache_entries() {
         let mut cache = UsageCache::default();
         let provider = test_provider("coding-plan", "https://api.kimi.com/coding/v1");
@@ -1397,9 +1946,153 @@ mod tests {
 
         let result = cache.record_failure("provider-a", identity, "request failed");
 
-        assert!(result.entries.is_empty());
+        assert!(result.data.is_empty());
         assert_eq!(result.error.as_deref(), Some("request failed"));
         assert!(cache.get("provider-a", &identity).is_none());
+    }
+
+    #[test]
+    fn balance_adapters_build_expected_endpoints() {
+        let cases = [
+            (
+                "https://api.deepseek.com/v1",
+                ProviderAdapter::DeepSeek,
+                "https://api.deepseek.com/user/balance",
+            ),
+            (
+                "https://api.stepfun.com/v1",
+                ProviderAdapter::StepFun,
+                "https://api.stepfun.com/v1/accounts",
+            ),
+            // 国际站独立账号体系:不得把 .ai 的 Key 发往国内站端点。
+            (
+                "https://api.stepfun.ai/v1",
+                ProviderAdapter::StepFunIntl,
+                "https://api.stepfun.ai/v1/accounts",
+            ),
+            (
+                "https://api.siliconflow.cn/v1",
+                ProviderAdapter::SiliconFlowCn,
+                "https://api.siliconflow.cn/v1/user/info",
+            ),
+            (
+                "https://api.siliconflow.com/v1",
+                ProviderAdapter::SiliconFlowEn,
+                "https://api.siliconflow.com/v1/user/info",
+            ),
+            (
+                "https://openrouter.ai/api/v1",
+                ProviderAdapter::OpenRouter,
+                "https://openrouter.ai/api/v1/credits",
+            ),
+            (
+                "https://api.novita.ai/v3/openai",
+                ProviderAdapter::Novita,
+                "https://api.novita.ai/v3/user/balance",
+            ),
+        ];
+
+        for (base_url, expected_adapter, expected_url) in cases {
+            let query = test_provider("balance", base_url);
+            let prepared = prepare_query(&query).expect("prepare balance query");
+            assert_eq!(prepared.primary.adapter, expected_adapter);
+            assert_eq!(prepared.primary.request.url.as_str(), expected_url);
+        }
+
+        assert!(prepare_query(&test_provider("balance", "http://api.deepseek.com/v1")).is_err());
+        assert!(prepare_query(&test_provider("balance", "https://api.other.example/v1")).is_err());
+    }
+
+    #[test]
+    fn balance_adapter_responses_are_normalized() {
+        let cases = [
+            (
+                ProviderAdapter::DeepSeek,
+                json!({"balance_infos": [{"currency": "CNY", "total_balance": "12.50"}]}),
+                "DeepSeek",
+                12.5,
+                "CNY",
+            ),
+            (
+                ProviderAdapter::StepFun,
+                json!({"balance": 9.25}),
+                "StepFun",
+                9.25,
+                "CNY",
+            ),
+            (
+                ProviderAdapter::StepFunIntl,
+                json!({"balance": 3.5}),
+                "StepFun",
+                3.5,
+                "USD",
+            ),
+            (
+                ProviderAdapter::SiliconFlowEn,
+                json!({"data": {"totalBalance": "8.75"}}),
+                "SiliconFlow",
+                8.75,
+                "USD",
+            ),
+            (
+                ProviderAdapter::OpenRouter,
+                json!({"data": {"total_credits": 20, "total_usage": 3.5}}),
+                "OpenRouter",
+                16.5,
+                "USD",
+            ),
+            (
+                ProviderAdapter::Novita,
+                json!({"availableBalance": 42_000}),
+                "Novita",
+                4.2,
+                "USD",
+            ),
+        ];
+
+        for (adapter, body, brand, remaining, unit) in cases {
+            let entries = parse_adapter_response(adapter, &body).expect("parse adapter response");
+            assert_eq!(entries[0].plan_name.as_deref(), Some(brand));
+            assert_eq!(entries[0].remaining, Some(remaining));
+            assert_eq!(entries[0].unit.as_deref(), Some(unit));
+            assert_eq!(entries[0].is_valid, None);
+        }
+    }
+
+    #[test]
+    fn balance_adapters_flag_unavailable_and_exhausted_accounts() {
+        // 对齐 cc-switch:DeepSeek is_available=false、OpenRouter/Novita 零余额
+        // 都要带 isValid=false 让前端标红,而不是渲染成正常余额行。
+        let deepseek = parse_adapter_response(
+            ProviderAdapter::DeepSeek,
+            &json!({
+                "is_available": false,
+                "balance_infos": [{"currency": "CNY", "total_balance": "0.00"}]
+            }),
+        )
+        .expect("parse deepseek");
+        assert_eq!(deepseek[0].is_valid, Some(false));
+        assert_eq!(
+            deepseek[0].invalid_message.as_deref(),
+            Some("Insufficient balance")
+        );
+
+        let openrouter = parse_adapter_response(
+            ProviderAdapter::OpenRouter,
+            &json!({"data": {"total_credits": 10, "total_usage": 10}}),
+        )
+        .expect("parse openrouter");
+        assert_eq!(openrouter[0].is_valid, Some(false));
+        assert_eq!(openrouter[0].total, Some(10.0));
+
+        let novita =
+            parse_adapter_response(ProviderAdapter::Novita, &json!({"availableBalance": 0}))
+                .expect("parse novita");
+        assert_eq!(novita[0].is_valid, Some(false));
+        assert_eq!(
+            novita[0].invalid_message.as_deref(),
+            Some("No balance remaining")
+        );
     }
 
     #[test]
@@ -1470,7 +2163,10 @@ mod tests {
                     "limits": [{"detail": {"limit": 100, "remaining": 40}}],
                     "usage": {"limit": 1000, "remaining": 700}
                 }),
-                vec!["40", "700"],
+                vec![
+                    (WINDOW_5H, 40.0, Some(100.0), None),
+                    (WINDOW_WEEKLY, 700.0, Some(1000.0), None),
+                ],
             ),
             (
                 ProviderAdapter::Zhipu,
@@ -1478,7 +2174,10 @@ mod tests {
                     {"type": "TOKENS_LIMIT", "unit": 3, "percentage": 25},
                     {"type": "TOKENS_LIMIT", "unit": 6, "percentage": 60}
                 ]}}),
-                vec!["75", "40"],
+                vec![
+                    (WINDOW_5H, 75.0, Some(100.0), Some("%")),
+                    (WINDOW_WEEKLY, 40.0, Some(100.0), Some("%")),
+                ],
             ),
             (
                 ProviderAdapter::MiniMax,
@@ -1488,7 +2187,10 @@ mod tests {
                     "current_weekly_status": 1,
                     "current_weekly_remaining_percent": 55
                 }]}),
-                vec!["80", "55"],
+                vec![
+                    (WINDOW_5H, 80.0, Some(100.0), Some("%")),
+                    (WINDOW_WEEKLY, 55.0, Some(100.0), Some("%")),
+                ],
             ),
             (
                 ProviderAdapter::ZenMux,
@@ -1496,7 +2198,10 @@ mod tests {
                     "quota_5_hour": {"usage_percentage": 0.2},
                     "quota_7_day": {"usage_percentage": 0.75}
                 }}),
-                vec!["80", "25"],
+                vec![
+                    (WINDOW_5H, 80.0, Some(100.0), Some("%")),
+                    (WINDOW_WEEKLY, 25.0, Some(100.0), Some("%")),
+                ],
             ),
             (
                 ProviderAdapter::VolcengineAfp,
@@ -1504,7 +2209,10 @@ mod tests {
                     "AFPFiveHour": {"Quota": 50, "Used": 12.5},
                     "AFPWeekly": {"Quota": 500, "Used": 150}
                 }}),
-                vec!["37.5", "350"],
+                vec![
+                    (WINDOW_5H, 37.5, Some(50.0), None),
+                    (WINDOW_WEEKLY, 350.0, Some(500.0), None),
+                ],
             ),
             (
                 ProviderAdapter::VolcengineCoding,
@@ -1512,19 +2220,27 @@ mod tests {
                     {"Level": "session", "Percent": 20},
                     {"Level": "weekly", "Percent": 35}
                 ]}}),
-                vec!["80", "65"],
+                vec![
+                    (WINDOW_5H, 80.0, Some(100.0), Some("%")),
+                    (WINDOW_WEEKLY, 65.0, Some(100.0), Some("%")),
+                ],
             ),
         ];
 
         for (adapter, body, expected) in cases {
             let entries = parse_adapter_response(adapter, &body).expect("parse quota response");
-            assert_eq!(
-                entries
-                    .iter()
-                    .map(|entry| entry.value.as_str())
-                    .collect::<Vec<_>>(),
-                expected
-            );
+            let actual = entries
+                .iter()
+                .map(|entry| {
+                    (
+                        entry.plan_name.as_deref().unwrap_or_default(),
+                        entry.remaining.unwrap_or(f64::NAN),
+                        entry.total,
+                        entry.unit.as_deref(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(actual, expected);
         }
     }
 
@@ -1562,7 +2278,7 @@ mod tests {
     }
 
     #[test]
-    fn script_extractor_requires_finite_remaining_values() {
+    fn script_extractor_accepts_optional_fields_and_rejects_bad_types() {
         let script = r#"({
           request: { url: "https://api.example.test/usage", method: "GET" },
           extractor: (response) => response
@@ -1573,19 +2289,47 @@ mod tests {
             &json!({"remaining": 4.2, "unit": "USD"}),
         )
         .expect("valid script result");
-        assert_eq!(valid[0].value, "4.2");
-        assert!(extract_script_entries(
+        assert_eq!(valid[0].remaining, Some(4.2));
+        assert_eq!(valid[0].unit.as_deref(), Some("USD"));
+
+        // 富模型:字段全可选、类型校验、多套餐数组、total=-1 表示无限。
+        let rich = extract_script_entries(
             script,
             &ScriptVariables::default(),
-            &json!({"remaining": "secret"}),
+            &json!([
+                {
+                    "planName": "Pro",
+                    "total": 100,
+                    "used": 30,
+                    "remaining": 70,
+                    "unit": "%",
+                    "extra": "resets 2026-08-01"
+                },
+                {"planName": "Bonus", "total": -1, "remaining": 5},
+                {"isValid": false, "invalidMessage": "expired"}
+            ]),
         )
-        .is_err());
-        assert!(extract_script_entries(
-            script,
-            &ScriptVariables::default(),
-            &json!({"unit": "USD"}),
-        )
-        .is_err());
+        .expect("rich script result");
+        assert_eq!(rich.len(), 3);
+        assert_eq!(rich[0].plan_name.as_deref(), Some("Pro"));
+        assert_eq!(rich[0].used, Some(30.0));
+        assert_eq!(rich[1].total, Some(-1.0));
+        assert_eq!(rich[2].is_valid, Some(false));
+        assert_eq!(rich[2].invalid_message.as_deref(), Some("expired"));
+
+        for invalid in [
+            json!({"remaining": "secret"}),
+            json!({"isValid": "yes"}),
+            json!({"planName": 42}),
+            json!({}),
+            json!([]),
+            json!("remaining"),
+        ] {
+            assert!(
+                extract_script_entries(script, &ScriptVariables::default(), &invalid).is_err(),
+                "{invalid} must be rejected",
+            );
+        }
     }
 
     #[test]
@@ -1622,7 +2366,7 @@ mod tests {
 
         let entries = extract_script_entries(script, &variables, &json!({"remaining": 4.2}))
             .expect("extract response");
-        assert_eq!(entries[0].label, "sanitized:::");
+        assert_eq!(entries[0].plan_name.as_deref(), Some("sanitized:::"));
         assert_eq!(entries[0].unit.as_deref(), Some("token:"));
     }
 
@@ -1739,6 +2483,77 @@ mod tests {
         );
     }
 
+    #[test]
+    fn draft_merge_reuses_persisted_secrets_only_when_flagged_configured() {
+        let mut persisted = test_provider("newapi", "https://api.example.test/v1").usage_query;
+        persisted.api_key = "saved-key".to_string();
+        persisted.access_token = "saved-token".to_string();
+        persisted.secret_access_key = "saved-secret".to_string();
+
+        // WebUI 草稿:秘密被脱敏为空串 + Configured=true → 沿用已存密钥。
+        let mut redacted = test_provider("newapi", "https://api.example.test/v1").usage_query;
+        redacted.api_key_configured = true;
+        redacted.access_token_configured = true;
+        redacted.secret_access_key_configured = true;
+        let merged = merge_draft_config(redacted, &persisted);
+        assert_eq!(merged.api_key, "saved-key");
+        assert_eq!(merged.access_token, "saved-token");
+        assert_eq!(merged.secret_access_key, "saved-secret");
+
+        // 显式清空(Configured=false)不得回捡旧密钥;新填值优先。
+        let mut cleared = test_provider("newapi", "https://api.example.test/v1").usage_query;
+        cleared.access_token = "fresh-token".to_string();
+        let merged = merge_draft_config(cleared, &persisted);
+        assert_eq!(merged.api_key, "");
+        assert_eq!(merged.access_token, "fresh-token");
+        assert_eq!(merged.secret_access_key, "");
+    }
+
+    #[tokio::test]
+    async fn draft_test_runs_editor_config_even_when_usage_query_is_disabled() {
+        // 「测试查询」以编辑器草稿为准:已存配置是"未启用 + general",草稿是
+        // 自定义脚本——必须按草稿执行并真实发出请求。
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
+        let address = listener.local_addr().expect("test server address");
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept test request");
+            let mut buffer = [0_u8; 4096];
+            let _ = socket.read(&mut buffer).await.expect("read test request");
+            let body = r#"{"balance": 7.5}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            socket
+                .write_all(response.as_bytes())
+                .await
+                .expect("write test response");
+        });
+
+        let mut provider = test_provider("general", "https://api.example.test/v1");
+        provider.usage_query.enabled = false;
+
+        let mut draft = test_provider("custom", "https://api.example.test/v1").usage_query;
+        draft.enabled = false;
+        draft.script = format!(
+            r#"({{
+  request: {{ url: "http://{address}/draft", method: "GET" }},
+  extractor: function (response) {{
+    return {{ remaining: response.balance, unit: "USD" }};
+  }}
+}})"#
+        );
+
+        let result = execute_draft_test(provider, draft).await;
+        assert_eq!(result.error, None);
+        assert_eq!(result.data[0].remaining, Some(7.5));
+        assert!(!result.is_stale);
+        server.await.expect("server task");
+    }
+
     fn test_provider(mode: &str, base_url: &str) -> StoredProvider {
         StoredProvider {
             provider_type: "claude_code".to_string(),
@@ -1748,6 +2563,7 @@ mod tests {
                 enabled: true,
                 mode: mode.to_string(),
                 base_url: String::new(),
+                api_key: String::new(),
                 access_token: String::new(),
                 user_id: String::new(),
                 access_key_id: if base_url.contains("volces.com") {
@@ -1761,8 +2577,442 @@ mod tests {
                     String::new()
                 },
                 script: String::new(),
+                coding_plan_provider: String::new(),
+                team_organization_id: String::new(),
+                team_project_id: String::new(),
+                timeout_secs: None,
+                api_key_configured: false,
+                access_token_configured: false,
+                secret_access_key_configured: false,
             },
         }
+    }
+
+    #[test]
+    fn zhipu_team_plan_routes_by_explicit_selection_with_org_headers() {
+        // 与个人版 base_url 相同,靠显式 coding_plan_provider 路由:同路径 +
+        // ?type=2 + 组织/项目请求头,Authorization 不加 Bearer(对齐 cc-switch)。
+        let mut provider = test_provider("coding-plan", "https://open.bigmodel.cn/api/paas/v4");
+        provider.usage_query.coding_plan_provider = "zhipu_team".to_string();
+        provider.usage_query.team_organization_id = "org-1".to_string();
+        provider.usage_query.team_project_id = "proj-1".to_string();
+
+        let prepared = prepare_query(&provider).expect("prepare zhipu team query");
+        assert_eq!(prepared.primary.adapter, ProviderAdapter::Zhipu);
+        assert_eq!(
+            prepared.primary.request.url.as_str(),
+            "https://open.bigmodel.cn/api/monitor/usage/quota/limit?type=2"
+        );
+        let headers = &prepared.primary.request.headers;
+        assert_eq!(
+            headers.get("Authorization").map(String::as_str),
+            Some("provider-secret"),
+        );
+        assert_eq!(
+            headers.get("bigmodel-organization").map(String::as_str),
+            Some("org-1"),
+        );
+        assert_eq!(
+            headers.get("bigmodel-project").map(String::as_str),
+            Some("proj-1"),
+        );
+
+        // 组织/项目缺一不可。
+        let mut missing = provider.clone();
+        missing.usage_query.team_project_id = String::new();
+        assert!(prepare_query(&missing).is_err());
+
+        // 未显式选择团队版时,同一 base_url 仍走个人版端点(不带 ?type=2)。
+        let personal = test_provider("coding-plan", "https://open.bigmodel.cn/api/paas/v4");
+        let prepared = prepare_query(&personal).expect("prepare personal zhipu query");
+        assert_eq!(
+            prepared.primary.request.url.as_str(),
+            "https://open.bigmodel.cn/api/monitor/usage/quota/limit"
+        );
+    }
+
+    #[test]
+    fn zenmux_plan_prefers_usage_query_credential_overrides() {
+        let mut provider = test_provider("coding-plan", "https://api.other.example/v1");
+        provider.usage_query.coding_plan_provider = "zenmux".to_string();
+        provider.usage_query.base_url = "https://api.zenmux.com/v1/usage".to_string();
+        provider.usage_query.api_key = "zenmux-secret".to_string();
+
+        let prepared = prepare_query(&provider).expect("prepare zenmux query");
+        assert_eq!(prepared.primary.adapter, ProviderAdapter::ZenMux);
+        assert_eq!(
+            prepared.primary.request.url.as_str(),
+            "https://api.zenmux.com/v1/usage"
+        );
+        assert_eq!(
+            prepared
+                .primary
+                .request
+                .headers
+                .get("Authorization")
+                .map(String::as_str),
+            Some("Bearer zenmux-secret"),
+        );
+    }
+
+    #[test]
+    fn script_modes_fall_back_to_builtin_presets_when_script_is_empty() {
+        // 选了模板但没落脚本的存量配置必须仍可查询。
+        let general = test_provider("general", "https://api.example.test/v1");
+        let prepared = prepare_query(&general).expect("general preset fallback");
+        assert_eq!(
+            prepared.primary.request.url.as_str(),
+            "https://api.example.test/v1/user/balance"
+        );
+        assert_eq!(
+            prepared
+                .primary
+                .request
+                .headers
+                .get("Authorization")
+                .map(String::as_str),
+            Some("Bearer provider-secret"),
+        );
+        assert_eq!(
+            prepared
+                .primary
+                .request
+                .headers
+                .get("User-Agent")
+                .map(String::as_str),
+            Some("LiveAgent/1.0"),
+        );
+
+        let mut newapi = test_provider("newapi", "https://api.example.test/v1");
+        newapi.usage_query.access_token = "token".to_string();
+        newapi.usage_query.user_id = "42".to_string();
+        let prepared = prepare_query(&newapi).expect("newapi preset fallback");
+        assert_eq!(
+            prepared.primary.request.url.as_str(),
+            "https://api.example.test/v1/api/user/self"
+        );
+        // {{accessToken}}/{{userId}} 必须替换进请求头,不得残留占位符。
+        assert_eq!(
+            prepared
+                .primary
+                .request
+                .headers
+                .get("Authorization")
+                .map(String::as_str),
+            Some("Bearer token"),
+        );
+        assert_eq!(
+            prepared
+                .primary
+                .request
+                .headers
+                .get("New-Api-User")
+                .map(String::as_str),
+            Some("42"),
+        );
+        for value in prepared.primary.request.headers.values() {
+            assert!(!value.contains("{{"), "unreplaced placeholder in {value}");
+        }
+
+        assert!(prepare_query(&test_provider("custom", "https://api.example.test/v1")).is_err());
+        assert!(prepare_query(&test_provider("balance-typo", "https://api.example.test")).is_err());
+    }
+
+    #[tokio::test]
+    async fn general_preset_substitutes_variables_end_to_end() {
+        // 全链路实测:预设脚本经 QuickJS 渲染 → Rust 发出 HTTP → 捕获线上请求
+        // 字节,证明 {{baseUrl}}/{{apiKey}} 真实替换;extractor 再解析响应。
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
+        let address = listener.local_addr().expect("test server address");
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept test request");
+            let mut buffer = [0_u8; 4096];
+            let read = socket.read(&mut buffer).await.expect("read test request");
+            let raw_request = String::from_utf8_lossy(&buffer[..read]).to_string();
+            let body = r#"{"balance": 4.2}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            socket
+                .write_all(response.as_bytes())
+                .await
+                .expect("write test response");
+            raw_request
+        });
+
+        let mut provider = test_provider("general", &format!("http://{address}"));
+        provider.usage_query.api_key = "query-secret".to_string();
+        let prepared = prepare_query(&provider).expect("prepare general preset");
+        let data = execute_prepared_query(&prepared)
+            .await
+            .expect("general preset query");
+        assert_eq!(data[0].remaining, Some(4.2));
+        assert_eq!(data[0].is_valid, Some(true));
+        assert_eq!(data[0].unit.as_deref(), Some("USD"));
+
+        let raw_request = server.await.expect("server task").to_ascii_lowercase();
+        assert!(
+            raw_request.starts_with("get /user/balance http/1.1"),
+            "unexpected request line: {raw_request}",
+        );
+        assert!(raw_request.contains("authorization: bearer query-secret"));
+        assert!(raw_request.contains("user-agent: liveagent/1.0"));
+        assert!(
+            !raw_request.contains("{{"),
+            "unreplaced placeholder reached the wire"
+        );
+    }
+
+    #[tokio::test]
+    async fn user_style_custom_script_reaches_local_server() {
+        // 回归:自定义脚本打 http://localhost 本地服务(硬编码 URL、顶层尾分号、
+        // 行内注释、全角字符、可选链/空值合并、extractor 返回数组)必须真实发出
+        // 请求并解析回包——复刻用户实测脚本的全部语法特征。
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
+        let port = listener.local_addr().expect("test server address").port();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept test request");
+            let mut buffer = [0_u8; 4096];
+            let read = socket.read(&mut buffer).await.expect("read test request");
+            let raw_request = String::from_utf8_lossy(&buffer[..read]).to_string();
+            let body = r#"{"ok": true}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            socket
+                .write_all(response.as_bytes())
+                .await
+                .expect("write test response");
+            raw_request
+        });
+
+        let script = r#"({
+  request: {
+    url: "http://localhost:3457/account/summary",
+    method: "GET",
+    headers: {
+      Authorization: "Bearer {{apiKey}}",
+      "User-Agent": "cc-switch/1.0",
+    },
+  },
+
+  extractor: function (response) {
+    const plans = [];
+    const IND = "　　"; // 全角缩进
+    const BRANCH = "├─ ";
+    const LAST = "└─ ";
+
+    // 余额
+    plans.push({
+      planName: "余额",
+      remaining: response.balance,
+      unit: "USD",
+      isValid: true,
+    });
+
+    // 订阅（总）
+    if (response.subscription) {
+      plans.push({
+        planName: "订阅 ▶",
+        total: response.subscription.total_quota,
+        used: response.subscription.used_quota,
+        remaining: response.subscription.remaining_quota,
+        unit: "USD",
+        isValid: true,
+        extra: `共 ${response.subscription.active_subscription_count ?? response.subscriptions?.length ?? 0} 个订阅`,
+      });
+    }
+
+    // 子订阅
+    const subs = Array.isArray(response.subscriptions)
+      ? response.subscriptions
+      : [];
+    subs.forEach((sub, idx) => {
+      const prefix = idx === subs.length - 1 ? LAST : BRANCH;
+
+      const expire = sub.expired_at?.slice(0, 10) ?? "-";
+      const resetText = sub.reset_today ? "已重置" : "未重置";
+
+      plans.push({
+        planName: `${IND}${prefix}${sub.name}`,
+        total: sub.total_quota,
+        remaining: sub.remaining_quota,
+        used: sub.total_quota - sub.remaining_quota,
+        unit: "USD",
+        isValid: true,
+        extra: `到期：${expire} · 今日：${resetText}`,
+      });
+    });
+
+    return plans;
+  },
+});"#
+        .replace("http://localhost:3457", &format!("http://localhost:{port}"));
+
+        let mut provider = test_provider("custom", "https://api.example.test/v1");
+        provider.usage_query.script = script;
+        let prepared = prepare_query(&provider).expect("prepare user custom script");
+        let data = execute_prepared_query(&prepared)
+            .await
+            .expect("user custom script query");
+        assert_eq!(data.len(), 1);
+        assert_eq!(data[0].plan_name.as_deref(), Some("余额"));
+        assert_eq!(data[0].is_valid, Some(true));
+        assert_eq!(data[0].unit.as_deref(), Some("USD"));
+
+        let raw_request = server.await.expect("server task").to_ascii_lowercase();
+        assert!(
+            raw_request.starts_with("get /account/summary http/1.1"),
+            "unexpected request line: {raw_request}",
+        );
+        assert!(raw_request.contains("authorization: bearer provider-secret"));
+    }
+
+    #[test]
+    fn general_preset_extractor_reads_balance_payload() {
+        let entries = extract_script_entries(
+            GENERAL_SCRIPT,
+            &ScriptVariables::default(),
+            &json!({"balance": 12.34}),
+        )
+        .expect("general extractor");
+        assert_eq!(entries[0].remaining, Some(12.34));
+        assert_eq!(entries[0].is_valid, Some(true));
+        assert_eq!(entries[0].unit.as_deref(), Some("USD"));
+    }
+
+    #[test]
+    fn newapi_preset_extractor_handles_success_and_failure_payloads() {
+        let success = extract_script_entries(
+            NEWAPI_SCRIPT,
+            &ScriptVariables::default(),
+            &json!({
+                "success": true,
+                "data": {"group": "vip", "quota": 5_000_000, "used_quota": 2_500_000}
+            }),
+        )
+        .expect("newapi success payload");
+        assert_eq!(success[0].plan_name.as_deref(), Some("vip"));
+        assert_eq!(success[0].remaining, Some(10.0));
+        assert_eq!(success[0].used, Some(5.0));
+        assert_eq!(success[0].total, Some(15.0));
+        assert_eq!(success[0].unit.as_deref(), Some("USD"));
+
+        let failure = extract_script_entries(
+            NEWAPI_SCRIPT,
+            &ScriptVariables::default(),
+            &json!({"success": false, "message": "invalid token"}),
+        )
+        .expect("newapi failure payload");
+        assert_eq!(failure[0].is_valid, Some(false));
+        assert_eq!(failure[0].invalid_message.as_deref(), Some("invalid token"));
+    }
+
+    #[test]
+    fn script_query_prefers_usage_api_key_override() {
+        let mut provider = test_provider("general", "https://api.example.test/v1");
+        provider.usage_query.api_key = "query-only-secret".to_string();
+        let prepared = prepare_query(&provider).expect("prepare with override");
+        assert_eq!(
+            prepared
+                .primary
+                .request
+                .headers
+                .get("Authorization")
+                .map(String::as_str),
+            Some("Bearer query-only-secret"),
+        );
+    }
+
+    #[test]
+    fn request_timeout_is_clamped_to_sane_bounds() {
+        let mut provider = test_provider("general", "https://api.example.test/v1");
+        assert_eq!(
+            resolve_timeout(&provider.usage_query),
+            Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECS)
+        );
+        provider.usage_query.timeout_secs = Some(0.5);
+        assert_eq!(
+            resolve_timeout(&provider.usage_query),
+            Duration::from_secs(MIN_REQUEST_TIMEOUT_SECS)
+        );
+        provider.usage_query.timeout_secs = Some(9000.0);
+        assert_eq!(
+            resolve_timeout(&provider.usage_query),
+            Duration::from_secs(MAX_REQUEST_TIMEOUT_SECS)
+        );
+        provider.usage_query.timeout_secs = Some(f64::NAN);
+        assert_eq!(
+            resolve_timeout(&provider.usage_query),
+            Duration::from_secs(DEFAULT_REQUEST_TIMEOUT_SECS)
+        );
+        provider.usage_query.timeout_secs = Some(25.0);
+        assert_eq!(
+            resolve_timeout(&provider.usage_query),
+            Duration::from_secs(25)
+        );
+        assert_eq!(
+            prepare_query(&provider).expect("prepared").timeout,
+            Duration::from_secs(25)
+        );
+    }
+
+    #[test]
+    fn failure_determinism_matches_keep_last_good_policy() {
+        // 确定性(清快照):鉴权、非超时/限流类的 4xx、脚本/解析错误。
+        assert!(QueryFailure::new(QueryFailureKind::Auth, "auth").deterministic);
+        assert!(QueryFailure::new(QueryFailureKind::Soft, "script").deterministic);
+        assert!(QueryFailure::http(reqwest::StatusCode::NOT_FOUND, "404").deterministic);
+        assert!(QueryFailure::http(reqwest::StatusCode::BAD_REQUEST, "400").deterministic);
+        // 瞬时(保留旧值标 isStale):网络、5xx、408/425/429。
+        assert!(!QueryFailure::new(QueryFailureKind::Transient, "net").deterministic);
+        assert!(!QueryFailure::http(reqwest::StatusCode::REQUEST_TIMEOUT, "408").deterministic);
+        assert!(!QueryFailure::http(reqwest::StatusCode::TOO_EARLY, "425").deterministic);
+        assert!(!QueryFailure::http(reqwest::StatusCode::TOO_MANY_REQUESTS, "429").deterministic);
+        assert!(!QueryFailure::http(reqwest::StatusCode::BAD_GATEWAY, "502").deterministic);
+        assert!(
+            !QueryFailure::http(reqwest::StatusCode::INTERNAL_SERVER_ERROR, "500").deterministic
+        );
+    }
+
+    #[tokio::test]
+    async fn volcengine_throttling_body_stays_transient_for_keep_last_good() {
+        // 429/5xx + 火山错误体(FlowLimitExceeded 等):kind 仍为 Soft(可触发
+        // fallback),但确定性必须跟随 HTTP 状态——不得误清 keep-last-good 快照。
+        let (url, server) = serve_once(|_| {
+            let body = r#"{"ResponseMetadata":{"Error":{"Code":"FlowLimitExceeded","Message":"throttled"}}}"#;
+            format!(
+                "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+        })
+        .await;
+        let prepared = PreparedRequest {
+            request: HttpRequest {
+                url,
+                method: Method::GET,
+                headers: HashMap::new(),
+                body: None,
+            },
+            adapter: ProviderAdapter::VolcengineAfp,
+            script: None,
+        };
+
+        let failure = execute_prepared_request(&prepared, Duration::from_secs(5))
+            .await
+            .expect_err("throttled volcengine request must fail");
+        assert_eq!(failure.kind, QueryFailureKind::Soft);
+        assert!(!failure.deterministic);
+        server.await.expect("server task");
     }
 
     #[test]
@@ -1776,6 +3026,27 @@ mod tests {
 
         assert!(!provider.usage_query.enabled);
         assert!(provider.usage_query.mode.is_empty());
+
+        // 缺新增字段(apiKey/timeoutSecs)的存量 usageQuery JSON 也必须能反序列化。
+        let provider: StoredProvider = serde_json::from_value(serde_json::json!({
+            "type": "codex",
+            "baseUrl": "https://api.example.test/v1",
+            "apiKey": "provider-secret",
+            "usageQuery": {
+                "enabled": true,
+                "mode": "general",
+                "script": "",
+                "baseUrl": "",
+                "accessToken": "",
+                "userId": "",
+                "accessKeyId": "",
+                "secretAccessKey": ""
+            }
+        }))
+        .expect("pre-upgrade usage query should deserialize");
+        assert!(provider.usage_query.enabled);
+        assert!(provider.usage_query.api_key.is_empty());
+        assert!(provider.usage_query.timeout_secs.is_none());
     }
 
     async fn serve_once(

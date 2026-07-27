@@ -2,9 +2,9 @@
 // 共享的状态归约/协调器/hook 逻辑在 usageQueryCore.ts(两端字节镜像),本文件只放平台差异。
 import { getGatewayWebSocketClient } from "@/lib/gatewaySocket";
 import { loadToken } from "@/lib/storage";
+import type { UsageQueryConfig } from "../settings";
 import {
   type ProviderUsageResult,
-  type SelectedModel,
   type UsageQueryProvider,
   useProviderUsageWithQuery,
 } from "./usageQueryCore";
@@ -20,9 +20,19 @@ export async function queryProviderUsage(
   ).providerUsageQuery<ProviderUsageResult | null>(providerId, refresh);
 }
 
-export function useProviderUsage(
-  providers: readonly UsageQueryProvider[],
-  selectedModel: SelectedModel,
-) {
-  return useProviderUsageWithQuery(queryProviderUsage, providers, selectedModel);
+/**
+ * 「测试查询」:按编辑器草稿配置试查询——忽略启用开关、不落库、不进缓存。
+ * WebUI 草稿的秘密为脱敏空串,靠 *Configured 标志让桌面端沿用已存密钥。
+ */
+export async function testProviderUsage(
+  providerId: string,
+  config: UsageQueryConfig,
+): Promise<ProviderUsageResult | null> {
+  return getGatewayWebSocketClient(
+    loadToken().trim(),
+  ).providerUsageTest<ProviderUsageResult | null>(providerId, JSON.stringify(config));
+}
+
+export function useProviderUsage(providers: readonly UsageQueryProvider[]) {
+  return useProviderUsageWithQuery(queryProviderUsage, providers);
 }

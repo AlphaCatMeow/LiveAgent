@@ -12,6 +12,7 @@ export type GatewayProviderApiKeyUpdates = Record<string, string>;
 export type GatewayProviderUsageQuerySecretUpdates = Record<
   string,
   {
+    apiKey?: string;
     accessToken?: string;
     secretAccessKey?: string;
   }
@@ -101,15 +102,22 @@ function apiKeyConfiguredForProvider(provider: AppSettings["customProviders"][nu
 
 const DEFAULT_USAGE_QUERY_CONFIG: AppSettings["customProviders"][number]["usageQuery"] = {
   enabled: false,
-  mode: "custom",
+  mode: "newapi",
   script: "",
+  scripts: {},
   baseUrl: "",
+  apiKey: "",
+  apiKeyConfigured: false,
   accessToken: "",
   accessTokenConfigured: false,
   userId: "",
   accessKeyId: "",
   secretAccessKey: "",
   secretAccessKeyConfigured: false,
+  codingPlanProvider: "",
+  teamOrganizationId: "",
+  teamProjectId: "",
+  timeoutSecs: 10,
 };
 
 function usageQueryConfig(
@@ -124,6 +132,8 @@ function redactUsageQueryConfig(
   const config = usageQuery ?? DEFAULT_USAGE_QUERY_CONFIG;
   return {
     ...config,
+    apiKey: "",
+    apiKeyConfigured: config.apiKey.trim().length > 0 || config.apiKeyConfigured === true,
     accessToken: "",
     accessTokenConfigured:
       config.accessToken.trim().length > 0 || config.accessTokenConfigured === true,
@@ -234,6 +244,9 @@ function collectProviderUsageQuerySecretUpdates(
     if (!id) continue;
     const update: GatewayProviderUsageQuerySecretUpdates[string] = {};
     const usageQuery = usageQueryConfig(provider);
+    if (usageQuery.apiKey.trim()) {
+      update.apiKey = usageQuery.apiKey.trim();
+    }
     if (usageQuery.accessToken.trim()) {
       update.accessToken = usageQuery.accessToken.trim();
     }
@@ -258,10 +271,26 @@ function collectChangedProviderUsageQuerySecretUpdates(
     const previousUsageQuery = previousProvider ? usageQueryConfig(previousProvider) : undefined;
     const usageQuery = usageQueryConfig(provider);
     const update: GatewayProviderUsageQuerySecretUpdates[string] = {};
-    if (usageQuery.accessToken !== previousUsageQuery?.accessToken) {
+    // WebUI 侧秘密恒被脱敏为空串,值比较发现不了"删除已配置密钥";
+    // Configured true→false 是显式清除信号(对齐 SSH passwordConfiguredCleared)。
+    const apiKeyCleared =
+      previousUsageQuery?.apiKeyConfigured === true && usageQuery.apiKeyConfigured === false;
+    if (usageQuery.apiKey !== previousUsageQuery?.apiKey || apiKeyCleared) {
+      update.apiKey = usageQuery.apiKey.trim();
+    }
+    const accessTokenCleared =
+      previousUsageQuery?.accessTokenConfigured === true &&
+      usageQuery.accessTokenConfigured === false;
+    if (usageQuery.accessToken !== previousUsageQuery?.accessToken || accessTokenCleared) {
       update.accessToken = usageQuery.accessToken.trim();
     }
-    if (usageQuery.secretAccessKey !== previousUsageQuery?.secretAccessKey) {
+    const secretAccessKeyCleared =
+      previousUsageQuery?.secretAccessKeyConfigured === true &&
+      usageQuery.secretAccessKeyConfigured === false;
+    if (
+      usageQuery.secretAccessKey !== previousUsageQuery?.secretAccessKey ||
+      secretAccessKeyCleared
+    ) {
       update.secretAccessKey = usageQuery.secretAccessKey.trim();
     }
     if (Object.keys(update).length > 0) updates[id] = update;
@@ -616,6 +645,9 @@ function normalizeProviderUsageQuerySecretUpdates(
     if (!normalizedId) continue;
     const updateSource = asObject(rawUpdate);
     const update: GatewayProviderUsageQuerySecretUpdates[string] = {};
+    if (Object.hasOwn(updateSource, "apiKey") && typeof updateSource.apiKey === "string") {
+      update.apiKey = updateSource.apiKey.trim();
+    }
     if (
       Object.hasOwn(updateSource, "accessToken") &&
       typeof updateSource.accessToken === "string"
@@ -639,6 +671,11 @@ function mergeSyncedUsageQuery(
   update: GatewayProviderUsageQuerySecretUpdates[string] | undefined,
 ) {
   const source = asObject(incoming);
+  const apiKey =
+    (update && Object.hasOwn(update, "apiKey") ? update.apiKey : undefined) ??
+    (typeof source.apiKey === "string" && source.apiKey.trim()
+      ? source.apiKey.trim()
+      : (current?.apiKey ?? ""));
   const accessToken =
     (update && Object.hasOwn(update, "accessToken") ? update.accessToken : undefined) ??
     (typeof source.accessToken === "string" && source.accessToken.trim()
@@ -652,6 +689,11 @@ function mergeSyncedUsageQuery(
 
   return {
     ...source,
+    apiKey,
+    apiKeyConfigured:
+      apiKey.length > 0 ||
+      source.apiKeyConfigured === true ||
+      (!Object.hasOwn(source, "apiKeyConfigured") && current?.apiKeyConfigured === true),
     accessToken,
     accessTokenConfigured:
       accessToken.length > 0 ||

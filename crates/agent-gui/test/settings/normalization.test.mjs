@@ -2517,17 +2517,38 @@ test("usage query defaults disabled and redacts query credentials", () => {
 
   assert.equal(provider.usageQuery.enabled, false);
   assert.equal(provider.usageQuery.mode, "newapi");
+  assert.equal(provider.usageQuery.timeoutSecs, 10);
 
-  // 余额适配器已移除:历史 "balance" 配置与未知值统一回退自定义脚本。
-  const legacy = settings.normalizeCustomProvider({ usageQuery: { mode: "balance" } });
-  assert.equal(legacy.usageQuery.mode, "custom");
-  assert.equal(settings.getDefaultUsageQueryConfig().mode, "custom");
+  // balance(官方余额适配器)是合法模式;未知值统一回退自定义脚本。
+  const balance = settings.normalizeCustomProvider({ usageQuery: { mode: "balance" } });
+  assert.equal(balance.usageQuery.mode, "balance");
+  const unknown = settings.normalizeCustomProvider({ usageQuery: { mode: "mystery" } });
+  assert.equal(unknown.usageQuery.mode, "newapi");
+  // 默认查询方式是 NewAPI 模板;显式保存过的 custom 保持不变。
+  assert.equal(settings.getDefaultUsageQueryConfig().mode, "newapi");
+  const explicitCustom = settings.normalizeCustomProvider({ usageQuery: { mode: "custom" } });
+  assert.equal(explicitCustom.usageQuery.mode, "custom");
 
-  const redacted = sync.redactCustomProvidersForGateway([provider])[0];
-  assert.equal(redacted.usageQuery.accessToken, "");
-  assert.equal(redacted.usageQuery.secretAccessKey, "");
-  assert.equal(redacted.usageQuery.accessTokenConfigured, true);
-  assert.equal(redacted.usageQuery.secretAccessKeyConfigured, true);
+  // 每模式独立脚本:逐项 trim、空槽位与未知键丢弃。
+  const withScripts = settings.normalizeCustomProvider({
+    usageQuery: { scripts: { custom: "  (a)  ", general: "   ", bogus: "(x)" } },
+  });
+  assert.deepEqual(withScripts.usageQuery.scripts, { custom: "(a)" });
+
+  // 超时 clamp:2-30 秒。
+  const clamped = settings.normalizeCustomProvider({ usageQuery: { timeoutSecs: 500 } });
+  assert.equal(clamped.usageQuery.timeoutSecs, 30);
+
+  const withApiKey = settings.normalizeCustomProvider({
+    usageQuery: { mode: "general", apiKey: "usage-key" },
+  });
+  const redacted = sync.redactCustomProvidersForGateway([provider, withApiKey]);
+  assert.equal(redacted[0].usageQuery.accessToken, "");
+  assert.equal(redacted[0].usageQuery.secretAccessKey, "");
+  assert.equal(redacted[0].usageQuery.accessTokenConfigured, true);
+  assert.equal(redacted[0].usageQuery.secretAccessKeyConfigured, true);
+  assert.equal(redacted[1].usageQuery.apiKey, "");
+  assert.equal(redacted[1].usageQuery.apiKeyConfigured, true);
 });
 
 test("usage query secret updates are emitted and applied without exposing the values", () => {
@@ -2538,7 +2559,7 @@ test("usage query secret updates are emitted and applied without exposing the va
     customProviders: [
       {
         id: "provider-1",
-        usageQuery: { accessToken: "new-token", secretAccessKey: "new-secret" },
+        usageQuery: { apiKey: "new-key", accessToken: "new-token", secretAccessKey: "new-secret" },
       },
     ],
   });
@@ -2547,8 +2568,9 @@ test("usage query secret updates are emitted and applied without exposing the va
     includeProviderApiKeyUpdates: true,
   });
   assert.deepEqual(update.providerUsageQuerySecretUpdates, {
-    "provider-1": { accessToken: "new-token", secretAccessKey: "new-secret" },
+    "provider-1": { apiKey: "new-key", accessToken: "new-token", secretAccessKey: "new-secret" },
   });
+  assert.equal(update.customProviders[0].usageQuery.apiKey, "");
   assert.equal(update.customProviders[0].usageQuery.accessToken, "");
   assert.equal(update.customProviders[0].usageQuery.secretAccessKey, "");
 
@@ -2556,6 +2578,36 @@ test("usage query secret updates are emitted and applied without exposing the va
     customProviders: update.customProviders,
     providerUsageQuerySecretUpdates: update.providerUsageQuerySecretUpdates,
   });
+  assert.equal(applied.customProviders[0].usageQuery.apiKey, "new-key");
   assert.equal(applied.customProviders[0].usageQuery.accessToken, "new-token");
   assert.equal(applied.customProviders[0].usageQuery.secretAccessKey, "new-secret");
+});
+
+test("clearing a configured usage query secret emits an explicit empty update", () => {
+  // WebUI 侧秘密恒被脱敏为空串,值比较发现不了"删除已配置密钥"——
+  // Configured true→false 是显式清除信号,必须产出空串 sidecar 条目。
+  const previous = settings.normalizeSettings({
+    customProviders: [
+      { id: "provider-1", usageQuery: { apiKey: "", apiKeyConfigured: true } },
+    ],
+  });
+  const next = settings.normalizeSettings({
+    customProviders: [
+      { id: "provider-1", usageQuery: { apiKey: "", apiKeyConfigured: false } },
+    ],
+  });
+
+  const update = sync.buildGatewaySettingsSyncUpdatePayload(previous, next, {
+    includeProviderApiKeyUpdates: true,
+  });
+  assert.deepEqual(update.providerUsageQuerySecretUpdates, {
+    "provider-1": { apiKey: "" },
+  });
+
+  const applied = sync.applyGatewaySettingsSyncPayload(previous, {
+    customProviders: update.customProviders,
+    providerUsageQuerySecretUpdates: update.providerUsageQuerySecretUpdates,
+  });
+  assert.equal(applied.customProviders[0].usageQuery.apiKey, "");
+  assert.equal(applied.customProviders[0].usageQuery.apiKeyConfigured, false);
 });

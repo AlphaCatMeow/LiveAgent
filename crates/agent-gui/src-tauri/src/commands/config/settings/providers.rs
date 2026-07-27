@@ -57,6 +57,11 @@ fn redact_provider_credential(provider: Value) -> Result<Value, String> {
 
 fn redact_usage_query_secrets(usage_query: Value) -> Result<Value, String> {
     let mut payload = expect_object(usage_query, "provider usage query settings")?;
+    let api_key_configured = match payload.remove("apiKey") {
+        Some(Value::String(value)) => !value.trim().is_empty(),
+        Some(Value::Null) | None => false,
+        Some(_) => return Err("provider usage query apiKey must be a string".to_string()),
+    } || matches!(payload.get("apiKeyConfigured"), Some(Value::Bool(true)));
     let access_token_configured = match payload.remove("accessToken") {
         Some(Value::String(value)) => !value.trim().is_empty(),
         Some(Value::Null) | None => false,
@@ -72,6 +77,7 @@ fn redact_usage_query_secrets(usage_query: Value) -> Result<Value, String> {
         payload.get("secretAccessKeyConfigured"),
         Some(Value::Bool(true))
     );
+    payload.insert("apiKeyConfigured".to_string(), Value::Bool(api_key_configured));
     payload.insert("accessTokenConfigured".to_string(), Value::Bool(access_token_configured));
     payload.insert(
         "secretAccessKeyConfigured".to_string(),

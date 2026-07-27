@@ -1140,6 +1140,9 @@ message ProviderModelsResponse {
 message ProviderUsageRequest {
   string provider_id = 1;
   bool refresh = 2;
+  // 非空时为「按草稿测试」:桌面端按此 JSON 配置(UsageQueryConfig 形状)执行
+  // 一次查询——忽略启用开关、不落库、不读写缓存;空串为常规查询。
+  string config_json = 3;
 }
 
 message ProviderUsageResponse {

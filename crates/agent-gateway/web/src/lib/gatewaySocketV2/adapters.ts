@@ -580,6 +580,7 @@ function agentRequestPayload(type: string, body: J): GatewayEnvelope["payload"] 
         value: create(ProviderUsageRequestSchema, {
           providerId: trimStr(body.provider_id),
           refresh: bool(body.refresh),
+          configJson: trimStr(body.config_json),
         }),
       };
     case "settings.get":

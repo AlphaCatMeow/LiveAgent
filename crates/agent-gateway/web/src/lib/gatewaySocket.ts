@@ -2710,6 +2710,15 @@ export class GatewayWebSocketClient {
     });
   }
 
+  async providerUsageTest<T = unknown>(providerId: string, configJson: string): Promise<T> {
+    // 按草稿测试:config_json 非空时桌面端忽略启用开关、不落库不进缓存。
+    return this.requestWithRecovery<T>("provider.usage.query", {
+      provider_id: providerId,
+      refresh: true,
+      config_json: configJson,
+    });
+  }
+
   dispose() {
     this.disposed = true;
     this.terminalStream.dispose();
@@ -3818,6 +3827,7 @@ export type GatewayWebSocketClientLike = {
     useSystemProxy?: boolean,
   ): Promise<unknown>;
   providerUsageQuery<T = unknown>(providerId: string, refresh: boolean): Promise<T>;
+  providerUsageTest<T = unknown>(providerId: string, configJson: string): Promise<T>;
   dispose(): void;
 };
 

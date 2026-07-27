@@ -9,14 +9,9 @@ import {
 } from "../chat/conversation/conversationState";
 import { createTurnCancellationFromSignal } from "../chat/conversation/turnCancellation";
 import { runAssistantWithTools } from "../chat/runner/agentRunner";
+import type { ProviderRuntimeConfig } from "../providers/runtime/types";
 import type { RuntimePlatform } from "../runtimePlatform";
-import type {
-  CodexRequestFormat,
-  CustomProvider,
-  ProviderId,
-  ProviderModelConfig,
-  ReasoningLevel,
-} from "../settings";
+import type { ProviderId } from "../settings";
 import { renderMessageBusSnapshot } from "./bus";
 import { toolErrorResult } from "./errors";
 import type { SubagentWorktreeIpc } from "./ipc/worktree";
@@ -49,25 +44,12 @@ import {
   truncateText,
 } from "./utils";
 
-export type SubagentProviderRuntime = {
-  baseUrl: string;
-  apiKey: string;
-  customHeaders?: CustomProvider["customHeaders"];
-  requestFormat?: CodexRequestFormat;
-  reasoning?: ReasoningLevel;
-  promptCachingEnabled?: boolean;
-  promptCacheRetention?: "short" | "long";
-  nativeWebSearchEnabled?: boolean;
-  useSystemProxy?: boolean;
-  modelConfig?: ProviderModelConfig;
-};
-
 type ChildToolExecutor = (toolCall: ToolCall, signal?: AbortSignal) => Promise<ToolResultMessage>;
 
 export type SubagentRunEnvironment = {
   providerId: ProviderId;
   model: string;
-  runtime: SubagentProviderRuntime;
+  runtime: ProviderRuntimeConfig;
   runtimePlatform?: RuntimePlatform;
   workdir: string;
   sessionId?: string;

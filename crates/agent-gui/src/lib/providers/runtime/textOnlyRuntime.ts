@@ -15,16 +15,14 @@ import {
   withHostedSearchProbeHeader,
 } from "../hostedSearchEvents";
 import { providerSupportsNativeWebSearch } from "../nativeWebSearch";
-import { prepareProxyRequest } from "../proxy";
 import { appendSystemPrompt, normalizeSessionId } from "./common";
 import { normalizeErrorMessage } from "./errors";
 import { createStreamingTextReconciler } from "./messageUtils";
 import { createModelFromConfig } from "./modelFactory";
 import { finalizeProviderStreamOptions } from "./payloadPipeline";
 import {
-  buildProviderRequestHeaders,
   buildProviderRequestMetadata,
-  mergeCustomHeaders,
+  prepareProviderRequest,
   resolveProviderCacheRetention,
   toSimpleStreamReasoning,
 } from "./requestOptions";
@@ -144,20 +142,9 @@ export async function streamAssistantMessage(params: {
   if (!params.runtime.baseUrl.trim()) throw new Error("Base URL cannot be empty");
   if (!params.runtime.apiKey.trim()) throw new Error("API Key cannot be empty");
 
-  const proxyRequest = await prepareProxyRequest(
-    params.providerId,
-    params.runtime.baseUrl.trim(),
-    mergeCustomHeaders(
-      buildProviderRequestHeaders(
-        params.providerId,
-        params.runtime.apiKey,
-        params.sessionId,
-        params.runtime.requestFormat,
-      ),
-      params.runtime.customHeaders,
-    ),
-    { useSystemProxy: params.runtime.useSystemProxy === true },
-  );
+  const proxyRequest = await prepareProviderRequest(params.providerId, params.runtime, {
+    sessionId: params.sessionId,
+  });
 
   const m = createModelFromConfig(
     params.providerId,
@@ -344,20 +331,9 @@ export async function completeAssistantMessage(params: {
   if (!params.runtime.baseUrl.trim()) throw new Error("Base URL cannot be empty");
   if (!params.runtime.apiKey.trim()) throw new Error("API Key cannot be empty");
 
-  const proxyRequest = await prepareProxyRequest(
-    params.providerId,
-    params.runtime.baseUrl.trim(),
-    mergeCustomHeaders(
-      buildProviderRequestHeaders(
-        params.providerId,
-        params.runtime.apiKey,
-        params.sessionId,
-        params.runtime.requestFormat,
-      ),
-      params.runtime.customHeaders,
-    ),
-    { useSystemProxy: params.runtime.useSystemProxy === true },
-  );
+  const proxyRequest = await prepareProviderRequest(params.providerId, params.runtime, {
+    sessionId: params.sessionId,
+  });
 
   const m = createModelFromConfig(
     params.providerId,

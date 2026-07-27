@@ -1,15 +1,26 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type { ProviderId } from "../settings";
-import { readHeaderValue } from "./customHeaders";
 
 export const LIVEAGENT_PROXY_TOKEN_HEADER = "x-liveagent-proxy-token";
 export const LIVEAGENT_UPSTREAM_ORIGIN_HEADER = "x-liveagent-upstream-origin";
-export const LIVEAGENT_UPSTREAM_USER_AGENT_HEADER = "x-liveagent-upstream-user-agent";
-export const LIVEAGENT_UPSTREAM_CONTENT_TYPE_HEADER = "x-liveagent-upstream-content-type";
+// 上游头覆盖包：base64(utf8(JSON))。WebView 的 fetch 会静默丢弃 User-Agent /
+// Cookie / Referer 等 forbidden header names，SDK 也可能自行注入同名头，所以最终
+// 头集经这一条通道下发，由本地反代在转发前作为最后一步覆盖写入上游请求——
+// “自定义头覆盖内置默认头”的唯一裁决点就在那里。
+export const LIVEAGENT_UPSTREAM_HEADERS_HEADER = "x-liveagent-upstream-headers";
 // 布尔标记头：声明该请求经系统代理出网。代理地址/凭据只存于桌面 Rust 侧，
 // 由本地反代按此头选择带代理的 client（x-liveagent-* 头不会转发给上游）。
 export const LIVEAGENT_USE_SYSTEM_PROXY_HEADER = "x-liveagent-use-system-proxy";
+
+// 鉴权头不进覆盖包：它们不属浏览器禁止名（常规通道必然送达），且是保留头用户
+// 改不了，没有覆盖需求——不必把密钥再复制一份进旁路通道。
+const UPSTREAM_HEADER_OVERRIDE_EXCLUDED_KEYS = new Set([
+  "authorization",
+  "x-api-key",
+  "x-goog-api-key",
+]);
+const UPSTREAM_HEADER_OVERRIDE_MAX_BYTES = 8 * 1024;
 
 type ProxyServerInfo = {
   baseUrl: string;
@@ -21,15 +32,26 @@ export type PreparedProxyRequest = {
   headers: Record<string, string>;
 };
 
-export function buildUpstreamHeaderOverrideHeaders(
-  headers: Record<string, string>,
-): Record<string, string> {
-  const userAgent = readHeaderValue(headers, "user-agent");
-  const contentType = readHeaderValue(headers, "content-type");
-  return {
-    ...(userAgent !== undefined ? { [LIVEAGENT_UPSTREAM_USER_AGENT_HEADER]: userAgent } : {}),
-    ...(contentType !== undefined ? { [LIVEAGENT_UPSTREAM_CONTENT_TYPE_HEADER]: contentType } : {}),
-  };
+export function encodeUpstreamHeaderOverrides(headers: Record<string, string>): string | undefined {
+  const overrides: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (UPSTREAM_HEADER_OVERRIDE_EXCLUDED_KEYS.has(key.toLowerCase())) continue;
+    if (key.toLowerCase().startsWith("x-liveagent-")) continue;
+    overrides[key] = value;
+  }
+  if (Object.keys(overrides).length === 0) return undefined;
+
+  // base64 而非裸 JSON：既杜绝取值里的 CR/LF 造成 header 注入，也免去引号与逗号
+  // 在 header 值里的解析歧义。
+  const encoded = new TextEncoder().encode(JSON.stringify(overrides));
+  if (encoded.byteLength > UPSTREAM_HEADER_OVERRIDE_MAX_BYTES) {
+    throw new Error(
+      `Custom request headers are too large (${encoded.byteLength} bytes, limit ${UPSTREAM_HEADER_OVERRIDE_MAX_BYTES}). Trim the provider's custom request headers.`,
+    );
+  }
+  let binary = "";
+  for (const byte of encoded) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 
 let proxyServerInfoPromise: Promise<ProxyServerInfo> | null = null;
@@ -191,12 +213,15 @@ export async function prepareProxyRequest(
     upstreamBaseUrl,
     proxyServerInfo.baseUrl,
   );
+  const upstreamHeaderOverrides = encodeUpstreamHeaderOverrides(headers);
 
   return {
     baseUrl,
     headers: {
       ...headers,
-      ...buildUpstreamHeaderOverrideHeaders(headers),
+      ...(upstreamHeaderOverrides
+        ? { [LIVEAGENT_UPSTREAM_HEADERS_HEADER]: upstreamHeaderOverrides }
+        : {}),
       [LIVEAGENT_UPSTREAM_ORIGIN_HEADER]: upstreamOrigin,
       [LIVEAGENT_PROXY_TOKEN_HEADER]: proxyServerInfo.token,
       ...(options?.useSystemProxy ? { [LIVEAGENT_USE_SYSTEM_PROXY_HEADER]: "1" } : {}),

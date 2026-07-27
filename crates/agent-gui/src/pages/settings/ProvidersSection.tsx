@@ -57,6 +57,7 @@ import {
   getCustomHeaderKeyPresets,
   isReservedCustomHeaderKey,
   isValidCustomHeaderKey,
+  isValidCustomHeaderValue,
 } from "../../lib/providers/customHeaders";
 import { parseModelValue, toModelValue } from "../../lib/providers/llm";
 import {
@@ -291,12 +292,24 @@ function parsePositiveInteger(input: string): number | null {
   return normalized > 0 ? normalized : null;
 }
 
-type CustomHeaderKeyIssue = "reserved" | "invalid";
+type CustomHeaderIssue = "reserved" | "invalid-key" | "invalid-value";
 
-function getCustomHeaderKeyIssue(key: string, includeEmpty = false): CustomHeaderKeyIssue | null {
-  if (!key && !includeEmpty) return null;
-  if (isReservedCustomHeaderKey(key)) return "reserved";
-  return isValidCustomHeaderKey(key) ? null : "invalid";
+function customHeaderIssueMessage(issue: CustomHeaderIssue, t: (key: string) => string): string {
+  if (issue === "reserved") return t("settings.customHeaderReservedTitle");
+  if (issue === "invalid-value") return t("settings.invalidCustomHeaderValue");
+  return t("settings.invalidCustomHeaderKey");
+}
+
+function getCustomHeaderIssue(
+  header: { key: string; value: string },
+  includeEmpty = false,
+): CustomHeaderIssue | null {
+  if (!header.key && !includeEmpty) return null;
+  if (isReservedCustomHeaderKey(header.key)) return "reserved";
+  if (!isValidCustomHeaderKey(header.key)) return "invalid-key";
+  // 取值含非 ASCII / CR / LF 时 fetch() 会直接抛错，整轮对话被打断成一条与请求头
+  // 无关的报错——在保存前拦住，把问题指回这一行配置。
+  return isValidCustomHeaderValue(header.value) ? null : "invalid-value";
 }
 
 function DialogSwitch(props: {
@@ -821,13 +834,18 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
   async function handleSave() {
     if (!name.trim()) return;
     const invalidHeaderIndex = customHeaders.findIndex(
-      (header) => getCustomHeaderKeyIssue(header.key, true) !== null,
+      (header) => getCustomHeaderIssue(header, true) !== null,
     );
     if (invalidHeaderIndex >= 0) {
       setHeaderValidationSubmitted(true);
       exitModelBulkMode();
       setActivePanel("request");
-      focusCustomHeader(invalidHeaderIndex, "key");
+      focusCustomHeader(
+        invalidHeaderIndex,
+        getCustomHeaderIssue(customHeaders[invalidHeaderIndex], true) === "invalid-value"
+          ? "value"
+          : "key",
+      );
       return;
     }
     if (requiresCustomUsageQueryConfirmation(usageQuery, customUsageQueryConfirmed)) {
@@ -1000,14 +1018,11 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
   );
   const firstHeaderIssue =
     customHeaders
-      .map((header) => getCustomHeaderKeyIssue(header.key, headerValidationSubmitted))
+      .map((header) => getCustomHeaderIssue(header, headerValidationSubmitted))
       .find((issue) => issue !== null) ?? null;
-  const headerIssueMessage =
-    firstHeaderIssue === "reserved"
-      ? t("settings.customHeaderReservedTitle")
-      : firstHeaderIssue === "invalid"
-        ? t("settings.invalidCustomHeaderKey")
-        : null;
+  const headerIssueMessage = firstHeaderIssue
+    ? customHeaderIssueMessage(firstHeaderIssue, t)
+    : null;
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 max-[720px]:p-0">
@@ -1658,16 +1673,10 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
                       onScroll={() => setHeaderSuggest(null)}
                     >
                       {customHeaders.map((header, index) => {
-                        const issue = getCustomHeaderKeyIssue(
-                          header.key,
-                          headerValidationSubmitted,
-                        );
-                        const issueTitle =
-                          issue === "reserved"
-                            ? t("settings.customHeaderReservedTitle")
-                            : issue === "invalid"
-                              ? t("settings.invalidCustomHeaderKey")
-                              : undefined;
+                        const issue = getCustomHeaderIssue(header, headerValidationSubmitted);
+                        const issueTitle = issue ? customHeaderIssueMessage(issue, t) : undefined;
+                        const valueIssue = issue === "invalid-value";
+                        const keyIssue = issue !== null && !valueIssue;
                         const valueVisible = visibleHeaderValues.has(index);
                         const suggestOpen =
                           headerSuggest?.index === index && headerSuggestItems.length > 0;
@@ -1688,11 +1697,11 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
                               value={header.key}
                               className={cn(
                                 "h-10 w-[210px] shrink-0 rounded-none border-0 border-r bg-muted/30 px-3 font-mono text-xs shadow-none focus-visible:ring-0 max-[720px]:w-full max-[720px]:border-b max-[720px]:border-r-0 max-[720px]:bg-muted/40",
-                                issue && "text-destructive",
+                                keyIssue && "text-destructive",
                               )}
                               placeholder={t("settings.customHeaderKeyPlaceholder")}
                               aria-label={t("settings.customHeaderName")}
-                              aria-invalid={issue ? true : undefined}
+                              aria-invalid={keyIssue ? true : undefined}
                               role="combobox"
                               aria-expanded={suggestOpen}
                               aria-controls={suggestOpen ? "provider-header-suggest" : undefined}
@@ -1749,9 +1758,14 @@ function ProviderModal({ providerType, initialData, onSave, onClose }: ModalProp
                                 }}
                                 type={valueVisible ? "text" : "password"}
                                 value={header.value}
-                                className="h-10 w-full rounded-none border-0 bg-transparent pl-3 pr-[4.5rem] font-mono text-xs shadow-none focus-visible:ring-0"
+                                className={cn(
+                                  "h-10 w-full rounded-none border-0 bg-transparent pl-3 pr-[4.5rem] font-mono text-xs shadow-none focus-visible:ring-0",
+                                  valueIssue && "text-destructive",
+                                )}
                                 placeholder={t("settings.customHeaderValue")}
                                 aria-label={t("settings.customHeaderValue")}
+                                aria-invalid={valueIssue ? true : undefined}
+                                title={valueIssue ? issueTitle : undefined}
                                 autoComplete="off"
                                 spellCheck={false}
                                 onChange={(event) =>

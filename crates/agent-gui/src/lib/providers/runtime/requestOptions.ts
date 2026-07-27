@@ -1,10 +1,5 @@
 import type { CacheRetention, SimpleStreamOptions } from "@earendil-works/pi-ai";
-import type {
-  CodexRequestFormat,
-  CustomProvider,
-  ProviderId,
-  ReasoningLevel,
-} from "../../settings";
+import type { CodexRequestFormat, ProviderId, ReasoningLevel } from "../../settings";
 import { createUuid } from "../../shared/id";
 import {
   ANTHROPIC_DEFAULT_REQUEST_HEADERS,
@@ -12,10 +7,12 @@ import {
   CODEX_DEFAULT_USER_AGENT,
   CODEX_SESSION_ID_HEADER,
   isAnthropicOAuthApiKey,
-  mergeCustomHeaders as mergeCustomHeadersBase,
+  mergeCustomHeaders,
   XAI_DEFAULT_USER_AGENT,
 } from "../customHeaders";
+import { type PreparedProxyRequest, prepareProxyRequest } from "../proxy";
 import { normalizeSessionId } from "./common";
+import type { ProviderRuntimeConfig } from "./types";
 
 export { isValidCustomHeaderKey } from "../customHeaders";
 
@@ -82,11 +79,29 @@ export function buildProviderRequestHeaders(
   return authHeaders;
 }
 
-export function mergeCustomHeaders(
-  base: Record<string, string>,
-  customHeaders?: CustomProvider["customHeaders"],
-): Record<string, string> {
-  return mergeCustomHeadersBase(base, customHeaders);
+/**
+ * 供应商上游请求的唯一装配入口：内置身份头 → 合并用户自定义头 → 过本地反代。
+ * 聊天 / 文本 / 摘要三条链路都走这里，杜绝各自重复装配时漏掉 customHeaders。
+ */
+export async function prepareProviderRequest(
+  providerId: ProviderId,
+  runtime: ProviderRuntimeConfig,
+  options?: { sessionId?: string },
+): Promise<PreparedProxyRequest> {
+  return prepareProxyRequest(
+    providerId,
+    runtime.baseUrl.trim(),
+    mergeCustomHeaders(
+      buildProviderRequestHeaders(
+        providerId,
+        runtime.apiKey,
+        options?.sessionId,
+        runtime.requestFormat,
+      ),
+      runtime.customHeaders,
+    ),
+    { useSystemProxy: runtime.useSystemProxy === true },
+  );
 }
 
 export function toSimpleStreamReasoning(

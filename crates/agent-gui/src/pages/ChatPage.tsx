@@ -30,6 +30,7 @@ import { Button } from "../components/ui/button";
 import { useConfirmDialog } from "../components/ui/confirm-dialog";
 import { useLocale } from "../i18n";
 import type { AppUpdateController } from "../lib/appUpdates";
+import { getAutomationState, useAutomation } from "../lib/automation";
 import type { CompactionStatus } from "../lib/chat/compaction/types";
 import {
   buildRequestContext,
@@ -80,7 +81,7 @@ import {
   createConversationOpenController,
 } from "../lib/sidebar/openController";
 import { conversationMatchesScope } from "../lib/sidebar/scope";
-import { selectConversations } from "../lib/sidebar/selectors";
+import { selectConversations, selectRunningConversationIds } from "../lib/sidebar/selectors";
 import { createSidebarStore } from "../lib/sidebar/store";
 import { useSidebarSelector } from "../lib/sidebar/useSidebarSelector";
 import { mergeAlwaysEnabledSkillNames } from "../lib/skills";
@@ -89,6 +90,8 @@ import { terminalSessionBelongsToProject } from "../lib/terminal/sessionStore";
 import { tauriTerminalClient } from "../lib/terminal/tauriTerminalClient";
 import { cancelPendingAskUserQuestionsForConversation } from "../lib/tools/askUserQuestionTools";
 import { disposeTodoToolState } from "../lib/tools/todoTools";
+import { buildTrayMenuModel, syncTrayMenu } from "../lib/tray/trayMenu";
+import { useTrayPrefs } from "../lib/tray/trayPrefs";
 import type { LocalTunnelClient } from "../lib/tunnels/constants";
 import { createTauriTunnelClient } from "../lib/tunnels/tauriTunnelClient";
 import { tauriWorkspaceActivityClient } from "../lib/workspace-activity/tauriWorkspaceActivityClient";
@@ -800,6 +803,7 @@ export function ChatPage(props: ChatPageProps) {
     publishChatQueueSnapshots,
     collectChatQueueSnapshotConversationIds,
     stopSending,
+    stopConversation,
     enqueueCurrentComposerTurn,
     requestQueuedChatTurnProcessing,
     runQueuedTurnNow,
@@ -1331,30 +1335,169 @@ export function ChatPage(props: ChatPageProps) {
     });
   }, [activeWorkspaceProjectPath, isAgentMode, openController]);
 
-  // 全局快捷键「新建对话」：Rust 端呼出窗口后发事件，这里切回对话视图
-  // （可能停在 Skills/MCP Hub）、开新会话并聚焦输入框，行为对齐侧栏按钮。
+  // 动作总线（Rust `app:action`）里 ChatPage 拥有的动作在下方统一监听
+  // （handleSelectConversation 定义之后）；这里先备好 ref 镜像。
   const handleNewConversationRef = useRef(handleNewConversation);
   handleNewConversationRef.current = handleNewConversation;
   const activeViewRef = useRef(activeView);
   activeViewRef.current = activeView;
   const isDraftConversationRef = useRef(isDraftConversation);
   isDraftConversationRef.current = isDraftConversation;
+
+  const handleSelectConversation = useCallback(
+    (id: string) => {
+      const targetConversationId = id.trim();
+      if (!targetConversationId) {
+        return;
+      }
+      prepareComposerForConversationChange();
+      openController.open(targetConversationId);
+      restoreCachedComposerDraft(targetConversationId);
+    },
+    [openController],
+  );
+
+  // 托盘/快捷键动作参数的 ref 镜像：监听 effect 是 []-dep，闭包内一律
+  // 经 ref 取最新值（handleSelectWorkspaceProject 等依赖 settings，不稳定）。
+  const sidebarRunningConversationIds = useSidebarSelector(
+    sidebarStore,
+    selectRunningConversationIds,
+  );
+  const appActionParamsRef = useRef({
+    handleSelectConversation,
+    handleSelectWorkspaceProject,
+    stopConversation,
+    consumeConversationStop,
+    isConversationRunning,
+    workspaceProjects,
+    sidebarRunningConversationIds,
+    addNotify,
+    t,
+  });
+  appActionParamsRef.current = {
+    handleSelectConversation,
+    handleSelectWorkspaceProject,
+    stopConversation,
+    consumeConversationStop,
+    isConversationRunning,
+    workspaceProjects,
+    sidebarRunningConversationIds,
+    addNotify,
+    t,
+  };
+
   useEffect(() => {
+    // 单个会话的停止：完整序列在 stopConversation（stop intent + 队列取消 +
+    // abort + force 清理）。未停到任何东西且会话未运行时必须消费掉 stop
+    // intent，否则该会话下一次 send 会被静默吞掉（同 gateway:chat-cancel 守卫）。
+    const stopConversationRun = (conversationId: string) => {
+      const params = appActionParamsRef.current;
+      const stopped = params.stopConversation(conversationId);
+      if (!stopped && !params.isConversationRunning(conversationId)) {
+        params.consumeConversationStop(conversationId);
+      }
+    };
+
     let cancelled = false;
     let unlisten: (() => void) | null = null;
-    listen("global-shortcut:new-chat", () => {
-      const wasInHub = activeViewRef.current !== "chat";
-      setActiveView("chat");
-      // 与侧栏"新建对话"一致：从 Hub 返回且当前已是空白草稿会话时直接复用。
-      if (!wasInHub || !isDraftConversationRef.current) {
-        handleNewConversationRef.current();
-      }
-      // 视图与会话切换渲染完成后再聚焦输入框。
-      window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(() => {
-          composerRef.current?.focus();
-        });
+    let unlistenFeedback: (() => void) | null = null;
+
+    // Rust 直连动作的结果反馈（目前只有托盘的 cron 启用开关）：toast 呈现，
+    // 任务名从 automation store 现查（可能已被删除，回退显示 id）。
+    // 勾选态本身经 automation:cron-changed → store → 托盘同步 effect 刷新。
+    listen<{ action: string; id?: string; ok: boolean; error?: string; value?: string }>(
+      "app:action-feedback",
+      (event) => {
+        const params = appActionParamsRef.current;
+        if (event.payload.action !== "toggle-cron-task") {
+          return;
+        }
+        const taskId = event.payload.id ?? "";
+        const task = getAutomationState().cron.tasks.find((entry) => entry.id === taskId);
+        const name = task?.name.trim() || taskId;
+        if (event.payload.ok) {
+          const messageKey =
+            event.payload.value === "enabled" ? "tray.cronEnabled" : "tray.cronDisabled";
+          params.addNotify("success", params.t(messageKey).replace("{name}", name));
+        } else {
+          params.addNotify(
+            "error",
+            params
+              .t("tray.cronToggleFailed")
+              .replace("{name}", name)
+              .replace("{error}", event.payload.error ?? ""),
+          );
+        }
+      },
+    )
+      .then((nextUnlisten) => {
+        if (cancelled) {
+          nextUnlisten();
+          return;
+        }
+        unlistenFeedback = nextUnlisten;
+      })
+      .catch(() => {
+        // 非 Tauri 环境忽略。
       });
+
+    listen<{ action: string; id?: string; value?: string }>("app:action", (event) => {
+      const params = appActionParamsRef.current;
+      switch (event.payload.action) {
+        case "new-chat": {
+          const wasInHub = activeViewRef.current !== "chat";
+          setActiveView("chat");
+          // 与侧栏"新建对话"一致：从 Hub 返回且当前已是空白草稿会话时直接复用。
+          if (!wasInHub || !isDraftConversationRef.current) {
+            handleNewConversationRef.current();
+          }
+          // 视图与会话切换渲染完成后再聚焦输入框。
+          window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => {
+              composerRef.current?.focus();
+            });
+          });
+          break;
+        }
+        case "open-conversation": {
+          const conversationId = event.payload.id?.trim();
+          if (!conversationId) break;
+          setActiveView("chat");
+          params.handleSelectConversation(conversationId);
+          break;
+        }
+        case "view-all-conversations": {
+          setActiveView("chat");
+          setSidebarOpen(true);
+          break;
+        }
+        case "switch-workspace": {
+          const projectId = event.payload.id?.trim();
+          if (!projectId) break;
+          const project = params.workspaceProjects.find((entry) => entry.id === projectId);
+          // 菜单可能滞后于项目列表；找不到就静默忽略。
+          if (project) {
+            setActiveView("chat");
+            void params.handleSelectWorkspaceProject(project);
+          }
+          break;
+        }
+        case "stop-run": {
+          const conversationId = event.payload.id?.trim();
+          if (conversationId) {
+            stopConversationRun(conversationId);
+          }
+          break;
+        }
+        case "stop-all-runs": {
+          for (const conversationId of params.sidebarRunningConversationIds) {
+            stopConversationRun(conversationId);
+          }
+          break;
+        }
+        default:
+          break;
+      }
     })
       .then((nextUnlisten) => {
         if (cancelled) {
@@ -1371,21 +1514,50 @@ export function ChatPage(props: ChatPageProps) {
       if (unlisten) {
         unlisten();
       }
+      if (unlistenFeedback) {
+        unlistenFeedback();
+      }
     };
   }, []);
 
-  const handleSelectConversation = useCallback(
-    (id: string) => {
-      const targetConversationId = id.trim();
-      if (!targetConversationId) {
-        return;
-      }
-      prepareComposerForConversationChange();
-      openController.open(targetConversationId);
-      restoreCachedComposerDraft(targetConversationId);
-    },
-    [openController],
-  );
+  // 托盘菜单同步：任一输入变化即重建模型推送（syncTrayMenu 内部按 JSON 签名
+  // 去抖），300ms 尾随防抖吸收流式期间侧栏 upsert 引起的高频变化。
+  // 注：全局快捷键绑定存 localStorage 无订阅，在模型构建时现读——改绑后
+  // 回显会在下一次模型级变化时跟上。
+  const trayPrefs = useTrayPrefs();
+  const automationState = useAutomation();
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void syncTrayMenu(
+        buildTrayMenuModel({
+          locale: settings.locale,
+          theme: settings.theme,
+          conversations: historyItems,
+          runningConversationIds: sidebarRunningConversationIds,
+          workspaceProjects,
+          activeWorkspaceProjectId: activeWorkspaceProject?.id,
+          archivedWorkspaceProjectPaths: settings.system.archivedWorkspaceProjectPaths,
+          cronTasks: automationState.cron.tasks,
+          remote: settings.remote,
+          gatewayOnline: remoteRuntimeStatus.online,
+          prefs: trayPrefs,
+        }),
+      );
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [
+    settings.locale,
+    settings.theme,
+    historyItems,
+    sidebarRunningConversationIds,
+    workspaceProjects,
+    activeWorkspaceProject,
+    settings.system.archivedWorkspaceProjectPaths,
+    automationState.cron.tasks,
+    settings.remote,
+    remoteRuntimeStatus.online,
+    trayPrefs,
+  ]);
 
   // Called by the sidebar container after the store confirmed a deletion:
   // evict local caches, replace the visible conversation when it was the

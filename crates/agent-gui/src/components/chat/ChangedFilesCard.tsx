@@ -45,15 +45,17 @@ const ChangedFileRow = memo(function ChangedFileRow({ file }: { file: ChangedFil
   const FileTypeIcon = getFileTypeIcon(file.path, "file");
 
   const pathLabel = (
-    <span className="flex min-w-0 flex-1 items-baseline font-mono text-[calc(11.5px*var(--zone-font-scale,1))] leading-[1.6]">
-      {dir ? <span className="truncate text-muted-foreground/70">{dir}</span> : null}
+    <span className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 overflow-hidden font-mono">
       <span
         className={cn(
-          "shrink-0 text-foreground/90",
+          "min-w-0 max-w-full truncate text-[calc(11.5px*var(--zone-font-scale,1))] font-medium leading-tight text-foreground/90",
           file.deleted && "text-muted-foreground line-through",
         )}
       >
         {base}
+      </span>
+      <span className="min-w-0 max-w-full truncate text-[calc(10px*var(--zone-font-scale,1))] leading-tight text-muted-foreground/70">
+        {dir || "."}
       </span>
     </span>
   );
@@ -68,12 +70,12 @@ const ChangedFileRow = memo(function ChangedFileRow({ file }: { file: ChangedFil
           type="button"
           onClick={() => actions?.onOpenFile?.(file.path)}
           title={t("chat.changedFiles.open")}
-          className="flex min-w-0 flex-1 items-center text-left focus-visible:outline-none"
+          className="flex min-w-0 flex-1 items-stretch text-left focus-visible:outline-none"
         >
           {pathLabel}
         </button>
       ) : (
-        <span className="flex min-w-0 flex-1 items-center">{pathLabel}</span>
+        <span className="flex min-w-0 flex-1 items-stretch">{pathLabel}</span>
       )}
       {file.deleted ? (
         <span className="shrink-0 rounded-full bg-muted/70 px-1.5 py-0.5 text-[calc(10px*var(--zone-font-scale,1))] leading-none text-muted-foreground">
@@ -145,7 +147,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard({
         ) : null}
       </div>
       {/* 最多露出 5 行，更多文件走内部滚动条。 */}
-      <div className="flex max-h-[calc(150px*var(--zone-font-scale,1))] flex-col gap-0.5 overflow-y-auto overscroll-contain border-t border-border/35 px-1 py-1 dark:border-white/[0.05]">
+      <div className="flex max-h-[calc(200px*var(--zone-font-scale,1))] flex-col gap-0.5 overflow-y-auto overscroll-contain border-t border-border/35 px-1 py-1 dark:border-white/[0.05]">
         {summary.files.map((file) => (
           <ChangedFileRow key={file.lastToolCallId || file.path} file={file} />
         ))}

@@ -20,8 +20,8 @@ import {
   resolveEffectiveTheme,
   resolveWorkspaceProjects,
   subscribeToSystemThemePreference,
-  type Theme,
   THEME_OPTIONS,
+  type Theme,
 } from "./lib/settings";
 import {
   loadPersistedSettingsWithDefaults,

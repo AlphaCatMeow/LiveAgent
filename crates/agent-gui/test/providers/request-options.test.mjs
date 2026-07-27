@@ -72,7 +72,8 @@ test("llm facade preserves provider runtime exports", () => {
     "buildProviderRequestHeaders",
     "buildProviderRequestMetadata",
     "isValidCustomHeaderKey",
-    "mergeCustomHeaders",
+    "prepareProviderRequest",
+    "createProviderRuntimeConfig",
     "completeAssistantMessage",
     "composePayloadMiddlewares",
     "createModelFromConfig",
@@ -282,16 +283,57 @@ test("provider-specific custom header suggestions include standard model headers
   assert.ok(!xaiPresets.includes("anthropic-version"));
 });
 
-test("local proxy preserves explicit user-agent and content-type values for the upstream hop", () => {
-  assert.deepEqual(
-    proxy.buildUpstreamHeaderOverrideHeaders({
-      "user-agent": "custom-agent/1.0",
-      "CONTENT-TYPE": "application/custom+json",
-    }),
-    {
-      "x-liveagent-upstream-user-agent": "custom-agent/1.0",
-      "x-liveagent-upstream-content-type": "application/custom+json",
-    },
+function decodeUpstreamHeaderOverrides(encoded) {
+  return JSON.parse(Buffer.from(encoded, "base64").toString("utf8"));
+}
+
+test("upstream override channel carries every non-auth header for the local proxy hop", () => {
+  // 这些头名里 user-agent 会被 WebView 的 fetch 静默丢弃，靠覆盖包才能送达上游。
+  const encoded = proxy.encodeUpstreamHeaderOverrides({
+    "user-agent": "custom-agent/1.0",
+    "CONTENT-TYPE": "application/custom+json",
+    Cookie: "session=abc",
+    "X-Request-ID": "trace-1",
+    Authorization: "Bearer secret",
+    "x-api-key": "secret",
+    "x-goog-api-key": "secret",
+    "x-liveagent-proxy-token": "internal",
+  });
+
+  assert.deepEqual(decodeUpstreamHeaderOverrides(encoded), {
+    "user-agent": "custom-agent/1.0",
+    "CONTENT-TYPE": "application/custom+json",
+    Cookie: "session=abc",
+    "X-Request-ID": "trace-1",
+  });
+});
+
+test("upstream override channel stays empty when there is nothing to override", () => {
+  assert.equal(proxy.encodeUpstreamHeaderOverrides({}), undefined);
+  assert.equal(
+    proxy.encodeUpstreamHeaderOverrides({ Authorization: "Bearer secret" }),
+    undefined,
+  );
+});
+
+test("upstream override channel rejects oversized custom header sets", () => {
+  assert.throws(
+    () => proxy.encodeUpstreamHeaderOverrides({ "X-Big": "v".repeat(9 * 1024) }),
+    /too large/i,
+  );
+});
+
+test("anthropic-beta never enters the upstream override package", () => {
+  // 覆盖包在 prepareProxyRequest 时刻构建，早于长上下文中间件算出 anthropic-beta；
+  // 它是保留头（用户填不进来），因此绝不会回头压掉中间件的 beta 串。
+  const base = providers.buildProviderRequestHeaders("claude_code", "secret");
+  const merged = customHeaderHelpers.mergeCustomHeaders(base, [
+    { key: "anthropic-beta", value: "hijacked" },
+  ]);
+  const overrides = decodeUpstreamHeaderOverrides(proxy.encodeUpstreamHeaderOverrides(merged));
+  assert.ok(
+    !Object.keys(overrides).some((key) => key.toLowerCase() === "anthropic-beta"),
+    "anthropic-beta must stay owned by attachAnthropicLongContextBeta",
   );
 });
 
@@ -1285,7 +1327,7 @@ test("streaming text reconciler emits only missing final text suffixes", () => {
 test("custom provider headers merge without mutating the base headers", () => {
   const base = { Accept: "application/json", "X-Tenant": "old" };
   assert.deepEqual(
-    providers.mergeCustomHeaders(base, [
+    customHeaderHelpers.mergeCustomHeaders(base, [
       { key: "X-Tenant", value: "new" },
       { key: "X-Request-ID", value: "request-123" },
     ]),
@@ -1306,7 +1348,7 @@ test("custom provider headers override model defaults but not credential or prot
     "Content-Length": "42",
   };
   assert.deepEqual(
-    providers.mergeCustomHeaders(base, [
+    customHeaderHelpers.mergeCustomHeaders(base, [
       { key: "authorization", value: "Bearer attacker" },
       { key: "X-API-KEY", value: "attacker" },
       { key: "X-GOOG-API-KEY", value: "attacker" },
@@ -1331,7 +1373,7 @@ test("custom provider headers override model defaults but not credential or prot
 
 test("custom provider headers filter invalid HTTP token keys", () => {
   assert.deepEqual(
-    providers.mergeCustomHeaders({}, [
+    customHeaderHelpers.mergeCustomHeaders({}, [
       { key: "", value: "empty" },
       { key: "Bad Header", value: "space" },
       { key: "Bad:Header", value: "colon" },
@@ -1344,12 +1386,30 @@ test("custom provider headers filter invalid HTTP token keys", () => {
   assert.equal(customHeaderHelpers.isReservedCustomHeaderKey("Anthropic-Beta"), true);
   assert.equal(providers.isValidCustomHeaderKey("X-Request-ID"), true);
   assert.equal(providers.isValidCustomHeaderKey("Bad Header"), false);
+  // 本地反代的内部命名空间不可被自定义头注入。
+  assert.equal(customHeaderHelpers.isReservedCustomHeaderKey("X-LiveAgent-Proxy-Token"), true);
+  assert.equal(customHeaderHelpers.isReservedCustomHeaderKey("x-liveagent-anything"), true);
+});
+
+test("custom provider headers reject values fetch() cannot transmit", () => {
+  assert.equal(customHeaderHelpers.isValidCustomHeaderValue("plain-ascii/1.0"), true);
+  assert.equal(customHeaderHelpers.isValidCustomHeaderValue(""), true);
+  assert.equal(customHeaderHelpers.isValidCustomHeaderValue("中文"), false);
+  assert.equal(customHeaderHelpers.isValidCustomHeaderValue("a\r\nb"), false);
+  assert.deepEqual(
+    customHeaderHelpers.mergeCustomHeaders({}, [
+      { key: "X-Bad", value: "中文" },
+      { key: "X-Injected", value: "a\r\nHost: evil" },
+      { key: "X-Good", value: "kept" },
+    ]),
+    { "X-Good": "kept" },
+  );
 });
 
 test("custom provider headers accept undefined and empty arrays", () => {
   const base = { Accept: "application/json" };
-  assert.deepEqual(providers.mergeCustomHeaders(base, undefined), base);
-  assert.deepEqual(providers.mergeCustomHeaders(base, []), base);
+  assert.deepEqual(customHeaderHelpers.mergeCustomHeaders(base, undefined), base);
+  assert.deepEqual(customHeaderHelpers.mergeCustomHeaders(base, []), base);
 });
 
 test("resolveProviderCacheRetention maps provider settings and per-request overrides", () => {

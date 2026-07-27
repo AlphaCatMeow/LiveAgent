@@ -8,6 +8,7 @@ type DebugLineType = "request" | "result" | "error";
 type RuntimeDebugInput = {
   baseUrl: string;
   apiKey: string;
+  customHeaders?: { key: string; value: string }[];
   requestFormat?: CodexRequestFormat;
   reasoning?: ReasoningLevel;
   promptCachingEnabled?: boolean;
@@ -193,6 +194,9 @@ export function buildRuntimeDebugInfo(runtime: RuntimeDebugInput) {
     nativeWebSearchEnabled: runtime.nativeWebSearchEnabled,
     useSystemProxy: runtime.useSystemProxy,
     hasApiKey: runtime.apiKey.trim().length > 0,
+    // 只记 key：取值继续整体脱敏。这是端到端确认「自定义请求头是否真的走到了
+    // 这条链路」的唯一低成本手段——配置一旦在中途被丢弃，这里就是空数组。
+    customHeaderKeys: (runtime.customHeaders ?? []).map((header) => header.key),
   };
 }
 

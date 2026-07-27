@@ -252,9 +252,10 @@ const llmMock = {
       Authorization: `Bearer ${apiKey}`,
     };
   },
-  buildProviderRequestHeaders(_providerId, apiKey, _sessionId) {
+  async prepareProviderRequest(_providerId, runtime) {
     return {
-      Authorization: `Bearer ${apiKey}`,
+      baseUrl: runtime.baseUrl.trim(),
+      headers: { Authorization: `Bearer ${runtime.apiKey}`, "x-liveagent-test": "1" },
     };
   },
   createModelFromConfig(providerId, modelId, baseUrl) {

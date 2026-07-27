@@ -20,6 +20,7 @@ export {
   finalizeProviderStreamOptions,
   type ProviderPayloadMiddleware,
 } from "./runtime/payloadPipeline";
+export { createProviderRuntimeConfig } from "./runtime/providerRuntimeConfig";
 export {
   buildAnthropicAuthHeaders,
   buildGeminiAuthHeaders,
@@ -27,7 +28,7 @@ export {
   buildProviderRequestHeaders,
   buildProviderRequestMetadata,
   isValidCustomHeaderKey,
-  mergeCustomHeaders,
+  prepareProviderRequest,
   resolveProviderCacheRetention,
   toSimpleStreamReasoning,
 } from "./runtime/requestOptions";

@@ -9,7 +9,6 @@ import type {
 } from "@earendil-works/pi-ai";
 import { buildStreamRequestDebugPayload, type StreamDebugLogger } from "../../debug/agentDebug";
 import { buildMemoryToolsSuffixSection } from "../../memory/prompts/injection";
-import { mergeCustomHeaders } from "../../providers/customHeaders";
 import {
   createHostedSearchEventAggregator,
   createHostedSearchProbeId,
@@ -17,12 +16,13 @@ import {
   withHostedSearchProbeHeader,
 } from "../../providers/hostedSearchEvents";
 import {
-  buildProviderRequestHeaders,
   buildProviderRequestMetadata,
   createModelFromConfig,
   createStreamingTextReconciler,
   finalizeProviderStreamOptions,
   normalizeErrorMessage,
+  type ProviderRuntimeConfig,
+  prepareProviderRequest,
   resolveProviderCacheRetention,
   type StreamOptionsEx,
   streamSimpleByApi,
@@ -36,7 +36,6 @@ import {
   isProviderNativeWebFetchToolName,
   isProviderNativeWebSearchToolName,
 } from "../../providers/nativeWebSearch";
-import { prepareProxyRequest } from "../../providers/proxy";
 import type { RetryAttemptRecord } from "../../providers/runtime/streamRetry";
 import {
   inferRuntimePlatform,
@@ -44,13 +43,7 @@ import {
   type RuntimePlatform,
   runtimePlatformLabel,
 } from "../../runtimePlatform";
-import type {
-  CodexRequestFormat,
-  CustomProvider,
-  ProviderId,
-  ProviderModelConfig,
-  ReasoningLevel,
-} from "../../settings";
+import type { ProviderId, ReasoningLevel } from "../../settings";
 import { createSubagentScheduler, type SubagentScheduler } from "../../subagents/scheduler";
 import { withPowerActivity } from "../../system/powerActivity";
 import { sanitizeContextForModelRequest } from "../context/requestContextSanitizer";
@@ -652,18 +645,7 @@ function findLastAssistantMessage(messages: Message[]): AssistantMessage | null 
 export async function runAssistantWithTools(params: {
   providerId: ProviderId;
   model: string;
-  runtime: {
-    baseUrl: string;
-    apiKey: string;
-    customHeaders?: CustomProvider["customHeaders"];
-    requestFormat?: CodexRequestFormat;
-    reasoning?: ReasoningLevel;
-    promptCachingEnabled?: boolean;
-    promptCacheRetention?: "short" | "long";
-    nativeWebSearchEnabled?: boolean;
-    useSystemProxy?: boolean;
-    modelConfig?: ProviderModelConfig;
-  };
+  runtime: ProviderRuntimeConfig;
   runtimePlatform?: RuntimePlatform;
   context: Context;
   workdir: string;
@@ -714,20 +696,9 @@ export async function runAssistantWithTools(params: {
   const subagentScheduler = params.subagentScheduler ?? createSubagentScheduler();
 
   return withPowerActivity("assistant-tools", `${params.providerId}:${modelId}`, async () => {
-    const proxyRequest = await prepareProxyRequest(
-      params.providerId,
-      params.runtime.baseUrl.trim(),
-      mergeCustomHeaders(
-        buildProviderRequestHeaders(
-          params.providerId,
-          params.runtime.apiKey,
-          params.sessionId,
-          params.runtime.requestFormat,
-        ),
-        params.runtime.customHeaders,
-      ),
-      { useSystemProxy: params.runtime.useSystemProxy === true },
-    );
+    const proxyRequest = await prepareProviderRequest(params.providerId, params.runtime, {
+      sessionId: params.sessionId,
+    });
 
     const model = createModelFromConfig(
       params.providerId,

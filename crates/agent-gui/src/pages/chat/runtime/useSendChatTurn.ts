@@ -41,7 +41,7 @@ import {
 import type { ScrollFollowHandle } from "../../../lib/chat-scroll/useScrollFollow";
 import { createStreamDebugLogger } from "../../../lib/debug/agentDebug";
 import { buildMemoryOverviewSection } from "../../../lib/memory/prompts/injection";
-import { createModelFromConfig } from "../../../lib/providers/llm";
+import { createModelFromConfig, createProviderRuntimeConfig } from "../../../lib/providers/llm";
 import {
   type AppSettings,
   applyMcpOpsToAppSettings,
@@ -94,7 +94,6 @@ import {
   resolveEffectiveChatModelSelection,
 } from "./modelSelection";
 import {
-  buildProviderRuntimeConfig,
   resolveConversationTitleModelSelection,
   resolveMemorySummaryModelSelection,
   selectedModelsMatch,
@@ -425,13 +424,13 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       gatewayBridgeRequest?.runtimeControlsOverride ??
       overrides?.runtimeControlsOverride ??
       settings.chatRuntimeControls;
-    const providerConfig = buildProviderRuntimeConfig(provider, model, runtimeControls);
+    const providerConfig = createProviderRuntimeConfig(provider, model, runtimeControls);
     const memorySummaryModelSelection = resolveMemorySummaryModelSelection(settings);
     const memoryExtractionModel = memorySummaryModelSelection
       ? {
           providerId: memorySummaryModelSelection.providerId,
           model: memorySummaryModelSelection.model,
-          runtime: buildProviderRuntimeConfig(
+          runtime: createProviderRuntimeConfig(
             memorySummaryModelSelection.provider,
             memorySummaryModelSelection.model,
             runtimeControls,
@@ -603,7 +602,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
         settings,
         effectiveSelectedModel,
       );
-      const titleProviderConfig = buildProviderRuntimeConfig(
+      const titleProviderConfig = createProviderRuntimeConfig(
         titleModelSelection.provider,
         titleModelSelection.model,
         runtimeControls,
@@ -611,16 +610,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       titlePromise = startConversationTitleJob({
         providerId: titleModelSelection.providerId,
         model: titleModelSelection.model,
-        runtime: {
-          baseUrl: titleProviderConfig.baseUrl,
-          apiKey: titleProviderConfig.apiKey,
-          requestFormat: titleProviderConfig.requestFormat,
-          reasoning: titleProviderConfig.reasoning,
-          promptCachingEnabled: titleProviderConfig.promptCachingEnabled,
-          nativeWebSearchEnabled: titleProviderConfig.nativeWebSearchEnabled,
-          useSystemProxy: titleProviderConfig.useSystemProxy,
-          modelConfig: titleProviderConfig.modelConfig,
-        },
+        runtime: titleProviderConfig,
         signal: cancellation.deriveScope().controller.signal,
         conversationId,
         titleSourceText,
@@ -1048,16 +1038,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     compaction.bindTurn({
       providerId,
       model,
-      runtime: {
-        baseUrl: providerConfig.baseUrl,
-        apiKey: providerConfig.apiKey,
-        requestFormat: providerConfig.requestFormat,
-        reasoning: providerConfig.reasoning,
-        promptCachingEnabled: providerConfig.promptCachingEnabled,
-        nativeWebSearchEnabled: providerConfig.nativeWebSearchEnabled,
-        useSystemProxy: providerConfig.useSystemProxy,
-        modelConfig: providerConfig.modelConfig,
-      },
+      runtime: providerConfig,
       cancellation,
       debugLogger: compactionDebugLogger,
       buildPreparedContext,
@@ -1316,16 +1297,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
           params: {
             providerId,
             model,
-            runtime: {
-              baseUrl: providerConfig.baseUrl,
-              apiKey: providerConfig.apiKey,
-              requestFormat: providerConfig.requestFormat,
-              reasoning: providerConfig.reasoning,
-              promptCachingEnabled: providerConfig.promptCachingEnabled,
-              nativeWebSearchEnabled: providerConfig.nativeWebSearchEnabled,
-              useSystemProxy: providerConfig.useSystemProxy,
-              modelConfig: providerConfig.modelConfig,
-            },
+            runtime: providerConfig,
             runtimeModel,
             selectedModel,
             memoryExtractionModel,
@@ -1395,16 +1367,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
           params: {
             providerId,
             model,
-            runtime: {
-              baseUrl: providerConfig.baseUrl,
-              apiKey: providerConfig.apiKey,
-              requestFormat: providerConfig.requestFormat,
-              reasoning: providerConfig.reasoning,
-              promptCachingEnabled: providerConfig.promptCachingEnabled,
-              nativeWebSearchEnabled: providerConfig.nativeWebSearchEnabled,
-              useSystemProxy: providerConfig.useSystemProxy,
-              modelConfig: providerConfig.modelConfig,
-            },
+            runtime: providerConfig,
             runtimeModel,
             selectedModel,
             memoryExtractionModel,

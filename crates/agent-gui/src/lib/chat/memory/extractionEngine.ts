@@ -51,31 +51,16 @@ import {
   type ExtractionRejectionEntry,
 } from "../../memory/prompts/extraction";
 import type { MemoryReviewerMode, ValidatedPlanItem } from "../../memory/schema";
-import type {
-  CodexRequestFormat,
-  ProviderId,
-  ProviderModelConfig,
-  ReasoningLevel,
-  SelectedModel,
-} from "../../settings";
+import type { ProviderRuntimeConfig } from "../../providers/runtime/types";
+import type { ProviderId, SelectedModel } from "../../settings";
 import { createMemoryTools } from "../../tools/memoryTools";
 import { isAbortLikeError } from "../page/chatPageHelpers";
 import { runAssistantWithTools } from "../runner/agentRunner";
 
-export type MemoryExtractionRuntimeConfig = {
-  baseUrl: string;
-  apiKey: string;
-  requestFormat?: CodexRequestFormat;
-  reasoning?: ReasoningLevel;
-  promptCachingEnabled?: boolean;
-  nativeWebSearchEnabled?: boolean;
-  modelConfig?: ProviderModelConfig;
-};
-
 export type MemoryExtractionModelConfig = {
   providerId: ProviderId;
   model: string;
-  runtime: MemoryExtractionRuntimeConfig;
+  runtime: ProviderRuntimeConfig;
   selectedModel?: SelectedModel;
 };
 

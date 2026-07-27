@@ -36,6 +36,7 @@ function splitPath(path: string): { dir: string; base: string } {
 
 const ROW_ACTION_CLASS =
   "flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 transition-all hover:bg-foreground/[0.07] hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none group-hover/changed-file:opacity-100";
+const MAX_VISIBLE_FILES = 5;
 
 const ChangedFileRow = memo(function ChangedFileRow({ file }: { file: ChangedFileEntry }) {
   const { t } = useLocale();
@@ -43,9 +44,15 @@ const ChangedFileRow = memo(function ChangedFileRow({ file }: { file: ChangedFil
   const { dir, base } = splitPath(file.path);
   const canOpen = Boolean(actions?.onOpenFile) && !file.deleted;
   const FileTypeIcon = getFileTypeIcon(file.path, "file");
+  const openLabel = `${t("chat.changedFiles.open")}: ${file.path}`;
+  const revealLabel = `${t("chat.changedFiles.reveal")}: ${file.path}`;
+  const diffLabel = `${t("chat.changedFiles.diff")}: ${file.path}`;
 
   const pathLabel = (
-    <span className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 overflow-hidden font-mono">
+    <span
+      title={file.path}
+      className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 overflow-hidden font-mono"
+    >
       <span
         className={cn(
           "min-w-0 max-w-full truncate text-[calc(11.5px*var(--zone-font-scale,1))] font-medium leading-tight text-foreground/90",
@@ -69,7 +76,8 @@ const ChangedFileRow = memo(function ChangedFileRow({ file }: { file: ChangedFil
         <button
           type="button"
           onClick={() => actions?.onOpenFile?.(file.path)}
-          title={t("chat.changedFiles.open")}
+          title={openLabel}
+          aria-label={openLabel}
           className="flex min-w-0 flex-1 items-stretch text-left focus-visible:outline-none"
         >
           {pathLabel}
@@ -88,8 +96,8 @@ const ChangedFileRow = memo(function ChangedFileRow({ file }: { file: ChangedFil
         <button
           type="button"
           onClick={() => actions.onRevealInFileTree?.(file.path)}
-          title={t("chat.changedFiles.reveal")}
-          aria-label={t("chat.changedFiles.reveal")}
+          title={revealLabel}
+          aria-label={revealLabel}
           className={ROW_ACTION_CLASS}
         >
           <FolderTree className="h-3.5 w-3.5" />
@@ -99,8 +107,8 @@ const ChangedFileRow = memo(function ChangedFileRow({ file }: { file: ChangedFil
         <button
           type="button"
           onClick={() => actions.onOpenDiff?.(file.path)}
-          title={t("chat.changedFiles.diff")}
-          aria-label={t("chat.changedFiles.diff")}
+          title={diffLabel}
+          aria-label={diffLabel}
           className={ROW_ACTION_CLASS}
         >
           <GitCommitHorizontal className="h-3.5 w-3.5" />
@@ -147,7 +155,13 @@ export const ChangedFilesCard = memo(function ChangedFilesCard({
         ) : null}
       </div>
       {/* 最多露出 5 行，更多文件走内部滚动条。 */}
-      <div className="flex max-h-[calc(200px*var(--zone-font-scale,1))] flex-col gap-0.5 overflow-y-auto overscroll-contain border-t border-border/35 px-1 py-1 dark:border-white/[0.05]">
+      <div
+        className={cn(
+          "flex flex-col gap-0.5 border-t border-border/35 px-1 py-1 dark:border-white/[0.05]",
+          summary.files.length > MAX_VISIBLE_FILES &&
+            "max-h-[calc(210px*var(--zone-font-scale,1))] overflow-y-auto overscroll-contain",
+        )}
+      >
         {summary.files.map((file) => (
           <ChangedFileRow key={file.lastToolCallId || file.path} file={file} />
         ))}

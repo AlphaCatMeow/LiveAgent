@@ -31,6 +31,8 @@ function createCardModule(rootDir) {
       },
       [resolveSource("components/icons.tsx")]: {
         FilePenLine: NullIcon,
+        FolderTree: NullIcon,
+        GitCommitHorizontal: NullIcon,
       },
       [resolveSource("components/chat/fileTypeIcons.tsx")]: {
         getFileTypeIcon() {
@@ -52,15 +54,20 @@ function createCardModule(rootDir) {
   };
 }
 
-function renderCard({ cardModule, jsxRuntime, renderToStaticMarkup }) {
+function renderCard(
+  { cardModule, jsxRuntime, renderToStaticMarkup },
+  { withActions = false, fileCount = 4 } = {},
+) {
   const paths = [
     { path: "src/components/ChangedFilesCard.tsx", deleted: false },
     { path: "README.md", deleted: false },
     { path: "src\\pages\\Settings.tsx", deleted: false },
     { path: "tmp/removed.ts", deleted: true },
+    { path: "src/features/fifth.ts", deleted: false },
+    { path: "src/features/sixth.ts", deleted: false },
   ];
   const summary = {
-    files: paths.map((file, index) => ({
+    files: paths.slice(0, fileCount).map((file, index) => ({
       ...file,
       added: index + 1,
       removed: index,
@@ -70,8 +77,18 @@ function renderCard({ cardModule, jsxRuntime, renderToStaticMarkup }) {
     totalRemoved: 8,
   };
 
+  const card = jsxRuntime.jsx(cardModule.ChangedFilesCard, { summary });
+  if (!withActions) return renderToStaticMarkup(card);
+
   return renderToStaticMarkup(
-    jsxRuntime.jsx(cardModule.ChangedFilesCard, { summary }),
+    jsxRuntime.jsx(cardModule.ChangedFilesActionsProvider, {
+      value: {
+        onOpenFile() {},
+        onRevealInFileTree() {},
+        onOpenDiff() {},
+      },
+      children: card,
+    }),
   );
 }
 
@@ -95,5 +112,44 @@ test("GUI changed-files rows render file names above directory paths", () => {
     html,
     /class="[^"]*line-through[^"]*"[^>]*>removed\.ts<\/span><span[^>]*>tmp\/<\/span>/,
   );
-  assert.ok(html.includes("max-h-[calc(200px*var(--zone-font-scale,1))]"));
+  for (const filePath of [
+    "src/components/ChangedFilesCard.tsx",
+    "README.md",
+    "src\\pages\\Settings.tsx",
+    "tmp/removed.ts",
+  ]) {
+    assert.ok(html.includes(`title="${filePath}"`), `missing full-path tooltip for ${filePath}`);
+  }
+  assert.doesNotMatch(html, /aria-label="chat\.changedFiles\.(?:open|reveal|diff):/);
+});
+
+test("GUI changed-files scrolling starts with the sixth row", () => {
+  const modules = createCardModule(rootDir);
+  const fiveFiles = renderCard(modules, { fileCount: 5 });
+  const sixFiles = renderCard(modules, { fileCount: 6 });
+
+  assert.ok(!fiveFiles.includes("max-h-[calc(210px*var(--zone-font-scale,1))]"));
+  assert.ok(!fiveFiles.includes("overscroll-contain"));
+  assert.ok(sixFiles.includes("max-h-[calc(210px*var(--zone-font-scale,1))]"));
+  assert.ok(sixFiles.includes("overflow-y-auto overscroll-contain"));
+});
+
+test("GUI changed-files actions include the localized action and canonical path", () => {
+  const html = renderCard(createCardModule(rootDir), { withActions: true });
+  const nestedPath = "src/components/ChangedFilesCard.tsx";
+
+  for (const action of ["open", "reveal", "diff"]) {
+    const label = `chat.changedFiles.${action}: ${nestedPath}`;
+    assert.ok(html.includes(`aria-label="${label}"`), `missing accessible ${action} label`);
+    assert.ok(html.includes(`title="${label}"`), `missing ${action} tooltip`);
+  }
+
+  assert.ok(
+    html.includes('aria-label="chat.changedFiles.reveal: tmp/removed.ts"'),
+    "deleted files should retain their available row actions",
+  );
+  assert.ok(
+    !html.includes('aria-label="chat.changedFiles.open: tmp/removed.ts"'),
+    "deleted files must not expose the open-file action",
+  );
 });

@@ -112,7 +112,6 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.history.deleteFailed": "删除历史对话失败",
     "chat.history.deleteBlockedRunning": "后台任务仍在运行，暂时不能删除该对话。",
     "chat.history.openFailed": "读取历史对话失败",
-    "chat.history.openFullFailed": "读取完整历史对话失败",
     "chat.history.persistFailed": "历史记录保存失败：{message}",
     "chat.history.syncing": "正在同步…",
     "chat.resizeSidebarSections": "调整工作空间与最近对话占比",
@@ -2272,7 +2271,6 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.history.deleteBlockedRunning":
       "A background task is still running; the conversation cannot be deleted yet.",
     "chat.history.openFailed": "Failed to open conversation",
-    "chat.history.openFullFailed": "Failed to load the full conversation",
     "chat.history.persistFailed": "Failed to save history: {message}",
     "chat.history.syncing": "Syncing…",
     "chat.resizeSidebarSections": "Resize workspaces and recent conversations",

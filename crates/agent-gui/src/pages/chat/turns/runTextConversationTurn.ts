@@ -36,10 +36,7 @@ import {
 import type { StreamDebugLogger } from "../../../lib/debug/agentDebug";
 import { assistantMessageToText, streamAssistantMessage } from "../../../lib/providers/llm";
 import type { ProviderId } from "../../../lib/settings";
-import {
-  buildPartialAssistantMessage,
-  type ConversationRuntimeEntry,
-} from "../runtime/chatPageRuntime";
+import { buildPartialAssistantMessage } from "../runtime/chatPageRuntime";
 
 export type RuntimeModel = {
   api: AssistantMessage["api"];
@@ -98,10 +95,7 @@ export type RunTextConversationTurnParams = {
   updateGatewayBridgeToolStatus: (status: string | null, isCompaction?: boolean) => void;
   updateRetryAttempts: (attempts: RetryAttemptRecord[], store: LiveTranscriptStore) => void;
   commitVisibleAbortedConversation: () => boolean;
-  updateConversationRuntimeEntry: (
-    conversationId: string,
-    updater: (prev: ConversationRuntimeEntry) => ConversationRuntimeEntry,
-  ) => ConversationRuntimeEntry;
+  freezeGatewayFinalProjection: (state: ConversationViewState, contentComplete?: boolean) => void;
   persistConversationWithHistorySync: (params: PersistConversationParams) => Promise<boolean>;
   memoryExtractionModel?: MemoryExtractionModelConfig;
   onMemoryExtractionModelFailure?: (model: MemoryExtractionModelConfig) => void;
@@ -138,7 +132,7 @@ export async function runTextConversationTurn(params: RunTextConversationTurnPar
     updateGatewayBridgeToolStatus,
     updateRetryAttempts,
     commitVisibleAbortedConversation,
-    updateConversationRuntimeEntry,
+    freezeGatewayFinalProjection,
     persistConversationWithHistorySync,
     memoryExtractionModel,
     onMemoryExtractionModelFailure,
@@ -395,11 +389,9 @@ export async function runTextConversationTurn(params: RunTextConversationTurnPar
   const shouldRunMemoryExtraction =
     finalAssistant.stopReason !== "error" && finalAssistant.stopReason !== "aborted";
   commitAssistantRoundMeta(finalAssistant, textRound);
+  applyConversationState(finalState);
+  freezeGatewayFinalProjection(finalState, true);
   settleLiveTranscript(transcriptStore);
-  updateConversationRuntimeEntry(conversationId, (prev) => ({
-    ...prev,
-    state: finalState,
-  }));
   hookLifecycle.ensureMessageEnded();
   hookLifecycle.endAgent();
   await persistConversationWithHistorySync({
@@ -413,11 +405,6 @@ export async function runTextConversationTurn(params: RunTextConversationTurnPar
     createdAt,
     titlePromise,
   });
-  gatewayBridgeEvents.queueEvent({
-    type: "done",
-    conversation_id: conversationId,
-  });
-  await gatewayBridgeEvents.close();
   if (shouldRunMemoryExtraction) {
     const currentMemoryExtractionModel: MemoryExtractionModelConfig = {
       providerId,

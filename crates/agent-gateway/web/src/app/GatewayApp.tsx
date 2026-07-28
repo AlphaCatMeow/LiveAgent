@@ -30,6 +30,7 @@ import { registerAskUserQuestionAnswerHandler } from "@/lib/chat/askUserQuestion
 import type { ChatHistorySummary } from "@/lib/chat/chatHistory";
 import { buildModelOptions } from "@/lib/chat/chatPageHelpers";
 import type { HistoryMessageRef } from "@/lib/chat/conversationState";
+import { isChatRuntimeProtocolIncompatible } from "@/lib/chat/runtimeCompatibility";
 import {
   adoptHistoryWindowState,
   evaluateHistoryWindowResponse,
@@ -2108,6 +2109,9 @@ export default function GatewayApp() {
             statusRef.current = nextStatus;
             setStatus(nextStatus);
             setStatusError(null);
+            if (isChatRuntimeProtocolIncompatible(nextStatus)) {
+              throw new Error(translate("chat.runtime.protocolIncompatible", settings.locale));
+            }
             return nextStatus;
           })
           .catch((error) => {
@@ -2143,7 +2147,7 @@ export default function GatewayApp() {
         }
       }
     },
-    [api],
+    [api, settings.locale],
   );
 
   // List loading, reconnect reconciliation, and the 60s silent reconcile all
@@ -2304,12 +2308,11 @@ export default function GatewayApp() {
       baseMessageRef: options?.editMessageRef,
       optimistic: options?.optimisticEcho !== false,
       submit: async () => {
-        // Preserve the instant optimistic echo, then serialize the bounded
-        // runtime wake-up ahead of dispatch. A failed/old-gateway prepare is a
-        // soft degradation: chat.command remains the final wake signal.
-        await prepareChatRuntime("send", api, CHAT_RUNTIME_PREPARE_TIMEOUT_MS).catch(
-          () => undefined,
-        );
+        // Preserve the instant optimistic echo, then require the bounded
+        // runtime wake-up before dispatch. The socket layer still understands
+        // old gateways; a new gateway must never fall through and dual-send to
+        // a desktop that lacks reliable chat ingress.
+        await prepareChatRuntime("send", api, CHAT_RUNTIME_PREPARE_TIMEOUT_MS);
         return api.chatCommand(commandInput);
       },
     });
@@ -2443,9 +2446,7 @@ export default function GatewayApp() {
         // straight into the GUI queue. The pipeline slot (pre-first-token
         // spinner + watchdog) belongs to the first command; the queue panel
         // updates via command_update/run_queued and chat_queue events.
-        await prepareChatRuntime("send", api, CHAT_RUNTIME_PREPARE_TIMEOUT_MS).catch(
-          () => undefined,
-        );
+        await prepareChatRuntime("send", api, CHAT_RUNTIME_PREPARE_TIMEOUT_MS);
         await api.chatCommand({
           type: "chat.submit",
           message: materialized.text,
@@ -4348,20 +4349,29 @@ export default function GatewayApp() {
   const composerIsSending = transcriptBusy;
   const transcriptError = displayedTranscriptRowCount === 0 ? null : chatError;
   const composerCompactionBlocked = transcriptToolStatusIsCompaction;
+  const chatProtocolIncompatible = isChatRuntimeProtocolIncompatible(status);
+  const chatProtocolIncompatibleMessage = chatProtocolIncompatible
+    ? translate("chat.runtime.protocolIncompatible", settings.locale)
+    : null;
   const sidebarSectionsDisabled = shouldDisableGatewaySidebarSections({
     connectionLost: gatewayConnectionLost,
     agentStatusFresh: sidebarAgentStatusFresh,
     agentOnline: status?.online,
   });
   const composerInputDisabled =
-    !status?.online || historyDetailLoading || composerCompactionBlocked;
-  const composerPlaceholder = composerCompactionBlocked
-    ? translate("chat.compactingContextWait", settings.locale)
-    : historyDetailLoading
-      ? "正在加载会话历史，请稍候..."
-      : enabledComposerSkills.length > 0
-        ? translate("chat.inputHintWithSkills", settings.locale)
-        : translate("chat.inputHint", settings.locale);
+    !status?.online ||
+    chatProtocolIncompatible ||
+    historyDetailLoading ||
+    composerCompactionBlocked;
+  const composerPlaceholder = chatProtocolIncompatible
+    ? translate("chat.runtime.protocolIncompatiblePlaceholder", settings.locale)
+    : composerCompactionBlocked
+      ? translate("chat.compactingContextWait", settings.locale)
+      : historyDetailLoading
+        ? "正在加载会话历史，请稍候..."
+        : enabledComposerSkills.length > 0
+          ? translate("chat.inputHintWithSkills", settings.locale)
+          : translate("chat.inputHint", settings.locale);
   const canDropUpload =
     status?.online === true &&
     isAgentMode &&
@@ -4717,6 +4727,9 @@ export default function GatewayApp() {
                   </div>
 
                   {statusError ? <div className="gateway-banner-error">{statusError}</div> : null}
+                  {chatProtocolIncompatibleMessage && !statusError ? (
+                    <div className="gateway-banner-error">{chatProtocolIncompatibleMessage}</div>
+                  ) : null}
                   {settingsSyncError ? (
                     <div className="gateway-banner-error">{settingsSyncError}</div>
                   ) : null}

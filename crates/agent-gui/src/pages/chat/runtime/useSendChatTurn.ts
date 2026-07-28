@@ -69,11 +69,14 @@ import {
   buildTextFromComposerDraft,
   importPastedTextsAsFiles,
 } from "../composer/composerDraftText";
-import type { GatewayRuntimeSnapshotState } from "../gateway/chatRuntimeSnapshot";
+import {
+  buildGatewayFinalProjectionEntries,
+  buildGatewayRuntimeSnapshotEntries,
+  type GatewayRuntimeSnapshotState,
+} from "../gateway/chatRuntimeSnapshot";
 import type { ActiveGatewayBridgeRequest } from "../gateway/gatewayBridgeTypes";
 import { createLocalGatewayChatRunId } from "../gateway/gatewayRuntimeStatusModel";
-import type { useGatewayBridgeBatcher } from "../gateway/useGatewayBridgeBatcher";
-import type { useGatewayRuntimeSnapshots } from "../gateway/useGatewayRuntimeSnapshots";
+import type { useGatewayRunMirrorCoordinator } from "../gateway/useGatewayRunMirrorCoordinator";
 import type { PersistConversationParams } from "../history/useConversationHistoryActions";
 import type { useChatPageRuntimeStore } from "../hooks/useChatPageRuntimeStore";
 import type { useLiveTranscriptController } from "../hooks/useLiveTranscriptController";
@@ -83,6 +86,7 @@ import {
   finalizeChatRunInOrder,
   releaseChatRunUi,
   settleChatRunFinalization,
+  trackTerminalHistoryPersist,
 } from "./chatRunFinalization";
 import {
   buildPreparedContext as buildPreparedConversationContext,
@@ -101,8 +105,7 @@ import {
 
 type LiveTranscriptController = ReturnType<typeof useLiveTranscriptController>;
 type ChatPageRuntimeStore = ReturnType<typeof useChatPageRuntimeStore>;
-type GatewayBridgeBatcher = ReturnType<typeof useGatewayBridgeBatcher>;
-type GatewayRuntimeSnapshots = ReturnType<typeof useGatewayRuntimeSnapshots>;
+type GatewayRunMirrorCoordinator = ReturnType<typeof useGatewayRunMirrorCoordinator>;
 
 type TitleJobRefValue = {
   conversationId: string;
@@ -155,13 +158,10 @@ type UseSendChatTurnParams = {
   batchLiveRoundsUpdate: LiveTranscriptController["batchLiveRoundsUpdate"];
   updateToolStatus: LiveTranscriptController["updateToolStatus"];
   updateRetryAttempts: LiveTranscriptController["updateRetryAttempts"];
-  queueGatewayBridgeEventForRequest: GatewayBridgeBatcher["queueGatewayBridgeEventForRequest"];
-  flushGatewayBridgeEventsForRequest: GatewayBridgeBatcher["flushGatewayBridgeEventsForRequest"];
-  activeGatewayRuntimeRunsRef: GatewayRuntimeSnapshots["activeGatewayRuntimeRunsRef"];
-  queueGatewayRuntimeSnapshot: GatewayRuntimeSnapshots["queueGatewayRuntimeSnapshot"];
-  queueGatewayRuntimeSnapshotForRun: GatewayRuntimeSnapshots["queueGatewayRuntimeSnapshotForRun"];
-  registerActiveGatewayRuntimeRun: GatewayRuntimeSnapshots["registerActiveGatewayRuntimeRun"];
-  finishActiveGatewayRuntimeRun: GatewayRuntimeSnapshots["finishActiveGatewayRuntimeRun"];
+  queueGatewayBridgeEventForRequest: GatewayRunMirrorCoordinator["queueGatewayBridgeEventForRequest"];
+  flushGatewayBridgeEventsForRequest: GatewayRunMirrorCoordinator["flushGatewayBridgeEventsForRequest"];
+  registerGatewayRunMirror: GatewayRunMirrorCoordinator["registerGatewayRunMirror"];
+  finishGatewayRunMirror: GatewayRunMirrorCoordinator["finishGatewayRunMirror"];
   gatewayBridgeHistorySummaryRef: MutableRefObject<Map<string, ChatHistorySummary>>;
   availableSkills: SkillSummary[];
   skillsRootDir: string;
@@ -229,11 +229,8 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     updateRetryAttempts,
     queueGatewayBridgeEventForRequest,
     flushGatewayBridgeEventsForRequest,
-    activeGatewayRuntimeRunsRef,
-    queueGatewayRuntimeSnapshot,
-    queueGatewayRuntimeSnapshotForRun,
-    registerActiveGatewayRuntimeRun,
-    finishActiveGatewayRuntimeRun,
+    registerGatewayRunMirror,
+    finishGatewayRunMirror,
     gatewayBridgeHistorySummaryRef,
     availableSkills,
     skillsRootDir,
@@ -338,11 +335,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       requestId: gatewayBridgeRequestId,
       workerId: gatewayBridgeWorkerId,
       enabled: Boolean(gatewayBridgeRequest) || hasRemoteGatewayTarget,
-      sendEvent: (requestId, event, options) => {
-        const result = queueGatewayBridgeEventForRequest(requestId, event, options);
-        void queueGatewayRuntimeSnapshot(conversationId);
-        return result;
-      },
+      sendEvent: queueGatewayBridgeEventForRequest,
       flushEvents: flushGatewayBridgeEventsForRequest,
       resolveErrorConversationId: () =>
         gatewayBridgeRequest?.conversationId ?? currentConversationIdRef.current,
@@ -350,11 +343,6 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     const updateGatewayBridgeToolStatus = (status: string | null, isCompaction = false) => {
       gatewayBridgeEvents.queueToolStatus(status, isCompaction);
       updateToolStatus(status, transcriptStore);
-      const run = activeGatewayRuntimeRunsRef.current.get(conversationId);
-      if (run) {
-        run.toolStatusIsCompaction = Boolean(status?.trim()) && isCompaction;
-      }
-      void queueGatewayRuntimeSnapshot(conversationId);
     };
     // Mirrors the live retry-attempt list to remote WebUI clients alongside
     // the local live-transcript update.
@@ -656,6 +644,11 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     let localGatewayRunStarted = false;
     let remoteGatewayCancelRequested = false;
     let gatewayRuntimeFinalState: GatewayRuntimeSnapshotState = "completed";
+    let gatewayRuntimeErrorCode = "";
+    let gatewayRuntimeErrorMessage = "";
+    let frozenGatewayFinalProjectionJson: string | null = null;
+    let frozenGatewayContentComplete = false;
+    let terminalHistoryPersistFailed = false;
     let initialPersistPromise: Promise<boolean> | null = null;
     let terminalHistoryPersistPromise: Promise<boolean> | null = null;
     let runCleanupPromise: Promise<void> = Promise.resolve();
@@ -666,33 +659,68 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       if (!(gatewayBridgeRequest || hasRemoteGatewayTarget)) {
         return null;
       }
-      return registerActiveGatewayRuntimeRun({
-        conversationId,
+      return registerGatewayRunMirror({
         runId: gatewayBridgeRequestId,
-        clientRequestId: gatewayBridgeRequest?.clientRequestId,
+        conversationId,
         workerId: gatewayBridgeWorkerId,
-        cwd: conversationCwd,
-        revision: 0,
-        state,
         userMessage: pendingUserMessage,
         transcriptStore,
-        toolStatusIsCompaction: false,
+        state,
       });
     }
 
+    function freezeGatewayFinalProjection(state: ConversationViewState, contentComplete = true) {
+      const entries = buildGatewayFinalProjectionEntries({
+        state,
+        userMessage: pendingUserMessage,
+        runId: gatewayBridgeRequestId,
+      });
+      frozenGatewayFinalProjectionJson = JSON.stringify(entries);
+      // The builder degrades to a user-only projection when it cannot locate
+      // this run's user message in the persisted history. If the run visibly
+      // produced assistant output, that degradation must not claim
+      // completeness — a confirmed-empty projection would erase the reply on
+      // remote clients and block history convergence.
+      const hasAssistantEntry = entries.some((entry) => entry.kind !== "user");
+      const liveSnapshot = transcriptStore.getSnapshot();
+      const runProducedOutput =
+        liveSnapshot.liveRounds.length > 0 || Boolean(liveSnapshot.draftAssistantText);
+      frozenGatewayContentComplete = contentComplete && (hasAssistantEntry || !runProducedOutput);
+    }
+
+    function freezeGatewayLiveProjection() {
+      const entries = buildGatewayRuntimeSnapshotEntries({
+        userMessage: pendingUserMessage,
+        liveTranscript: transcriptStore.getSnapshot(),
+      });
+      frozenGatewayFinalProjectionJson = JSON.stringify(entries);
+      frozenGatewayContentComplete = false;
+    }
+
+    async function persistTerminalConversation(
+      input: Parameters<typeof persistConversationWithHistorySync>[0],
+    ) {
+      return trackTerminalHistoryPersist(
+        () => persistConversationWithHistorySync(input),
+        () => {
+          terminalHistoryPersistFailed = true;
+        },
+      );
+    }
+
     function acknowledgeGatewayRunStarted() {
-      if (gatewayRunStarted) {
+      // Runs without a remote target must never enter the mirror lifecycle:
+      // the coordinator would otherwise attempt ingress commits that fail on
+      // the missing gateway identity and leak a mirror per local run.
+      if (gatewayRunStarted || !(gatewayBridgeRequest || hasRemoteGatewayTarget)) {
         return;
       }
       gatewayRunStarted = true;
-      const run = registerGatewayRuntimeRun("running");
-      if (run) {
-        void queueGatewayRuntimeSnapshotForRun(run, { state: "running", force: true });
-      }
+      registerGatewayRuntimeRun("running");
     }
 
     function ensureGatewayRunForTerminalState(state: GatewayRuntimeSnapshotState) {
-      if (gatewayRunStarted) return;
+      if (gatewayRunStarted || !(gatewayBridgeRequest || hasRemoteGatewayTarget)) return;
       gatewayRunStarted = true;
       registerGatewayRuntimeRun(state);
     }
@@ -768,11 +796,41 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     };
 
     async function finishGatewayRuntimeRun(state: GatewayRuntimeSnapshotState) {
-      if (state === "cancelled") {
+      // A cancel or an early failure that carries an error message must reach
+      // remote clients as a terminal record even when the run never streamed;
+      // otherwise the WebUI sees a phantom completed/queued command with no
+      // explanation.
+      if (state === "cancelled" || (state === "failed" && gatewayRuntimeErrorMessage)) {
         ensureGatewayRunForTerminalState(state);
       }
       if (gatewayRunStarted) {
-        await finishActiveGatewayRuntimeRun(conversationId, state);
+        if (frozenGatewayFinalProjectionJson === null) {
+          if (state === "cancelled") {
+            freezeGatewayLiveProjection();
+          } else {
+            freezeGatewayFinalProjection(nextConversationState, true);
+          }
+        }
+        const terminalState = terminalHistoryPersistFailed ? "failed" : state;
+        const terminalErrorCode = terminalHistoryPersistFailed
+          ? "history_persist_failed"
+          : gatewayRuntimeErrorCode;
+        const terminalErrorMessage = terminalHistoryPersistFailed
+          ? "The final conversation history could not be persisted."
+          : gatewayRuntimeErrorMessage;
+        const projectionJson = frozenGatewayFinalProjectionJson ?? "[]";
+        const projectionBytes = new TextEncoder().encode(projectionJson).byteLength;
+        const historyRequired = projectionBytes > 64 * 1024 * 1024;
+        await finishGatewayRunMirror({
+          runId: gatewayBridgeRequestId,
+          conversationId,
+          entriesJson: historyRequired ? "[]" : projectionJson,
+          state: terminalState,
+          errorCode: terminalErrorCode || undefined,
+          errorMessage: terminalErrorMessage || undefined,
+          contentComplete: !historyRequired && frozenGatewayContentComplete,
+          historyRequired,
+        });
       }
     }
 
@@ -904,8 +962,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     }
 
     // Persist the user turn immediately so WebUI/GUI sidebars can surface the
-    // latest conversation before the assistant round finishes. The live runtime
-    // itself is mirrored through ChatRuntimeSnapshot, not history_sync.
+    // latest conversation before the assistant round finishes.
     initialPersistPromise = persistConversationWithHistorySync({
       conversationId,
       sessionId,
@@ -928,6 +985,8 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       if (!persisted) {
         const message = "历史记录保存失败，已取消回滚与重发。";
         setConversationErrorState(message);
+        gatewayRuntimeErrorCode = "history_persist_failed";
+        gatewayRuntimeErrorMessage = message;
         gatewayBridgeEvents.emitError(message, conversationId);
         releaseConversationRunUi();
         await finalizeConversationRun("failed");
@@ -946,6 +1005,8 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
         }
         const message = asErrorMessage(error, "回滚历史失败");
         setConversationErrorState(message);
+        gatewayRuntimeErrorCode = "history_rollback_failed";
+        gatewayRuntimeErrorMessage = message;
         gatewayBridgeEvents.emitError(message, conversationId);
         releaseConversationRunUi();
         await finalizeConversationRun("failed");
@@ -1132,6 +1193,8 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       if (missing.length > 0) {
         const message = `找不到以下 Skills：${missing.join(", ")}（请先重新扫描固定 Skills 目录）`;
         setConversationErrorState(message);
+        gatewayRuntimeErrorCode = "skills_missing";
+        gatewayRuntimeErrorMessage = message;
         gatewayBridgeEvents.emitError(message, conversationId);
         releaseConversationRunUi();
         await finalizeConversationRun("failed");
@@ -1224,12 +1287,10 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
 
       const finalState = appendMessagesToConversation(nextConversationState, partialMessages);
       abortedConversationCommitted = true;
+      applyConversationState(finalState);
+      freezeGatewayFinalProjection(finalState, true);
       settleLiveTranscript(transcriptStore);
-      updateConversationRuntimeEntry(conversationId, (prev) => ({
-        ...prev,
-        state: finalState,
-      }));
-      terminalHistoryPersistPromise = persistConversationWithHistorySync({
+      terminalHistoryPersistPromise = persistTerminalConversation({
         conversationId,
         sessionId,
         providerId,
@@ -1264,13 +1325,14 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
         errorAssistant,
       ]);
       abortedConversationCommitted = true;
+      applyConversationState(finalState);
+      freezeGatewayFinalProjection(finalState, true);
       settleLiveTranscript(transcriptStore);
       updateConversationRuntimeEntry(conversationId, (prev) => ({
         ...prev,
-        state: finalState,
         errorMessage: null,
       }));
-      terminalHistoryPersistPromise = persistConversationWithHistorySync({
+      terminalHistoryPersistPromise = persistTerminalConversation({
         conversationId,
         sessionId,
         providerId,
@@ -1367,8 +1429,8 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
               persistableAgentProgress = progress;
             },
             commitVisibleAbortedConversation,
-            updateConversationRuntimeEntry,
-            persistConversationWithHistorySync,
+            persistConversationWithHistorySync: persistTerminalConversation,
+            freezeGatewayFinalProjection,
           },
         });
       } else {
@@ -1406,8 +1468,8 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
             updateGatewayBridgeToolStatus,
             updateRetryAttempts: updateGatewayBridgeRetryAttempts,
             commitVisibleAbortedConversation,
-            updateConversationRuntimeEntry,
-            persistConversationWithHistorySync,
+            persistConversationWithHistorySync: persistTerminalConversation,
+            freezeGatewayFinalProjection,
           },
         });
       }
@@ -1417,6 +1479,8 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       const remoteErrorMessage = aborted
         ? "Cancelled"
         : (err instanceof Error ? err.message : String(err)) || "Request failed";
+      gatewayRuntimeErrorCode = aborted ? "cancelled" : "provider_error";
+      gatewayRuntimeErrorMessage = remoteErrorMessage;
       if (aborted) {
         hookScope.cancel();
         requestRemoteGatewayCancellation();

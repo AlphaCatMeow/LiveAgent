@@ -367,6 +367,7 @@ test("finalization flushes the gateway stream only after history persists", asyn
     "src/pages/chat/runtime/chatRunFinalization.ts",
   );
   const persistGate = deferred();
+  const closeGate = deferred();
   const events = [];
 
   const finalization = finalizeChatRunInOrder({
@@ -376,7 +377,9 @@ test("finalization flushes the gateway stream only after history persists", asyn
       events.push("persist:done");
     },
     closeBridge: async () => {
-      events.push("close");
+      events.push("close:start");
+      await closeGate.promise;
+      events.push("close:done");
     },
     finishRuntimeRun: async () => {
       events.push("finish");
@@ -390,8 +393,15 @@ test("finalization flushes the gateway stream only after history persists", asyn
   assert.deepEqual(events, ["persist:start"], "flushes must wait for the persist barrier");
 
   persistGate.resolve();
+  await flushPromises();
+  assert.deepEqual(
+    events,
+    ["persist:start", "persist:done", "close:start"],
+    "terminal checkpoint must wait for the final delta flush",
+  );
+  closeGate.resolve();
   await finalization;
-  assert.deepEqual(events, ["persist:start", "persist:done", "close", "finish"]);
+  assert.deepEqual(events, ["persist:start", "persist:done", "close:start", "close:done", "finish"]);
 });
 
 test("a failing persist barrier still lets the finalization flushes run", async () => {
@@ -414,4 +424,34 @@ test("a failing persist barrier still lets the finalization flushes run", async 
   });
 
   assert.deepEqual(events, ["close", "finish"]);
+});
+
+test("terminal history persistence marks both false results and thrown errors", async () => {
+  const loader = createTsModuleLoader();
+  const { trackTerminalHistoryPersist } = loader.loadModule(
+    "src/pages/chat/runtime/chatRunFinalization.ts",
+  );
+  let failures = 0;
+
+  assert.equal(
+    await trackTerminalHistoryPersist(
+      async () => false,
+      () => {
+        failures += 1;
+      },
+    ),
+    false,
+  );
+  await assert.rejects(
+    trackTerminalHistoryPersist(
+      async () => {
+        throw new Error("history database unavailable");
+      },
+      () => {
+        failures += 1;
+      },
+    ),
+    /history database unavailable/,
+  );
+  assert.equal(failures, 2);
 });

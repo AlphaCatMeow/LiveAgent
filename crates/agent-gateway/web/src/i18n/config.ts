@@ -159,6 +159,9 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.runtime.tunnelRemoteOffline": "Remote Gateway 未连接",
     "chat.runtime.tunnelSettingsSyncing": "正在同步桌面端设置",
     "chat.runtime.settingsSyncTitle": "正在同步桌面端设置",
+    "chat.runtime.protocolIncompatible":
+      "桌面端版本不支持可靠聊天同步。请更新 LiveAgent 桌面端后再使用 WebUI 聊天。",
+    "chat.runtime.protocolIncompatiblePlaceholder": "请先更新 LiveAgent 桌面端",
     "chat.runtime.reasoning": "思考程度",
     "chat.emptyRound": "（无回复）",
     "chat.inputHint": "输入消息，@ 引用文件，提示词可队列发送...",
@@ -2317,6 +2320,9 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.runtime.tunnelRemoteOffline": "Remote Gateway is offline",
     "chat.runtime.tunnelSettingsSyncing": "Syncing desktop settings",
     "chat.runtime.settingsSyncTitle": "Syncing desktop settings",
+    "chat.runtime.protocolIncompatible":
+      "This desktop version does not support reliable chat sync. Update LiveAgent desktop before using WebUI chat.",
+    "chat.runtime.protocolIncompatiblePlaceholder": "Update LiveAgent desktop to continue",
     "chat.runtime.reasoning": "Thinking effort",
     "chat.emptyRound": "(No reply)",
     "chat.inputHint": "Type a message, @ to reference files, prompts can be queued...",

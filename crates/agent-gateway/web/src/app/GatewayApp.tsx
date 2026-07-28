@@ -4930,6 +4930,13 @@ export default function GatewayApp() {
                         })();
                       }}
                       onStop={() => {
+                        const nextQueuedTurn = queuedChatTurnsForDisplayedConversation[0];
+                        if (nextQueuedTurn) {
+                          // Keep WebUI's stop button aligned with the desktop
+                          // composer: stop the active run, then drain the queue.
+                          runQueuedTurnNow(nextQueuedTurn.id);
+                          return;
+                        }
                         void cancelChat(displayedConversationId);
                       }}
                       onPrepareChatRuntime={() => {

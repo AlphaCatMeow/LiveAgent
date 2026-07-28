@@ -75,10 +75,7 @@ import type { SkillAccessPolicy } from "../../../lib/tools/skillAccessPolicy";
 import type { SshManagerSessionChange } from "../../../lib/tools/sshManagerTools";
 import { getOrCreateTodoToolState } from "../../../lib/tools/todoTools";
 import type { TunnelManagerChange } from "../../../lib/tools/tunnelManagerTools";
-import {
-  appendSystemPrompt,
-  buildPartialAssistantMessage,
-} from "../runtime/chatPageRuntime";
+import { appendSystemPrompt, buildPartialAssistantMessage } from "../runtime/chatPageRuntime";
 import { buildGatewayToolCallPreviewArguments } from "./gatewayToolPreview";
 
 export type RuntimeModel = {

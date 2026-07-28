@@ -339,11 +339,7 @@ export function buildGatewayFinalProjectionEntries(
       continue;
     }
     for (const round of item.rounds) {
-      appendRoundEntries(
-        entries,
-        round,
-        `run-${input.runId}-assistant-${assistantGroupIndex}`,
-      );
+      appendRoundEntries(entries, round, `run-${input.runId}-assistant-${assistantGroupIndex}`);
       assistantGroupIndex += 1;
     }
   }

@@ -692,21 +692,21 @@ export function rebuildTurnFromSnapshot(turn: Turn, parsed: ChatEntry[]): Turn {
     let merged = entry;
     if (entry.kind === "tool_call" && previous?.kind === "tool_call") {
       const prev = previous;
-        const prevProgress = toolArgsProgress(
-          prev.toolCall.name,
-          normalizeToolArguments(prev.toolCall.arguments),
-        );
-        const snapshotProgress = toolArgsProgress(
-          entry.toolCall.name,
-          normalizeToolArguments(entry.toolCall.arguments),
-        );
-        if (
-          prevProgress !== undefined &&
-          snapshotProgress !== undefined &&
-          snapshotProgress < prevProgress
-        ) {
-          merged = { ...entry, toolCall: prev.toolCall, summary: prev.summary, text: prev.text };
-        }
+      const prevProgress = toolArgsProgress(
+        prev.toolCall.name,
+        normalizeToolArguments(prev.toolCall.arguments),
+      );
+      const snapshotProgress = toolArgsProgress(
+        entry.toolCall.name,
+        normalizeToolArguments(entry.toolCall.arguments),
+      );
+      if (
+        prevProgress !== undefined &&
+        snapshotProgress !== undefined &&
+        snapshotProgress < prevProgress
+      ) {
+        merged = { ...entry, toolCall: prev.toolCall, summary: prev.summary, text: prev.text };
+      }
     }
     entries.push({ ...merged, id: previous?.id ?? `${ns}:s:${entry.id}` } as ChatEntry);
   }

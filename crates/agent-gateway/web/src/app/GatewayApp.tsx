@@ -30,7 +30,6 @@ import { registerAskUserQuestionAnswerHandler } from "@/lib/chat/askUserQuestion
 import type { ChatHistorySummary } from "@/lib/chat/chatHistory";
 import { buildModelOptions } from "@/lib/chat/chatPageHelpers";
 import type { HistoryMessageRef } from "@/lib/chat/conversationState";
-import { isChatRuntimeProtocolIncompatible } from "@/lib/chat/runtimeCompatibility";
 import {
   adoptHistoryWindowState,
   evaluateHistoryWindowResponse,
@@ -41,6 +40,7 @@ import {
   trimLeadingHeadlessEntries,
 } from "@/lib/chat/historyWindow";
 import type { CodeMentionReference } from "@/lib/chat/mentionReferences";
+import { isChatRuntimeProtocolIncompatible } from "@/lib/chat/runtimeCompatibility";
 import { createActivityStore } from "@/lib/chat/stream/activityStore";
 import {
   type ChatCommandOutcome,

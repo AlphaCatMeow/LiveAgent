@@ -50,9 +50,7 @@ type chatIngressRunState struct {
 }
 
 type chatIngressFragmentAssembly struct {
-	runID              string
 	conversationID     string
-	sourceSeq          uint64
 	fragmentCount      uint32
 	encodedRecordBytes uint64
 	sha256             string

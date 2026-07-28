@@ -686,11 +686,8 @@ export function createTranscriptStore(options?: {
     }
     const inferredErrorEntryId = turn.inferredLossErrorEntryId;
     const realErrorEntries = turn.entries.filter(
-      (
-        entry,
-      ): entry is Extract<ChatEntry, { kind: "assistant" | "error" }> =>
-        (entry.kind === "error" ||
-          (entry.kind === "assistant" && entry.id.includes(":err:"))) &&
+      (entry): entry is Extract<ChatEntry, { kind: "assistant" | "error" }> =>
+        (entry.kind === "error" || (entry.kind === "assistant" && entry.id.includes(":err:"))) &&
         entry.id !== inferredErrorEntryId,
     );
     let next =
@@ -807,10 +804,7 @@ export function createTranscriptStore(options?: {
     // refresh may adopt the real reply (enrichTurnFromHistory). A gateway
     // resurrection rebuilds from the runtime snapshot and clears the mark.
     const shouldMarkContentStale = inferredLoss || turn?.contentConfirmed !== true;
-    if (
-      turn &&
-      (turn.phase !== "settled" || turn.contentStale !== shouldMarkContentStale)
-    ) {
+    if (turn && (turn.phase !== "settled" || turn.contentStale !== shouldMarkContentStale)) {
       replaceTurn(turn, {
         ...turn,
         phase: "settled",

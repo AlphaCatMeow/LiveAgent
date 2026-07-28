@@ -72,6 +72,7 @@ import {
   DEFAULT_SKILL_PRESET_ID,
   removeSkillFromAllPresets,
   resolveSkillPreset,
+  type SkillPreset,
   updateSkillPreset,
   updateSkills,
 } from "../../lib/settings";
@@ -2284,8 +2285,8 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
     setSettings((prev) => updateSkills(prev, { enabled }));
   }
 
-  function uniquePresetName(base: string) {
-    const existing = new Set(settings.skills.presets.map((preset) => preset.name.toLowerCase()));
+  function uniquePresetName(base: string, presets: SkillPreset[]) {
+    const existing = new Set(presets.map((preset) => preset.name.toLowerCase()));
     let candidate = base.trim() || t("settings.skillsPresetUntitled");
     let suffix = 2;
     while (existing.has(candidate.toLowerCase())) {
@@ -2297,19 +2298,22 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
 
   function createPreset(copyCurrent: boolean) {
     const id = createUuid();
-    const name = uniquePresetName(
-      copyCurrent
-        ? `${activePreset.name} ${t("settings.skillsPresetCopySuffix")}`
-        : t("settings.skillsPresetUntitled"),
-    );
-    setSettings((prev) =>
-      updateSkills(prev, {
+    const sourcePresetId = activePreset.id;
+    setSettings((prev) => {
+      const sourcePreset = resolveSkillPreset(prev.skills, sourcePresetId);
+      const name = uniquePresetName(
+        copyCurrent
+          ? `${sourcePreset.name} ${t("settings.skillsPresetCopySuffix")}`
+          : t("settings.skillsPresetUntitled"),
+        prev.skills.presets,
+      );
+      return updateSkills(prev, {
         presets: [
           ...prev.skills.presets,
-          { id, name, skillNames: copyCurrent ? activePreset.skillNames : [] },
+          { id, name, skillNames: copyCurrent ? [...sourcePreset.skillNames] : [] },
         ],
-      }),
-    );
+      });
+    });
     setActivePresetId(id);
   }
 

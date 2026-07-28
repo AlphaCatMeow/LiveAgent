@@ -3249,7 +3249,11 @@ pub struct OpenWorkspacePathResponse {
 }
 
 #[cfg(target_os = "macos")]
-fn spawn_workspace_open_command(target: &Path, kind: &str, mode: &str) -> Result<(), String> {
+pub(crate) fn spawn_workspace_open_command(
+    target: &Path,
+    kind: &str,
+    mode: &str,
+) -> Result<(), String> {
     let mut command = Command::new("open");
     if mode == "reveal" && kind == "file" {
         command.arg("-R");
@@ -3262,7 +3266,11 @@ fn spawn_workspace_open_command(target: &Path, kind: &str, mode: &str) -> Result
 }
 
 #[cfg(target_os = "windows")]
-fn spawn_workspace_open_command(target: &Path, kind: &str, mode: &str) -> Result<(), String> {
+pub(crate) fn spawn_workspace_open_command(
+    target: &Path,
+    kind: &str,
+    mode: &str,
+) -> Result<(), String> {
     let mut command = Command::new("explorer.exe");
     if mode == "reveal" && kind == "file" {
         command.arg(format!("/select,{}", target.display()));
@@ -3276,7 +3284,11 @@ fn spawn_workspace_open_command(target: &Path, kind: &str, mode: &str) -> Result
 }
 
 #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-fn spawn_workspace_open_command(target: &Path, kind: &str, mode: &str) -> Result<(), String> {
+pub(crate) fn spawn_workspace_open_command(
+    target: &Path,
+    kind: &str,
+    mode: &str,
+) -> Result<(), String> {
     let open_target = if mode == "reveal" && kind == "file" {
         target.parent().unwrap_or(target)
     } else {

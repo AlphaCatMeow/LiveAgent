@@ -4,6 +4,7 @@ import { ChangedFilesCard } from "../../../components/chat/ChangedFilesCard";
 import type { RetryAttemptRecord } from "../../../lib/chat/conversation/liveTranscriptStore";
 import { collectChangedFiles } from "../../../lib/chat/messages/changedFiles";
 import type { UiRound } from "../../../lib/chat/messages/uiMessages";
+import type { ChatFileLink } from "../../../lib/chat/chatFileLinks";
 
 import { AssistantAvatar } from "./assistant-bubble/AssistantAvatar";
 import { RoundContent } from "./assistant-bubble/RoundContent";
@@ -29,6 +30,8 @@ export const AssistantBubble = memo(function AssistantBubble(props: {
   toolStatus?: string | null;
   toolStatusVariant?: "default" | "compaction";
   retryAttempts?: RetryAttemptRecord[];
+  workdir?: string;
+  onOpenFileLink?: (link: ChatFileLink) => void;
 }) {
   const {
     rounds,
@@ -39,6 +42,8 @@ export const AssistantBubble = memo(function AssistantBubble(props: {
     toolStatus,
     toolStatusVariant,
     retryAttempts,
+    workdir,
+    onOpenFileLink,
   } = props;
   const latestTodoItem = useMemo(() => {
     for (let roundIndex = rounds.length - 1; roundIndex >= 0; roundIndex -= 1) {
@@ -83,6 +88,8 @@ export const AssistantBubble = memo(function AssistantBubble(props: {
             thinkingOpen={round.thinkingOpen}
             latestTodoItem={latestTodoItem}
             isAborted={isAborted}
+            workdir={workdir}
+            onOpenFileLink={onOpenFileLink}
           />
         ))}
         {changedFiles ? <ChangedFilesCard summary={changedFiles} /> : null}

@@ -5,6 +5,7 @@ import { Markdown } from "../../../../components/Markdown";
 import { useLocale } from "../../../../i18n";
 import type { RetryAttemptRecord } from "../../../../lib/chat/conversation/liveTranscriptStore";
 import type { ToolTraceItem, UiRound } from "../../../../lib/chat/messages/uiMessages";
+import type { ChatFileLink } from "../../../../lib/chat/chatFileLinks";
 import { normalizeLiveToolStatus, VIBING_STATUS } from "../../../../lib/chat/page/chatPageHelpers";
 import { groupRoundBlocks } from "./assistantBubbleUtils";
 import { HostedSearchGroupView } from "./HostedSearchGroupView";
@@ -20,11 +21,15 @@ const ThinkingBlock = memo(function ThinkingBlock({
   open,
   isRunning,
   renderMode,
+  workdir,
+  onOpenFileLink,
 }: {
   text: string;
   open?: boolean;
   isRunning?: boolean;
   renderMode: "streaming" | "static";
+  workdir?: string;
+  onOpenFileLink?: (link: ChatFileLink) => void;
 }) {
   const hasText = /\S/.test(text || "");
   const { t } = useLocale();
@@ -69,6 +74,8 @@ const ThinkingBlock = memo(function ThinkingBlock({
               className="thinking-markdown space-y-1.5"
               renderMode={renderMode}
               showCaret={false}
+              workdir={workdir}
+              onOpenFileLink={onOpenFileLink}
             />
           </div>
         )}
@@ -143,6 +150,8 @@ export const RoundContent = memo(function RoundContent(props: {
   thinkingOpen?: boolean;
   latestTodoItem?: ToolTraceItem | null;
   isAborted?: boolean;
+  workdir?: string;
+  onOpenFileLink?: (link: ChatFileLink) => void;
 }) {
   const {
     round,
@@ -158,6 +167,8 @@ export const RoundContent = memo(function RoundContent(props: {
     thinkingOpen,
     latestTodoItem,
     isAborted = false,
+    workdir,
+    onOpenFileLink,
   } = props;
   const groupedBlocks = useMemo(() => groupRoundBlocks(round.blocks), [round.blocks]);
   const visibleGroupedBlocks = useMemo(
@@ -255,6 +266,8 @@ export const RoundContent = memo(function RoundContent(props: {
               open={autoOpenThinking && block.key === latestThinkingKey}
               isRunning={autoOpenThinking && block.key === latestThinkingKey}
               renderMode={renderMode ?? (isLive ? "streaming" : "static")}
+              workdir={workdir}
+              onOpenFileLink={onOpenFileLink}
             />
           );
         }
@@ -312,6 +325,8 @@ export const RoundContent = memo(function RoundContent(props: {
             className="font-chat"
             renderMode={renderMode ?? (isLive ? "streaming" : "static")}
             showCaret={Boolean(isLive && isActive)}
+            workdir={workdir}
+            onOpenFileLink={onOpenFileLink}
           />
         );
       })}

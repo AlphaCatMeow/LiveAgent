@@ -6,6 +6,7 @@ import type {
 } from "../../../lib/chat/conversation/conversationState";
 import type { LiveTranscriptStore } from "../../../lib/chat/conversation/liveTranscriptStore";
 import type { PendingUploadedFile } from "../../../lib/chat/messages/uploadedFiles";
+import type { ChatFileLink } from "../../../lib/chat/chatFileLinks";
 import type { ScrollFollowHandle } from "../../../lib/chat-scroll/useScrollFollow";
 import type { GitClient } from "../../../lib/git/types";
 import type { SectionId } from "../../settings/types";
@@ -29,6 +30,7 @@ export type ChatTranscriptProps = {
   bottomReservePx?: number;
   contentWidth: number;
   onContentWidthChange: (width: number) => void;
+  onOpenFileLink?: (link: ChatFileLink) => void;
   onResendFromEdit: (
     messageRef: HistoryMessageRef,
     text: string,

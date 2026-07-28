@@ -68,6 +68,9 @@ export type WorkspaceCodeEditorOpenRequest = {
   projectPathKey: string;
   workdir: string;
   path: string;
+  line?: number;
+  endLine?: number;
+  column?: number;
 };
 
 type ReadEditableTextResponse = {
@@ -798,6 +801,22 @@ export function WorkspaceCodeEditorOverlay(props: WorkspaceCodeEditorOverlayProp
     }
     editorModelKeyRef.current = activeTab.key;
   }, [activeTab]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !activeTab || !openRequest?.line) return;
+    if (activeTab.key !== editorTabKey(openRequest.projectPathKey, openRequest.path)) return;
+    const model = editor.getModel();
+    if (!model) return;
+    const line = Math.min(Math.max(1, openRequest.line), model.getLineCount());
+    const endLine = Math.min(Math.max(line, openRequest.endLine ?? line), model.getLineCount());
+    const column = Math.min(Math.max(1, openRequest.column ?? 1), model.getLineMaxColumn(line));
+    const endColumn = openRequest.endLine ? model.getLineMaxColumn(endLine) : column;
+    const range = new monaco.Range(line, column, endLine, endColumn);
+    editor.setSelection(range);
+    editor.revealRangeInCenter(range);
+    editor.focus();
+  }, [activeTab, openRequest]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

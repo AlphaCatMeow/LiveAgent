@@ -3,6 +3,7 @@ import { memo } from "react";
 import type { HistoryMessageRef } from "../../../lib/chat/conversation/conversationState";
 import type { RetryAttemptRecord } from "../../../lib/chat/conversation/liveTranscriptStore";
 import type { PendingUploadedFile } from "../../../lib/chat/messages/uploadedFiles";
+import type { ChatFileLink } from "../../../lib/chat/chatFileLinks";
 import { VIBING_STATUS } from "../../../lib/chat/page/chatPageHelpers";
 import {
   AssistantAvatar,
@@ -25,6 +26,8 @@ export type AssistantRowProps = {
   isCompactionRunning: boolean;
   toolStatus: string | null;
   retryAttempts?: RetryAttemptRecord[];
+  workdir?: string;
+  onOpenFileLink?: (link: ChatFileLink) => void;
   onResendFromEdit: (
     messageRef: HistoryMessageRef,
     text: string,
@@ -49,6 +52,8 @@ export const AssistantRow = memo(function AssistantRow(props: AssistantRowProps)
     isCompactionRunning,
     toolStatus,
     retryAttempts,
+    workdir,
+    onOpenFileLink,
     onResendFromEdit,
     onBranchConversation,
   } = props;
@@ -65,6 +70,8 @@ export const AssistantRow = memo(function AssistantRow(props: AssistantRowProps)
           toolStatus={row.live ? toolStatus : null}
           toolStatusVariant={row.live && isCompactionRunning ? "compaction" : "default"}
           retryAttempts={row.live ? retryAttempts : undefined}
+          workdir={workdir}
+          onOpenFileLink={onOpenFileLink}
         />
       ) : row.live ? (
         <div className="flex w-full max-w-full items-start gap-3">

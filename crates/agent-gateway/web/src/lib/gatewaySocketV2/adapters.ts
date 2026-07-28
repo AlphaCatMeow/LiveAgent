@@ -33,6 +33,7 @@ import {
   CancelChatRequestSchema,
   ChatCommandRequestSchema,
   ChatMessageRefSchema,
+  ChatFileOpenRequestSchema,
   ChatQueueRequestSchema,
   ChatRequestSchema,
   ChatRuntimeControlsSchema,
@@ -146,6 +147,11 @@ function bool(value: unknown): boolean {
 
 function optBool(value: unknown): boolean | undefined {
   return typeof value === "boolean" ? value : undefined;
+}
+
+function optPositiveU32(value: unknown): number | undefined {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 && parsed <= 0xffff_ffff ? parsed : undefined;
 }
 
 // 64 位整数出站边界：number → bigint。
@@ -739,6 +745,20 @@ function agentRequestPayload(type: string, body: J): GatewayEnvelope["payload"] 
           path: trimStr(body.path),
         }),
       };
+    case "chat.file_open":
+      return {
+        case: "chatFileOpen",
+        value: create(ChatFileOpenRequestSchema, {
+          conversationId: trimStr(body.conversation_id),
+          workdir: trimStr(body.workdir),
+          path: trimStr(body.path),
+          source: trimStr(body.source),
+          line: optPositiveU32(body.line),
+          endLine: optPositiveU32(body.end_line),
+          column: optPositiveU32(body.column),
+          openInFileManager: bool(body.open_in_file_manager),
+        }),
+      };
     default:
       throw new Error(`unsupported gateway request type: ${type}`);
   }
@@ -1138,6 +1158,17 @@ function decodeAgentResponse(envelope: AgentEnvelope, options: { agentOnline: bo
         sizeBytes: num(payload.value.sizeBytes),
         mtimeMs: num(payload.value.mtimeMs),
         contentHash: payload.value.contentHash,
+      };
+    case "chatFileOpenResp":
+      return {
+        action: payload.value.action,
+        kind: payload.value.kind,
+        workdir: payload.value.workdir || undefined,
+        path: payload.value.path || undefined,
+        line: payload.value.line,
+        endLine: payload.value.endLine,
+        column: payload.value.column,
+        outsideWorkspace: payload.value.outsideWorkspace,
       };
     case "fsWriteTextResp":
       return {

@@ -22,6 +22,7 @@ import type {
 } from "../../../lib/chat/conversation/conversationState";
 import type { LiveTranscriptStore } from "../../../lib/chat/conversation/liveTranscriptStore";
 import type { PendingUploadedFile } from "../../../lib/chat/messages/uploadedFiles";
+import type { ChatFileLink } from "../../../lib/chat/chatFileLinks";
 import {
   buildGitHubCommitUrl,
   type CommitDetailsLoader,
@@ -113,6 +114,7 @@ export type TranscriptListProps = {
   usageContextWindow?: number;
   workspaceRoot?: string;
   gitClient?: GitClient | null;
+  onOpenFileLink?: (link: ChatFileLink) => void;
   // 楼层导航：跳转句柄挂载点（与 followRef 同一模式），以及「视口顶部
   // 当前处于哪条用户消息行」变化时的上报回调。
   navRef?: MutableRefObject<TranscriptNavHandle | null>;
@@ -150,6 +152,7 @@ export const TranscriptList = memo(function TranscriptList(props: TranscriptList
     usageContextWindow,
     workspaceRoot,
     gitClient,
+    onOpenFileLink,
     navRef,
     onAnchorUserRowChange,
     onResendFromEdit,
@@ -512,6 +515,8 @@ export const TranscriptList = memo(function TranscriptList(props: TranscriptList
                 isCompactionRunning={row.live ? isCompactionRunning : false}
                 toolStatus={row.live ? displayedToolStatus : null}
                 retryAttempts={row.live ? liveState.retryAttempts : undefined}
+                workdir={workspaceRoot}
+                onOpenFileLink={onOpenFileLink}
                 onResendFromEdit={onResendFromEdit}
                 onBranchConversation={onBranchConversation}
               />

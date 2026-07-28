@@ -495,6 +495,8 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
               executionModeOverride: queuedTurn.executionMode,
               workdirOverride: queuedTurn.workdir,
               selectedSystemToolIdsOverride: queuedTurn.selectedSystemToolIds,
+              skillPresetIdOverride: gatewayRequest.skillPresetId,
+              skillsDisabledOverride: gatewayRequest.skillsDisabled,
             }
           : null;
         const markGatewayStarted =
@@ -514,6 +516,8 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
           executionModeOverride: queuedTurn.executionMode,
           workdirOverride: queuedTurn.workdir,
           selectedSystemToolIdsOverride: queuedTurn.selectedSystemToolIds,
+          skillPresetIdOverride: gatewayRequest?.skillPresetId,
+          skillsDisabledOverride: gatewayRequest?.skillsDisabled,
           runtimeControlsOverride: queuedTurn.runtimeControls,
           gatewayBridgeRequestOverride: gatewayBridgeRequest,
           preserveComposerOnStart: true,
@@ -751,6 +755,8 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
             : "auto",
         selectedModel: payload.selectedModel,
         runtimeControls: payload.runtimeControls,
+        skillPresetId: payload.skillPresetId?.trim() || "default",
+        skillsDisabled: payload.skillsDisabled === true,
       },
     });
 

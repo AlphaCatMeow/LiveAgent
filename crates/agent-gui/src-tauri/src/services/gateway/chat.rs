@@ -173,6 +173,8 @@ impl GatewayController {
             selected_system_tools,
             uploaded_files,
             queue_policy,
+            skill_preset_id,
+            skills_disabled,
         } = request;
         let selected_model = selected_model.map(|selected_model| GatewaySelectedModelEvent {
             custom_provider_id: selected_model.custom_provider_id,
@@ -217,6 +219,8 @@ impl GatewayController {
                 })
                 .collect(),
             queue_policy,
+            skill_preset_id,
+            skills_disabled,
         }
     }
 

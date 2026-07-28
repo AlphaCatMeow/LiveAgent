@@ -44,7 +44,9 @@ import {
   MessageSquare,
   Package,
   Palette,
+  Pencil,
   Plug,
+  Plus,
   Radio,
   RefreshCw,
   ScanText,
@@ -73,7 +75,15 @@ import {
   ConfirmDeletePopover,
 } from "../../components/ui/confirm-action-popover";
 import { useLocale } from "../../i18n";
-import { type AppSettings, updateSkills } from "../../lib/settings";
+import {
+  type AppSettings,
+  DEFAULT_SKILL_PRESET_ID,
+  removeSkillFromAllPresets,
+  resolveSkillPreset,
+  updateSkillPreset,
+  updateSkills,
+} from "../../lib/settings";
+import { createUuid } from "../../lib/shared/id";
 import { cn } from "../../lib/shared/utils";
 import {
   cancelSkillInstallJob,
@@ -1260,6 +1270,9 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
     () => emptyInstalledSkillPreviewState(),
   );
   const discoverySignatureRef = useRef<string | null>(null);
+  const [activePresetId, setActivePresetId] = useState(DEFAULT_SKILL_PRESET_ID);
+  const [renamingPresetId, setRenamingPresetId] = useState<string | null>(null);
+  const [renamingPresetName, setRenamingPresetName] = useState("");
 
   // 唯一写入点：setState 与 discoverySignatureRef 必须同步更新，防止签名与状态漂移。
   // 签名未变时跳过 setState，保持 skills 数组引用稳定（下游 memo 链与 store 轮询零重渲）。
@@ -1333,9 +1346,11 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
     }
   }, [initialSkills?.length, refresh]);
 
+  const activePreset = resolveSkillPreset(settings.skills, activePresetId);
+  const activePresetSkillNames = activePreset.skillNames;
   const selected = useMemo(
-    () => new Set(mergeAlwaysEnabledSkillNames(settings.skills.selected)),
-    [settings.skills.selected],
+    () => new Set(mergeAlwaysEnabledSkillNames(activePresetSkillNames)),
+    [activePresetSkillNames],
   );
   // React 19 的 initialValue 让 Hub 外壳先独立提交；大量卡片在可中断的后台
   // render 中准备，全部完成后再原子替换加载态，避免页面切换被首屏列表挂载阻塞。
@@ -1766,7 +1781,8 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
       if (installedNames.length === 0) return;
 
       setSettings((prev) => {
-        const next = new Set(prev.skills.selected);
+        const preset = resolveSkillPreset(prev.skills, activePreset.id);
+        const next = new Set(preset.skillNames);
         let changed = prev.skills.enabled !== true;
         for (const name of installedNames) {
           if (!next.has(name)) {
@@ -1775,13 +1791,16 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
           }
         }
         if (!changed) return prev;
+        const skills = updateSkillPreset(prev.skills, preset.id, {
+          skillNames: Array.from(next),
+        });
         return updateSkills(prev, {
           enabled: true,
-          selected: Array.from(next),
+          presets: skills.presets,
         });
       });
     },
-    [setSettings],
+    [activePreset.id, setSettings],
   );
 
   useEffect(() => {
@@ -1930,9 +1949,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
     try {
       await manageSkill({ action: "delete", name: skillName });
       setSettings((prev) =>
-        updateSkills(prev, {
-          selected: prev.skills.selected.filter((name) => name !== skillName),
-        }),
+        updateSkills(prev, { presets: removeSkillFromAllPresets(prev.skills, skillName).presets }),
       );
       setSkills((prev) => prev.filter((item) => item.name !== skillName));
       setPreviewInstalledSkill((current) => (current?.name === skillName ? null : current));
@@ -1974,11 +1991,16 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
 
   function toggleSkill(name: string, on: boolean) {
     if (isAlwaysEnabledSkillName(name)) return;
-    const next = new Set(settings.skills.selected);
+    const next = new Set(activePreset.skillNames);
     if (on) next.add(name);
     else next.delete(name);
     requestInstalledSkillFlip("single", [name], on ? [name] : []);
-    setSettings((prev) => updateSkills(prev, { selected: Array.from(next) }));
+    setSettings((prev) => {
+      const skills = updateSkillPreset(prev.skills, activePreset.id, {
+        skillNames: Array.from(next),
+      });
+      return updateSkills(prev, { presets: skills.presets });
+    });
   }
 
   const clearBulkUndoTimer = useCallback(() => {
@@ -2070,7 +2092,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
       const names = [...bulkSelection].filter((name) => !isAlwaysEnabledSkillName(name));
       if (names.length === 0) return;
 
-      const before = settings.skills.selected;
+      const before = activePreset.skillNames;
       const current = new Set(before);
       const changedNames = names.filter((name) =>
         target ? !current.has(name) : current.has(name),
@@ -2088,47 +2110,42 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
       setBulkSelection(new Set());
       bulkAnchorRef.current = null;
       setSettings((prev) => {
-        const next = new Set(prev.skills.selected);
+        const preset = resolveSkillPreset(prev.skills, activePreset.id);
+        const next = new Set(preset.skillNames);
         for (const name of names) {
           if (target) next.add(name);
           else next.delete(name);
         }
+        const skills = updateSkillPreset(prev.skills, preset.id, {
+          skillNames: Array.from(next),
+        });
         return updateSkills(prev, {
           enabled: target ? true : prev.skills.enabled,
-          selected: Array.from(next),
+          presets: skills.presets,
         });
       });
     },
-    [
-      bulkSelection,
-      clearBulkUndoTimer,
-      requestInstalledSkillFlip,
-      setSettings,
-      settings.skills.selected,
-    ],
+    [bulkSelection, clearBulkUndoTimer, requestInstalledSkillFlip, setSettings, activePreset],
   );
 
   const undoBulkSelection = useCallback(() => {
     clearBulkUndoTimer();
     if (bulkUndo) {
       const restore = bulkUndo.selected;
-      const current = new Set(settings.skills.selected);
+      const current = new Set(activePreset.skillNames);
       const restoreSet = new Set(restore);
       const changedNames = [...new Set([...current, ...restoreSet])].filter(
         (name) => !isAlwaysEnabledSkillName(name) && current.has(name) !== restoreSet.has(name),
       );
       const followNames = changedNames.filter((name) => restoreSet.has(name) && !current.has(name));
       requestInstalledSkillFlip("batch", changedNames, followNames);
-      setSettings((prev) => updateSkills(prev, { selected: restore }));
+      setSettings((prev) => {
+        const skills = updateSkillPreset(prev.skills, activePreset.id, { skillNames: restore });
+        return updateSkills(prev, { presets: skills.presets });
+      });
     }
     setBulkUndo(null);
-  }, [
-    bulkUndo,
-    clearBulkUndoTimer,
-    requestInstalledSkillFlip,
-    setSettings,
-    settings.skills.selected,
-  ]);
+  }, [bulkUndo, clearBulkUndoTimer, requestInstalledSkillFlip, setSettings, activePreset]);
 
   async function deleteBulkSelectedInstalledSkills() {
     if (lockedByChatMode || deletingSkillName || !bulkMode) return;
@@ -2145,7 +2162,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
         await manageSkill({ action: "delete", name: skill.name });
         setSettings((prev) =>
           updateSkills(prev, {
-            selected: prev.skills.selected.filter((name) => name !== skill.name),
+            presets: removeSkillFromAllPresets(prev.skills, skill.name).presets,
           }),
         );
         setSkills((prev) => prev.filter((item) => item.name !== skill.name));
@@ -2334,6 +2351,70 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
     setSettings((prev) => updateSkills(prev, { enabled }));
   }
 
+  function uniquePresetName(base: string) {
+    const existing = new Set(settings.skills.presets.map((preset) => preset.name.toLowerCase()));
+    let candidate = base.trim() || t("settings.skillsPresetUntitled");
+    let suffix = 2;
+    while (existing.has(candidate.toLowerCase())) {
+      candidate = `${base.trim() || t("settings.skillsPresetUntitled")} ${suffix}`;
+      suffix += 1;
+    }
+    return candidate;
+  }
+
+  function createPreset(copyCurrent: boolean) {
+    const id = createUuid();
+    const name = uniquePresetName(
+      copyCurrent
+        ? `${activePreset.name} ${t("settings.skillsPresetCopySuffix")}`
+        : t("settings.skillsPresetUntitled"),
+    );
+    setSettings((prev) =>
+      updateSkills(prev, {
+        presets: [
+          ...prev.skills.presets,
+          { id, name, skillNames: copyCurrent ? activePreset.skillNames : [] },
+        ],
+      }),
+    );
+    setActivePresetId(id);
+  }
+
+  function renameActivePreset() {
+    if (activePreset.id === DEFAULT_SKILL_PRESET_ID) return;
+    setRenamingPresetId(activePreset.id);
+    setRenamingPresetName(activePreset.name);
+  }
+
+  function commitPresetRename() {
+    if (renamingPresetId !== activePreset.id) return;
+    const value = renamingPresetName.trim();
+    setRenamingPresetId(null);
+    if (!value || value === activePreset.name) return;
+    const duplicate = settings.skills.presets.some(
+      (preset) =>
+        preset.id !== activePreset.id && preset.name.toLowerCase() === value.toLowerCase(),
+    );
+    if (duplicate) {
+      setLoadError(t("settings.skillsPresetNameExists"));
+      return;
+    }
+    setSettings((prev) => {
+      const skills = updateSkillPreset(prev.skills, activePreset.id, { name: value });
+      return updateSkills(prev, { presets: skills.presets });
+    });
+  }
+
+  function deleteActivePreset() {
+    if (activePreset.id === DEFAULT_SKILL_PRESET_ID) return;
+    setSettings((prev) =>
+      updateSkills(prev, {
+        presets: prev.skills.presets.filter((preset) => preset.id !== activePreset.id),
+      }),
+    );
+    setActivePresetId(DEFAULT_SKILL_PRESET_ID);
+  }
+
   const skillsEnabled = settings.skills.enabled;
   const showInitialInstalledContentLoading =
     skills.length > 0 && !hasPresentedInstalledSkills && installedContentPending;
@@ -2367,7 +2448,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                   : "border-border/40 bg-background/60",
               )}
             >
-              <div className="flex items-center gap-3 px-4 py-3.5 sm:gap-x-5 sm:px-5">
+              <div className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:gap-x-5 sm:px-5">
                 <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-3.5">
                   <div
                     className={cn(
@@ -2415,7 +2496,83 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                   </div>
                 </div>
 
-                <div className="flex shrink-0 items-center gap-2">
+                <div className="flex min-w-0 flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
+                  {renamingPresetId === activePreset.id ? (
+                    <input
+                      autoFocus
+                      value={renamingPresetName}
+                      onChange={(event) => setRenamingPresetName(event.currentTarget.value)}
+                      onBlur={commitPresetRename}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") event.currentTarget.blur();
+                        if (event.key === "Escape") setRenamingPresetId(null);
+                      }}
+                      className="h-8 min-w-0 max-w-40 rounded-md border border-border/50 bg-background px-2 text-xs text-foreground outline-none focus:border-primary/60"
+                      aria-label={t("settings.skillsPresetRenamePrompt")}
+                    />
+                  ) : (
+                    <select
+                      value={activePreset.id}
+                      onChange={(event) => {
+                        setActivePresetId(event.currentTarget.value);
+                        setRenamingPresetId(null);
+                      }}
+                      className="h-8 min-w-0 max-w-40 rounded-md border border-border/50 bg-background px-2 text-xs text-foreground"
+                      aria-label={t("settings.skillsPresetLabel")}
+                    >
+                      {settings.skills.presets.map((preset) => (
+                        <option key={preset.id} value={preset.id}>
+                          {preset.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => createPreset(false)}
+                    title={t("settings.skillsPresetCreate")}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => createPreset(true)}
+                    title={t("settings.skillsPresetDuplicate")}
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    disabled={activePreset.id === DEFAULT_SKILL_PRESET_ID}
+                    onClick={renameActivePreset}
+                    title={t("settings.skillsPresetRename")}
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <ConfirmActionPopover
+                    title={t("settings.skillsPresetDelete")}
+                    description={t("settings.skillsPresetDeleteConfirm")}
+                    confirmLabel={t("settings.delete")}
+                    onConfirm={deleteActivePreset}
+                  >
+                    {() => (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-destructive"
+                        disabled={activePreset.id === DEFAULT_SKILL_PRESET_ID}
+                        title={t("settings.skillsPresetDelete")}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
+                  </ConfirmActionPopover>
                   <button
                     type="button"
                     role="switch"

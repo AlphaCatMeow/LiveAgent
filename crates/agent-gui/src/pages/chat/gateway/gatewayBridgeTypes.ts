@@ -35,6 +35,8 @@ export type GatewayChatRequestEvent = {
   selectedSystemTools?: string[];
   uploadedFiles?: PendingUploadedFile[];
   queuePolicy?: "auto" | "append" | "interrupt" | string;
+  skillPresetId?: string;
+  skillsDisabled?: boolean;
 };
 
 export type GatewayChatClaimedRequest = {
@@ -73,6 +75,8 @@ export type ActiveGatewayBridgeRequest = {
   executionModeOverride?: ExecutionMode;
   workdirOverride?: string;
   selectedSystemToolIdsOverride?: SystemToolId[];
+  skillPresetIdOverride?: string;
+  skillsDisabledOverride?: boolean;
 };
 
 export type SendChatAction = (overrides?: {
@@ -83,6 +87,8 @@ export type SendChatAction = (overrides?: {
   executionModeOverride?: ExecutionMode;
   workdirOverride?: string;
   selectedSystemToolIdsOverride?: SystemToolId[];
+  skillPresetIdOverride?: string;
+  skillsDisabledOverride?: boolean;
   runtimeControlsOverride?: ChatRuntimeControls;
   gatewayBridgeRequestOverride?: ActiveGatewayBridgeRequest | null;
   preserveComposerOnStart?: boolean;

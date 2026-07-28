@@ -485,6 +485,8 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
           executionModeOverride: normalizeGatewayExecutionMode(payload.executionMode),
           workdirOverride: normalizeGatewayWorkdir(payload.workdir),
           selectedSystemToolIdsOverride: normalizeSystemToolSelection(payload.selectedSystemTools),
+          skillPresetIdOverride: payload.skillPresetId?.trim() || undefined,
+          skillsDisabledOverride: payload.skillsDisabled,
         });
         const markRuntimeStarted = async () => {
           await invoke("gateway_chat_mark_started", {
@@ -500,6 +502,8 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
           executionModeOverride: gatewayBridgeRequest.executionModeOverride,
           workdirOverride: gatewayBridgeRequest.workdirOverride,
           selectedSystemToolIdsOverride: gatewayBridgeRequest.selectedSystemToolIdsOverride,
+          skillPresetIdOverride: gatewayBridgeRequest.skillPresetIdOverride,
+          skillsDisabledOverride: gatewayBridgeRequest.skillsDisabledOverride,
           runtimeControlsOverride: gatewayBridgeRequest.runtimeControlsOverride,
           gatewayBridgeRequestOverride: gatewayBridgeRequest,
           beforeRuntimeStart: markRuntimeStarted,

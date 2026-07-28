@@ -21,3 +21,19 @@ func TestVetAgentRequestAllowsProviderUsage(t *testing.T) {
 		t.Fatalf("vetAgentRequest() error = %v", err)
 	}
 }
+
+func TestVetAgentRequestAllowsHistorySkills(t *testing.T) {
+	env := &gatewayv2.GatewayEnvelope{
+		Payload: &gatewayv2.GatewayEnvelope_HistorySkills{
+			HistorySkills: &gatewayv2.HistorySkillsRequest{
+				ConversationId: "conversation-1",
+				SkillPresetId:  "focused-review",
+				SkillsDisabled: true,
+			},
+		},
+	}
+
+	if err := vetAgentRequest(session.AgentView{}, env); err != nil {
+		t.Fatalf("vetAgentRequest() error = %v", err)
+	}
+}

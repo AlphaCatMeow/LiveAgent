@@ -67,9 +67,11 @@ export type CompactionCheckpointStats = {
 };
 
 export type StoredChatContextMeta = {
-  schemaVersion: 3;
+  schemaVersion: 4;
   systemPrompt?: string;
   tools?: Context["tools"];
+  skillPresetId: string;
+  skillsDisabled: boolean;
   activeSegmentIndex: number;
   totalSegmentCount: number;
   totalMessageCount: number;
@@ -393,6 +395,8 @@ function countMessages(segments: StoredContextSegment[]) {
 function buildConversationMeta(params: {
   systemPrompt?: string;
   tools?: Context["tools"];
+  skillPresetId?: string;
+  skillsDisabled?: boolean;
   segments: StoredContextSegment[];
   activeSegmentIndex?: number;
 }): StoredChatContextMeta {
@@ -402,9 +406,11 @@ function buildConversationMeta(params: {
       : Math.max(0, params.segments.length - 1);
   const systemPrompt = normalizeConversationSystemPrompt(params.systemPrompt);
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     systemPrompt,
     tools: params.tools,
+    skillPresetId: params.skillPresetId?.trim() || "default",
+    skillsDisabled: params.skillsDisabled === true,
     activeSegmentIndex,
     totalSegmentCount: params.segments.length,
     totalMessageCount: countMessages(params.segments),
@@ -893,6 +899,8 @@ export function normalizeConversationState(input: {
   const meta = buildConversationMeta({
     systemPrompt: input.meta.systemPrompt,
     tools: input.meta.tools,
+    skillPresetId: input.meta.skillPresetId,
+    skillsDisabled: input.meta.skillsDisabled,
     segments,
     activeSegmentIndex,
   });
@@ -910,6 +918,8 @@ export function createConversationStateFromContext(context: Context): Conversati
     meta: {
       systemPrompt: context.systemPrompt,
       tools: context.tools,
+      skillPresetId: "default",
+      skillsDisabled: false,
     },
     segments: [createEmptySegment(0)],
   });
@@ -1006,6 +1016,8 @@ export function appendMessagesToConversation(
   const meta = buildConversationMeta({
     systemPrompt: state.meta.systemPrompt,
     tools: state.meta.tools,
+    skillPresetId: state.meta.skillPresetId,
+    skillsDisabled: state.meta.skillsDisabled,
     segments: normalizedSegments,
     activeSegmentIndex,
   });
@@ -1116,6 +1128,8 @@ export function truncateConversationFromMessage(
   const meta = buildConversationMeta({
     systemPrompt: state.meta.systemPrompt,
     tools: state.meta.tools,
+    skillPresetId: state.meta.skillPresetId,
+    skillsDisabled: state.meta.skillsDisabled,
     segments: normalizedSegments,
     activeSegmentIndex,
   });
@@ -1158,6 +1172,8 @@ export function replaceActiveSegmentMessages(
   const meta = buildConversationMeta({
     systemPrompt: state.meta.systemPrompt,
     tools: state.meta.tools,
+    skillPresetId: state.meta.skillPresetId,
+    skillsDisabled: state.meta.skillsDisabled,
     segments: normalizedSegments,
     activeSegmentIndex: state.activeSegmentIndex,
   });

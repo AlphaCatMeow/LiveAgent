@@ -38,7 +38,7 @@ import {
   createConversationStateFromContext,
   type RenderTimelineItem,
 } from "../lib/chat/conversation/conversationState";
-import type { ChatHistorySummary } from "../lib/chat/history/chatHistory";
+import { type ChatHistorySummary, setChatHistorySkills } from "../lib/chat/history/chatHistory";
 import { memoryExtraction } from "../lib/chat/memory/extractionController";
 import type { CodeMentionReference } from "../lib/chat/messages/mentionReferences";
 import {
@@ -63,12 +63,15 @@ import {
   parseSelectedModelJson,
   type RightDockFileTreeStatePatch,
   type RightDockProjectState,
+  resolveEffectiveSkillNames,
   resolveEffectiveTheme,
+  resolveSkillPreset,
   type SelectedModel,
   updateChatTranscriptWidth,
   updateRightDockFileTreeState,
   updateRightDockProjectState,
   updateRightDockWidth,
+  updateSkillPreset,
   updateSkills,
   updateSshProjectHostIds,
   updateSystem,
@@ -84,7 +87,6 @@ import { conversationMatchesScope } from "../lib/sidebar/scope";
 import { selectConversations, selectRunningConversationIds } from "../lib/sidebar/selectors";
 import { createSidebarStore } from "../lib/sidebar/store";
 import { useSidebarSelector } from "../lib/sidebar/useSidebarSelector";
-import { mergeAlwaysEnabledSkillNames } from "../lib/skills";
 import { createSubagentStoreManager } from "../lib/subagents";
 import { terminalSessionBelongsToProject } from "../lib/terminal/sessionStore";
 import { tauriTerminalClient } from "../lib/terminal/tauriTerminalClient";
@@ -211,17 +213,24 @@ export function ChatPage(props: ChatPageProps) {
   const isAgentMode = isAgentExecutionMode(settings.system.executionMode);
   const isAgentDevExecutionMode = isAgentDevMode(settings.system.executionMode);
   const skillsConfigured = settings.skills.enabled;
-  const skillsEnabled = skillsConfigured && isAgentMode;
+  const effectiveSkillsSelection = useMemo(
+    () =>
+      resolveEffectiveSkillNames({
+        settings: settings.skills,
+        presetId: conversationState.meta.skillPresetId,
+        skillsDisabled: conversationState.meta.skillsDisabled,
+        executionMode: settings.system.executionMode,
+      }),
+    [conversationState.meta, settings.skills, settings.system.executionMode],
+  );
+  const skillsEnabled = effectiveSkillsSelection.enabled;
   const activeAgentPrompt = useMemo(() => {
     const activeTemplate = settings.agents.find(
       (template) => template.enabled && template.prompt.trim(),
     );
     return activeTemplate?.prompt.trim() ?? "";
   }, [settings.agents]);
-  const selectedSkillNames = useMemo(
-    () => (skillsEnabled ? mergeAlwaysEnabledSkillNames(settings.skills.selected) : []),
-    [skillsEnabled, settings.skills.selected],
-  );
+  const selectedSkillNames = effectiveSkillsSelection.skillNames;
   const workdir = settings.system.workdir.trim();
   // The sidebar store owns all sidebar domain state (conversation list,
   // workdirs, running set); ChatPage only issues imperative calls and keeps a
@@ -626,9 +635,11 @@ export function ChatPage(props: ChatPageProps) {
     const composer = composerRef.current;
     if (!composer || !codeReviewSkill) return;
     setSettings((prev) => {
-      const selected = appendManagedSkillSelections(prev.skills.selected, [codeReviewSkill.name]);
-      if (selected.join("\n") === prev.skills.selected.join("\n")) return prev;
-      return updateSkills(prev, { selected });
+      const preset = resolveSkillPreset(prev.skills, effectiveSkillsSelection.presetId);
+      const skillNames = appendManagedSkillSelections(preset.skillNames, [codeReviewSkill.name]);
+      if (skillNames.join("\n") === preset.skillNames.join("\n")) return prev;
+      const skills = updateSkillPreset(prev.skills, preset.id, { skillNames });
+      return updateSkills(prev, { presets: skills.presets });
     });
     const alreadyInserted = composer
       .getDraft()
@@ -637,7 +648,7 @@ export function ChatPage(props: ChatPageProps) {
       composer.insertSkillMention(codeReviewSkill);
     }
     composer.focus();
-  }, [codeReviewSkill, setSettings]);
+  }, [codeReviewSkill, effectiveSkillsSelection.presetId, setSettings]);
   const handleRightDockInsertCommitMention = useCallback((commit: GitCommitContextPayload) => {
     composerRef.current?.insertCommitMention(commit);
     composerRef.current?.focus();
@@ -1303,7 +1314,6 @@ export function ChatPage(props: ChatPageProps) {
     availableSkills,
     skillsRootDir,
     refreshSkills,
-    selectedSkillNames,
     activeAgentPrompt,
     ensureTunnelToolTab,
     ensureSshTunnelToolTab,
@@ -1568,6 +1578,37 @@ export function ChatPage(props: ChatPageProps) {
       removeSharedHistoryItems([id]);
     },
     [removeSharedHistoryItems],
+  );
+
+  const handleConversationSkillsChange = useCallback(
+    (presetId: string, disabled: boolean) => {
+      if (isSending) return;
+      const conversationId = currentConversationIdRef.current.trim();
+      const normalizedPresetId = presetId.trim() || "default";
+      updateConversationRuntimeEntry(conversationId, (entry) => ({
+        ...entry,
+        state: {
+          ...entry.state,
+          meta: {
+            ...entry.state.meta,
+            skillPresetId: normalizedPresetId,
+            skillsDisabled: disabled,
+          },
+        },
+      }));
+      const persistedItem = historyItems.find(
+        (item) => item.id === conversationId && !item.isPending,
+      );
+      if (persistedItem) {
+        void setChatHistorySkills(conversationId, normalizedPresetId, disabled).catch((error) => {
+          addNotify(
+            "error",
+            error instanceof Error ? error.message : String(error || "保存 Skill 方案失败"),
+          );
+        });
+      }
+    },
+    [addNotify, currentConversationIdRef, historyItems, isSending, updateConversationRuntimeEntry],
   );
 
   const handleSend = useCallback(() => {
@@ -1916,6 +1957,11 @@ export function ChatPage(props: ChatPageProps) {
                 workdir={displayedConversationWorkdir}
                 enabledSkills={enabledComposerSkills}
                 isAgentMode={isAgentMode}
+                skillPresets={settings.skills.presets}
+                skillPresetId={effectiveSkillsSelection.presetId}
+                skillsDisabled={conversationState.meta.skillsDisabled}
+                skillsGloballyEnabled={skillsConfigured}
+                onSkillsChange={handleConversationSkillsChange}
                 chatRuntimeControls={chatRuntimeControlsForCurrentProvider}
                 reasoningOptions={chatRuntimeReasoningOptions}
                 thinkingAlwaysOn={chatRuntimeThinkingAlwaysOn}

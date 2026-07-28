@@ -29,7 +29,9 @@ test("conversation state builds request context from the active segment", () => 
     ],
   });
 
-  assert.equal(state.meta.schemaVersion, 3);
+  assert.equal(state.meta.schemaVersion, 4);
+  assert.equal(state.meta.skillPresetId, "default");
+  assert.equal(state.meta.skillsDisabled, false);
   assert.equal(state.meta.totalMessageCount, 2);
   assert.equal(state.historyRenderItems.length, 2);
 
@@ -40,6 +42,26 @@ test("conversation state builds request context from the active segment", () => 
     requestContext.messages.map((message) => message.role),
     ["user", "assistant"],
   );
+});
+
+test("conversation normalization preserves per-conversation skills metadata", () => {
+  const seeded = conversationState.createConversationStateFromContext({ messages: [] });
+  const normalized = conversationState.normalizeConversationState({
+    meta: {
+      systemPrompt: "prompt",
+      skillPresetId: "focused",
+      skillsDisabled: true,
+    },
+    segments: seeded.segments,
+  });
+
+  assert.equal(normalized.meta.schemaVersion, 4);
+  assert.equal(normalized.meta.skillPresetId, "focused");
+  assert.equal(normalized.meta.skillsDisabled, true);
+
+  const appended = conversationState.appendMessagesToConversation(normalized, [user("next", 3)]);
+  assert.equal(appended.meta.skillPresetId, "focused");
+  assert.equal(appended.meta.skillsDisabled, true);
 });
 
 test("request context omits legacy silent memory extraction artifacts but keeps render items", () => {

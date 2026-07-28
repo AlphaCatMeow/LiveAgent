@@ -77,7 +77,25 @@ export type McpSettings = {
 
 export type SkillsSettings = {
   enabled: boolean;
+  /** @deprecated Compatibility alias for the default preset. */
   selected: string[];
+  presets: SkillPreset[];
+};
+
+export const DEFAULT_SKILL_PRESET_ID = "default";
+const CUSTOM_SKILL_PRESET_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export type SkillPreset = {
+  id: string;
+  name: string;
+  skillNames: string[];
+};
+
+export type EffectiveSkillsSelection = {
+  presetId: string;
+  skillNames: string[];
+  enabled: boolean;
 };
 
 export type MemoryOrganizerScope = "all" | "global" | "projects" | "current-project";
@@ -1708,10 +1726,129 @@ export function normalizeAgentPromptTemplates(input: unknown): AgentPromptTempla
 
 export function normalizeSkillsSettings(input: unknown): SkillsSettings {
   const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const presets = normalizeSkillPresets(obj.presets, obj.selected);
+  const defaultPreset = presets[0] ?? {
+    id: DEFAULT_SKILL_PRESET_ID,
+    name: "Default",
+    skillNames: [],
+  };
   return {
     enabled: obj.enabled === false ? false : true,
-    selected: mergeAlwaysEnabledSkillNames(normalizeStringArray(obj.selected)),
+    selected: mergeAlwaysEnabledSkillNames(defaultPreset.skillNames),
+    presets,
   };
+}
+
+function normalizeSkillNames(input: unknown): string[] {
+  return [
+    ...new Set(
+      normalizeStringArray(input).filter((name) => !isAlwaysEnabledSkillNameForSettings(name)),
+    ),
+  ].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+}
+
+function isAlwaysEnabledSkillNameForSettings(name: string) {
+  return mergeAlwaysEnabledSkillNames([]).includes(name);
+}
+
+export function normalizeSkillPresets(input: unknown, legacySelected?: unknown): SkillPreset[] {
+  const rawPresets = Array.isArray(input) ? input : [];
+  const defaultRaw = rawPresets.find((raw) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+    return (raw as Record<string, unknown>).id === DEFAULT_SKILL_PRESET_ID;
+  }) as Record<string, unknown> | undefined;
+  const presets: SkillPreset[] = [
+    {
+      id: DEFAULT_SKILL_PRESET_ID,
+      name: "Default",
+      skillNames: normalizeSkillNames(defaultRaw?.skillNames ?? legacySelected),
+    },
+  ];
+  const seenIds = new Set<string>([DEFAULT_SKILL_PRESET_ID]);
+  const seenNames = new Set<string>(["default"]);
+
+  for (const raw of rawPresets) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const obj = raw as Record<string, unknown>;
+    const id = typeof obj.id === "string" ? obj.id.trim().toLowerCase() : "";
+    const name = typeof obj.name === "string" ? obj.name.trim() : "";
+    if (!CUSTOM_SKILL_PRESET_ID_PATTERN.test(id) || !name || seenIds.has(id)) continue;
+    const normalizedName = name.toLowerCase();
+    if (seenNames.has(normalizedName)) continue;
+    seenIds.add(id);
+    seenNames.add(normalizedName);
+    presets.push({ id, name, skillNames: normalizeSkillNames(obj.skillNames) });
+  }
+
+  return presets;
+}
+
+export function resolveSkillPreset(
+  settings: Pick<SkillsSettings, "presets">,
+  presetId: string | null | undefined,
+): SkillPreset {
+  const normalizedPresetId = presetId?.trim().toLowerCase();
+  return (
+    settings.presets.find((preset) => preset.id === normalizedPresetId) ??
+    settings.presets.find((preset) => preset.id === DEFAULT_SKILL_PRESET_ID) ?? {
+      id: DEFAULT_SKILL_PRESET_ID,
+      name: "Default",
+      skillNames: [],
+    }
+  );
+}
+
+export function resolveEffectiveSkillNames(params: {
+  settings: SkillsSettings;
+  presetId?: string;
+  skillsDisabled?: boolean;
+  executionMode: ExecutionMode;
+}): EffectiveSkillsSelection {
+  const preset = resolveSkillPreset(params.settings, params.presetId);
+  const enabled =
+    params.settings.enabled && !params.skillsDisabled && params.executionMode !== "text";
+  return {
+    presetId: preset.id,
+    enabled,
+    skillNames: enabled ? mergeAlwaysEnabledSkillNames(preset.skillNames) : [],
+  };
+}
+
+export function updateSkillPreset(
+  settings: SkillsSettings,
+  presetId: string,
+  patch: Partial<Pick<SkillPreset, "name" | "skillNames">>,
+): SkillsSettings {
+  const normalizedPresetId = presetId.trim().toLowerCase();
+  const presets = settings.presets.map((preset) =>
+    preset.id === normalizedPresetId
+      ? {
+          ...preset,
+          ...(preset.id === DEFAULT_SKILL_PRESET_ID || patch.name === undefined
+            ? {}
+            : { name: patch.name }),
+          ...(patch.skillNames === undefined
+            ? {}
+            : { skillNames: normalizeSkillNames(patch.skillNames) }),
+        }
+      : preset,
+  );
+  return normalizeSkillsSettings({ ...settings, presets });
+}
+
+export function removeSkillFromAllPresets(
+  settings: SkillsSettings,
+  skillName: string,
+): SkillsSettings {
+  const normalizedName = skillName.trim();
+  if (!normalizedName) return settings;
+  return normalizeSkillsSettings({
+    ...settings,
+    presets: settings.presets.map((preset) => ({
+      ...preset,
+      skillNames: preset.skillNames.filter((name) => name !== normalizedName),
+    })),
+  });
 }
 
 export function normalizeSelectedModel(input: unknown): SelectedModel | undefined {
@@ -2235,6 +2372,7 @@ export function getDefaultSettings(): AppSettings {
     skills: {
       enabled: true,
       selected: mergeAlwaysEnabledSkillNames([]),
+      presets: normalizeSkillPresets([]),
     },
     chatRuntimeControls: DEFAULT_CHAT_RUNTIME_CONTROLS,
     selectedModel: undefined,
@@ -2381,11 +2519,17 @@ export function removeSshHostFromProjectAssociations(
 }
 
 export function updateSkills(prev: AppSettings, patch: Partial<SkillsSettings>): AppSettings {
+  const nextPresets = patch.selected
+    ? updateSkillPreset(prev.skills, DEFAULT_SKILL_PRESET_ID, {
+        skillNames: patch.selected,
+      }).presets
+    : patch.presets;
   return normalizeSettings({
     ...prev,
     skills: {
       ...prev.skills,
       ...patch,
+      ...(nextPresets ? { presets: nextPresets } : {}),
     },
   });
 }

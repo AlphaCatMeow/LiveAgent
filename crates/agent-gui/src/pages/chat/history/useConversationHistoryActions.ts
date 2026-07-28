@@ -285,6 +285,8 @@ export function useConversationHistoryActions(params: UseConversationHistoryActi
         meta: {
           systemPrompt: activeRecord.meta.systemPrompt,
           tools: activeRecord.meta.tools,
+          skillPresetId: activeRecord.meta.skillPresetId,
+          skillsDisabled: activeRecord.meta.skillsDisabled,
         },
         segments: [activeRecord.activeSegment],
       });

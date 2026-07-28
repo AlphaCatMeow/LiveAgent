@@ -24,6 +24,7 @@ import {
   Clock3,
   Globe,
   GlobeOff,
+  Layers,
   Lightbulb,
   LightbulbOff,
   Loader2,
@@ -58,6 +59,7 @@ import {
   type ChatRuntimeControls,
   DEFAULT_CHAT_RUNTIME_CONTROLS,
   type ReasoningLevel,
+  type SkillPreset,
 } from "../../lib/settings";
 import { cn } from "../../lib/shared/utils";
 import type { WorkspaceActivityClient } from "../../lib/workspace-activity/types";
@@ -227,6 +229,11 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
   workdir: string;
   enabledSkills: MentionComposerSkill[];
   isAgentMode: boolean;
+  skillPresets: SkillPreset[];
+  skillPresetId: string;
+  skillsDisabled: boolean;
+  skillsGloballyEnabled: boolean;
+  onSkillsChange: (presetId: string, disabled: boolean) => void;
   chatRuntimeControls: ChatRuntimeControls;
   reasoningOptions: ReasoningLevel[];
   thinkingAlwaysOn: boolean;
@@ -261,6 +268,11 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
     workdir,
     enabledSkills,
     isAgentMode,
+    skillPresets,
+    skillPresetId,
+    skillsDisabled,
+    skillsGloballyEnabled,
+    onSkillsChange,
     chatRuntimeControls,
     reasoningOptions,
     thinkingAlwaysOn,
@@ -904,6 +916,46 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
                   ) : null}
                 </button>
               </RuntimeControlTooltip>
+
+              {isAgentMode ? (
+                <RuntimeControlTooltip label={t("chat.skills.presetTooltip")}>
+                  <Select
+                    value={skillsDisabled ? "__disabled__" : skillPresetId}
+                    onValueChange={(value) =>
+                      onSkillsChange(
+                        value === "__disabled__" ? skillPresetId : value,
+                        value === "__disabled__",
+                      )
+                    }
+                    disabled={controlsDisabled || !skillsGloballyEnabled}
+                  >
+                    <SelectTrigger
+                      className="composer-toolbar-action h-8 w-auto max-w-36 shrink-0 gap-1 rounded-full border-0 bg-transparent px-2 text-xs text-muted-foreground shadow-none hover:bg-muted/60 hover:text-foreground disabled:opacity-40"
+                      aria-label={t("chat.skills.presetTooltip")}
+                    >
+                      <Layers className="h-4 w-4 shrink-0" />
+                      <SelectValue>
+                        {(value) =>
+                          value === "__disabled__"
+                            ? t("chat.skills.disabledForConversation")
+                            : (skillPresets.find((preset) => preset.id === value)?.name ??
+                              "Default")
+                        }
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent className="sidebar-context-menu min-w-48 rounded-xl border-0">
+                      {skillPresets.map((preset) => (
+                        <SelectItem key={preset.id} value={preset.id}>
+                          {preset.name}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value="__disabled__">
+                        {t("chat.skills.disabledForConversation")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </RuntimeControlTooltip>
+              ) : null}
 
               <RuntimeControlTooltip label={webSearchTooltip}>
                 <button

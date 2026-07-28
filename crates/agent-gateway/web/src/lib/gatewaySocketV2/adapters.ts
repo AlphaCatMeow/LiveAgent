@@ -61,6 +61,7 @@ import {
   HistoryRenameRequestSchema,
   HistoryShareGetRequestSchema,
   HistoryShareSetRequestSchema,
+  HistorySkillsRequestSchema,
   HistoryWorkdirsRequestSchema,
   ManagedProcessRequestSchema,
   MemoryManageRequestSchema,
@@ -350,6 +351,9 @@ function buildChatCommand(body: J) {
           })
         : undefined,
       queuePolicy: str(inner.queue_policy),
+      skillPresetId: str(inner.skill_preset_id),
+      skillsDisabled:
+        typeof inner.skills_disabled === "boolean" ? inner.skills_disabled : undefined,
     }),
     baseMessageRef: inner.base_message_ref
       ? buildMessageRef(rec(inner.base_message_ref))
@@ -537,6 +541,15 @@ function agentRequestPayload(type: string, body: J): GatewayEnvelope["payload"] 
         value: create(HistoryPinRequestSchema, {
           conversationId: trimStr(body.conversation_id),
           isPinned: bool(body.is_pinned),
+        }),
+      };
+    case "history.skills":
+      return {
+        case: "historySkills",
+        value: create(HistorySkillsRequestSchema, {
+          conversationId: trimStr(body.conversation_id),
+          skillPresetId: trimStr(body.skill_preset_id),
+          skillsDisabled: bool(body.skills_disabled),
         }),
       };
     case "history.share.get":
@@ -989,10 +1002,17 @@ function decodeAgentResponse(envelope: AgentEnvelope, options: { agentOnline: bo
         conversation: payload.value.conversation
           ? conversationSummaryPayload(payload.value.conversation)
           : null,
+        ...(payload.value.skillPresetId
+          ? {
+              skill_preset_id: payload.value.skillPresetId,
+              skills_disabled: payload.value.skillsDisabled,
+            }
+          : {}),
       };
     case "historyRenameResp":
     case "historyBranchResp":
     case "historyPinResp":
+    case "historySkillsResp":
       if (!payload.value.conversation) {
         frameError("unexpected agent response");
       }

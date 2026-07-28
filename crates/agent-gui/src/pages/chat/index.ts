@@ -6,10 +6,7 @@ export type {
   SendChatAction,
 } from "./gateway/gatewayBridgeTypes";
 export { useGatewayBridgeListeners } from "./gateway/useGatewayBridgeListeners";
-export {
-  scheduleIdleHydration,
-  useConversationHistoryActions,
-} from "./history/useConversationHistoryActions";
+export { useConversationHistoryActions } from "./history/useConversationHistoryActions";
 export { useChatPageRuntimeStore } from "./hooks/useChatPageRuntimeStore";
 export { useChatSkills } from "./hooks/useChatSkills";
 export { useEditResend } from "./hooks/useEditResend";

@@ -308,12 +308,12 @@ export function buildGatewayFinalProjectionEntries(
   const userEntry = buildUserEntry(input.userMessage);
   const entries: GatewayRuntimeSnapshotEntry[] = userEntry ? [userEntry] : [];
   const userMessageId = readMessageId(input.userMessage, "");
-  let userIndex = input.state.historyRenderItems.findIndex(
+  let userIndex = input.state.transcript.items.findIndex(
     (item) => item.kind === "user" && item.messageRef?.messageId === userMessageId,
   );
   if (userIndex < 0 && userEntry) {
-    for (let index = input.state.historyRenderItems.length - 1; index >= 0; index -= 1) {
-      const item = input.state.historyRenderItems[index];
+    for (let index = input.state.transcript.items.length - 1; index >= 0; index -= 1) {
+      const item = input.state.transcript.items[index];
       if (
         item?.kind === "user" &&
         item.text === userEntry.text &&
@@ -329,8 +329,8 @@ export function buildGatewayFinalProjectionEntries(
   }
 
   let assistantGroupIndex = 0;
-  for (let index = userIndex + 1; index < input.state.historyRenderItems.length; index += 1) {
-    const item = input.state.historyRenderItems[index];
+  for (let index = userIndex + 1; index < input.state.transcript.items.length; index += 1) {
+    const item = input.state.transcript.items[index];
     if (!item) continue;
     if (item.kind === "user") {
       break;

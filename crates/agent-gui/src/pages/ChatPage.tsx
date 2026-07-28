@@ -104,7 +104,6 @@ import {
   MAX_UPLOAD_FILES,
   pruneIdleConversationRuntimeCaches,
   type SendChatAction,
-  scheduleIdleHydration,
   useChatPageRuntimeStore,
   useChatSkills,
   useConversationHistoryActions,
@@ -351,19 +350,19 @@ export function ChatPage(props: ChatPageProps) {
     [availableSkills],
   );
 
-  const historyRenderItems = useMemo<RenderTimelineItem[]>(
-    () => conversationState.historyRenderItems,
+  const transcriptItems = useMemo<RenderTimelineItem[]>(
+    () => conversationState.transcript.items,
     [conversationState],
   );
   // Sent-prompt history for the composer's ↑/↓ recall. Read lazily through a
   // ref so the memoized composer bar never re-renders on transcript growth.
-  const historyRenderItemsRef = useRef<RenderTimelineItem[]>(historyRenderItems);
+  const transcriptItemsRef = useRef<RenderTimelineItem[]>(transcriptItems);
   useEffect(() => {
-    historyRenderItemsRef.current = historyRenderItems;
-  }, [historyRenderItems]);
+    transcriptItemsRef.current = transcriptItems;
+  }, [transcriptItems]);
   const loadComposerHistoryPrompts = useCallback(() => {
     const prompts: string[] = [];
-    for (const item of historyRenderItemsRef.current) {
+    for (const item of transcriptItemsRef.current) {
       if (item.kind === "user" && item.text.trim()) prompts.push(item.text);
     }
     return prompts;
@@ -393,17 +392,12 @@ export function ChatPage(props: ChatPageProps) {
   const openInitialActionRef = useRef<(id: string) => Promise<"cache-hit" | "painted">>(
     async () => "painted",
   );
-  const hydrateFullActionRef = useRef<(id: string) => Promise<void>>(async () => undefined);
+  const loadEarlierHistoryActionRef = useRef<(id: string) => Promise<void>>(async () => undefined);
   const cleanupDeletedConversationActionRef = useRef<(id: string) => void>(() => undefined);
-  // Two-phase conversation open: paint the active segment fast, hydrate the
-  // full transcript at idle. The overlay appears only after 150ms of
-  // still-opening — no minimum overlay duration.
   const openController = useMemo(
     () =>
       createConversationOpenController({
         openInitial: (conversationId) => openInitialActionRef.current(conversationId),
-        hydrateFull: (conversationId) => hydrateFullActionRef.current(conversationId),
-        scheduleIdle: scheduleIdleHydration,
         onStateChange: setConversationOpenState,
       }),
     [],
@@ -453,7 +447,7 @@ export function ChatPage(props: ChatPageProps) {
   const {
     currentConversationIdRef,
     conversationRuntimeCacheRef,
-    persistedConversationStateRef,
+    conversationPersistenceCursorRef,
     buildRuntimeEntryFromVisibleState,
     syncVisibleConversationRuntime,
     updateConversationRuntimeEntry,
@@ -490,6 +484,10 @@ export function ChatPage(props: ChatPageProps) {
     setCurrentConversationSelectedModel,
     setRunningConversationIds,
   });
+  const handleLoadEarlierHistory = useCallback(
+    () => loadEarlierHistoryActionRef.current(currentConversationIdRef.current),
+    [currentConversationIdRef],
+  );
 
   const {
     modelOptions,
@@ -516,7 +514,7 @@ export function ChatPage(props: ChatPageProps) {
     updateConversationRuntimeEntry,
   });
 
-  function cancelConversationHydration() {
+  function cancelConversationLoad() {
     conversationLoadSequenceRef.current += 1;
     setHydratingConversationId(null);
     setHydrationFailedConversationId(null);
@@ -877,7 +875,7 @@ export function ChatPage(props: ChatPageProps) {
       const queuedConversationIds = getQueuedConversationIds(queuedChatTurnsRef.current);
       pruneIdleConversationRuntimeCaches({
         runtimeCache: conversationRuntimeCacheRef.current,
-        persistedStateCache: persistedConversationStateRef.current,
+        persistenceCursors: conversationPersistenceCursorRef.current,
         keepConversationIds: [
           currentConversationIdRef.current,
           ...extraKeepIds,
@@ -897,7 +895,7 @@ export function ChatPage(props: ChatPageProps) {
       currentConversationIdRef,
       deleteConversationLocalCaches,
       isConversationRunning,
-      persistedConversationStateRef,
+      conversationPersistenceCursorRef,
     ],
   );
 
@@ -934,14 +932,15 @@ export function ChatPage(props: ChatPageProps) {
   const {
     startNewConversation,
     openInitial: openConversationInitial,
-    hydrateFull: hydrateConversationFull,
+    loadEarlier: loadEarlierConversationHistory,
+    replaceConversationAtMessage,
     cleanupDeletedConversation,
     persistConversation,
   } = useConversationHistoryActions({
     conversationState,
     currentConversationIdRef,
     conversationRuntimeCacheRef,
-    persistedConversationStateRef,
+    conversationPersistenceCursorRef,
     markLocalHistorySnapshotSynced,
     isConversationRunning,
     conversationLoadSequenceRef,
@@ -951,7 +950,7 @@ export function ChatPage(props: ChatPageProps) {
     buildRuntimeEntryFromVisibleState,
     syncVisibleConversationRuntime,
     updateConversationRuntimeEntry,
-    cancelConversationHydration,
+    cancelConversationLoad,
     resetVisibleTransientState,
     deleteConversationArtifacts: deleteConversationLocalCaches,
     disposeSubagentsForConversation: (conversationId) => {
@@ -969,7 +968,7 @@ export function ChatPage(props: ChatPageProps) {
 
   startNewConversationActionRef.current = startNewConversation;
   openInitialActionRef.current = openConversationInitial;
-  hydrateFullActionRef.current = hydrateConversationFull;
+  loadEarlierHistoryActionRef.current = loadEarlierConversationHistory;
   cleanupDeletedConversationActionRef.current = cleanupDeletedConversation;
 
   const {
@@ -993,7 +992,7 @@ export function ChatPage(props: ChatPageProps) {
     isConversationRunning,
     currentConversationIdRef,
     conversationRuntimeCacheRef,
-    persistedConversationStateRef,
+    conversationPersistenceCursorRef,
     locallySyncedHistoryUpdatedAtRef,
     deleteConversationLocalCaches,
     disposeSubagentsForConversation: (conversationId) => {
@@ -1019,7 +1018,7 @@ export function ChatPage(props: ChatPageProps) {
     if (conversationState.meta.totalMessageCount > 0 || pendingUploadedFiles.length > 0) {
       return;
     }
-    if (persistedConversationStateRef.current.has(conversationId)) {
+    if (conversationPersistenceCursorRef.current.has(conversationId)) {
       return;
     }
     const historyItem = sidebarStore.peek(conversationId);
@@ -1079,8 +1078,7 @@ export function ChatPage(props: ChatPageProps) {
     conversationState,
     currentConversationIdRef,
     conversationRuntimeCacheRef,
-    persistedConversationStateRef,
-    buildRuntimeEntryFromVisibleState,
+    conversationPersistenceCursorRef,
     syncVisibleConversationRuntime,
     isConversationRunning,
     sidebarStore,
@@ -1089,7 +1087,6 @@ export function ChatPage(props: ChatPageProps) {
     hydrationFailedConversationIdRef,
     setHydratingConversationId,
     setHydrationFailedConversationId,
-    subagentStoresRef,
   });
 
   ensureGatewayBridgeConversationReadyRef.current = ensureGatewayBridgeConversationReady;
@@ -1308,6 +1305,7 @@ export function ChatPage(props: ChatPageProps) {
     ensureTunnelToolTab,
     ensureSshTunnelToolTab,
     persistConversation,
+    replaceConversationAtMessage,
     pruneIdleConversationCaches,
     requestQueuedChatTurnProcessing,
   });
@@ -1606,9 +1604,9 @@ export function ChatPage(props: ChatPageProps) {
   const composerPlaceholder = isCompactionRunning
     ? t("chat.compactingContextWait")
     : isConversationHydrating
-      ? "正在补全完整历史，请稍候..."
+      ? "正在加载会话，请稍候..."
       : isConversationHydrationFailed
-        ? "当前会话完整历史加载失败，请重新打开会话..."
+        ? "当前会话加载失败，请重新打开会话..."
         : enabledComposerSkills.length > 0
           ? t("chat.inputHintWithSkills")
           : t("chat.inputHint");
@@ -1639,16 +1637,12 @@ export function ChatPage(props: ChatPageProps) {
   });
 
   const { handleResendFromEdit } = useEditResend({
-    conversationState,
     isSending,
     isConversationHydrating,
     isConversationHydrationFailed,
     currentConversationIdRef,
-    composerRef,
-    setPendingUploadsForConversation,
-    updateConversationRuntimeEntry,
-    invalidateSubagentsForConversation: (conversationId) => {
-      subagentStoresRef.current.invalidate(conversationId);
+    onError: (error) => {
+      setErrorMessage(error instanceof Error ? error.message : String(error));
     },
     sendActionRef,
   });
@@ -1881,7 +1875,9 @@ export function ChatPage(props: ChatPageProps) {
                   gitClient={tauriGitClient}
                   followRef={scrollFollowRef}
                   hasModels={hasModels}
-                  historyItems={historyRenderItems}
+                  historyItems={transcriptItems}
+                  hasMoreHistory={conversationState.transcript.hasMoreBefore}
+                  onLoadEarlierHistory={handleLoadEarlierHistory}
                   isHistorySwitching={conversationOpenState.showOverlay}
                   isSending={isSending}
                   isAgentMode={isAgentMode}
@@ -1894,8 +1890,7 @@ export function ChatPage(props: ChatPageProps) {
                   onContentWidthChange={handleChatTranscriptWidthChange}
                   onResendFromEdit={handleResendFromEdit}
                   onBranchConversation={
-                    // 水合中/水合失败时 handler 只会静默 return——直接不传，
-                    // 让 AssistantRow 的 disabled 分支给出可见的禁用态。
+                    // 会话加载中或加载失败时直接不传操作，展示明确的禁用态。
                     isConversationHydrating || isConversationHydrationFailed
                       ? undefined
                       : handleBranchConversation

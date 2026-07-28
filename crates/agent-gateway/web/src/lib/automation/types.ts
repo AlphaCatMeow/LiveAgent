@@ -181,6 +181,8 @@ export type PromptRunRequest = {
   workdir: string;
   /** Task thinking level; empty means the runner's default. */
   reasoning: string;
+  skillPresetId: string;
+  skillsDisabled: boolean;
 };
 
 export type CompletePromptRunInput = {

@@ -109,7 +109,6 @@ import {
   useChatSkills,
   useConversationHistoryActions,
   useEditResend,
-  useGatewayBridgeBatcher,
   useGatewayBridgeListeners,
   useLiveTranscriptController,
   usePendingUploads,
@@ -119,7 +118,7 @@ import { ChatFileDropOverlay } from "./chat/components/ChatFileDropOverlay";
 import { WorkspaceOverlayHost } from "./chat/components/WorkspaceOverlayHost";
 import { useComposerDraftCache } from "./chat/composer/useComposerDraftCache";
 import { useGatewayBridgeReadiness } from "./chat/gateway/useGatewayBridgeReadiness";
-import { useGatewayRuntimeSnapshots } from "./chat/gateway/useGatewayRuntimeSnapshots";
+import { useGatewayRunMirrorCoordinator } from "./chat/gateway/useGatewayRunMirrorCoordinator";
 import { useGatewayStatus } from "./chat/gateway/useGatewayStatus";
 import { useBranchConversation } from "./chat/history/useBranchConversation";
 import { useSharedHistory } from "./chat/history/useSharedHistory";
@@ -445,8 +444,12 @@ export function ChatPage(props: ChatPageProps) {
   } = useLiveTranscriptController({
     currentConversationId,
   });
-  const { queueGatewayBridgeEventForRequest, flushGatewayBridgeEventsForRequest } =
-    useGatewayBridgeBatcher();
+  const {
+    queueGatewayBridgeEventForRequest,
+    flushGatewayBridgeEventsForRequest,
+    registerGatewayRunMirror,
+    finishGatewayRunMirror,
+  } = useGatewayRunMirrorCoordinator();
   const {
     currentConversationIdRef,
     conversationRuntimeCacheRef,
@@ -839,20 +842,20 @@ export function ChatPage(props: ChatPageProps) {
     sendActionRef,
   });
 
-  const {
-    activeGatewayRuntimeRunsRef,
-    queueGatewayRuntimeSnapshot,
-    queueGatewayRuntimeSnapshotForRun,
-    registerActiveGatewayRuntimeRun,
-    finishActiveGatewayRuntimeRun,
-  } = useGatewayRuntimeSnapshots({
-    canShareHistory,
-    remoteRuntimeStatus,
-    currentConversationIdRef,
-    queuedChatTurnsRef,
-    publishChatQueueSnapshots,
-    collectChatQueueSnapshotConversationIds,
-  });
+  // Queue snapshots publish on queue mutation only; after a gateway
+  // reconnect (new session) the gateway's in-memory queue view is empty, so
+  // republish the current queue for every conversation that has one.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: connection identity intentionally drives the republish
+  useEffect(() => {
+    if (!canShareHistory) {
+      return;
+    }
+    publishChatQueueSnapshots(
+      collectChatQueueSnapshotConversationIds(queuedChatTurnsRef.current, [
+        currentConversationIdRef.current,
+      ]),
+    );
+  }, [canShareHistory, remoteRuntimeStatus.connectedSince, remoteRuntimeStatus.sessionId]);
 
   const deleteConversationLocalCaches = useCallback(
     (conversationId: string) => {
@@ -1294,11 +1297,8 @@ export function ChatPage(props: ChatPageProps) {
     updateRetryAttempts,
     queueGatewayBridgeEventForRequest,
     flushGatewayBridgeEventsForRequest,
-    activeGatewayRuntimeRunsRef,
-    queueGatewayRuntimeSnapshot,
-    queueGatewayRuntimeSnapshotForRun,
-    registerActiveGatewayRuntimeRun,
-    finishActiveGatewayRuntimeRun,
+    registerGatewayRunMirror,
+    finishGatewayRunMirror,
     gatewayBridgeHistorySummaryRef,
     availableSkills,
     skillsRootDir,

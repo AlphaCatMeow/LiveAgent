@@ -5,7 +5,6 @@ export type {
   EnsureGatewayBridgeConversationReadyOptions,
   SendChatAction,
 } from "./gateway/gatewayBridgeTypes";
-export { useGatewayBridgeBatcher } from "./gateway/useGatewayBridgeBatcher";
 export { useGatewayBridgeListeners } from "./gateway/useGatewayBridgeListeners";
 export {
   scheduleIdleHydration,

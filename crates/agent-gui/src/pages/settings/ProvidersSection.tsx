@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ClaudeIcon,
+  ClipboardPaste,
   Download,
   ExternalLink,
   Eye,
@@ -902,6 +903,8 @@ function ProviderModal({
       setHeaderValidationSubmitted(true);
       exitModelBulkMode();
       setActivePanel("request");
+      // 导入视图会顶掉请求头列表,先切回列表再聚焦,否则目标输入框尚未挂载。
+      setHeaderImportOpen(false);
       focusCustomHeader(
         invalidHeaderIndex,
         getCustomHeaderIssue(customHeaders[invalidHeaderIndex], true) === "invalid-value"
@@ -1743,14 +1746,19 @@ function ProviderModal({
                       type="button"
                       variant="outline"
                       size="sm"
-                      className="h-8 shrink-0 max-[720px]:h-11 max-[720px]:flex-1"
+                      className={cn(
+                        "h-8 shrink-0 gap-1.5 max-[720px]:h-11 max-[720px]:flex-1",
+                        headerImportOpen && "border-primary/50 bg-primary/10 text-primary",
+                      )}
                       aria-expanded={headerImportOpen}
                       onClick={() => {
                         setHeaderImportOpen((open) => !open);
                         setHeaderImportError(null);
                         setHeaderImportSummary(null);
+                        setHeaderSuggest(null);
                       }}
                     >
+                      <ClipboardPaste className="h-3.5 w-3.5" />
                       {t("settings.importCustomHeaders")}
                     </Button>
                     <Button
@@ -1758,6 +1766,8 @@ function ProviderModal({
                       variant="outline"
                       size="sm"
                       className="h-8 shrink-0 gap-1.5 max-[720px]:h-11 max-[720px]:flex-1"
+                      /* 导入视图占据了列表位置,此时新增行不可见,禁用避免静默无响应。 */
+                      disabled={headerImportOpen}
                       onClick={() => addCustomHeader()}
                     >
                       <Plus className="h-3.5 w-3.5" />
@@ -1767,7 +1777,7 @@ function ProviderModal({
                 </div>
 
                 {headerImportOpen ? (
-                  <div className="mt-3 min-w-0 rounded-xl border bg-card p-3">
+                  <div className="provider-panel-enter mt-3 min-w-0 rounded-xl border bg-card p-3">
                     <Label
                       htmlFor="provider-custom-header-import"
                       className="mb-2 block text-xs font-medium"
@@ -1784,6 +1794,7 @@ function ProviderModal({
                         headerImportErrorMessage ? "provider-custom-header-import-error" : undefined
                       }
                       spellCheck={false}
+                      autoFocus
                       onChange={(event) => {
                         setHeaderImportText(event.currentTarget.value);
                         setHeaderImportError(null);
@@ -1831,7 +1842,8 @@ function ProviderModal({
                   </p>
                 ) : null}
 
-                {customHeaders.length === 0 ? (
+                {/* 导入视图与请求头列表互斥:解析成功后回到列表,直接看到增量导入的结果。 */}
+                {headerImportOpen ? null : customHeaders.length === 0 ? (
                   <button
                     type="button"
                     className="mt-3 flex w-full flex-col items-center gap-1 rounded-xl border border-dashed px-4 py-8 text-center transition-colors hover:border-primary/50 hover:bg-accent/20"
@@ -2001,7 +2013,7 @@ function ProviderModal({
                   </div>
                 )}
 
-                {headerIssueMessage ? (
+                {headerIssueMessage && !headerImportOpen ? (
                   <p className="mt-2 text-xs leading-relaxed text-destructive" role="alert">
                     {headerIssueMessage}
                   </p>

@@ -172,7 +172,7 @@ test("a stop intent aborts a controller and handler registered later", () => {
   hookHarness.cleanup();
 });
 
-test("a stop during queued processing never auto-starts the next turn", async () => {
+test("a direct queue stop pauses processing until composer Stop resumes it", async () => {
   const hookHarness = createHookHarness();
   const sendGate = deferred();
   const sendCalls = [];
@@ -332,6 +332,12 @@ test("a stop during queued processing never auto-starts the next turn", async ()
 
   assert.equal(sendCalls.length, 1, "the second queued turn must remain paused after Stop");
   assert.equal(queue.queuedChatTurnsRef.current.length, 1);
+
+  queue.stopSending();
+  await flushPromises();
+
+  assert.equal(sendCalls.length, 2, "composer Stop must continue with the queued turn");
+  assert.equal(queue.queuedChatTurnsRef.current.length, 0);
   hookHarness.cleanup();
 });
 

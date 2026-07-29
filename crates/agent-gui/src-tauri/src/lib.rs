@@ -85,6 +85,7 @@ macro_rules! app_invoke_handler {
             commands::fs::fs_glob,
             commands::fs::fs_grep,
             commands::fs::fs_mention_list,
+            commands::chat_file_links::open_chat_file_link,
             // Subagent worktrees
             commands::subagent_worktree::subagent_worktree_create,
             commands::subagent_worktree::subagent_worktree_status,

@@ -31,6 +31,7 @@ import { useConfirmDialog } from "../components/ui/confirm-dialog";
 import { useLocale } from "../i18n";
 import type { AppUpdateController } from "../lib/appUpdates";
 import { getAutomationState, useAutomation } from "../lib/automation";
+import type { ChatFileLink } from "../lib/chat/chatFileLinks";
 import type { CompactionStatus } from "../lib/chat/compaction/types";
 import {
   buildRequestContext,
@@ -41,6 +42,7 @@ import {
 import { type ChatHistorySummary, setChatHistorySkills } from "../lib/chat/history/chatHistory";
 import { memoryExtraction } from "../lib/chat/memory/extractionController";
 import type { CodeMentionReference } from "../lib/chat/messages/mentionReferences";
+import { openChatFileLink } from "../lib/chat/openChatFileLink";
 import {
   buildFallbackConversationTitle,
   createConversationIdentity,
@@ -678,7 +680,12 @@ export function ChatPage(props: ChatPageProps) {
     terminalProjectPathKey,
     rightDockFileTreeOpen,
   });
-  const { handleOpenWorkspaceFile, handleOpenSshTerminal } = workspaceOverlays;
+  const {
+    handleOpenWorkspaceFile,
+    handleOpenSshTerminal,
+    openWorkspaceEditorFile,
+    openWorkspaceFilePreview,
+  } = workspaceOverlays;
   // ── 回复末尾「已编辑文件」卡的三个动作 ────────────────────────────────
   const gitReviewFocusNonceRef = useRef(0);
   const [gitReviewFocusRequest, setGitReviewFocusRequest] = useState<GitReviewFocusRequest | null>(
@@ -760,6 +767,84 @@ export function ChatPage(props: ChatPageProps) {
     hookWarning,
     compactionStatus,
   });
+
+  const handleOpenChatFileLink = useCallback(
+    (link: ChatFileLink) => {
+      const conversationId = currentConversationId;
+      const conversationWorkdir = displayedConversationWorkdir.trim();
+      if (!conversationWorkdir) {
+        addNotify("error", "The conversation working directory is unavailable.");
+        return;
+      }
+      const request = { ...link, conversationId, workdir: conversationWorkdir };
+      void openChatFileLink(request)
+        .then(async (result) => {
+          if (result.action === "opened" || result.action === "revealed") return;
+          const resultWorkdir = result.workdir?.trim() ?? "";
+          const resultPath = result.path?.trim() ?? "";
+          if (!resultWorkdir || !resultPath) {
+            addNotify("error", "The linked file could not be opened.");
+            return;
+          }
+          if (result.action === "directory") {
+            if (workspaceProjectPathKey(resultWorkdir) === terminalProjectPathKey) {
+              handleChangedFileReveal(resultPath);
+              return;
+            }
+            const fallback = await openChatFileLink({ ...request, openInFileManager: true });
+            if (fallback.action !== "opened") {
+              addNotify("error", "The linked directory could not be opened.");
+            }
+            return;
+          }
+          const workspaceRequest = {
+            projectPathKey: workspaceProjectPathKey(resultWorkdir),
+            workdir: resultWorkdir,
+            path: resultPath,
+          };
+          if (
+            !result.outsideWorkspace &&
+            workspaceRequest.projectPathKey === terminalProjectPathKey
+          ) {
+            handleChangedFileReveal(resultPath);
+          }
+          if (result.action === "preview") {
+            openWorkspaceFilePreview(workspaceRequest);
+            return;
+          }
+          openWorkspaceEditorFile({
+            ...workspaceRequest,
+            line: result.line,
+            endLine: result.endLine,
+            column: result.column,
+          });
+        })
+        .catch((error: unknown) => {
+          const message =
+            error && typeof error === "object" && "message" in error
+              ? String((error as { message?: unknown }).message ?? "")
+              : String(error ?? "");
+          const normalized = message.toLowerCase();
+          addNotify(
+            "error",
+            normalized.includes("timed out") ||
+              normalized.includes("offline") ||
+              normalized.includes("not connected")
+              ? "The device that owns this conversation is offline or did not respond."
+              : message || "The linked file could not be opened.",
+          );
+        });
+    },
+    [
+      addNotify,
+      currentConversationId,
+      displayedConversationWorkdir,
+      handleChangedFileReveal,
+      openWorkspaceEditorFile,
+      openWorkspaceFilePreview,
+      terminalProjectPathKey,
+    ],
+  );
 
   const {
     isUploadingFiles,
@@ -1601,7 +1686,7 @@ export function ChatPage(props: ChatPageProps) {
         void setChatHistorySkills(conversationId, normalizedPresetId, disabled).catch((error) => {
           addNotify(
             "error",
-            error instanceof Error ? error.message : String(error || "保存 Skill 方案失败"),
+            error instanceof Error ? error.message : String(error || "保存 Skill 预设失败"),
           );
         });
       }
@@ -1929,6 +2014,7 @@ export function ChatPage(props: ChatPageProps) {
                   bottomReservePx={composerOverlayHeight}
                   contentWidth={settings.customSettings.chatTranscript.width}
                   onContentWidthChange={handleChatTranscriptWidthChange}
+                  onOpenFileLink={handleOpenChatFileLink}
                   onResendFromEdit={handleResendFromEdit}
                   onBranchConversation={
                     // 会话加载中或加载失败时直接不传操作，展示明确的禁用态。

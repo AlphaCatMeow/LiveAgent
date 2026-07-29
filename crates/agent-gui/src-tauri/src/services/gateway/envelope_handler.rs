@@ -835,6 +835,25 @@ impl GatewayController {
                     Err(error) => self.send_error_response(request_id, 500, error).await,
                 }
             }
+            Some(proto::gateway_envelope::Payload::ChatFileOpen(request)) => {
+                let sender = self.current_outbound_sender()?;
+                tauri::async_runtime::spawn(async move {
+                    let envelope = match gateway_bridge::handle_chat_file_open(request).await {
+                        Ok(response) => proto::AgentEnvelope {
+                            request_id,
+                            timestamp: now_unix_seconds(),
+                            payload: Some(proto::agent_envelope::Payload::ChatFileOpenResp(
+                                response,
+                            )),
+                        },
+                        Err(error) => build_error_response_envelope(request_id, 500, error),
+                    };
+                    if let Err(error) = send_agent_envelope_to(sender, envelope).await {
+                        eprintln!("send gateway chat file open response failed: {error}");
+                    }
+                });
+                Ok(())
+            }
             Some(proto::gateway_envelope::Payload::FsWriteText(request)) => {
                 match gateway_bridge::handle_fs_write_text(request).await {
                     Ok(response) => {

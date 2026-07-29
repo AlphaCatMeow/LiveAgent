@@ -60,7 +60,8 @@ message GatewayEnvelope {
     ManagedProcessRequest managed_process_request = 91;
     HistoryBranchRequest history_branch = 92;
     ProviderUsageRequest provider_usage = 93;
-    HistorySkillsRequest history_skills = 94;
+    ChatFileOpenRequest chat_file_open = 94;
+    HistorySkillsRequest history_skills = 95;
   }
 
   // Legacy tunnel control/frame payloads (pre-rewrite protocol) and the
@@ -133,8 +134,9 @@ message AgentEnvelope {
     ChatIngressBatch chat_ingress_batch = 95;
     ChatIngressResume chat_ingress_resume = 96;
     ChatIngressFragment chat_ingress_fragment = 97;
-    HistorySkillsResponse history_skills_resp = 98;
+    ChatFileOpenResponse chat_file_open_resp = 98;
     ErrorResponse error = 99;
+    HistorySkillsResponse history_skills_resp = 100;
   }
 
   // Legacy tunnel control/frame payloads (pre-rewrite protocol) and the
@@ -1070,6 +1072,28 @@ message FsReadWorkspaceImageResponse {
   uint64 size_bytes = 4;
   uint64 mtime_ms = 5;
   string content_hash = 6;
+}
+
+message ChatFileOpenRequest {
+  string conversation_id = 1;
+  string workdir = 2;
+  string path = 3;
+  string source = 4;
+  optional uint32 line = 5;
+  optional uint32 end_line = 6;
+  optional uint32 column = 7;
+  bool open_in_file_manager = 8;
+}
+
+message ChatFileOpenResponse {
+  string action = 1;
+  string kind = 2;
+  string workdir = 3;
+  string path = 4;
+  optional uint32 line = 5;
+  optional uint32 end_line = 6;
+  optional uint32 column = 7;
+  bool outside_workspace = 8;
 }
 
 message FsWriteTextRequest {

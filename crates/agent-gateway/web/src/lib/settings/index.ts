@@ -75,6 +75,7 @@ const CUSTOM_SKILL_PRESET_ID_PATTERN =
 export type SkillPreset = {
   id: string;
   name: string;
+  description: string;
   skillNames: string[];
 };
 
@@ -1783,6 +1784,10 @@ function normalizeSkillNames(input: unknown): string[] {
   );
 }
 
+function normalizeSkillPresetDescription(input: unknown): string {
+  return typeof input === "string" ? input.trim().slice(0, 240) : "";
+}
+
 export function normalizeSkillPresets(input: unknown, legacySelected?: unknown): SkillPreset[] {
   const rawPresets = Array.isArray(input) ? input : [];
   const defaultRaw = rawPresets.find((raw) => {
@@ -1793,6 +1798,7 @@ export function normalizeSkillPresets(input: unknown, legacySelected?: unknown):
     {
       id: DEFAULT_SKILL_PRESET_ID,
       name: "Default",
+      description: "",
       skillNames: normalizeSkillNames(defaultRaw?.skillNames ?? legacySelected),
     },
   ];
@@ -1813,7 +1819,12 @@ export function normalizeSkillPresets(input: unknown, legacySelected?: unknown):
       continue;
     seenIds.add(id);
     seenNames.add(normalizedName);
-    presets.push({ id, name, skillNames: normalizeSkillNames(obj.skillNames) });
+    presets.push({
+      id,
+      name,
+      description: normalizeSkillPresetDescription(obj.description),
+      skillNames: normalizeSkillNames(obj.skillNames),
+    });
   }
   return presets;
 }
@@ -1828,6 +1839,7 @@ export function resolveSkillPreset(
     settings.presets.find((preset) => preset.id === DEFAULT_SKILL_PRESET_ID) ?? {
       id: DEFAULT_SKILL_PRESET_ID,
       name: "Default",
+      description: "",
       skillNames: [],
     }
   );
@@ -1852,7 +1864,7 @@ export function resolveEffectiveSkillNames(params: {
 export function updateSkillPreset(
   settings: SkillsSettings,
   presetId: string,
-  patch: Partial<Pick<SkillPreset, "name" | "skillNames">>,
+  patch: Partial<Pick<SkillPreset, "name" | "description" | "skillNames">>,
 ): SkillsSettings {
   const normalizedPresetId = presetId.trim().toLowerCase();
   const presets = settings.presets.map((preset) =>
@@ -1862,6 +1874,9 @@ export function updateSkillPreset(
           ...(preset.id === DEFAULT_SKILL_PRESET_ID || patch.name === undefined
             ? {}
             : { name: patch.name }),
+          ...(preset.id === DEFAULT_SKILL_PRESET_ID || patch.description === undefined
+            ? {}
+            : { description: normalizeSkillPresetDescription(patch.description) }),
           ...(patch.skillNames === undefined
             ? {}
             : { skillNames: normalizeSkillNames(patch.skillNames) }),

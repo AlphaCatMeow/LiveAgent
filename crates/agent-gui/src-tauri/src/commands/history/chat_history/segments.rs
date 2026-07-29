@@ -510,12 +510,12 @@ fn set_chat_history_skills_sync(
         return Err("历史对话 id 不能为空".to_string());
     }
     if preset_id.is_empty() {
-        return Err("Skill 方案 id 不能为空".to_string());
+        return Err("Skill 预设 id 不能为空".to_string());
     }
 
     let tx = conn
         .unchecked_transaction()
-        .map_err(|e| format!("开启 Skill 方案更新事务失败：{e}"))?;
+        .map_err(|e| format!("开启 Skill 预设更新事务失败：{e}"))?;
     let context_meta_json: String = tx
         .query_row(
             "SELECT context_meta_json FROM chatHistory WHERE id = ?1",
@@ -533,15 +533,15 @@ fn set_chat_history_skills_sync(
     );
     context_meta.insert("skillsDisabled".to_string(), Value::Bool(skills_disabled));
     let payload = serde_json::to_string(&context_meta)
-        .map_err(|e| format!("序列化历史对话 Skill 方案失败：{e}"))?;
+        .map_err(|e| format!("序列化历史对话 Skill 预设失败：{e}"))?;
 
     tx.execute(
         "UPDATE chatHistory SET context_meta_json = ?1 WHERE id = ?2",
         params![payload, chat_id],
     )
-    .map_err(|e| format!("更新历史对话 Skill 方案失败：{e}"))?;
+    .map_err(|e| format!("更新历史对话 Skill 预设失败：{e}"))?;
     tx.commit()
-        .map_err(|e| format!("提交 Skill 方案更新事务失败：{e}"))?;
+        .map_err(|e| format!("提交 Skill 预设更新事务失败：{e}"))?;
 
     get_summary_by_id(conn, chat_id)
 }

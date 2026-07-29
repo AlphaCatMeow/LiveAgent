@@ -37,9 +37,7 @@ import {
   Loader2,
   Lock,
   MessageSquare,
-  Pencil,
   Plug,
-  Plus,
   Radio,
   RefreshCw,
   ScanText,
@@ -61,6 +59,7 @@ import {
   Zap,
 } from "../../components/icons";
 import { Markdown } from "../../components/Markdown";
+import { SkillPresetManager } from "../../components/skills/SkillPresetManager";
 import { Button } from "../../components/ui/button";
 import {
   ConfirmActionPopover,
@@ -136,7 +135,6 @@ const STORE_PAGE_LIMIT = 24;
 const INSTALLED_SKILL_PREVIEW_LINES = 10_000;
 const COPY_FEEDBACK_MS = 1600;
 const EMPTY_SKILLS: SkillSummary[] = [];
-const EMPTY_SKILL_NAMES: string[] = [];
 const TERMINAL_INSTALL_PHASES = new Set(["done", "error", "cancelled"]);
 const STORE_SORT_OPTIONS: Array<{ value: ClawHubSort; labelKey: string }> = [
   { value: "downloads", labelKey: "settings.skillsStoreSortMostDownloaded" },
@@ -1227,9 +1225,6 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
     () => emptyInstalledSkillPreviewState(),
   );
   const discoverySignatureRef = useRef<string | null>(null);
-  const [activePresetId, setActivePresetId] = useState(DEFAULT_SKILL_PRESET_ID);
-  const [renamingPresetId, setRenamingPresetId] = useState<string | null>(null);
-  const [renamingPresetName, setRenamingPresetName] = useState("");
 
   // 唯一写入点：setState 与 discoverySignatureRef 必须同步更新，防止签名与状态漂移。
   // 签名未变时跳过 setState，保持 skills 数组引用稳定（下游 memo 链与 store 轮询零重渲）。
@@ -1304,19 +1299,9 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
   }, [initialSkills?.length, refresh]);
 
   const defaultPreset = resolveSkillPreset(settings.skills, DEFAULT_SKILL_PRESET_ID);
-  const customPresets = useMemo(
-    () => settings.skills.presets.filter((preset) => preset.id !== DEFAULT_SKILL_PRESET_ID),
-    [settings.skills.presets],
-  );
-  const activeCustomPreset =
-    customPresets.find((preset) => preset.id === activePresetId) ?? customPresets[0] ?? null;
-  const activePreset =
-    view === "presets" && activeCustomPreset ? activeCustomPreset : defaultPreset;
-  const activePresetSkillNames =
-    view === "presets" && !activeCustomPreset ? EMPTY_SKILL_NAMES : activePreset.skillNames;
   const selected = useMemo(
-    () => new Set(mergeAlwaysEnabledSkillNames(activePresetSkillNames)),
-    [activePresetSkillNames],
+    () => new Set(mergeAlwaysEnabledSkillNames(defaultPreset.skillNames)),
+    [defaultPreset.skillNames],
   );
   // React 19 的 initialValue 让 Hub 外壳先独立提交；大量卡片在可中断的后台
   // render 中准备，全部完成后再原子替换加载态，避免页面切换被首屏列表挂载阻塞。
@@ -1379,7 +1364,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
   );
 
   useEffect(() => {
-    if ((view === "installed" || view === "presets") && !lockedByChatMode) return;
+    if (view === "installed" && !lockedByChatMode) return;
     setPreviewInstalledSkill(null);
   }, [lockedByChatMode, view]);
 
@@ -1941,12 +1926,12 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
 
   function toggleSkill(name: string, on: boolean) {
     if (isAlwaysEnabledSkillName(name)) return;
-    const next = new Set(activePreset.skillNames);
+    const next = new Set(defaultPreset.skillNames);
     if (on) next.add(name);
     else next.delete(name);
     requestInstalledSkillFlip("single", [name], on ? [name] : []);
     setSettings((prev) => {
-      const skills = updateSkillPreset(prev.skills, activePreset.id, {
+      const skills = updateSkillPreset(prev.skills, DEFAULT_SKILL_PRESET_ID, {
         skillNames: Array.from(next),
       });
       return updateSkills(prev, { presets: skills.presets });
@@ -2039,7 +2024,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
       const names = [...bulkSelection].filter((name) => !isAlwaysEnabledSkillName(name));
       if (names.length === 0) return;
 
-      const before = activePreset.skillNames;
+      const before = defaultPreset.skillNames;
       const current = new Set(before);
       const changedNames = names.filter((name) =>
         target ? !current.has(name) : current.has(name),
@@ -2057,7 +2042,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
       setBulkSelection(new Set());
       bulkAnchorRef.current = null;
       setSettings((prev) => {
-        const preset = resolveSkillPreset(prev.skills, activePreset.id);
+        const preset = resolveSkillPreset(prev.skills, DEFAULT_SKILL_PRESET_ID);
         const next = new Set(preset.skillNames);
         for (const name of names) {
           if (target) next.add(name);
@@ -2070,14 +2055,14 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
         });
       });
     },
-    [bulkSelection, clearBulkUndoTimer, requestInstalledSkillFlip, setSettings, activePreset],
+    [bulkSelection, clearBulkUndoTimer, requestInstalledSkillFlip, setSettings, defaultPreset],
   );
 
   const undoBulkSelection = useCallback(() => {
     clearBulkUndoTimer();
     if (bulkUndo) {
       const restore = bulkUndo.selected;
-      const current = new Set(activePreset.skillNames);
+      const current = new Set(defaultPreset.skillNames);
       const restoreSet = new Set(restore);
       const changedNames = [...new Set([...current, ...restoreSet])].filter(
         (name) => !isAlwaysEnabledSkillName(name) && current.has(name) !== restoreSet.has(name),
@@ -2085,12 +2070,14 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
       const followNames = changedNames.filter((name) => restoreSet.has(name) && !current.has(name));
       requestInstalledSkillFlip("batch", changedNames, followNames);
       setSettings((prev) => {
-        const skills = updateSkillPreset(prev.skills, activePreset.id, { skillNames: restore });
+        const skills = updateSkillPreset(prev.skills, DEFAULT_SKILL_PRESET_ID, {
+          skillNames: restore,
+        });
         return updateSkills(prev, { presets: skills.presets });
       });
     }
     setBulkUndo(null);
-  }, [bulkUndo, clearBulkUndoTimer, requestInstalledSkillFlip, setSettings, activePreset]);
+  }, [bulkUndo, clearBulkUndoTimer, requestInstalledSkillFlip, setSettings, defaultPreset]);
 
   async function deleteBulkSelectedInstalledSkills() {
     if (lockedByChatMode || deletingSkillName || !bulkMode) return;
@@ -2190,7 +2177,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
           return;
         }
         // 「全选当前筛选」只对已安装页有定义；其余视图保留浏览器默认 Ctrl+A。
-        if (view !== "installed" && view !== "presets") return;
+        if (view !== "installed") return;
         event.preventDefault();
         setBulkSelectionRange(filteredSelectableInstalledNames, true);
       }
@@ -2306,74 +2293,67 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
     return candidate;
   }
 
-  function createPreset(copyCurrent: boolean) {
+  function createPreset(draft: { name: string; description: string; skillNames: string[] }) {
     const id = createUuid();
-    const sourcePresetId = activePreset.id;
     setSettings((prev) => {
-      const sourcePreset = resolveSkillPreset(prev.skills, sourcePresetId);
+      return updateSkills(prev, {
+        presets: [
+          ...prev.skills.presets,
+          {
+            id,
+            name: draft.name,
+            description: draft.description,
+            skillNames: draft.skillNames,
+          },
+        ],
+      });
+    });
+  }
+
+  function updatePreset(
+    id: string,
+    patch: { name: string; description: string; skillNames: string[] },
+  ) {
+    setSettings((prev) => {
+      const skills = updateSkillPreset(prev.skills, id, patch);
+      return updateSkills(prev, { presets: skills.presets });
+    });
+  }
+
+  function duplicatePreset(id: string) {
+    setSettings((prev) => {
+      const source = resolveSkillPreset(prev.skills, id);
       const name = uniquePresetName(
-        copyCurrent
-          ? `${sourcePreset.name} ${t("settings.skillsPresetCopySuffix")}`
-          : t("settings.skillsPresetUntitled"),
+        `${source.name} ${t("settings.skillsPresetCopySuffix")}`,
         prev.skills.presets,
       );
       return updateSkills(prev, {
         presets: [
           ...prev.skills.presets,
-          { id, name, skillNames: copyCurrent ? [...sourcePreset.skillNames] : [] },
+          {
+            id: createUuid(),
+            name,
+            description: source.description,
+            skillNames: [...source.skillNames],
+          },
         ],
       });
     });
-    setActivePresetId(id);
   }
 
-  function renameActivePreset() {
-    if (!activeCustomPreset) return;
-    setRenamingPresetId(activeCustomPreset.id);
-    setRenamingPresetName(activeCustomPreset.name);
-  }
-
-  function commitPresetRename() {
-    if (!activeCustomPreset || renamingPresetId !== activeCustomPreset.id) return;
-    const value = renamingPresetName.trim();
-    setRenamingPresetId(null);
-    if (!value || value === activeCustomPreset.name) return;
-    const duplicate = settings.skills.presets.some(
-      (preset) =>
-        preset.id !== activeCustomPreset.id && preset.name.toLowerCase() === value.toLowerCase(),
-    );
-    if (duplicate) {
-      setLoadError(t("settings.skillsPresetNameExists"));
-      return;
-    }
-    setSettings((prev) => {
-      const skills = updateSkillPreset(prev.skills, activeCustomPreset.id, { name: value });
-      return updateSkills(prev, { presets: skills.presets });
-    });
-  }
-
-  function deleteActivePreset() {
-    if (!activeCustomPreset) return;
+  function deletePreset(id: string) {
+    if (id === DEFAULT_SKILL_PRESET_ID) return;
     setSettings((prev) =>
       updateSkills(prev, {
-        presets: prev.skills.presets.filter((preset) => preset.id !== activeCustomPreset.id),
+        presets: prev.skills.presets.filter((preset) => preset.id !== id),
       }),
     );
-    setActivePresetId(DEFAULT_SKILL_PRESET_ID);
   }
 
   const skillsEnabled = settings.skills.enabled;
   const showInitialInstalledContentLoading =
     skills.length > 0 && !hasPresentedInstalledSkills && installedContentPending;
-  const skillsStatusHint = lockedByChatMode
-    ? t("settings.skillsDisabledInChatMode")
-    : view === "presets"
-      ? activeCustomPreset
-        ? t("settings.skillsPresetEditingHint").replace("{name}", activeCustomPreset.name)
-        : t("settings.skillsPresetEmptyDesc")
-      : view === "installed"
-        ? t("settings.skillsPresetDefaultHint")
-        : null;
+  const skillsStatusHint = lockedByChatMode ? t("settings.skillsDisabledInChatMode") : null;
 
   return (
     <div className="hub-page hub-page-enter relative flex h-full min-h-0 flex-1 flex-col overflow-hidden">
@@ -2448,92 +2428,6 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                 </div>
 
                 <div className="flex min-w-0 flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
-                  {view === "presets" ? (
-                    <>
-                      {activeCustomPreset ? (
-                        renamingPresetId === activeCustomPreset.id ? (
-                          <input
-                            autoFocus
-                            value={renamingPresetName}
-                            onChange={(event) => setRenamingPresetName(event.currentTarget.value)}
-                            onBlur={commitPresetRename}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter") event.currentTarget.blur();
-                              if (event.key === "Escape") setRenamingPresetId(null);
-                            }}
-                            className="h-8 min-w-0 max-w-40 rounded-md border border-border/50 bg-background px-2 text-xs text-foreground outline-none focus:border-primary/60"
-                            aria-label={t("settings.skillsPresetRenamePrompt")}
-                          />
-                        ) : (
-                          <select
-                            value={activeCustomPreset.id}
-                            onChange={(event) => {
-                              setActivePresetId(event.currentTarget.value);
-                              setRenamingPresetId(null);
-                            }}
-                            className="h-8 min-w-0 max-w-40 rounded-md border border-border/50 bg-background px-2 text-xs text-foreground"
-                            aria-label={t("settings.skillsPresetLabel")}
-                          >
-                            {customPresets.map((preset) => (
-                              <option key={preset.id} value={preset.id}>
-                                {preset.name}
-                              </option>
-                            ))}
-                          </select>
-                        )
-                      ) : (
-                        <span className="text-xs text-muted-foreground">
-                          {t("settings.skillsPresetEmptyShort")}
-                        </span>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => createPreset(false)}
-                        title={t("settings.skillsPresetCreate")}
-                      >
-                        <Plus className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => createPreset(true)}
-                        title={t("settings.skillsPresetDuplicate")}
-                      >
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        disabled={!activeCustomPreset}
-                        onClick={renameActivePreset}
-                        title={t("settings.skillsPresetRename")}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <ConfirmActionPopover
-                        title={t("settings.skillsPresetDelete")}
-                        description={t("settings.skillsPresetDeleteConfirm")}
-                        confirmLabel={t("settings.delete")}
-                        onConfirm={deleteActivePreset}
-                      >
-                        {() => (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-8 w-8 text-destructive"
-                            disabled={!activeCustomPreset}
-                            title={t("settings.skillsPresetDelete")}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        )}
-                      </ConfirmActionPopover>
-                    </>
-                  ) : null}
                   <button
                     type="button"
                     role="switch"
@@ -2606,7 +2500,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                     value: "presets" as const,
                     label: t("settings.skillsHubPresetsTab"),
                     icon: LayoutGrid,
-                    count: customPresets.length,
+                    count: settings.skills.presets.length,
                   },
                   {
                     value: "store" as const,
@@ -2654,9 +2548,9 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                 })}
               </div>
 
-              {!lockedByChatMode ? (
+              {!lockedByChatMode && view !== "presets" ? (
                 <div className="flex w-full min-w-0 items-center justify-end gap-2">
-                  {view !== "store" && (view !== "presets" || activeCustomPreset) ? (
+                  {view === "installed" || view === "import" ? (
                     <button
                       type="button"
                       aria-pressed={bulkMode}
@@ -2665,7 +2559,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                         else enterBulkMode();
                       }}
                       title={
-                        view === "installed" || view === "presets"
+                        view === "installed"
                           ? t("settings.skillsBulkHint")
                           : t("settings.skillsBulkImportHint")
                       }
@@ -2682,7 +2576,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                       </span>
                     </button>
                   ) : null}
-                  {view === "installed" || view === "presets" ? (
+                  {view === "installed" ? (
                     <select
                       value={installedSort}
                       onChange={(event) => {
@@ -2712,15 +2606,11 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                     <input
                       type="text"
                       value={
-                        view === "installed" || view === "presets"
-                          ? filter
-                          : view === "store"
-                            ? storeQuery
-                            : importQuery
+                        view === "installed" ? filter : view === "store" ? storeQuery : importQuery
                       }
                       onChange={(e) => {
                         const value = e.currentTarget.value;
-                        if (view === "installed" || view === "presets") {
+                        if (view === "installed") {
                           setFilter(value);
                         } else if (view === "store") {
                           setStoreQuery(value);
@@ -2729,7 +2619,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                         }
                       }}
                       placeholder={
-                        view === "installed" || view === "presets"
+                        view === "installed"
                           ? t("settings.skillsSearch")
                           : view === "store"
                             ? t("settings.skillsStoreSearch")
@@ -2754,7 +2644,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                     </div>
                   </GlassPanel>
                 </div>
-              ) : view === "installed" || view === "presets" ? (
+              ) : view === "installed" ? (
                 <div
                   aria-busy={loading || showInitialInstalledContentLoading}
                   className={cn(
@@ -2763,33 +2653,6 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                   )}
                 >
                   <div className="flex flex-col gap-5">
-                    {view === "presets" && !activeCustomPreset ? (
-                      <GlassPanel className="hub-panel-enter">
-                        <div className="flex flex-col items-center gap-3 py-8 text-center">
-                          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted/60">
-                            <LayoutGrid className="h-5 w-5 text-muted-foreground" />
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-sm font-medium text-foreground">
-                              {t("settings.skillsPresetEmptyTitle")}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              {t("settings.skillsPresetEmptyDesc")}
-                            </p>
-                          </div>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="mt-1 gap-1.5 rounded-full"
-                            onClick={() => createPreset(false)}
-                          >
-                            <Plus className="h-3.5 w-3.5" />
-                            {t("settings.skillsPresetCreate")}
-                          </Button>
-                        </div>
-                      </GlassPanel>
-                    ) : null}
-
                     {loadError ? (
                       <GlassPanel tone="error" className="hub-panel-enter">
                         <div className="flex items-center gap-2">
@@ -2849,7 +2712,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                       />
                     ) : null}
 
-                    {sortedFiltered.length > 0 && (view !== "presets" || activeCustomPreset) ? (
+                    {sortedFiltered.length > 0 ? (
                       <div className="flex flex-col gap-3">
                         {bulkMode ? (
                           <div className="hub-panel-enter flex items-center gap-2 text-[11px] text-muted-foreground/80">
@@ -2889,10 +2752,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                       </div>
                     ) : null}
 
-                    {(view !== "presets" || activeCustomPreset) &&
-                    filter.trim() &&
-                    sortedFiltered.length === 0 &&
-                    skills.length > 0 ? (
+                    {filter.trim() && sortedFiltered.length === 0 && skills.length > 0 ? (
                       <GlassPanel tone="muted" className="hub-panel-enter">
                         <p className="py-2 text-center text-sm text-muted-foreground">
                           {t("settings.skillsNoMatch").replace("{filter}", filter)}
@@ -2900,6 +2760,18 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                       </GlassPanel>
                     ) : null}
                   </div>
+                </div>
+              ) : view === "presets" ? (
+                <div className="h-full min-h-0 overflow-y-auto px-0.5 pb-4 pr-1 pt-1.5">
+                  <SkillPresetManager
+                    presets={settings.skills.presets}
+                    skills={skills}
+                    onCreate={createPreset}
+                    onUpdate={updatePreset}
+                    onDuplicate={duplicatePreset}
+                    onDelete={deletePreset}
+                    onGoInstalled={() => setView("installed")}
+                  />
                 </div>
               ) : view === "store" ? (
                 <SkillsStoreView
@@ -2964,7 +2836,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
       ) : null}
 
       {bulkMode &&
-      (view === "installed" || view === "presets") &&
+      view === "installed" &&
       !lockedByChatMode &&
       (!bulkUndo || bulkSelection.size > 0) ? (
         <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center px-3 max-sm:bottom-[calc(1rem+env(safe-area-inset-bottom))]">

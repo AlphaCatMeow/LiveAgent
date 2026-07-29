@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { type AppSettings, updateSkills } from "../../lib/settings";
+import type { AppSettings } from "../../lib/settings";
 import {
   discoverSkills,
-  isAlwaysEnabledSkillName,
   type SkillSummary,
   subscribeSkillsDiscoveryUpdated,
 } from "../../lib/skills";
@@ -13,29 +12,8 @@ type UseChatSkillsParams = {
   setSettings: (updater: (prev: AppSettings) => AppSettings) => void;
 };
 
-function reconcileSelectedSkills(params: {
-  skills: SkillSummary[];
-  setSettings: (updater: (prev: AppSettings) => AppSettings) => void;
-}) {
-  const { skills, setSettings } = params;
-  const names = new Set(skills.map((skill) => skill.name));
-  setSettings((prev) => {
-    const presets = prev.skills.presets.map((preset) => ({
-      ...preset,
-      skillNames: preset.skillNames.filter(
-        (name) => isAlwaysEnabledSkillName(name) || names.has(name),
-      ),
-    }));
-    const unchanged = presets.every(
-      (preset, index) =>
-        preset.skillNames.join("\n") === prev.skills.presets[index]?.skillNames.join("\n"),
-    );
-    return unchanged ? prev : updateSkills(prev, { presets });
-  });
-}
-
 export function useChatSkills(params: UseChatSkillsParams) {
-  const { skillsEnabled, setSettings } = params;
+  const { skillsEnabled } = params;
   const [availableSkills, setAvailableSkills] = useState<SkillSummary[]>([]);
   const [skillsRootDir, setSkillsRootDir] = useState("");
   const [skillsLoading, setSkillsLoading] = useState(false);
@@ -79,10 +57,6 @@ export function useChatSkills(params: UseChatSkillsParams) {
         }
         setSkillsRootDir(discovery.rootDir);
         setAvailableSkills(discovery.skills);
-        reconcileSelectedSkills({
-          skills: discovery.skills,
-          setSettings,
-        });
         return discovery;
       } catch (err) {
         if (!mountedRef.current || requestSequenceRef.current !== requestId) {
@@ -99,7 +73,7 @@ export function useChatSkills(params: UseChatSkillsParams) {
         }
       }
     },
-    [applyDisabledState, setSettings, skillsEnabled],
+    [applyDisabledState, skillsEnabled],
   );
 
   const refreshSkills = useCallback(async () => {

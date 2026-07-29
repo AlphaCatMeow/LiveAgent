@@ -54,6 +54,7 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
     bottomReservePx = 0,
     contentWidth,
     onContentWidthChange,
+    onOpenFileLink,
     onResendFromEdit,
     onBranchConversation,
     branchPendingMessageId,
@@ -322,6 +323,7 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
                 showUsage={showUsage}
                 usageContextWindow={usageContextWindow}
                 workspaceRoot={workspaceRoot}
+                onOpenFileLink={onOpenFileLink}
                 gitClient={gitClient}
                 navRef={transcriptNavRef}
                 onAnchorUserRowChange={setActiveFloorKey}

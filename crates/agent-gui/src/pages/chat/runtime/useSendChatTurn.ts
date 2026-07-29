@@ -50,6 +50,7 @@ import {
   getSshProjectHostIds,
   isAgentDevMode,
   isAgentExecutionMode,
+  removeSkillFromAllPresets,
   resolveEffectiveSkillNames,
   resolveSkillPreset,
   type SelectedModel,
@@ -1460,6 +1461,16 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
             skillAccessPolicy: skillAccessPolicyForTools,
             skillsPrompt,
             onManagedSkillsChanged: (change) => {
+              if (change.action === "delete") {
+                setSettings((prev) => {
+                  const skills = change.names.reduce(
+                    (next, name) => removeSkillFromAllPresets(next, name),
+                    prev.skills,
+                  );
+                  return updateSkills(prev, { presets: skills.presets });
+                });
+                return;
+              }
               enableManagedSkills(change.names, effectiveSkillsSelection.presetId);
             },
             agentTemplates: settings.agents,

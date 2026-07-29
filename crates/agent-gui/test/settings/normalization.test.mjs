@@ -18,24 +18,30 @@ test("skills settings migrate legacy selection into the default preset", () => {
   });
 
   assert.deepEqual(normalized.presets, [
-    { id: "default", name: "Default", skillNames: ["alpha", "beta"] },
+    { id: "default", name: "Default", description: "", skillNames: ["alpha", "beta"] },
   ]);
   assert.deepEqual(normalized.selected, ["skills-creator", "skills-installer", "alpha", "beta"]);
 });
 
 test("skills presets enforce the built-in default and case-insensitive unique names", () => {
+  const longDescription = `  ${"x".repeat(260)}  `;
   const presets = settings.normalizeSkillPresets([
     { id: "33333333-3333-4333-8333-333333333333", name: "default", skillNames: ["ignored"] },
     { id: "default", name: "Renamed", skillNames: ["one"] },
-    { id: PRESET_A_ID, name: "Work", skillNames: ["two"] },
+    { id: PRESET_A_ID, name: "Work", description: longDescription, skillNames: ["two"] },
     { id: PRESET_B_ID, name: "work", skillNames: ["three"] },
     { id: "__disabled__", name: "Reserved collision", skillNames: ["four"] },
     { id: "not-a-uuid", name: "Invalid", skillNames: ["five"] },
   ]);
 
   assert.deepEqual(presets, [
-    { id: "default", name: "Default", skillNames: ["one"] },
-    { id: PRESET_A_ID, name: "Work", skillNames: ["two"] },
+    { id: "default", name: "Default", description: "", skillNames: ["one"] },
+    {
+      id: PRESET_A_ID,
+      name: "Work",
+      description: "x".repeat(240),
+      skillNames: ["two"],
+    },
   ]);
 });
 
@@ -46,8 +52,8 @@ test("skills presets accept RFC 9562 UUIDs and normalize IDs deterministically",
   ]);
 
   assert.deepEqual(presets, [
-    { id: "default", name: "Default", skillNames: [] },
-    { id: PRESET_V8_ID, name: "V8", skillNames: [] },
+    { id: "default", name: "Default", description: "", skillNames: [] },
+    { id: PRESET_V8_ID, name: "V8", description: "", skillNames: [] },
   ]);
   assert.equal(settings.resolveSkillPreset({ presets }, PRESET_V8_ID.toUpperCase()).id, PRESET_V8_ID);
 });

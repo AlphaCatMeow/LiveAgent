@@ -6,6 +6,11 @@ const implementations = [
   {
     label: "GUI",
     page: new URL("../../src/pages/skills-hub/SkillsHubPage.tsx", import.meta.url),
+    composer: new URL("../../src/components/chat/MentionComposer.tsx", import.meta.url),
+    composerBar: new URL(
+      "../../src/pages/chat/components/ChatComposerBar.tsx",
+      import.meta.url,
+    ),
     i18n: new URL("../../src/i18n/config.ts", import.meta.url),
   },
   {
@@ -14,12 +19,22 @@ const implementations = [
       "../../../agent-gateway/web/src/pages/skills-hub/SkillsHubPage.tsx",
       import.meta.url,
     ),
+    composer: new URL(
+      "../../../agent-gateway/web/src/components/chat/MentionComposer.tsx",
+      import.meta.url,
+    ),
+    composerBar: new URL(
+      "../../../agent-gateway/web/src/pages/chat/ChatComposerBar.tsx",
+      import.meta.url,
+    ),
     i18n: new URL("../../../agent-gateway/web/src/i18n/config.ts", import.meta.url),
   },
 ];
 
-for (const { label, page, i18n } of implementations) {
+for (const { label, page, composer, composerBar, i18n } of implementations) {
   const source = readFileSync(page, "utf8");
+  const composerSource = readFileSync(composer, "utf8");
+  const composerBarSource = readFileSync(composerBar, "utf8");
   const translations = readFileSync(i18n, "utf8");
 
   test(`${label} keeps Default on Installed and custom presets on their own tab`, () => {
@@ -52,5 +67,13 @@ for (const { label, page, i18n } of implementations) {
       /resolveSkillPreset\(prev\.skills, DEFAULT_SKILL_PRESET_ID\)/,
     );
     assert.doesNotMatch(installUpdate, /activePreset\.id/);
+  });
+
+  test(`${label} configures conversation presets through the /skills command`, () => {
+    assert.match(composerSource, /type: "skillsCommand"/);
+    assert.match(composerSource, /normalizedMentionQuery === "skills"/);
+    assert.match(composerSource, /skillsCommand\?\.onChange\(suggestion\.presetId, suggestion\.disabled\)/);
+    assert.match(composerBarSource, /skillsCommand=\{/);
+    assert.doesNotMatch(composerBarSource, /value=\{skillsDisabled \? "__disabled__"/);
   });
 }

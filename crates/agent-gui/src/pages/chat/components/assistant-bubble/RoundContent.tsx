@@ -3,6 +3,7 @@ import { memo, type ReactNode, useEffect, useRef, useState } from "react";
 import { ChevronRight, Lightbulb, RefreshCw } from "../../../../components/icons";
 import { Markdown } from "../../../../components/Markdown";
 import { useLocale } from "../../../../i18n";
+import type { ChatFileLink } from "../../../../lib/chat/chatFileLinks";
 import type { RetryAttemptRecord } from "../../../../lib/chat/conversation/liveTranscriptStore";
 import type { GroupedRoundBlock } from "./assistantBubbleUtils";
 import { HostedSearchGroupView } from "./HostedSearchGroupView";
@@ -17,11 +18,15 @@ const ThinkingBlock = memo(function ThinkingBlock({
   open,
   isRunning,
   renderMode,
+  workdir,
+  onOpenFileLink,
 }: {
   text: string;
   open?: boolean;
   isRunning?: boolean;
   renderMode: "streaming" | "static";
+  workdir?: string;
+  onOpenFileLink?: (link: ChatFileLink) => void;
 }) {
   const hasText = /\S/.test(text || "");
   const { t } = useLocale();
@@ -66,6 +71,8 @@ const ThinkingBlock = memo(function ThinkingBlock({
               className="thinking-markdown space-y-1.5"
               renderMode={renderMode}
               showCaret={false}
+              workdir={workdir}
+              onOpenFileLink={onOpenFileLink}
             />
           </div>
         )}
@@ -131,6 +138,8 @@ export const RoundBlockContent = memo(function RoundBlockContent(props: {
   thinkingOpen: boolean;
   isLatestThinking: boolean;
   isAborted: boolean;
+  workdir?: string;
+  onOpenFileLink?: (link: ChatFileLink) => void;
 }) {
   const {
     block,
@@ -141,6 +150,8 @@ export const RoundBlockContent = memo(function RoundBlockContent(props: {
     thinkingOpen,
     isLatestThinking,
     isAborted,
+    workdir,
+    onOpenFileLink,
   } = props;
 
   let content: ReactNode;
@@ -152,6 +163,8 @@ export const RoundBlockContent = memo(function RoundBlockContent(props: {
         open={isRunning}
         isRunning={isRunning}
         renderMode={renderMode}
+        workdir={workdir}
+        onOpenFileLink={onOpenFileLink}
       />
     );
   } else if (block.kind === "tool") {
@@ -193,6 +206,8 @@ export const RoundBlockContent = memo(function RoundBlockContent(props: {
         className="font-chat"
         renderMode={renderMode}
         showCaret={Boolean(isLive && isMutable)}
+        workdir={workdir}
+        onOpenFileLink={onOpenFileLink}
       />
     );
   } else {

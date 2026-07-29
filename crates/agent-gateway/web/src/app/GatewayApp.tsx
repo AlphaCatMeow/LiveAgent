@@ -27,6 +27,7 @@ import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { LocaleContext, t as translate } from "@/i18n";
 import { registerAskUserQuestionAnswerHandler } from "@/lib/chat/askUserQuestionBridge";
+import type { ChatFileLink } from "@/lib/chat/chatFileLinks";
 import type { ChatHistorySummary } from "@/lib/chat/chatHistory";
 import { buildModelOptions } from "@/lib/chat/chatPageHelpers";
 import type { HistoryMessageRef } from "@/lib/chat/conversationState";
@@ -40,6 +41,7 @@ import {
   trimLeadingHeadlessEntries,
 } from "@/lib/chat/historyWindow";
 import type { CodeMentionReference } from "@/lib/chat/mentionReferences";
+import { openChatFileLink } from "@/lib/chat/openChatFileLink";
 import { isChatRuntimeProtocolIncompatible } from "@/lib/chat/runtimeCompatibility";
 import { createActivityStore } from "@/lib/chat/stream/activityStore";
 import {
@@ -4138,6 +4140,83 @@ export default function GatewayApp() {
     }),
     [handleChangedFileOpenDiff, handleChangedFileReveal, handleOpenWorkspaceFile],
   );
+  const handleOpenChatFileLink = useCallback(
+    (link: ChatFileLink) => {
+      const conversationWorkdir = displayedConversationWorkdir.trim();
+      if (!displayedConversationId || !conversationWorkdir) {
+        addNotify("error", "The conversation working directory is unavailable.");
+        return;
+      }
+      const request = {
+        ...link,
+        conversationId: displayedConversationId,
+        workdir: conversationWorkdir,
+      };
+      void openChatFileLink(request)
+        .then(async (result) => {
+          if (result.action === "opened" || result.action === "revealed") return;
+          const resultWorkdir = result.workdir?.trim() ?? "";
+          const resultPath = result.path?.trim() ?? "";
+          if (!resultWorkdir || !resultPath) {
+            addNotify("error", "The linked file could not be opened.");
+            return;
+          }
+          if (result.action === "directory") {
+            if (workspaceProjectPathKey(resultWorkdir) === terminalProjectPathKey) {
+              handleChangedFileReveal(resultPath);
+              return;
+            }
+            const fallback = await openChatFileLink({ ...request, openInFileManager: true });
+            if (fallback.action !== "opened") {
+              addNotify("error", "The linked directory could not be opened.");
+            }
+            return;
+          }
+          const workspaceRequest = {
+            projectPathKey: workspaceProjectPathKey(resultWorkdir),
+            workdir: resultWorkdir,
+            path: resultPath,
+          };
+          if (
+            !result.outsideWorkspace &&
+            workspaceRequest.projectPathKey === terminalProjectPathKey
+          ) {
+            handleChangedFileReveal(resultPath);
+          }
+          if (result.action === "preview") {
+            openWorkspaceFilePreview(workspaceRequest);
+            return;
+          }
+          openWorkspaceEditorFile({
+            ...workspaceRequest,
+            line: result.line,
+            endLine: result.endLine,
+            column: result.column,
+          });
+        })
+        .catch((error: unknown) => {
+          const message = asErrorMessage(error, "The linked file could not be opened.");
+          const normalized = message.toLowerCase();
+          addNotify(
+            "error",
+            normalized.includes("timed out") ||
+              normalized.includes("offline") ||
+              normalized.includes("not connected")
+              ? "The device that owns this conversation is offline or did not respond."
+              : message,
+          );
+        });
+    },
+    [
+      addNotify,
+      displayedConversationId,
+      displayedConversationWorkdir,
+      handleChangedFileReveal,
+      openWorkspaceEditorFile,
+      openWorkspaceFilePreview,
+      terminalProjectPathKey,
+    ],
+  );
   // RightDockPanel is memo'd: every callback handed to it must be stable or
   // the memo boundary is void (see the panel-side context useMemo).
   const handleChatTranscriptWidthChange = useCallback(
@@ -4765,6 +4844,7 @@ export default function GatewayApp() {
                             showUsage={isAgentDevExecutionMode}
                             usageContextWindow={currentModelContextWindow}
                             workspaceRoot={displayedConversationWorkdir}
+                            onOpenFileLink={handleOpenChatFileLink}
                             gitClient={gitClient}
                             onLoadUploadedImagePreview={handleLoadUploadedImagePreview}
                             onResendFromEdit={handleResendFromEdit}

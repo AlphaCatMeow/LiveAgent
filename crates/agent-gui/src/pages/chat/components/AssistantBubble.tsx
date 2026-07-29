@@ -1,5 +1,6 @@
 import { memo, type ReactNode } from "react";
 
+import type { ChatFileLink } from "../../../lib/chat/chatFileLinks";
 import type { RetryAttemptRecord } from "../../../lib/chat/conversation/liveTranscriptStore";
 import { VIBING_STATUS } from "../../../lib/chat/page/chatPageHelpers";
 import type { AssistantUnitRow } from "../transcript/rowModel";
@@ -18,6 +19,8 @@ export const AssistantBubbleUnit = memo(function AssistantBubbleUnit(props: {
   isCompactionRunning: boolean;
   toolStatus: string | null;
   retryAttempts?: RetryAttemptRecord[];
+  workdir?: string;
+  onOpenFileLink?: (link: ChatFileLink) => void;
 }) {
   const {
     row,
@@ -27,6 +30,8 @@ export const AssistantBubbleUnit = memo(function AssistantBubbleUnit(props: {
     isCompactionRunning,
     toolStatus,
     retryAttempts,
+    workdir,
+    onOpenFileLink,
   } = props;
   const { unit } = row;
   if (unit.kind === "footer") return null;
@@ -98,6 +103,8 @@ export const AssistantBubbleUnit = memo(function AssistantBubbleUnit(props: {
             thinkingOpen={unit.thinkingOpen}
             isLatestThinking={unit.isLatestThinking}
             isAborted={row.isAborted}
+            workdir={workdir}
+            onOpenFileLink={onOpenFileLink}
           />
         ) : null}
 

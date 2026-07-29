@@ -15,6 +15,7 @@ import {
 import { CheckCircle2, ChevronDown } from "../../../components/icons";
 import { Markdown } from "../../../components/Markdown";
 import { useLocale } from "../../../i18n";
+import type { ChatFileLink } from "../../../lib/chat/chatFileLinks";
 import type {
   HistoryMessageRef,
   RenderSummaryCard,
@@ -117,6 +118,7 @@ export type TranscriptListProps = {
   usageContextWindow?: number;
   workspaceRoot?: string;
   gitClient?: GitClient | null;
+  onOpenFileLink?: (link: ChatFileLink) => void;
   // 楼层导航：跳转句柄挂载点（与 followRef 同一模式），以及「视口顶部
   // 当前处于哪条用户消息行」变化时的上报回调。
   navRef?: MutableRefObject<TranscriptNavHandle | null>;
@@ -152,6 +154,7 @@ export const TranscriptList = memo(function TranscriptList(props: TranscriptList
     usageContextWindow,
     workspaceRoot,
     gitClient,
+    onOpenFileLink,
     navRef,
     onAnchorUserRowChange,
     onResendFromEdit,
@@ -522,6 +525,8 @@ export const TranscriptList = memo(function TranscriptList(props: TranscriptList
                 isCompactionRunning={row.mutable ? isCompactionRunning : false}
                 toolStatus={row.mutable ? displayedToolStatus : null}
                 retryAttempts={row.mutable ? liveState.retryAttempts : undefined}
+                workdir={workspaceRoot}
+                onOpenFileLink={onOpenFileLink}
                 onResendFromEdit={onResendFromEdit}
                 onBranchConversation={onBranchConversation}
               />

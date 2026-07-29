@@ -26,6 +26,12 @@ import {
 } from "streamdown";
 import { useLocale } from "../i18n";
 import {
+  type ChatFileLink,
+  decodeChatFileLinkPayload,
+  encodeChatFileLink,
+  parseChatFileLink,
+} from "../lib/chat/chatFileLinks";
+import {
   getCollapsedCodeBlockPreview,
   resolveCodeBlockRenderPolicy,
 } from "../lib/markdownCodeBlockPolicy";
@@ -34,7 +40,132 @@ import { cn } from "../lib/shared/utils";
 import { Check, ChevronDown, ChevronUp, Copy, ExternalLink, X } from "./icons";
 import { Button } from "./ui/button";
 
-type MarkdownProps = {
+const CHAT_FILE_NODE_DATA_KEY = "liveagentChatFileLink";
+const LIVEAGENT_FILE_PROTOCOL = "liveagent-file:";
+
+type ChatFileHastNode = {
+  children?: ChatFileHastNode[];
+  data?: Record<string, unknown>;
+  properties?: Record<string, unknown>;
+  position?: { start?: { offset?: number } };
+  type?: string;
+  tagName?: string;
+};
+
+type ChatFileVFile = { value?: unknown };
+
+function visitChatFileElements(node: ChatFileHastNode, visitor: (node: ChatFileHastNode) => void) {
+  if (node.type === "element") visitor(node);
+  for (const child of node.children ?? []) visitChatFileElements(child, visitor);
+}
+
+export function rewriteChatFileLinks() {
+  return (tree: unknown, file?: ChatFileVFile) => {
+    visitChatFileElements(tree as ChatFileHastNode, (node) => {
+      if (node.tagName !== "a") return;
+      const source = typeof file?.value === "string" ? file.value : "";
+      const sourceOffset = node.position?.start?.offset;
+      // Raw HTML anchors keep their source position after rehype-raw. They
+      // must not acquire the trusted marker that only Markdown links receive.
+      if (sourceOffset !== undefined && source[sourceOffset] === "<") return;
+      const href = typeof node.properties?.href === "string" ? node.properties.href : "";
+      const parsed = parseChatFileLink(href);
+      if (!parsed) return;
+      const internalHref = encodeChatFileLink(parsed);
+      node.properties = { ...node.properties, href: internalHref };
+      node.data = { ...node.data, [CHAT_FILE_NODE_DATA_KEY]: internalHref };
+    });
+  };
+}
+
+type ChatFileMdastNode = {
+  children?: ChatFileMdastNode[];
+  position?: { start?: { offset?: number }; end?: { offset?: number } };
+  type?: string;
+  url?: string;
+  value?: string;
+};
+
+const CHAT_FILE_MARKDOWN_LINK_PATTERN = /\[([^\]\n]+)\]\(([^)\n]+)\)/g;
+const SKIPPED_CHAT_FILE_MDAST_NODES = new Set(["code", "html", "image", "inlineCode", "link"]);
+const COMMONMARK_ESCAPABLE_CHARACTER = /[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/;
+
+function mapDecodedSourceOffsets(sourceValue: string, value: string) {
+  let decoded = "";
+  const rawOffsets: number[] = [];
+  for (let index = 0; index < sourceValue.length; index += 1) {
+    const next = sourceValue[index + 1];
+    if (sourceValue[index] === "\\" && next && COMMONMARK_ESCAPABLE_CHARACTER.test(next)) {
+      decoded += next;
+      rawOffsets.push(index + 1);
+      index += 1;
+    } else {
+      decoded += sourceValue[index];
+      rawOffsets.push(index);
+    }
+  }
+  return decoded === value ? rawOffsets : null;
+}
+
+function rewriteChatFileTextNode(node: ChatFileMdastNode, source: string) {
+  const value = node.value ?? "";
+  const sourceStart = node.position?.start?.offset;
+  const sourceEnd = node.position?.end?.offset;
+  const sourceValue =
+    sourceStart !== undefined && sourceEnd !== undefined
+      ? source.slice(sourceStart, sourceEnd)
+      : "";
+  const rawOffsets = mapDecodedSourceOffsets(sourceValue, value);
+  if (!rawOffsets) return null;
+  const nodes: ChatFileMdastNode[] = [];
+  let cursor = 0;
+  for (const match of value.matchAll(CHAT_FILE_MARKDOWN_LINK_PATTERN)) {
+    const index = match.index ?? 0;
+    const sourceIndex = rawOffsets[index];
+    let backslashes = 0;
+    for (let offset = sourceIndex - 1; offset >= 0 && sourceValue[offset] === "\\"; offset -= 1) {
+      backslashes += 1;
+    }
+    if (backslashes % 2 === 1) continue;
+    const destination = match[2].trim();
+    if (!parseChatFileLink(destination)) continue;
+    if (index > cursor) nodes.push({ type: "text", value: value.slice(cursor, index) });
+    nodes.push({
+      type: "link",
+      url: destination,
+      children: [{ type: "text", value: match[1] }],
+    });
+    cursor = index + match[0].length;
+  }
+  if (cursor === 0) return null;
+  if (cursor < value.length) nodes.push({ type: "text", value: value.slice(cursor) });
+  return nodes;
+}
+
+function rewriteChatFileMarkdownChildren(node: ChatFileMdastNode, source: string) {
+  if (!node.children || SKIPPED_CHAT_FILE_MDAST_NODES.has(node.type ?? "")) return;
+  for (let index = 0; index < node.children.length; index += 1) {
+    const child = node.children[index];
+    if (child.type === "text" && typeof child.value === "string") {
+      const replacement = rewriteChatFileTextNode(child, source);
+      if (!replacement) continue;
+      node.children.splice(index, 1, ...replacement);
+      index += replacement.length - 1;
+      continue;
+    }
+    rewriteChatFileMarkdownChildren(child, source);
+  }
+}
+
+export function remarkChatFileLinks() {
+  return (tree: unknown, file?: ChatFileVFile) =>
+    rewriteChatFileMarkdownChildren(
+      tree as ChatFileMdastNode,
+      typeof file?.value === "string" ? file.value : "",
+    );
+}
+
+export type MarkdownProps = {
   content: string;
   className?: string;
   // Fixed render mode: content born from a live stream renders in Streamdown
@@ -56,33 +187,77 @@ type MarkdownProps = {
   // against the page origin before they reach custom components. Sanitize
   // still runs, so scriptable protocols (javascript: etc.) never get through.
   preserveRelativeUrls?: boolean;
+  // Chat file links are only rewritten when this explicit user-action callback
+  // is present. Other Markdown surfaces keep Streamdown's normal link policy.
+  workdir?: string;
+  onOpenFileLink?: (link: ChatFileLink) => void;
 };
 
 const streamdownPlugins = { code, math, mermaid, cjk };
 const remarkPlugins = [...Object.values(defaultRemarkPlugins), remarkBreaks];
+const chatRemarkPlugins = [...remarkPlugins, remarkChatFileLinks];
 
 type StreamdownRehypePlugins = NonNullable<ComponentProps<typeof Streamdown>["rehypePlugins"]>;
 
-// raw + sanitize from the default chain (raw → sanitize → harden), with data:
-// image sources additionally allowed so embedded data-URI images render.
-const relativeUrlRehypePlugins = (() => {
+function createSanitizedRehypePlugins(options: {
+  allowDataImages: boolean;
+  preserveRelativeUrls: boolean;
+  rewriteFileLinks: boolean;
+}) {
   const sanitize = defaultRehypePlugins.sanitize;
   if (!Array.isArray(sanitize)) {
-    return [defaultRehypePlugins.raw, sanitize] as StreamdownRehypePlugins;
+    return [
+      defaultRehypePlugins.raw,
+      ...(options.rewriteFileLinks ? [rewriteChatFileLinks] : []),
+      sanitize,
+      ...(options.preserveRelativeUrls ? [] : [defaultRehypePlugins.harden]),
+    ] as StreamdownRehypePlugins;
   }
   const schema = (sanitize[1] ?? {}) as { protocols?: Record<string, unknown[]> };
   const srcProtocols = schema.protocols?.src;
+  const hrefProtocols = schema.protocols?.href;
   const protocols = {
     ...schema.protocols,
-    src: Array.isArray(srcProtocols)
-      ? [...new Set([...srcProtocols, "data"])]
-      : ["http", "https", "data"],
+    ...(options.rewriteFileLinks
+      ? {
+          href: Array.isArray(hrefProtocols)
+            ? [...new Set([...hrefProtocols, "liveagent-file"])]
+            : ["http", "https", "mailto", "liveagent-file"],
+        }
+      : {}),
+    ...(options.allowDataImages
+      ? {
+          src: Array.isArray(srcProtocols)
+            ? [...new Set([...srcProtocols, "data"])]
+            : ["http", "https", "data"],
+        }
+      : {}),
   };
   return [
     defaultRehypePlugins.raw,
+    ...(options.rewriteFileLinks ? [rewriteChatFileLinks] : []),
     [sanitize[0], { ...schema, protocols }],
+    ...(options.preserveRelativeUrls ? [] : [defaultRehypePlugins.harden]),
   ] as StreamdownRehypePlugins;
-})();
+}
+
+// Workspace previews intentionally skip harden so relative assets reach their
+// custom renderer. Chat surfaces always use raw → rewrite → sanitize → harden.
+export const relativeUrlRehypePlugins = createSanitizedRehypePlugins({
+  allowDataImages: true,
+  preserveRelativeUrls: true,
+  rewriteFileLinks: false,
+});
+export const chatFileRehypePlugins = createSanitizedRehypePlugins({
+  allowDataImages: false,
+  preserveRelativeUrls: false,
+  rewriteFileLinks: true,
+});
+const relativeChatFileRehypePlugins = createSanitizedRehypePlugins({
+  allowDataImages: true,
+  preserveRelativeUrls: true,
+  rewriteFileLinks: true,
+});
 
 type MarkdownImageFallbackProps = ComponentProps<"img"> & ExtraProps;
 type MarkdownAnchorFallbackProps = ComponentProps<"a"> & ExtraProps;
@@ -93,7 +268,45 @@ type StreamdownCodeChildProps = {
   "data-block"?: string;
 };
 
+type MarkdownFileLinkProps = ComponentProps<"a"> &
+  ExtraProps & {
+    onOpenFileLink: (link: ChatFileLink) => void;
+    workdir?: string;
+  };
+
 const DEFAULT_CODE_BLOCK_LANGUAGE = "markdown";
+
+function readRewrittenChatFileLink(props: MarkdownAnchorFallbackProps) {
+  const href = typeof props.href === "string" ? props.href : "";
+  const marker = (props.node as ChatFileHastNode | undefined)?.data?.[CHAT_FILE_NODE_DATA_KEY];
+  if (!href.startsWith(LIVEAGENT_FILE_PROTOCOL) || marker !== href) return null;
+  const parsed = decodeChatFileLinkPayload(href.slice(LIVEAGENT_FILE_PROTOCOL.length));
+  if (!parsed || encodeChatFileLink(parsed) !== href) return null;
+  return parsed;
+}
+
+export function MarkdownFileLink(props: MarkdownFileLinkProps) {
+  const { children, title, onOpenFileLink, workdir } = props;
+  const parsed = readRewrittenChatFileLink(props);
+  if (!parsed) return <MarkdownReadOnlyLink {...props} data-liveagent-file-link="blocked" />;
+  const label =
+    typeof title === "string" && title.trim()
+      ? title.trim()
+      : parsed.source === "relative" && workdir
+        ? `${workdir.replace(/[\\/]+$/, "")}/${parsed.path.replace(/^[\\/]+/, "")}`
+        : parsed.path;
+  return (
+    <button
+      type="button"
+      className="inline max-w-full cursor-pointer appearance-none whitespace-normal rounded-sm border-0 bg-transparent p-0 text-left font-medium text-primary underline decoration-primary/35 underline-offset-4 outline-none [overflow-wrap:anywhere] hover:decoration-primary focus-visible:ring-2 focus-visible:ring-ring/35"
+      data-liveagent-file-link="true"
+      title={label}
+      onClick={() => onOpenFileLink(parsed)}
+    >
+      {children}
+    </button>
+  );
+}
 
 function MarkdownImageFallback(props: MarkdownImageFallbackProps) {
   const { alt, title } = props;
@@ -139,6 +352,46 @@ export const markdownReadOnlyComponents: Components = {
   ...markdownComponents,
   a: MarkdownReadOnlyLink,
 };
+
+function MarkdownExternalLink(props: MarkdownAnchorFallbackProps) {
+  const { children, className, href, title } = props;
+  const [modalOpen, setModalOpen] = useState(false);
+  if (!href) return <MarkdownReadOnlyLink {...props} />;
+  const incomplete = href === "streamdown:incomplete-link";
+  return (
+    <>
+      <button
+        type="button"
+        className={cn(
+          "inline max-w-full cursor-pointer appearance-none whitespace-normal border-0 bg-transparent p-0 text-left font-medium text-primary underline [overflow-wrap:anywhere]",
+          className,
+        )}
+        data-incomplete={incomplete}
+        data-streamdown="link"
+        title={title}
+        onClick={() => {
+          if (!incomplete) setModalOpen(true);
+        }}
+      >
+        {children}
+      </button>
+      <ExternalLinkModal
+        isOpen={modalOpen}
+        url={href}
+        onClose={() => setModalOpen(false)}
+        onConfirm={() => window.open(href, "_blank", "noreferrer")}
+      />
+    </>
+  );
+}
+
+export function MarkdownLink(props: MarkdownFileLinkProps) {
+  if (readRewrittenChatFileLink(props)) return <MarkdownFileLink {...props} />;
+  if (typeof props.href === "string" && props.href.startsWith(LIVEAGENT_FILE_PROTOCOL)) {
+    return <MarkdownReadOnlyLink {...props} data-liveagent-file-link="blocked" />;
+  }
+  return <MarkdownExternalLink {...props} />;
+}
 
 async function copyCodeBlockText(text: string) {
   try {
@@ -435,17 +688,33 @@ export const Markdown = memo(function Markdown(props: MarkdownProps) {
     readOnly = false,
     componentOverrides,
     preserveRelativeUrls = false,
+    workdir,
+    onOpenFileLink,
   } = props;
   const streaming = renderMode === "streaming";
   const normalizedContent = useMemo(
     () => normalizeLatexDelimiters(content, streaming && showCaret),
     [content, showCaret, streaming],
   );
-  const baseComponents = readOnly ? markdownReadOnlyComponents : markdownComponents;
-  const components = useMemo(
-    () => (componentOverrides ? { ...baseComponents, ...componentOverrides } : baseComponents),
-    [baseComponents, componentOverrides],
-  );
+  const components = useMemo(() => {
+    const baseComponents = readOnly ? markdownReadOnlyComponents : markdownComponents;
+    const fileLinkComponents: Components =
+      !readOnly && onOpenFileLink
+        ? {
+            a: (linkProps) => (
+              <MarkdownLink {...linkProps} workdir={workdir} onOpenFileLink={onOpenFileLink} />
+            ),
+          }
+        : {};
+    return { ...baseComponents, ...fileLinkComponents, ...componentOverrides };
+  }, [componentOverrides, onOpenFileLink, readOnly, workdir]);
+  const rehypePlugins = onOpenFileLink
+    ? preserveRelativeUrls
+      ? relativeChatFileRehypePlugins
+      : chatFileRehypePlugins
+    : preserveRelativeUrls
+      ? relativeUrlRehypePlugins
+      : undefined;
 
   return (
     <div>
@@ -454,16 +723,12 @@ export const Markdown = memo(function Markdown(props: MarkdownProps) {
           "chat-markdown max-w-none break-words",
           MARKDOWN_EMBED_CLASSNAME,
           streaming ? "chat-markdown--streaming" : "chat-markdown--static",
-          // Streamdown's memo equality does not include `caret` in its check,
-          // so toggling the caret prop alone does not invalidate the render.
-          // Mirror the visibility into a className modifier to force a re-render
-          // that recomputes the inline `--streamdown-caret` style.
           showCaret ? "chat-markdown--caret-on" : "chat-markdown--caret-off",
           className,
         )}
         plugins={streamdownPlugins}
-        remarkPlugins={remarkPlugins}
-        {...(preserveRelativeUrls ? { rehypePlugins: relativeUrlRehypePlugins } : {})}
+        remarkPlugins={onOpenFileLink ? chatRemarkPlugins : remarkPlugins}
+        {...(rehypePlugins ? { rehypePlugins } : {})}
         components={components}
         mode={streaming ? "streaming" : "static"}
         dir="auto"

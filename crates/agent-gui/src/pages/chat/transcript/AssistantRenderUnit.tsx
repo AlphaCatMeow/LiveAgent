@@ -1,6 +1,7 @@
 import { memo, useMemo } from "react";
 
 import { ChangedFilesCard } from "../../../components/chat/ChangedFilesCard";
+import type { ChatFileLink } from "../../../lib/chat/chatFileLinks";
 import type { HistoryMessageRef } from "../../../lib/chat/conversation/conversationState";
 import type { RetryAttemptRecord } from "../../../lib/chat/conversation/liveTranscriptStore";
 import { collectChangedFiles } from "../../../lib/chat/messages/changedFiles";
@@ -17,6 +18,8 @@ export type AssistantRenderUnitProps = {
   isCompactionRunning: boolean;
   toolStatus: string | null;
   retryAttempts?: RetryAttemptRecord[];
+  workdir?: string;
+  onOpenFileLink?: (link: ChatFileLink) => void;
   onResendFromEdit: (
     messageRef: HistoryMessageRef,
     text: string,
@@ -79,6 +82,8 @@ export const AssistantRenderUnit = memo(function AssistantRenderUnit(
     isCompactionRunning,
     toolStatus,
     retryAttempts,
+    workdir,
+    onOpenFileLink,
     onResendFromEdit,
     onBranchConversation,
   } = props;
@@ -106,6 +111,8 @@ export const AssistantRenderUnit = memo(function AssistantRenderUnit(
         isCompactionRunning={isCompactionRunning}
         toolStatus={toolStatus}
         retryAttempts={retryAttempts}
+        workdir={workdir}
+        onOpenFileLink={onOpenFileLink}
       />
     </div>
   );

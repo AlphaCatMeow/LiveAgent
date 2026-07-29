@@ -1,5 +1,5 @@
 import type { MutableRefObject } from "react";
-
+import type { ChatFileLink } from "../../../lib/chat/chatFileLinks";
 import type {
   HistoryMessageRef,
   RenderTimelineItem,
@@ -31,6 +31,7 @@ export type ChatTranscriptProps = {
   bottomReservePx?: number;
   contentWidth: number;
   onContentWidthChange: (width: number) => void;
+  onOpenFileLink?: (link: ChatFileLink) => void;
   onResendFromEdit: (
     messageRef: HistoryMessageRef,
     text: string,

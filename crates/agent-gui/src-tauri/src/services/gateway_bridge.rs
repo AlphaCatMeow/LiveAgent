@@ -4,6 +4,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::commands::{
+    chat_file_links::open_chat_file_link_for_conversation,
     chat_history,
     chat_history::ChatHistoryMessageRef,
     fs::{
@@ -573,6 +574,33 @@ pub async fn handle_fs_read_workspace_image(
             mtime_ms: response.mtime_ms,
             content_hash: response.content_hash,
         })
+    })
+}
+
+pub async fn handle_chat_file_open(
+    request: proto::ChatFileOpenRequest,
+) -> Result<proto::ChatFileOpenResponse, String> {
+    open_chat_file_link_for_conversation(
+        request.conversation_id,
+        request.workdir,
+        request.path,
+        request.source,
+        request.line,
+        request.end_line,
+        request.column,
+        request.open_in_file_manager,
+    )
+    .await
+    .map_err(|error| error.message)
+    .map(|response| proto::ChatFileOpenResponse {
+        action: response.action,
+        kind: response.kind,
+        workdir: response.workdir.unwrap_or_default(),
+        path: response.path.unwrap_or_default(),
+        line: response.line,
+        end_line: response.end_line,
+        column: response.column,
+        outside_workspace: response.outside_workspace,
     })
 }
 

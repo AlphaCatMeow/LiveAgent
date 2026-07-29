@@ -1384,8 +1384,6 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.noCustomHeaders": "暂无自定义请求头",
     "settings.noCustomHeadersHint": "点击此处新增，输入名称时会自动联想常用请求头。",
     "settings.customHeaderReservedTitle": "保留头，由系统管理",
-    "settings.showCustomHeaderValue": "显示请求头值",
-    "settings.hideCustomHeaderValue": "隐藏请求头值",
     "settings.manualAddModel": "手动添加",
     "settings.customHeaderKeyPlaceholder": "请求头名称",
     "settings.addCustomHeader": "添加",
@@ -3610,8 +3608,6 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.noCustomHeadersHint":
       "Click to add one — common header names are suggested as you type.",
     "settings.customHeaderReservedTitle": "Reserved header managed by the system",
-    "settings.showCustomHeaderValue": "Show header value",
-    "settings.hideCustomHeaderValue": "Hide header value",
     "settings.manualAddModel": "Add manually",
     "settings.customHeaderKeyPlaceholder": "Header name",
     "settings.addCustomHeader": "Add",

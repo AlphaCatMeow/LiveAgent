@@ -138,37 +138,43 @@ test("gateway final projection is frozen from the persisted conversation state",
       meta: {},
       segments: [],
       activeSegmentIndex: 0,
-      historyRenderItems: [
-        {
-          kind: "user",
-          key: "user-row",
-          messageRef: { messageId: "user-final" },
-          text: "Inspect the project",
-          attachments: [],
-        },
-        {
-          kind: "assistant",
-          key: "assistant-row",
-          rounds: [
-            {
-              key: "round-1",
-              round: 1,
-              runningToolCallIds: [],
-              blocks: [
-                { kind: "thinking", text: "Checking files" },
-                { kind: "text", text: "The project is healthy." },
-              ],
-            },
-          ],
-        },
-        {
-          kind: "user",
-          key: "next-user",
-          messageRef: { messageId: "user-next" },
-          text: "Next prompt",
-          attachments: [],
-        },
-      ],
+      transcript: {
+        items: [
+          {
+            kind: "user",
+            key: "user-row",
+            messageRef: { messageId: "user-final" },
+            text: "Inspect the project",
+            attachments: [],
+          },
+          {
+            kind: "assistant",
+            key: "assistant-row",
+            rounds: [
+              {
+                key: "round-1",
+                round: 1,
+                runningToolCallIds: [],
+                blocks: [
+                  { kind: "thinking", text: "Checking files" },
+                  { kind: "text", text: "The project is healthy." },
+                ],
+              },
+            ],
+          },
+          {
+            kind: "user",
+            key: "next-user",
+            messageRef: { messageId: "user-next" },
+            text: "Next prompt",
+            attachments: [],
+          },
+        ],
+        segmentWindows: [],
+        oldestMessageOffset: 0,
+        hasMoreBefore: false,
+        revision: null,
+      },
     },
   });
 

@@ -233,21 +233,6 @@ import { WorkspaceOverlayHost } from "./WorkspaceOverlayHost";
 const STALE_HISTORY_RETRY_INITIAL_DELAY_MS = 1_000;
 const STALE_HISTORY_RETRY_MAX_DELAY_MS = 30_000;
 
-// Idle scheduler for the open controller (mirrors the GUI helper semantics:
-// requestIdleCallback with a hard timeout so it still runs on busy pages).
-// The web end's opens resolve "painted-complete", so the controller never
-// actually schedules its phase-2 hydration through this — it exists to
-// satisfy the shared controller deps.
-const HYDRATE_IDLE_TIMEOUT_MS = 1_500;
-function scheduleIdleTask(task: () => void): () => void {
-  if (typeof window.requestIdleCallback === "function") {
-    const handle = window.requestIdleCallback(() => task(), { timeout: HYDRATE_IDLE_TIMEOUT_MS });
-    return () => window.cancelIdleCallback(handle);
-  }
-  const timeoutId = window.setTimeout(task, 300);
-  return () => window.clearTimeout(timeoutId);
-}
-
 export default function GatewayApp() {
   const historyShareToken = useMemo(() => parseHistoryShareToken(), []);
   const {
@@ -564,19 +549,16 @@ export default function GatewayApp() {
   }, [activeWorkspaceProjectPath, isAgentMode, sidebarStore]);
 
   // Conversation-open controller: the web end paints the conversation's whole
-  // established history window in phase 1 (openInitial resolves
-  // "painted-complete"), so the controller never schedules a phase-2
-  // hydration — messages above the window edge stay unfetched until the user
-  // pages up. Deps go through refs (assigned per render) so the controller
-  // instance stays stable.
-  const openInitialRef = useRef<
-    (id: string, seq: number) => Promise<"cache-hit" | "painted" | "painted-complete">
-  >(() => Promise.resolve("painted-complete"));
+  // established history window in the single open phase — messages above the
+  // window edge stay unfetched until the user pages up. Deps go through refs
+  // (assigned per render) so the controller instance stays stable.
+  const openInitialRef = useRef<(id: string) => Promise<"cache-hit" | "painted">>(() =>
+    Promise.resolve("painted"),
+  );
   const openController = useMemo(
     () =>
       createConversationOpenController({
-        openInitial: (id, seq) => openInitialRef.current(id, seq),
-        scheduleIdle: scheduleIdleTask,
+        openInitial: (id) => openInitialRef.current(id),
         onStateChange: setConversationOpenState,
       }),
     [],
@@ -1999,16 +1981,15 @@ export default function GatewayApp() {
   // paged up to). Sets the selection state synchronously (controller.open
   // calls this in the same tick), fetches the window, and replace-applies it
   // to the transcript store. The web end has no synchronous local-activation
-  // path, so it always resolves "painted-complete" (never "cache-hit") —
-  // revisits still show the cached transcript instantly because the registry
-  // store keeps rendering underneath. Messages above the window edge stay
-  // unfetched until the user pages up ("load earlier history"): an idle full
-  // hydration would put open cost back on the conversation's lifetime size,
-  // which is exactly what the lazy window avoids.
+  // path, so it always resolves "painted" (never "cache-hit") — revisits
+  // still show the cached transcript instantly because the registry store
+  // keeps rendering underneath. Messages above the window edge stay
+  // unfetched until the user pages up ("load earlier history"): hydrating
+  // the full record on open would put open cost back on the conversation's
+  // lifetime size, which is exactly what the lazy window avoids.
   async function openConversationInitial(
     conversationIdValue: string,
-    _seq: number,
-  ): Promise<"cache-hit" | "painted-complete"> {
+  ): Promise<"cache-hit" | "painted"> {
     const currentApi = api;
     if (!currentApi) {
       throw new Error("Gateway client is not ready.");
@@ -2053,7 +2034,7 @@ export default function GatewayApp() {
         planned === undefined ? undefined : { maxMessages: planned },
       );
       if (isStale()) {
-        return "painted-complete";
+        return "painted";
       }
       const counts = readHistoryWindowCounts(detail);
       if (counts) {
@@ -2064,7 +2045,7 @@ export default function GatewayApp() {
       const parsed = await parseHistoryMessagesJsonAsync(detail.messages_json);
       const entries = detail.has_more === true ? trimLeadingHeadlessEntries(parsed) : parsed;
       if (isStale()) {
-        return "painted-complete";
+        return "painted";
       }
       setSelectedHistory(detail);
       transcriptStoreRegistry
@@ -2074,7 +2055,7 @@ export default function GatewayApp() {
       if (detailWorkdir) {
         conversationWorkdirsRef.current.set(conversationIdValue, detailWorkdir);
       }
-      return "painted-complete";
+      return "painted";
     } catch (error) {
       if (!isStale()) {
         const message = asErrorMessage(

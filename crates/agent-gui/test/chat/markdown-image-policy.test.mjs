@@ -330,7 +330,7 @@ test("historical and streaming assistant rows share the explicit file-open prop 
   const files = [
     "../../src/pages/chat/transcript/ChatTranscript.tsx",
     "../../src/pages/chat/transcript/TranscriptList.tsx",
-    "../../src/pages/chat/transcript/AssistantRow.tsx",
+    "../../src/pages/chat/transcript/AssistantRenderUnit.tsx",
     "../../src/pages/chat/components/AssistantBubble.tsx",
     "../../src/pages/chat/components/assistant-bubble/RoundContent.tsx",
   ];
@@ -348,9 +348,18 @@ test("historical and streaming assistant rows share the explicit file-open prop 
     ),
     "utf8",
   );
-  assert.match(roundContent, /renderMode \?\? \(isLive \? "streaming" : "static"\)/);
-  assert.ok((roundContent.match(/onOpenFileLink=\{onOpenFileLink\}/g) ?? []).length >= 3);
-  assert.ok((roundContent.match(/workdir=\{workdir\}/g) ?? []).length >= 3);
+  assert.match(roundContent, /export const RoundBlockContent/);
+  assert.match(roundContent, /renderMode=\{renderMode\}/);
+  assert.ok((roundContent.match(/onOpenFileLink=\{onOpenFileLink\}/g) ?? []).length >= 2);
+  assert.ok((roundContent.match(/workdir=\{workdir\}/g) ?? []).length >= 2);
+
+  const transcriptList = fs.readFileSync(
+    fileURLToPath(new URL("../../src/pages/chat/transcript/TranscriptList.tsx", import.meta.url)),
+    "utf8",
+  );
+  assert.match(transcriptList, /isCompactionRunning=\{row\.mutable/);
+  assert.match(transcriptList, /workdir=\{workspaceRoot\}/);
+  assert.match(transcriptList, /onOpenFileLink=\{onOpenFileLink\}/);
 
   const chatPage = fs.readFileSync(
     fileURLToPath(new URL("../../src/pages/ChatPage.tsx", import.meta.url)),

@@ -329,8 +329,8 @@ export function AskUserQuestionCard({
                   ? "hover:border-border/70 hover:bg-foreground/[0.03] dark:hover:border-white/[0.14]"
                   : "",
                 !canInteract &&
-                !activeCustomSelected &&
-                (isSettled || cancelled || countdownExpired)
+                  !activeCustomSelected &&
+                  (isSettled || cancelled || countdownExpired)
                   ? "opacity-55"
                   : "",
                 canInteract ? "cursor-pointer" : "cursor-default",

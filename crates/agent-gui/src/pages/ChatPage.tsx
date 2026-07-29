@@ -150,7 +150,7 @@ type ChatPageProps = {
   getMcpSettings: () => AppSettings["mcp"];
   context: Context;
   setContext: (next: Context) => void;
-  onOpenSettings: (section?: SectionId) => void;
+  onOpenSettings: (section?: SectionId, providerId?: string) => void;
   onToggleTheme: () => void;
   appUpdate?: AppUpdateController;
 };

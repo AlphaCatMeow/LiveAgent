@@ -53,3 +53,14 @@ test("model pickers search models and providers", () => {
     assert.match(source, /t\("chat\.noModelFound"\)/);
   }
 });
+
+test("provider groups expose a direct edit affordance", () => {
+  for (const source of headerSources) {
+    assert.match(source, /\bPencil\b/);
+    assert.match(source, /t\("settings\.editProvider"\)/);
+    assert.match(
+      source,
+      /setIsModelPickerOpen\(false\);\s+onOpenSettings\("providers", group\.id\);/,
+    );
+  }
+});

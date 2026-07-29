@@ -169,6 +169,7 @@ function applyRuntimeSystemDefaults(settings: AppSettings, defaultWorkdir: strin
 export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SectionId>("system");
+  const [settingsProviderId, setSettingsProviderId] = useState<string>();
   const [settingsReady, setSettingsReady] = useState(false);
   const [settings, setSettingsState] = useState<AppSettings>(() => getDefaultSettings());
   const [settingsSaveState, setSettingsSaveState] = useState<SettingsSaveState>({
@@ -404,8 +405,9 @@ export default function App() {
   );
 
   const openSettings = useCallback(
-    (section: SectionId = "system") => {
+    (section: SectionId = "system", providerId?: string) => {
       setSettingsSection(section);
+      setSettingsProviderId(section === "providers" ? providerId : undefined);
       setSettingsOpen(true);
       setOverlay("entering");
       requestAnimationFrame(() => requestAnimationFrame(() => setOverlay("open")));
@@ -615,6 +617,7 @@ export default function App() {
                 saveState={settingsSaveState}
                 onBack={closeSettings}
                 initialSection={settingsSection}
+                initialProviderId={settingsProviderId}
                 appUpdate={appUpdate}
               />
             </AppErrorBoundary>

@@ -1,12 +1,11 @@
 import type { MutableRefObject } from "react";
-
+import type { ChatFileLink } from "../../../lib/chat/chatFileLinks";
 import type {
   HistoryMessageRef,
   RenderTimelineItem,
 } from "../../../lib/chat/conversation/conversationState";
 import type { LiveTranscriptStore } from "../../../lib/chat/conversation/liveTranscriptStore";
 import type { PendingUploadedFile } from "../../../lib/chat/messages/uploadedFiles";
-import type { ChatFileLink } from "../../../lib/chat/chatFileLinks";
 import type { ScrollFollowHandle } from "../../../lib/chat-scroll/useScrollFollow";
 import type { GitClient } from "../../../lib/git/types";
 import type { SectionId } from "../../settings/types";

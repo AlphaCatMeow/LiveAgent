@@ -2,6 +2,9 @@ use serde::Serialize;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, LazyLock};
+use std::time::Duration;
+use tokio::sync::Semaphore;
 
 use super::fs::spawn_workspace_open_command;
 use crate::commands::chat_history;
@@ -120,6 +123,11 @@ const PREVIEW_EXTENSIONS: &[&str] = &[
     "mp3", "mp4", "ods", "oga", "ogg", "ogv", "pdf", "png", "rtf", "svg", "tsv", "wav", "webm",
     "webp", "xls", "xlsm", "xlsx", "xltm", "xltx",
 ];
+const CHAT_FILE_OPEN_TIMEOUT: Duration = Duration::from_secs(25);
+const CHAT_FILE_OPEN_CONCURRENCY: usize = 4;
+static CHAT_FILE_OPEN_SEMAPHORE: LazyLock<Arc<Semaphore>> =
+    LazyLock::new(|| Arc::new(Semaphore::new(CHAT_FILE_OPEN_CONCURRENCY)));
+
 const EXECUTABLE_EXTENSIONS: &[&str] = &[
     "app",
     "appimage",
@@ -232,6 +240,16 @@ fn extension(path: &Path) -> String {
 fn has_extension(path: &Path, extensions: &[&str]) -> bool {
     let ext = extension(path);
     extensions.iter().any(|candidate| *candidate == ext)
+}
+
+#[cfg(target_os = "macos")]
+fn is_active_directory(path: &Path) -> bool {
+    has_extension(path, EXECUTABLE_EXTENSIONS)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn is_active_directory(_path: &Path) -> bool {
+    false
 }
 
 fn has_shebang(path: &Path) -> bool {
@@ -401,24 +419,13 @@ fn build_chat_file_link_plan(
         )
     })?;
 
-    if metadata.is_dir() && has_extension(&target, EXECUTABLE_EXTENSIONS) {
-        return Ok(ChatFileLinkPlan {
-            response: ChatFileLinkOpenResponse {
-                action: "revealed".to_string(),
-                kind: "file".to_string(),
-                workdir: None,
-                path: None,
-                line: None,
-                end_line: None,
-                column: None,
-                outside_workspace: !target.starts_with(&conversation_workdir),
-            },
-            target,
-            system_mode: Some("reveal"),
-        });
-    }
-
     if metadata.is_dir() {
+        if is_active_directory(&target) {
+            return Err(ChatFileLinkError::new(
+                ChatFileLinkErrorCode::UnsupportedTarget,
+                "The linked directory cannot be opened safely.",
+            ));
+        }
         let inside_workspace =
             target.starts_with(&conversation_workdir) && target != conversation_workdir;
         if inside_workspace && !open_in_file_manager {
@@ -473,7 +480,10 @@ fn build_chat_file_link_plan(
     } else if is_probably_text(&target) {
         "editor"
     } else {
-        "opened"
+        return Err(ChatFileLinkError::new(
+            ChatFileLinkErrorCode::UnsupportedTarget,
+            "The linked file type cannot be opened safely.",
+        ));
     };
 
     if action == "editor" || action == "preview" {
@@ -507,11 +517,7 @@ fn build_chat_file_link_plan(
             outside_workspace: !target.starts_with(&conversation_workdir),
         },
         target,
-        system_mode: Some(if action == "revealed" {
-            "reveal"
-        } else {
-            "open"
-        }),
+        system_mode: Some("reveal"),
     })
 }
 
@@ -556,45 +562,64 @@ pub(crate) async fn open_chat_file_link_for_conversation(
     column: Option<u32>,
     open_in_file_manager: bool,
 ) -> Result<ChatFileLinkOpenResponse, ChatFileLinkError> {
-    // Finding the id in the target agent's own history database is the
-    // conversation/worker ownership check. The request-supplied workdir is
-    // never used as the base for a relative path.
-    let summary = chat_history::chat_history_get_summary_inner(conversation_id.clone())
+    tokio::time::timeout(CHAT_FILE_OPEN_TIMEOUT, async move {
+        // Finding the id in the target agent's own history database is the
+        // conversation/worker ownership check. The request-supplied workdir is
+        // never used as the base for a relative path.
+        let summary = chat_history::chat_history_get_summary_inner(conversation_id.clone())
+            .await
+            .map_err(|_| {
+                ChatFileLinkError::new(
+                    ChatFileLinkErrorCode::InvalidRequest,
+                    "The conversation is unavailable on this device.",
+                )
+            })?;
+        let workdir = summary
+            .cwd
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| {
+                ChatFileLinkError::new(
+                    ChatFileLinkErrorCode::InvalidWorkdir,
+                    "The conversation working directory is unavailable.",
+                )
+            })?;
+        let _ = requested_workdir;
+        let permit = Arc::clone(&CHAT_FILE_OPEN_SEMAPHORE)
+            .acquire_owned()
+            .await
+            .map_err(|_| {
+                ChatFileLinkError::new(
+                    ChatFileLinkErrorCode::OpenFailed,
+                    "The linked file request did not complete.",
+                )
+            })?;
+
+        tauri::async_runtime::spawn_blocking(move || {
+            let _permit = permit;
+            open_chat_file_link_sync(
+                conversation_id,
+                workdir,
+                path,
+                source,
+                line,
+                end_line,
+                column,
+                open_in_file_manager,
+            )
+        })
         .await
         .map_err(|_| {
             ChatFileLinkError::new(
-                ChatFileLinkErrorCode::InvalidRequest,
-                "The conversation is unavailable on this device.",
+                ChatFileLinkErrorCode::OpenFailed,
+                "The linked file request did not complete.",
             )
-        })?;
-    let workdir = summary
-        .cwd
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| {
-            ChatFileLinkError::new(
-                ChatFileLinkErrorCode::InvalidWorkdir,
-                "The conversation working directory is unavailable.",
-            )
-        })?;
-    let _ = requested_workdir;
-
-    tauri::async_runtime::spawn_blocking(move || {
-        open_chat_file_link_sync(
-            conversation_id,
-            workdir,
-            path,
-            source,
-            line,
-            end_line,
-            column,
-            open_in_file_manager,
-        )
+        })?
     })
     .await
     .map_err(|_| {
         ChatFileLinkError::new(
             ChatFileLinkErrorCode::OpenFailed,
-            "The linked file request did not complete.",
+            "The linked file request timed out.",
         )
     })?
 }
@@ -653,11 +678,12 @@ mod tests {
     }
 
     #[test]
-    fn classifies_text_preview_and_unknown_files_without_opening_them() {
+    fn classifies_text_and_preview_files_but_rejects_unknown_binary_types() {
         let root = temp_workspace();
         fs::write(root.join("src/a.ts"), "const value = 1;\n").expect("write source");
         fs::write(root.join("document.pdf"), b"%PDF-test").expect("write pdf");
         fs::write(root.join("opaque.custom"), [0_u8, 1, 2, 3]).expect("write opaque");
+        fs::write(root.join("macro.docm"), [0_u8, 1, 2, 3]).expect("write macro document");
 
         assert_eq!(
             plan(&root, "src/a.ts", "relative").response.action,
@@ -667,10 +693,20 @@ mod tests {
             plan(&root, "document.pdf", "relative").response.action,
             "preview"
         );
-        assert_eq!(
-            plan(&root, "opaque.custom", "relative").response.action,
-            "opened"
-        );
+        for path in ["opaque.custom", "macro.docm"] {
+            let error = build_chat_file_link_plan(
+                "conversation-test",
+                &root.to_string_lossy(),
+                path,
+                "relative",
+                None,
+                None,
+                None,
+                false,
+            )
+            .expect_err("unknown binary file must fail closed");
+            assert_eq!(error.code, ChatFileLinkErrorCode::UnsupportedTarget);
+        }
 
         fs::remove_dir_all(root).expect("remove temp workspace");
     }
@@ -686,7 +722,6 @@ mod tests {
             "Windows Registry Editor Version 5.00\n",
         )
         .expect("write reg");
-        fs::create_dir(root.join("Dangerous.app")).expect("create app bundle");
 
         let script = plan(&root, "request.ps1", "relative");
         assert_eq!(script.response.action, "editor");
@@ -702,9 +737,6 @@ mod tests {
             plan(&root, "settings.reg", "relative").response.action,
             "revealed"
         );
-        let app_bundle = plan(&root, "Dangerous.app", "relative");
-        assert_eq!(app_bundle.response.action, "revealed");
-        assert_eq!(app_bundle.system_mode, Some("reveal"));
 
         fs::remove_dir_all(root).expect("remove temp workspace");
     }
@@ -712,9 +744,14 @@ mod tests {
     #[test]
     fn workspace_directories_use_file_tree_first_and_support_a_safe_manager_fallback() {
         let root = temp_workspace();
+        fs::create_dir(root.join("scripts.ps1")).expect("create script-suffixed directory");
         let directory = plan(&root, "src", "relative");
         assert_eq!(directory.response.action, "directory");
         assert_eq!(directory.system_mode, None);
+        let suffixed_directory = plan(&root, "scripts.ps1", "relative");
+        assert_eq!(suffixed_directory.response.action, "directory");
+        assert_eq!(suffixed_directory.response.kind, "directory");
+        assert_eq!(suffixed_directory.system_mode, None);
 
         let fallback = build_chat_file_link_plan(
             "conversation-test",
@@ -731,6 +768,28 @@ mod tests {
         assert_eq!(fallback.response.kind, "directory");
         assert_eq!(fallback.system_mode, Some("open"));
 
+        fs::remove_dir_all(root).expect("remove temp workspace");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_active_directory_packages_are_rejected_instead_of_launched() {
+        let root = temp_workspace();
+        for path in ["Dangerous.app", "Dangerous.workflow", "Dangerous.pkg"] {
+            fs::create_dir(root.join(path)).expect("create active directory package");
+            let error = build_chat_file_link_plan(
+                "conversation-test",
+                &root.to_string_lossy(),
+                path,
+                "relative",
+                None,
+                None,
+                None,
+                false,
+            )
+            .expect_err("active directory package must fail closed");
+            assert_eq!(error.code, ChatFileLinkErrorCode::UnsupportedTarget);
+        }
         fs::remove_dir_all(root).expect("remove temp workspace");
     }
 

@@ -200,6 +200,7 @@ test("chat file links are rewritten before sanitize and harden without widening 
 });
 
 test("raw spaces and backslashes become Markdown file links without touching code", () => {
+  const source = "Open [space](C:/path with spaces/a.ts) and [windows](C:\\work\\src\\a.ts).";
   const tree = {
     type: "root",
     children: [
@@ -208,8 +209,8 @@ test("raw spaces and backslashes become Markdown file links without touching cod
         children: [
           {
             type: "text",
-            value:
-              "Open [space](C:/path with spaces/a.ts) and [windows](C:\\work\\src\\a.ts).",
+            value: source,
+            position: { start: { offset: 0 }, end: { offset: source.length } },
           },
         ],
       },
@@ -232,7 +233,7 @@ test("raw spaces and backslashes become Markdown file links without touching cod
       },
     ],
   };
-  markdownModule.remarkChatFileLinks()(tree);
+  markdownModule.remarkChatFileLinks()(tree, { value: source });
 
   const paragraph = tree.children[0].children;
   assert.equal(paragraph.filter((node) => node.type === "link").length, 2);
@@ -243,6 +244,50 @@ test("raw spaces and backslashes become Markdown file links without touching cod
   assert.equal(tree.children[3].value, String.raw`[x](C:\math\formula.ts)`);
   assert.equal(tree.children[4].type, "table");
   assert.equal(tree.children[4].children[0].children[0].value, "plain cell");
+});
+
+test("escaped Markdown file links stay literal while a following link remains clickable", () => {
+  const source = String.raw`\[foo\*](README.md) and [foo*](README.md)`;
+  const tree = {
+    type: "root",
+    children: [
+      {
+        type: "paragraph",
+        children: [
+          {
+            type: "text",
+            value: "[foo*](README.md) and [foo*](README.md)",
+            position: { start: { offset: 0 }, end: { offset: source.length } },
+          },
+        ],
+      },
+    ],
+  };
+
+  markdownModule.remarkChatFileLinks()(tree, { value: source });
+
+  assert.deepEqual(tree.children[0].children, [
+    { type: "text", value: "[foo*](README.md) and " },
+    {
+      type: "link",
+      url: "README.md",
+      children: [{ type: "text", value: "foo*" }],
+    },
+  ]);
+});
+
+test("linked editor locations are applied once per request and tab in both frontends", () => {
+  const files = [
+    "../../src/components/workspace-editor/WorkspaceCodeEditorOverlay.tsx",
+    "../../../agent-gateway/web/src/components/workspace-editor/WorkspaceCodeEditorOverlay.tsx",
+  ];
+  for (const relativePath of files) {
+    const source = fs.readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), "utf8");
+    assert.match(source, /linkedLocationKeyRef/);
+    assert.match(source, /const locationKey = `\$\{openRequest\.id\}\\u0000\$\{activeTabKey\}`/);
+    assert.match(source, /if \(linkedLocationKeyRef\.current === locationKey\) return/);
+    assert.doesNotMatch(source, /\}, \[activeTab, openRequest\]\);/);
+  }
 });
 
 test("the reported ps1 link renders as one accessible click target and never executes itself", () => {

@@ -1,9 +1,8 @@
 import { memo } from "react";
-
+import type { ChatFileLink } from "../../../lib/chat/chatFileLinks";
 import type { HistoryMessageRef } from "../../../lib/chat/conversation/conversationState";
 import type { RetryAttemptRecord } from "../../../lib/chat/conversation/liveTranscriptStore";
 import type { PendingUploadedFile } from "../../../lib/chat/messages/uploadedFiles";
-import type { ChatFileLink } from "../../../lib/chat/chatFileLinks";
 import { VIBING_STATUS } from "../../../lib/chat/page/chatPageHelpers";
 import {
   AssistantAvatar,

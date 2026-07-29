@@ -1,10 +1,10 @@
 import { memo, useMemo } from "react";
 
 import { ChangedFilesCard } from "../../../components/chat/ChangedFilesCard";
+import type { ChatFileLink } from "../../../lib/chat/chatFileLinks";
 import type { RetryAttemptRecord } from "../../../lib/chat/conversation/liveTranscriptStore";
 import { collectChangedFiles } from "../../../lib/chat/messages/changedFiles";
 import type { UiRound } from "../../../lib/chat/messages/uiMessages";
-import type { ChatFileLink } from "../../../lib/chat/chatFileLinks";
 
 import { AssistantAvatar } from "./assistant-bubble/AssistantAvatar";
 import { RoundContent } from "./assistant-bubble/RoundContent";

@@ -6,6 +6,30 @@ import { fileURLToPath } from "node:url";
 import { createWebModuleLoader } from "../../test/helpers/load-web-module.mjs";
 
 const loader = createWebModuleLoader();
+const markdownLoader = createWebModuleLoader({
+  mocks: {
+    "@streamdown/cjk": { cjk: {} },
+    "@streamdown/code": { code: {} },
+    "@streamdown/math": { math: {} },
+    "@streamdown/mermaid": { mermaid: {} },
+    streamdown: {
+      Streamdown(props) {
+        return { type: "Streamdown", props };
+      },
+      defaultRemarkPlugins: {},
+      defaultRehypePlugins: { raw: () => {}, sanitize: [() => {}, {}], harden: () => {} },
+    },
+    "react-dom": { createPortal: (children, container) => ({ children, container }) },
+    "../i18n": { useLocale: () => ({ t: (key) => key }) },
+    "../lib/shared/utils": { cn: (...parts) => parts.filter(Boolean).join(" ") },
+    "./icons": new Proxy(
+      {},
+      { get: (_target, name) => (props) => ({ type: String(name), props }) },
+    ),
+    "./ui/button": { Button: (props) => ({ type: "Button", props }) },
+  },
+});
+const markdownModule = markdownLoader.loadModule("src/components/Markdown.tsx");
 const {
   decodeChatFileLinkPayload,
   encodeChatFileLink,
@@ -81,6 +105,36 @@ test("Gateway historical and streaming rows keep the explicit file-open prop cha
   );
   assert.match(gatewayApp, /openInFileManager: true/);
   assert.match(gatewayApp, /!result\.outsideWorkspace/);
+});
+
+test("escaped Markdown file links stay literal in Gateway Web", () => {
+  const source = String.raw`\[foo\*](README.md) and [foo*](README.md)`;
+  const tree = {
+    type: "root",
+    children: [
+      {
+        type: "paragraph",
+        children: [
+          {
+            type: "text",
+            value: "[foo*](README.md) and [foo*](README.md)",
+            position: { start: { offset: 0 }, end: { offset: source.length } },
+          },
+        ],
+      },
+    ],
+  };
+
+  markdownModule.remarkChatFileLinks()(tree, { value: source });
+
+  assert.deepEqual(tree.children[0].children, [
+    { type: "text", value: "[foo*](README.md) and " },
+    {
+      type: "link",
+      url: "README.md",
+      children: [{ type: "text", value: "foo*" }],
+    },
+  ]);
 });
 
 test("parseChatFileLink supports the cross-platform chat path matrix", () => {

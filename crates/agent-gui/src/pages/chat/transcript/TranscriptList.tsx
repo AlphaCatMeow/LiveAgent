@@ -15,6 +15,7 @@ import {
 import { CheckCircle2, ChevronDown } from "../../../components/icons";
 import { Markdown } from "../../../components/Markdown";
 import { useLocale } from "../../../i18n";
+import type { ChatFileLink } from "../../../lib/chat/chatFileLinks";
 import type {
   HistoryMessageRef,
   RenderSummaryCard,
@@ -22,7 +23,6 @@ import type {
 } from "../../../lib/chat/conversation/conversationState";
 import type { LiveTranscriptStore } from "../../../lib/chat/conversation/liveTranscriptStore";
 import type { PendingUploadedFile } from "../../../lib/chat/messages/uploadedFiles";
-import type { ChatFileLink } from "../../../lib/chat/chatFileLinks";
 import {
   buildGitHubCommitUrl,
   type CommitDetailsLoader,

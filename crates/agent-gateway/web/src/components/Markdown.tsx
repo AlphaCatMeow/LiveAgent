@@ -26,9 +26,9 @@ import {
 } from "streamdown";
 import { useLocale } from "../i18n";
 import {
+  type ChatFileLink,
   decodeChatFileLinkPayload,
   encodeChatFileLink,
-  type ChatFileLink,
   parseChatFileLink,
 } from "../lib/chat/chatFileLinks";
 import { normalizeLatexDelimiters } from "../lib/normalizeLatexDelimiters";
@@ -76,6 +76,7 @@ export function rewriteChatFileLinks() {
 
 type ChatFileMdastNode = {
   children?: ChatFileMdastNode[];
+  position?: { start?: { offset?: number }; end?: { offset?: number } };
   type?: string;
   url?: string;
   value?: string;
@@ -83,12 +84,45 @@ type ChatFileMdastNode = {
 
 const CHAT_FILE_MARKDOWN_LINK_PATTERN = /\[([^\]\n]+)\]\(([^)\n]+)\)/g;
 const SKIPPED_CHAT_FILE_MDAST_NODES = new Set(["code", "html", "image", "inlineCode", "link"]);
+const COMMONMARK_ESCAPABLE_CHARACTER = /[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/;
 
-function rewriteChatFileTextNode(value: string) {
+function mapDecodedSourceOffsets(sourceValue: string, value: string) {
+  let decoded = "";
+  const rawOffsets: number[] = [];
+  for (let index = 0; index < sourceValue.length; index += 1) {
+    const next = sourceValue[index + 1];
+    if (sourceValue[index] === "\\" && next && COMMONMARK_ESCAPABLE_CHARACTER.test(next)) {
+      decoded += next;
+      rawOffsets.push(index + 1);
+      index += 1;
+    } else {
+      decoded += sourceValue[index];
+      rawOffsets.push(index);
+    }
+  }
+  return decoded === value ? rawOffsets : null;
+}
+
+function rewriteChatFileTextNode(node: ChatFileMdastNode, source: string) {
+  const value = node.value ?? "";
+  const sourceStart = node.position?.start?.offset;
+  const sourceEnd = node.position?.end?.offset;
+  const sourceValue =
+    sourceStart !== undefined && sourceEnd !== undefined
+      ? source.slice(sourceStart, sourceEnd)
+      : "";
+  const rawOffsets = mapDecodedSourceOffsets(sourceValue, value);
+  if (!rawOffsets) return null;
   const nodes: ChatFileMdastNode[] = [];
   let cursor = 0;
   for (const match of value.matchAll(CHAT_FILE_MARKDOWN_LINK_PATTERN)) {
     const index = match.index ?? 0;
+    const sourceIndex = rawOffsets[index];
+    let backslashes = 0;
+    for (let offset = sourceIndex - 1; offset >= 0 && sourceValue[offset] === "\\"; offset -= 1) {
+      backslashes += 1;
+    }
+    if (backslashes % 2 === 1) continue;
     const destination = match[2].trim();
     if (!parseChatFileLink(destination)) continue;
     if (index > cursor) nodes.push({ type: "text", value: value.slice(cursor, index) });
@@ -104,23 +138,27 @@ function rewriteChatFileTextNode(value: string) {
   return nodes;
 }
 
-function rewriteChatFileMarkdownChildren(node: ChatFileMdastNode) {
+function rewriteChatFileMarkdownChildren(node: ChatFileMdastNode, source: string) {
   if (!node.children || SKIPPED_CHAT_FILE_MDAST_NODES.has(node.type ?? "")) return;
   for (let index = 0; index < node.children.length; index += 1) {
     const child = node.children[index];
     if (child.type === "text" && typeof child.value === "string") {
-      const replacement = rewriteChatFileTextNode(child.value);
+      const replacement = rewriteChatFileTextNode(child, source);
       if (!replacement) continue;
       node.children.splice(index, 1, ...replacement);
       index += replacement.length - 1;
       continue;
     }
-    rewriteChatFileMarkdownChildren(child);
+    rewriteChatFileMarkdownChildren(child, source);
   }
 }
 
 export function remarkChatFileLinks() {
-  return (tree: unknown) => rewriteChatFileMarkdownChildren(tree as ChatFileMdastNode);
+  return (tree: unknown, file?: ChatFileVFile) =>
+    rewriteChatFileMarkdownChildren(
+      tree as ChatFileMdastNode,
+      typeof file?.value === "string" ? file.value : "",
+    );
 }
 
 export type MarkdownProps = {

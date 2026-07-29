@@ -14,8 +14,8 @@ import {
 import { ImagePreview, type ImagePreviewSlide } from "@/components/chat/ImagePreview";
 import { Markdown } from "@/components/Markdown";
 import { useLocale } from "@/i18n/LocaleContext";
-import { normalizeLiveToolStatus, VIBING_STATUS } from "@/lib/chat/chatPageHelpers";
 import type { ChatFileLink } from "@/lib/chat/chatFileLinks";
+import { normalizeLiveToolStatus, VIBING_STATUS } from "@/lib/chat/chatPageHelpers";
 import type { HistoryMessageRef } from "@/lib/chat/conversationState";
 import { getRoundText, getRoundToolTrace } from "@/lib/chat/uiMessages";
 import {

@@ -31,6 +31,7 @@ import { useConfirmDialog } from "../components/ui/confirm-dialog";
 import { useLocale } from "../i18n";
 import type { AppUpdateController } from "../lib/appUpdates";
 import { getAutomationState, useAutomation } from "../lib/automation";
+import type { ChatFileLink } from "../lib/chat/chatFileLinks";
 import type { CompactionStatus } from "../lib/chat/compaction/types";
 import {
   buildRequestContext,
@@ -39,10 +40,9 @@ import {
   type RenderTimelineItem,
 } from "../lib/chat/conversation/conversationState";
 import type { ChatHistorySummary } from "../lib/chat/history/chatHistory";
-import type { ChatFileLink } from "../lib/chat/chatFileLinks";
-import { openChatFileLink } from "../lib/chat/openChatFileLink";
 import { memoryExtraction } from "../lib/chat/memory/extractionController";
 import type { CodeMentionReference } from "../lib/chat/messages/mentionReferences";
+import { openChatFileLink } from "../lib/chat/openChatFileLink";
 import {
   buildFallbackConversationTitle,
   createConversationIdentity,

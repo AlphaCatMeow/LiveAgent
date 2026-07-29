@@ -32,8 +32,8 @@ import type {
 import {
   CancelChatRequestSchema,
   ChatCommandRequestSchema,
-  ChatMessageRefSchema,
   ChatFileOpenRequestSchema,
+  ChatMessageRefSchema,
   ChatQueueRequestSchema,
   ChatRequestSchema,
   ChatRuntimeControlsSchema,

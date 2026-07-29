@@ -27,9 +27,8 @@ import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { LocaleContext, t as translate } from "@/i18n";
 import { registerAskUserQuestionAnswerHandler } from "@/lib/chat/askUserQuestionBridge";
-import type { ChatHistorySummary } from "@/lib/chat/chatHistory";
 import type { ChatFileLink } from "@/lib/chat/chatFileLinks";
-import { openChatFileLink } from "@/lib/chat/openChatFileLink";
+import type { ChatHistorySummary } from "@/lib/chat/chatHistory";
 import { buildModelOptions } from "@/lib/chat/chatPageHelpers";
 import type { HistoryMessageRef } from "@/lib/chat/conversationState";
 import {
@@ -42,6 +41,7 @@ import {
   trimLeadingHeadlessEntries,
 } from "@/lib/chat/historyWindow";
 import type { CodeMentionReference } from "@/lib/chat/mentionReferences";
+import { openChatFileLink } from "@/lib/chat/openChatFileLink";
 import { isChatRuntimeProtocolIncompatible } from "@/lib/chat/runtimeCompatibility";
 import { createActivityStore } from "@/lib/chat/stream/activityStore";
 import {

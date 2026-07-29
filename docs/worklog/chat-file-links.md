@@ -57,5 +57,26 @@ Completed checks:
 - Playwright narrow-width check: 390px and 412px had no horizontal overflow; mouse, Enter,
   and Space each generated one click; tooltip and focus outline were present.
 
-Final acceptance/security audit is complete. No migration, package dependency, commit, push, or
-unrelated-worktree cleanup was performed.
+## Hardening follow-up — 2026-07-29
+
+The follow-up closes the remaining review findings without changing the public file-link contract:
+
+- Escaped Markdown links remain literal, including candidates whose label contains escaped punctuation
+- Linked editor locations apply once per request and tab, so typing no longer resets the caret
+- Directories are classified before file extensions; macOS active directory packages fail closed
+- Unknown binary and active targets never reach the host opener
+- Gateway file-open work runs outside the serial envelope loop, with a 25-second timeout and a four-request concurrency limit
+- Detached Gateway responses stay bound to the outbound connection that received the request
+
+Verification for the follow-up snapshot:
+
+- GUI targeted chat/Markdown tests: 23 passed
+- Gateway targeted chat-file-link tests: 5 passed
+- Rust `chat_file_links` tests: 5 passed; `cargo check --tests` passed with five unrelated existing warnings
+- GUI and Gateway Web `pnpm build`: passed
+- Focused Biome checks for the changed Markdown/editor logic: passed with only existing editor accessibility warnings
+- Full package Biome checks remain unusable on this Windows checkout because untouched files produce hundreds of existing CRLF-format and lint diagnostics; no broad formatting rewrite was applied
+- `cargo fmt --check`, mirror check for 116 files, and `git diff --check`: passed
+- `Cargo.lock`, `Cargo.toml`, generated build output, and unrelated local files are excluded from the follow-up
+
+The hardening implementation and local verification are complete. Commit, push, PR creation, and remote CI follow this checkpoint.

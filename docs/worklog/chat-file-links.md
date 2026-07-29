@@ -80,3 +80,11 @@ Verification for the follow-up snapshot:
 - `Cargo.lock`, `Cargo.toml`, generated build output, and unrelated local files are excluded from the follow-up
 
 The hardening implementation and local verification are complete. Commit, push, PR creation, and remote CI follow this checkpoint.
+
+## Maintainer safety follow-up — 2026-07-29
+
+Host file-manager fallbacks now reveal or select directory targets instead of opening the targets
+through platform file associations. This keeps unrecognized macOS bundles such as `.prefPane`,
+`.saver`, `.bundle`, and `.plugin` directories from being launched after a chat-file-link click.
+Platform command construction and the directory-package plan are covered by focused Rust regression
+tests.

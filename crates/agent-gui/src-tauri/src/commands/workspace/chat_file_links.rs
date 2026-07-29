@@ -458,7 +458,7 @@ fn build_chat_file_link_plan(
                 outside_workspace: true,
             },
             target,
-            system_mode: Some("open"),
+            system_mode: Some("reveal"),
         });
     }
     if !metadata.is_file() {
@@ -542,7 +542,7 @@ pub(crate) fn open_chat_file_link_sync(
         open_in_file_manager,
     )?;
     if let Some(mode) = plan.system_mode {
-        spawn_workspace_open_command(&plan.target, &plan.response.kind, mode).map_err(|_| {
+        spawn_workspace_open_command(&plan.target, mode).map_err(|_| {
             ChatFileLinkError::new(
                 ChatFileLinkErrorCode::OpenFailed,
                 "The linked file could not be opened on the host device.",
@@ -766,7 +766,7 @@ mod tests {
         .expect("build manager fallback");
         assert_eq!(fallback.response.action, "opened");
         assert_eq!(fallback.response.kind, "directory");
-        assert_eq!(fallback.system_mode, Some("open"));
+        assert_eq!(fallback.system_mode, Some("reveal"));
 
         fs::remove_dir_all(root).expect("remove temp workspace");
     }
@@ -789,6 +789,35 @@ mod tests {
             )
             .expect_err("active directory package must fail closed");
             assert_eq!(error.code, ChatFileLinkErrorCode::UnsupportedTarget);
+        }
+        fs::remove_dir_all(root).expect("remove temp workspace");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_other_directory_packages_are_revealed_instead_of_launched() {
+        let root = temp_workspace();
+        for path in [
+            "Dangerous.prefPane",
+            "Dangerous.saver",
+            "Dangerous.bundle",
+            "Dangerous.plugin",
+        ] {
+            fs::create_dir(root.join(path)).expect("create directory package");
+            let planned = build_chat_file_link_plan(
+                "conversation-test",
+                &root.to_string_lossy(),
+                path,
+                "relative",
+                None,
+                None,
+                None,
+                true,
+            )
+            .expect("directory package must use safe reveal");
+            assert_eq!(planned.response.action, "opened");
+            assert_eq!(planned.response.kind, "directory");
+            assert_eq!(planned.system_mode, Some("reveal"));
         }
         fs::remove_dir_all(root).expect("remove temp workspace");
     }

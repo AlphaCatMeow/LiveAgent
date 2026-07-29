@@ -23,14 +23,18 @@ function installDom() {
     KeyboardEvent: window.KeyboardEvent,
     getComputedStyle: window.getComputedStyle.bind(window),
   })) {
-    previous.set(name, globalThis[name]);
-    globalThis[name] = value;
+    previous.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, {
+      configurable: true,
+      writable: true,
+      value,
+    });
   }
   return () => {
     window.close();
-    for (const [name, value] of previous) {
-      if (value === undefined) delete globalThis[name];
-      else globalThis[name] = value;
+    for (const [name, descriptor] of previous) {
+      if (descriptor === undefined) delete globalThis[name];
+      else Object.defineProperty(globalThis, name, descriptor);
     }
   };
 }

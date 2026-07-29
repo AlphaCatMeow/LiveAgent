@@ -124,7 +124,7 @@ import {
 } from "../../lib/skills/skillCardMetadata";
 import { getSkillTriggerHint } from "../../lib/skills/skillTriggerHint";
 
-type SkillsHubView = "installed" | "store" | "import";
+type SkillsHubView = "installed" | "presets" | "store" | "import";
 
 const EXTERNAL_TOOL_LABELS: Record<string, string> = {
   "claude-code": "Claude Code",
@@ -136,6 +136,7 @@ const STORE_PAGE_LIMIT = 24;
 const INSTALLED_SKILL_PREVIEW_LINES = 10_000;
 const COPY_FEEDBACK_MS = 1600;
 const EMPTY_SKILLS: SkillSummary[] = [];
+const EMPTY_SKILL_NAMES: string[] = [];
 const TERMINAL_INSTALL_PHASES = new Set(["done", "error", "cancelled"]);
 const STORE_SORT_OPTIONS: Array<{ value: ClawHubSort; labelKey: string }> = [
   { value: "downloads", labelKey: "settings.skillsStoreSortMostDownloaded" },
@@ -1302,8 +1303,17 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
     }
   }, [initialSkills?.length, refresh]);
 
-  const activePreset = resolveSkillPreset(settings.skills, activePresetId);
-  const activePresetSkillNames = activePreset.skillNames;
+  const defaultPreset = resolveSkillPreset(settings.skills, DEFAULT_SKILL_PRESET_ID);
+  const customPresets = useMemo(
+    () => settings.skills.presets.filter((preset) => preset.id !== DEFAULT_SKILL_PRESET_ID),
+    [settings.skills.presets],
+  );
+  const activeCustomPreset =
+    customPresets.find((preset) => preset.id === activePresetId) ?? customPresets[0] ?? null;
+  const activePreset =
+    view === "presets" && activeCustomPreset ? activeCustomPreset : defaultPreset;
+  const activePresetSkillNames =
+    view === "presets" && !activeCustomPreset ? EMPTY_SKILL_NAMES : activePreset.skillNames;
   const selected = useMemo(
     () => new Set(mergeAlwaysEnabledSkillNames(activePresetSkillNames)),
     [activePresetSkillNames],
@@ -1369,7 +1379,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
   );
 
   useEffect(() => {
-    if (view === "installed" && !lockedByChatMode) return;
+    if ((view === "installed" || view === "presets") && !lockedByChatMode) return;
     setPreviewInstalledSkill(null);
   }, [lockedByChatMode, view]);
 
@@ -1723,7 +1733,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
       if (installedNames.length === 0) return;
 
       setSettings((prev) => {
-        const preset = resolveSkillPreset(prev.skills, activePreset.id);
+        const preset = resolveSkillPreset(prev.skills, DEFAULT_SKILL_PRESET_ID);
         const next = new Set(preset.skillNames);
         let changed = prev.skills.enabled !== true;
         for (const name of installedNames) {
@@ -1740,7 +1750,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
         });
       });
     },
-    [activePreset.id, setSettings],
+    [setSettings],
   );
 
   useEffect(() => {
@@ -2180,7 +2190,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
           return;
         }
         // 「全选当前筛选」只对已安装页有定义；其余视图保留浏览器默认 Ctrl+A。
-        if (view !== "installed") return;
+        if (view !== "installed" && view !== "presets") return;
         event.preventDefault();
         setBulkSelectionRange(filteredSelectableInstalledNames, true);
       }
@@ -2318,35 +2328,35 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
   }
 
   function renameActivePreset() {
-    if (activePreset.id === DEFAULT_SKILL_PRESET_ID) return;
-    setRenamingPresetId(activePreset.id);
-    setRenamingPresetName(activePreset.name);
+    if (!activeCustomPreset) return;
+    setRenamingPresetId(activeCustomPreset.id);
+    setRenamingPresetName(activeCustomPreset.name);
   }
 
   function commitPresetRename() {
-    if (renamingPresetId !== activePreset.id) return;
+    if (!activeCustomPreset || renamingPresetId !== activeCustomPreset.id) return;
     const value = renamingPresetName.trim();
     setRenamingPresetId(null);
-    if (!value || value === activePreset.name) return;
+    if (!value || value === activeCustomPreset.name) return;
     const duplicate = settings.skills.presets.some(
       (preset) =>
-        preset.id !== activePreset.id && preset.name.toLowerCase() === value.toLowerCase(),
+        preset.id !== activeCustomPreset.id && preset.name.toLowerCase() === value.toLowerCase(),
     );
     if (duplicate) {
       setLoadError(t("settings.skillsPresetNameExists"));
       return;
     }
     setSettings((prev) => {
-      const skills = updateSkillPreset(prev.skills, activePreset.id, { name: value });
+      const skills = updateSkillPreset(prev.skills, activeCustomPreset.id, { name: value });
       return updateSkills(prev, { presets: skills.presets });
     });
   }
 
   function deleteActivePreset() {
-    if (activePreset.id === DEFAULT_SKILL_PRESET_ID) return;
+    if (!activeCustomPreset) return;
     setSettings((prev) =>
       updateSkills(prev, {
-        presets: prev.skills.presets.filter((preset) => preset.id !== activePreset.id),
+        presets: prev.skills.presets.filter((preset) => preset.id !== activeCustomPreset.id),
       }),
     );
     setActivePresetId(DEFAULT_SKILL_PRESET_ID);
@@ -2357,9 +2367,13 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
     skills.length > 0 && !hasPresentedInstalledSkills && installedContentPending;
   const skillsStatusHint = lockedByChatMode
     ? t("settings.skillsDisabledInChatMode")
-    : skillsEnabled
-      ? null
-      : null;
+    : view === "presets"
+      ? activeCustomPreset
+        ? t("settings.skillsPresetEditingHint").replace("{name}", activeCustomPreset.name)
+        : t("settings.skillsPresetEmptyDesc")
+      : view === "installed"
+        ? t("settings.skillsPresetDefaultHint")
+        : null;
 
   return (
     <div className="hub-page hub-page-enter relative flex h-full min-h-0 flex-1 flex-col overflow-hidden">
@@ -2434,82 +2448,92 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                 </div>
 
                 <div className="flex min-w-0 flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
-                  {renamingPresetId === activePreset.id ? (
-                    <input
-                      autoFocus
-                      value={renamingPresetName}
-                      onChange={(event) => setRenamingPresetName(event.currentTarget.value)}
-                      onBlur={commitPresetRename}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") event.currentTarget.blur();
-                        if (event.key === "Escape") setRenamingPresetId(null);
-                      }}
-                      className="h-8 min-w-0 max-w-40 rounded-md border border-border/50 bg-background px-2 text-xs text-foreground outline-none focus:border-primary/60"
-                      aria-label={t("settings.skillsPresetRenamePrompt")}
-                    />
-                  ) : (
-                    <select
-                      value={activePreset.id}
-                      onChange={(event) => {
-                        setActivePresetId(event.currentTarget.value);
-                        setRenamingPresetId(null);
-                      }}
-                      className="h-8 min-w-0 max-w-40 rounded-md border border-border/50 bg-background px-2 text-xs text-foreground"
-                      aria-label={t("settings.skillsPresetLabel")}
-                    >
-                      {settings.skills.presets.map((preset) => (
-                        <option key={preset.id} value={preset.id}>
-                          {preset.name}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={() => createPreset(false)}
-                    title={t("settings.skillsPresetCreate")}
-                  >
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={() => createPreset(true)}
-                    title={t("settings.skillsPresetDuplicate")}
-                  >
-                    <Copy className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    disabled={activePreset.id === DEFAULT_SKILL_PRESET_ID}
-                    onClick={renameActivePreset}
-                    title={t("settings.skillsPresetRename")}
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <ConfirmActionPopover
-                    title={t("settings.skillsPresetDelete")}
-                    description={t("settings.skillsPresetDeleteConfirm")}
-                    confirmLabel={t("settings.delete")}
-                    onConfirm={deleteActivePreset}
-                  >
-                    {() => (
+                  {view === "presets" ? (
+                    <>
+                      {activeCustomPreset ? (
+                        renamingPresetId === activeCustomPreset.id ? (
+                          <input
+                            autoFocus
+                            value={renamingPresetName}
+                            onChange={(event) => setRenamingPresetName(event.currentTarget.value)}
+                            onBlur={commitPresetRename}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") event.currentTarget.blur();
+                              if (event.key === "Escape") setRenamingPresetId(null);
+                            }}
+                            className="h-8 min-w-0 max-w-40 rounded-md border border-border/50 bg-background px-2 text-xs text-foreground outline-none focus:border-primary/60"
+                            aria-label={t("settings.skillsPresetRenamePrompt")}
+                          />
+                        ) : (
+                          <select
+                            value={activeCustomPreset.id}
+                            onChange={(event) => {
+                              setActivePresetId(event.currentTarget.value);
+                              setRenamingPresetId(null);
+                            }}
+                            className="h-8 min-w-0 max-w-40 rounded-md border border-border/50 bg-background px-2 text-xs text-foreground"
+                            aria-label={t("settings.skillsPresetLabel")}
+                          >
+                            {customPresets.map((preset) => (
+                              <option key={preset.id} value={preset.id}>
+                                {preset.name}
+                              </option>
+                            ))}
+                          </select>
+                        )
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          {t("settings.skillsPresetEmptyShort")}
+                        </span>
+                      )}
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8 text-destructive"
-                        disabled={activePreset.id === DEFAULT_SKILL_PRESET_ID}
-                        title={t("settings.skillsPresetDelete")}
+                        className="h-8 w-8"
+                        onClick={() => createPreset(false)}
+                        title={t("settings.skillsPresetCreate")}
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Plus className="h-4 w-4" />
                       </Button>
-                    )}
-                  </ConfirmActionPopover>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => createPreset(true)}
+                        title={t("settings.skillsPresetDuplicate")}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        disabled={!activeCustomPreset}
+                        onClick={renameActivePreset}
+                        title={t("settings.skillsPresetRename")}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <ConfirmActionPopover
+                        title={t("settings.skillsPresetDelete")}
+                        description={t("settings.skillsPresetDeleteConfirm")}
+                        confirmLabel={t("settings.delete")}
+                        onConfirm={deleteActivePreset}
+                      >
+                        {() => (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-destructive"
+                            disabled={!activeCustomPreset}
+                            title={t("settings.skillsPresetDelete")}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </ConfirmActionPopover>
+                    </>
+                  ) : null}
                   <button
                     type="button"
                     role="switch"
@@ -2579,6 +2603,12 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                     count: selectableSkills.length,
                   },
                   {
+                    value: "presets" as const,
+                    label: t("settings.skillsHubPresetsTab"),
+                    icon: LayoutGrid,
+                    count: customPresets.length,
+                  },
+                  {
                     value: "store" as const,
                     label: t("settings.skillsHubStoreTab"),
                     icon: Cloud,
@@ -2626,7 +2656,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
 
               {!lockedByChatMode ? (
                 <div className="flex w-full min-w-0 items-center justify-end gap-2">
-                  {view !== "store" ? (
+                  {view !== "store" && (view !== "presets" || activeCustomPreset) ? (
                     <button
                       type="button"
                       aria-pressed={bulkMode}
@@ -2635,7 +2665,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                         else enterBulkMode();
                       }}
                       title={
-                        view === "installed"
+                        view === "installed" || view === "presets"
                           ? t("settings.skillsBulkHint")
                           : t("settings.skillsBulkImportHint")
                       }
@@ -2652,7 +2682,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                       </span>
                     </button>
                   ) : null}
-                  {view === "installed" ? (
+                  {view === "installed" || view === "presets" ? (
                     <select
                       value={installedSort}
                       onChange={(event) => {
@@ -2682,11 +2712,15 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                     <input
                       type="text"
                       value={
-                        view === "installed" ? filter : view === "store" ? storeQuery : importQuery
+                        view === "installed" || view === "presets"
+                          ? filter
+                          : view === "store"
+                            ? storeQuery
+                            : importQuery
                       }
                       onChange={(e) => {
                         const value = e.currentTarget.value;
-                        if (view === "installed") {
+                        if (view === "installed" || view === "presets") {
                           setFilter(value);
                         } else if (view === "store") {
                           setStoreQuery(value);
@@ -2695,7 +2729,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                         }
                       }}
                       placeholder={
-                        view === "installed"
+                        view === "installed" || view === "presets"
                           ? t("settings.skillsSearch")
                           : view === "store"
                             ? t("settings.skillsStoreSearch")
@@ -2720,7 +2754,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                     </div>
                   </GlassPanel>
                 </div>
-              ) : view === "installed" ? (
+              ) : view === "installed" || view === "presets" ? (
                 <div
                   aria-busy={loading || showInitialInstalledContentLoading}
                   className={cn(
@@ -2729,6 +2763,33 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                   )}
                 >
                   <div className="flex flex-col gap-5">
+                    {view === "presets" && !activeCustomPreset ? (
+                      <GlassPanel className="hub-panel-enter">
+                        <div className="flex flex-col items-center gap-3 py-8 text-center">
+                          <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted/60">
+                            <LayoutGrid className="h-5 w-5 text-muted-foreground" />
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-sm font-medium text-foreground">
+                              {t("settings.skillsPresetEmptyTitle")}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {t("settings.skillsPresetEmptyDesc")}
+                            </p>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="mt-1 gap-1.5 rounded-full"
+                            onClick={() => createPreset(false)}
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            {t("settings.skillsPresetCreate")}
+                          </Button>
+                        </div>
+                      </GlassPanel>
+                    ) : null}
+
                     {loadError ? (
                       <GlassPanel tone="error" className="hub-panel-enter">
                         <div className="flex items-center gap-2">
@@ -2788,7 +2849,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                       />
                     ) : null}
 
-                    {sortedFiltered.length > 0 ? (
+                    {sortedFiltered.length > 0 && (view !== "presets" || activeCustomPreset) ? (
                       <div className="flex flex-col gap-3">
                         {bulkMode ? (
                           <div className="hub-panel-enter flex items-center gap-2 text-[11px] text-muted-foreground/80">
@@ -2828,7 +2889,10 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                       </div>
                     ) : null}
 
-                    {filter.trim() && sortedFiltered.length === 0 && skills.length > 0 ? (
+                    {(view !== "presets" || activeCustomPreset) &&
+                    filter.trim() &&
+                    sortedFiltered.length === 0 &&
+                    skills.length > 0 ? (
                       <GlassPanel tone="muted" className="hub-panel-enter">
                         <p className="py-2 text-center text-sm text-muted-foreground">
                           {t("settings.skillsNoMatch").replace("{filter}", filter)}
@@ -2900,7 +2964,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
       ) : null}
 
       {bulkMode &&
-      view === "installed" &&
+      (view === "installed" || view === "presets") &&
       !lockedByChatMode &&
       (!bulkUndo || bulkSelection.size > 0) ? (
         <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center px-3 max-sm:bottom-[calc(1rem+env(safe-area-inset-bottom))]">

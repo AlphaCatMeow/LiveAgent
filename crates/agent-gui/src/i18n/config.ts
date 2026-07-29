@@ -2049,6 +2049,11 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.skillsPresetRenamePrompt": "输入新的方案名称",
     "settings.skillsPresetNameExists": "方案名称已存在",
     "settings.skillsPresetDeleteConfirm": "删除此方案？引用它的会话和 Cron 将回退到 Default。",
+    "settings.skillsPresetEmptyShort": "暂无自定义方案",
+    "settings.skillsPresetEmptyTitle": "还没有自定义 Skill 方案",
+    "settings.skillsPresetEmptyDesc": "创建方案后，从已安装 Skill 中选择要向模型暴露的能力。",
+    "settings.skillsPresetEditingHint": "正在配置“{name}”，成员仅来自已安装 Skill",
+    "settings.skillsPresetDefaultHint": "这里配置新会话默认使用的 Default 方案",
     "settings.skillsHubSubtitle": "浏览、安装并管理对话可用的技能模块",
     "settings.skillsHubEnabled": "Skills 已启用",
     "settings.skillsHubEnabledBadge": "已启用",
@@ -2057,6 +2062,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.skillsHubToggleEnable": "启用技能",
     "settings.skillsHubToggleDisable": "禁用技能",
     "settings.skillsHubInstalledTab": "已安装",
+    "settings.skillsHubPresetsTab": "Skill 方案",
     "settings.skillsHubStoreTab": "技能商店",
     "settings.skillsHubImportTab": "本地导入",
     "settings.skillsImportDesc":
@@ -4412,6 +4418,13 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.skillsPresetNameExists": "A preset with this name already exists",
     "settings.skillsPresetDeleteConfirm":
       "Delete this preset? Conversations and Cron tasks using it will fall back to Default.",
+    "settings.skillsPresetEmptyShort": "No custom presets",
+    "settings.skillsPresetEmptyTitle": "No custom Skill presets yet",
+    "settings.skillsPresetEmptyDesc":
+      "Create a preset, then choose which installed Skills it exposes to the model.",
+    "settings.skillsPresetEditingHint": "Configuring “{name}” from the Skills currently installed",
+    "settings.skillsPresetDefaultHint":
+      "Configure the Default preset used by new conversations here",
     "settings.skillsHubSubtitle": "Browse, install, and manage skills for your conversations",
     "settings.skillsHubEnabled": "Skills enabled",
     "settings.skillsHubEnabledBadge": "Enabled",
@@ -4420,6 +4433,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.skillsHubToggleEnable": "Enable Skills",
     "settings.skillsHubToggleDisable": "Disable Skills",
     "settings.skillsHubInstalledTab": "Installed",
+    "settings.skillsHubPresetsTab": "Skill Presets",
     "settings.skillsHubStoreTab": "Skills Store",
     "settings.skillsHubImportTab": "Local Import",
     "settings.skillsImportDesc":

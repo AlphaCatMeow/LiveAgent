@@ -309,7 +309,9 @@ export const ChatHeader = memo(function ChatHeader(props: {
                               type="button"
                               onClick={() => toggleGroup(group.id)}
                               aria-expanded={expanded}
-                              title={expanded ? t("chat.collapseProvider") : t("chat.expandProvider")}
+                              title={
+                                expanded ? t("chat.collapseProvider") : t("chat.expandProvider")
+                              }
                               className="model-selector-group-label flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 px-2 py-0 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 dark:text-white/80"
                             >
                               <ProviderBrandIcon

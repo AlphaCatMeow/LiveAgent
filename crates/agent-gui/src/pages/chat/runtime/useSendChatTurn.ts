@@ -65,7 +65,11 @@ import {
   resolveExplicitSkillMentions,
   type SkillSummary,
 } from "../../../lib/skills";
-import type { SubagentStoreManager } from "../../../lib/subagents";
+import {
+  collectRetainedSubagentParentToolCallIds,
+  pruneSubagentRunsForConversation,
+  type SubagentStoreManager,
+} from "../../../lib/subagents";
 import type { SkillAccessPolicy } from "../../../lib/tools/skillAccessPolicy";
 import { appendManagedSkillSelections, asErrorMessage } from "../chatPageUtils";
 import {
@@ -173,6 +177,11 @@ type UseSendChatTurnParams = {
   ensureTunnelToolTab: (projectPathKey?: string) => void;
   ensureSshTunnelToolTab: (projectPathKey?: string) => void;
   persistConversation: (params: PersistConversationParams) => Promise<boolean>;
+  replaceConversationAtMessage: (
+    conversationId: string,
+    messageRef: HistoryMessageRef,
+    replacementMessage: UserMessage,
+  ) => Promise<ConversationViewState>;
   pruneIdleConversationCaches: (extraKeepIds?: Iterable<string>) => void;
   requestQueuedChatTurnProcessing: (conversationId: string) => void;
 };
@@ -241,6 +250,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     ensureTunnelToolTab,
     ensureSshTunnelToolTab,
     persistConversation,
+    replaceConversationAtMessage,
     pruneIdleConversationCaches,
     requestQueuedChatTurnProcessing,
   } = params;
@@ -391,13 +401,13 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       return false;
     }
     if (hydratingConversationIdRef.current === conversationId) {
-      const message = "当前会话仍在补全完整历史，请稍候。";
+      const message = "当前会话仍在加载，请稍候。";
       setConversationErrorState(message);
       gatewayBridgeEvents.emitError(message, conversationId);
       return false;
     }
     if (hydrationFailedConversationIdRef.current === conversationId) {
-      const message = "当前会话完整历史加载失败，请重新打开该会话后再继续。";
+      const message = "当前会话加载失败，请重新打开该会话后再继续。";
       setConversationErrorState(message);
       gatewayBridgeEvents.emitError(message, conversationId);
       return false;
@@ -686,6 +696,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     let frozenGatewayFinalProjectionJson: string | null = null;
     let frozenGatewayContentComplete = false;
     let terminalHistoryPersistFailed = false;
+    let initialUserTurnPersisted = false;
     let initialPersistPromise: Promise<boolean> | null = null;
     let terminalHistoryPersistPromise: Promise<boolean> | null = null;
     let runCleanupPromise: Promise<void> = Promise.resolve();
@@ -918,6 +929,33 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       localGatewayRunStarted = true;
     }
 
+    if (overrides?.editResendBaseMessageRef) {
+      try {
+        nextConversationState = await replaceConversationAtMessage(
+          conversationId,
+          overrides.editResendBaseMessageRef,
+          pendingUserMessage,
+        );
+        initialUserTurnPersisted = true;
+        const keepParentToolCallIds =
+          collectRetainedSubagentParentToolCallIds(nextConversationState);
+        subagentStoresRef.current.invalidate(conversationId);
+        await pruneSubagentRunsForConversation({
+          parentConversationId: conversationId,
+          keepParentToolCallIds,
+        }).catch((error) => {
+          console.warn("edit-resend subagent cleanup failed", error);
+        });
+      } catch (error) {
+        const message = asErrorMessage(error, "替换编辑消息失败，原历史保持不变。");
+        cancellation.userStop.abort();
+        setConversationErrorState(message);
+        gatewayBridgeEvents.emitError(message, conversationId);
+        await gatewayBridgeEvents.close();
+        return false;
+      }
+    }
+
     setConversationStopHandler(conversationId, handleConversationStop);
     markConversationRunStarted();
     if (await finishRequestedStopBeforeRuntime()) {
@@ -1000,19 +1038,21 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
 
     // Persist the user turn immediately so WebUI/GUI sidebars can surface the
     // latest conversation before the assistant round finishes.
-    initialPersistPromise = persistConversationWithHistorySync({
-      conversationId,
-      sessionId,
-      providerId,
-      model,
-      selectedModel,
-      cwd: conversationCwd,
-      state: nextConversationState,
-      fallbackTitle,
-      createdAt,
-      titlePromise,
-      titleLookahead: true,
-    });
+    initialPersistPromise = initialUserTurnPersisted
+      ? Promise.resolve(true)
+      : persistConversationWithHistorySync({
+          conversationId,
+          sessionId,
+          providerId,
+          model,
+          selectedModel,
+          cwd: conversationCwd,
+          state: nextConversationState,
+          fallbackTitle,
+          createdAt,
+          titlePromise,
+          titleLookahead: true,
+        });
     const initialPersist = initialPersistPromise;
     if (overrides?.afterInitialHistoryPersist && !overrides.beforeRuntimeStart) {
       const persisted = await initialPersist;
@@ -1020,7 +1060,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
         return true;
       }
       if (!persisted) {
-        const message = "历史记录保存失败，已取消回滚与重发。";
+        const message = "历史记录保存失败，已取消发送。";
         setConversationErrorState(message);
         gatewayRuntimeErrorCode = "history_persist_failed";
         gatewayRuntimeErrorMessage = message;
@@ -1040,9 +1080,9 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
         if (await finishRequestedStopBeforeRuntime()) {
           return true;
         }
-        const message = asErrorMessage(error, "回滚历史失败");
+        const message = asErrorMessage(error, "历史保存后的启动操作失败");
         setConversationErrorState(message);
-        gatewayRuntimeErrorCode = "history_rollback_failed";
+        gatewayRuntimeErrorCode = "post_history_start_failed";
         gatewayRuntimeErrorMessage = message;
         gatewayBridgeEvents.emitError(message, conversationId);
         releaseConversationRunUi();

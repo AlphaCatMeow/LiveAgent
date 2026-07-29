@@ -446,7 +446,6 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
             targetConversationId,
             {
               rebased: payload.rebased === true,
-              baseMessageRef,
             },
           );
 
@@ -506,6 +505,7 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
           skillsDisabledOverride: gatewayBridgeRequest.skillsDisabledOverride,
           runtimeControlsOverride: gatewayBridgeRequest.runtimeControlsOverride,
           gatewayBridgeRequestOverride: gatewayBridgeRequest,
+          editResendBaseMessageRef: baseMessageRef,
           beforeRuntimeStart: markRuntimeStarted,
           afterInitialHistoryPersist: markRuntimeStarted,
         });

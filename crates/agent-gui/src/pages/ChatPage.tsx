@@ -791,7 +791,10 @@ export function ChatPage(props: ChatPageProps) {
             workdir: resultWorkdir,
             path: resultPath,
           };
-          if (!result.outsideWorkspace && workspaceRequest.projectPathKey === terminalProjectPathKey) {
+          if (
+            !result.outsideWorkspace &&
+            workspaceRequest.projectPathKey === terminalProjectPathKey
+          ) {
             handleChangedFileReveal(resultPath);
           }
           if (result.action === "preview") {

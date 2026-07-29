@@ -37,7 +37,11 @@ function normalizePath(path: string) {
 }
 
 function isAbsolutePath(path: string) {
-  return WINDOWS_DRIVE_PATH_PATTERN.test(path) || WINDOWS_UNC_PATH_PATTERN.test(path) || ABSOLUTE_POSIX_PATH_PATTERN.test(path);
+  return (
+    WINDOWS_DRIVE_PATH_PATTERN.test(path) ||
+    WINDOWS_UNC_PATH_PATTERN.test(path) ||
+    ABSOLUTE_POSIX_PATH_PATTERN.test(path)
+  );
 }
 
 function parseTrailingLocation(value: string) {
@@ -170,11 +174,14 @@ export function decodeChatFileLinkPayload(payload: string): ChatFileLink | null 
   if (params.get("v") !== INTERNAL_PAYLOAD_VERSION) return null;
   const path = params.get("path") ?? "";
   const source = params.get("source");
-  if (!path || (source !== "absolute" && source !== "relative" && source !== "file-url")) return null;
+  if (!path || (source !== "absolute" && source !== "relative" && source !== "file-url"))
+    return null;
 
   const normalized = normalizePath(path);
   const sourceMatches =
-    source === "relative" ? isSafeRelativePath(normalized) && !isAbsolutePath(normalized) : isAbsolutePath(normalized);
+    source === "relative"
+      ? isSafeRelativePath(normalized) && !isAbsolutePath(normalized)
+      : isAbsolutePath(normalized);
   if (!sourceMatches) return null;
 
   const parseLocationValue = (key: "line" | "endLine" | "column") => {

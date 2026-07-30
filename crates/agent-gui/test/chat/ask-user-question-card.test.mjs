@@ -8,6 +8,10 @@ const i18nPath = fileURLToPath(new URL("../../src/i18n/index.ts", import.meta.ur
 const iconsPath = fileURLToPath(new URL("../../src/components/icons/index.ts", import.meta.url));
 const utilsPath = fileURLToPath(new URL("../../src/lib/shared/utils.ts", import.meta.url));
 
+const { ASK_USER_QUESTION_TIMEOUT_MS } = createTsModuleLoader().loadModule(
+  "src/lib/chat/askUserQuestion.ts",
+);
+
 const questions = [
   {
     id: "choice",
@@ -30,6 +34,11 @@ function createHookHarness(initialState = {}) {
     [4, initialState.customTexts ?? {}],
     [5, initialState.submitting ?? false],
   ]);
+  // useAnswerCountdown 的 remainingMs（挂载后由 interval tick 驱动）；
+  // 测试用它模拟“采信的截止时间随后归零”。
+  if (initialState.remainingMs !== undefined) {
+    stateOverrides.set(8, initialState.remainingMs);
+  }
 
   const react = {
     useState(initialValue) {
@@ -146,9 +155,11 @@ test("expired countdown disables options, custom input, and submit before tool_r
   const card = createCardHarness({
     customSelected: { choice: true },
     customTexts: { choice: "My answer" },
+    // 采信的截止时间（挂载时仍在窗口内）随 interval tick 归零。
+    remainingMs: 0,
   });
   const tree = card.render({
-    deadlineAt: Date.now() - 1,
+    deadlineAt: Date.now() + 60_000,
     onSubmit: async () => {
       submitCalls += 1;
       return { ok: true };
@@ -189,6 +200,57 @@ test("expired countdown disables options, custom input, and submit before tool_r
   await flushPromises();
   assert.equal(card.hooks.setters.length, setterCountBeforeBlockedActions);
   assert.equal(submitCalls, 0);
+});
+
+// 截止时间由桌面时钟盖章、倒计时读本机时钟：偏移超界时必须回退挂载近似，
+// 不能把仍在挂起的提问卡一挂载就锁死（过期提交由桌面挂起表权威拒绝）。
+test("a deadline already past at mount is distrusted and the pending card stays answerable", async () => {
+  const submitted = [];
+  const card = createCardHarness({ draftSelections: { choice: "Second" } });
+  const tree = card.render({
+    // 本机时钟快于桌面盖章时钟：卡片挂载时截止时间看似早已过去。
+    deadlineAt: Date.now() - 5 * 60 * 1000,
+    onSubmit: async (answers) => {
+      submitted.push(answers);
+      return { ok: true };
+    },
+  });
+
+  const optionButtons = findAll(
+    tree,
+    (node) => node.type === "button" && node.props?.role === "radio",
+  );
+  assert.equal(optionButtons.length, 2);
+  assert.equal(optionButtons.every((button) => button.props.disabled === false), true);
+  const customOption = findAll(
+    tree,
+    (node) => node.type === "div" && node.props?.role === "radio",
+  )[0];
+  assert.equal(customOption.props["aria-disabled"], false);
+
+  const submitButton = findSubmitButton(tree);
+  assert.equal(submitButton.props.disabled, false);
+  submitButton.props.onClick();
+  await flushPromises();
+  assert.equal(submitted.length, 1);
+  assert.equal(submitted[0][0].selectedLabel, "Second");
+});
+
+test("a deadline beyond the full answer window is distrusted and clamps the countdown", () => {
+  const card = createCardHarness();
+  const tree = card.render({
+    // 本机时钟慢于桌面盖章时钟：截止时间看似远超完整应答窗口。
+    deadlineAt: Date.now() + ASK_USER_QUESTION_TIMEOUT_MS + 5 * 60 * 1000,
+    onSubmit: async () => ({ ok: true }),
+  });
+
+  const optionButtons = findAll(
+    tree,
+    (node) => node.type === "button" && node.props?.role === "radio",
+  );
+  assert.equal(optionButtons.every((button) => button.props.disabled === false), true);
+  // 倒计时按挂载近似显示完整窗口，而不是把偏移量当剩余时间。
+  assert.match(treeText(tree), /(?:3:00|2:59) chat\.askUser\.timeoutHint/);
 });
 
 test("a complete answer before the deadline submits the selected non-first option", async () => {

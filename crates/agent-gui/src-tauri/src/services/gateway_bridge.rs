@@ -1078,7 +1078,6 @@ fn is_builtin_share_tool_name(name: &str) -> bool {
             | "Edit"
             | "Glob"
             | "Grep"
-            | "HttpGetTest"
             | "Image"
             | "List"
             | "ManagedProcess"

@@ -118,7 +118,6 @@ type GatewayRequestOptions = {
 type GatewayChatSystemSettings = {
   executionMode?: string;
   workdir?: string;
-  selectedSystemTools?: string[];
 };
 
 export type GatewayChatCommandInput = {
@@ -608,8 +607,6 @@ function buildChatCommandPayload(input: GatewayChatCommandInput) {
       client_request_id: clientRequestId,
       execution_mode: systemSettings?.executionMode?.trim() || "text",
       workdir: systemSettings?.workdir?.trim() || "",
-      selected_system_tools:
-        systemSettings?.selectedSystemTools?.map((item) => item.trim()).filter(Boolean) ?? [],
       uploaded_files:
         input.uploadedFiles?.map((file) => ({
           relative_path: file.relativePath,
@@ -1834,6 +1831,21 @@ export class GatewayWebSocketClient {
         conversation_id: conversationId,
         item_id: toolCallId,
         request_json: answersJson,
+      }),
+    );
+  }
+
+  /** 提交对桌面端挂起工具审批的决定：item_id 为 toolCallId，request_json 为 {"decision":...}。 */
+  async chatQueueToolApproval(
+    conversationId: string,
+    toolCallId: string,
+    decisionJson: string,
+  ): Promise<ChatQueueResponse> {
+    return normalizeChatQueueResponse(
+      await this.requestWithRecovery<RawChatQueueResponse>("chat_queue.tool_approval", {
+        conversation_id: conversationId,
+        item_id: toolCallId,
+        request_json: decisionJson,
       }),
     );
   }

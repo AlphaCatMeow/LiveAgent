@@ -311,6 +311,7 @@ export default function GatewayApp() {
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
   const [workspaceCreateModalOpen, setWorkspaceCreateModalOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SectionId>("system");
+  const [settingsProviderId, setSettingsProviderId] = useState<string>();
   const [overlay, setOverlay] = useState<OverlayState>("closed");
   const { settings, setSettings, settingsSyncReady, settingsSyncError, settingsSaveState } =
     useGatewaySettingsSync({ token, api, activeAgentId: activeAgentScope });
@@ -3626,11 +3627,12 @@ export default function GatewayApp() {
 
   const handleComposerBusyChange = useCallback((_isBusy: boolean) => {}, []);
 
-  function openSettings(section: SectionId = "system") {
+  function openSettings(section: SectionId = "system", providerId?: string) {
     if (isMobileSidebarLayout()) {
       setSidebarOpen(false);
     }
     setSettingsSection(section);
+    setSettingsProviderId(section === "providers" ? providerId : undefined);
     setSettingsOpen(true);
     setOverlay("entering");
     requestAnimationFrame(() => requestAnimationFrame(() => setOverlay("open")));
@@ -5203,6 +5205,7 @@ export default function GatewayApp() {
                 saveState={settingsSaveState}
                 onBack={closeSettings}
                 initialSection={settingsSection}
+                initialProviderId={settingsProviderId}
                 hiddenSections={["remote"]}
                 onAgentDirectoryChanged={async () => {
                   if (!api) return;

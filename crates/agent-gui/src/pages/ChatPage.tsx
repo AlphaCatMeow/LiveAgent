@@ -161,7 +161,7 @@ type ChatPageProps = {
   getToolPolicies: () => AppSettings["system"]["toolPolicies"];
   context: Context;
   setContext: (next: Context) => void;
-  onOpenSettings: (section?: SectionId) => void;
+  onOpenSettings: (section?: SectionId, providerId?: string) => void;
   onToggleTheme: () => void;
   appUpdate?: AppUpdateController;
 };

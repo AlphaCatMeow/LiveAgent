@@ -3666,8 +3666,13 @@ function ProviderList(props: {
   );
 }
 
-export function ProvidersSection(props: SettingsSectionProps) {
-  const { settings, setSettings } = props;
+export function ProvidersSection(
+  props: SettingsSectionProps & {
+    initialProviderId?: string;
+    onInitialProviderHandled?: () => void;
+  },
+) {
+  const { settings, setSettings, initialProviderId, onInitialProviderHandled } = props;
   const { t } = useLocale();
 
   const [activeTab, setActiveTab] = useState<ProviderId>("claude_code");
@@ -3688,6 +3693,19 @@ export function ProvidersSection(props: SettingsSectionProps) {
   const { usageByProvider, refreshingProviderIds, refreshProvider } = useProviderUsage(
     settings.customProviders,
   );
+  const openedInitialProviderIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const providerId = initialProviderId?.trim();
+    if (!providerId || openedInitialProviderIdRef.current === providerId) return;
+    const provider = settings.customProviders.find((item) => item.id === providerId);
+    if (!provider) return;
+    openedInitialProviderIdRef.current = providerId;
+    setActiveTab(provider.type);
+    setEditingProvider(provider);
+    setModalOpen(true);
+    onInitialProviderHandled?.();
+  }, [initialProviderId, onInitialProviderHandled, settings.customProviders]);
 
   async function refreshThirdPartyProviders() {
     setCcsLoading(true);

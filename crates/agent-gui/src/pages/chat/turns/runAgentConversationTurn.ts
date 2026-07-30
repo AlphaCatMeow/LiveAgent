@@ -698,8 +698,9 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
 
   function queueToolCallDelta(toolCall: ToolCall, round: number) {
     if (!shouldShowToolEvent(toolCall)) return;
-    // 提问卡必须等问题与选项全部生成完毕再显示：跳过流式增量，双端
-    // （GUI 回合与网关 tool_call_delta）都只在 onToolCall 拿到完整参数后出现。
+    // 提问卡必须等问题与选项全部生成完毕且工具真正开始执行后再显示：
+    // 流式增量与 onToolCall 都只做内部记账，双端统一由
+    // onToolExecutionStart 发布可交互卡片。
     if (toolCall.name === ASK_USER_QUESTION_TOOL_NAME) return;
     pendingToolCallDeltas.set(toolCallDeltaKey(round, toolCall.id), { round, toolCall });
     schedulePendingToolCallDeltaFlush();
@@ -820,6 +821,10 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
         onToolCall: (toolCall, round) => {
           sawToolCallInRound = true;
           discardPendingToolCallDelta(toolCall, round);
+          // isRunning 只表示工具已出现在当前轮次，不代表提问已经进入权威
+          // pending 表。提问卡延迟到 onToolExecutionStart，避免用户在
+          // executeToolCall 建立 pending 前抢先提交。
+          if (toolCall.name === ASK_USER_QUESTION_TOOL_NAME) return;
           if (!shouldShowToolEvent(toolCall)) return;
           gatewayBridgeEvents.queueEvent({
             type: "tool_call",

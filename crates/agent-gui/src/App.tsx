@@ -377,6 +377,7 @@ export default function App() {
   // synchronously by setSettings, so read-modify-write sequences that stay in
   // one synchronous segment can never observe a stale snapshot.
   const getMcpSettings = useCallback(() => settingsRef.current.mcp, []);
+  const getToolPolicies = useCallback(() => settingsRef.current.system.toolPolicies, []);
 
   const reloadPersistedSettings = useCallback(async () => {
     await saveChainRef.current.catch(() => undefined);
@@ -594,6 +595,7 @@ export default function App() {
             settings={settings}
             setSettings={setSettings}
             getMcpSettings={getMcpSettings}
+            getToolPolicies={getToolPolicies}
             context={context}
             setContext={setContext}
             onOpenSettings={openSettings}

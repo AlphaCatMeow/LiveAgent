@@ -189,7 +189,6 @@ test("agent turn preserves suppressed parent Agent trace for cancellation persis
     effectiveSkillsEnabled: false,
     showSilentMemoryExtraction: false,
     agentTemplates: [],
-    selectedSystemToolIds: [],
     getMcpSettings: () => ({ servers: [], selected: [] }),
     sessionId: "session-1",
     conversationId: "conversation-1",

@@ -248,7 +248,6 @@ test("a direct queue stop pauses processing until composer Stop resumes it", asy
         system: {
           executionMode: "chat",
           workdir: "",
-          selectedSystemTools: [],
         },
         chatRuntimeControls: {},
       },

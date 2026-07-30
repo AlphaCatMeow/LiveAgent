@@ -304,21 +304,39 @@ export const ChatHeader = memo(function ChatHeader(props: {
                       return (
                         <div key={group.id} className="flex flex-col gap-0.5">
                           {groupIndex > 0 ? <hr className="my-1 h-px border-0 bg-muted" /> : null}
-                          <div className="sticky top-0 z-10 flex h-[30px] shrink-0 items-stretch bg-popover/95 backdrop-blur supports-[backdrop-filter]:bg-popover/80">
+                          <div className="group sticky top-0 z-10 flex h-[30px] shrink-0 items-stretch bg-popover/95 backdrop-blur transition-colors hover:bg-muted/40 focus-within:bg-muted/40 supports-[backdrop-filter]:bg-popover/80">
                             <button
                               type="button"
                               onClick={() => toggleGroup(group.id)}
                               aria-expanded={expanded}
-                              title={
-                                expanded ? t("chat.collapseProvider") : t("chat.expandProvider")
-                              }
-                              className="model-selector-group-label flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 px-2 py-0 text-left text-xs font-medium text-muted-foreground transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 dark:text-white/80"
+                              className="model-selector-group-label flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 px-2 py-0 text-left text-xs font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 dark:text-white/80"
                             >
                               <ProviderBrandIcon
                                 type={group.providerType}
                                 className="h-3.5 w-3.5 opacity-90"
                               />
                               <span className="min-w-0 flex-1 truncate">{group.name}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsModelPickerOpen(false);
+                                onOpenSettings("providers", group.id);
+                              }}
+                              aria-label={`${t("settings.editProvider")}: ${group.name}`}
+                              className="pointer-events-none flex w-7 max-w-0 shrink-0 cursor-pointer items-center justify-center overflow-hidden text-muted-foreground/70 opacity-0 transition-[max-width,opacity,color,background-color] duration-150 group-hover:max-w-7 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:max-w-7 group-focus-within:pointer-events-auto group-focus-within:opacity-100 hover:bg-muted/60 hover:text-foreground focus-visible:max-w-7 focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => toggleGroup(group.id)}
+                              aria-expanded={expanded}
+                              aria-label={`${
+                                expanded ? t("chat.collapseProvider") : t("chat.expandProvider")
+                              }: ${group.name}`}
+                              className="model-selector-group-label flex shrink-0 cursor-pointer items-center gap-1.5 px-2 py-0 text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 dark:text-white/80"
+                            >
                               <span className="inline-flex h-4 min-w-[1.1rem] shrink-0 items-center justify-center rounded-full bg-muted/70 px-1 text-[10px] tabular-nums">
                                 {group.opts.length}
                               </span>
@@ -328,18 +346,6 @@ export const ChatHeader = memo(function ChatHeader(props: {
                                   expanded && "rotate-180",
                                 )}
                               />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setIsModelPickerOpen(false);
-                                onOpenSettings("providers", group.id);
-                              }}
-                              title={`${t("settings.editProvider")}: ${group.name}`}
-                              aria-label={`${t("settings.editProvider")}: ${group.name}`}
-                              className="flex w-7 shrink-0 cursor-pointer items-center justify-center text-muted-foreground/70 transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
                             </button>
                           </div>
                           {expanded

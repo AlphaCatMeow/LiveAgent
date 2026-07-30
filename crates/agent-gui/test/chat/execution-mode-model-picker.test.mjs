@@ -54,10 +54,16 @@ test("model pickers search models and providers", () => {
   }
 });
 
-test("provider groups expose a direct edit affordance", () => {
+test("provider groups reveal the edit affordance before the count on hover", () => {
   for (const source of headerSources) {
     assert.match(source, /\bPencil\b/);
     assert.match(source, /t\("settings\.editProvider"\)/);
+    assert.doesNotMatch(source, /title=\{`\$\{t\("settings\.editProvider"\)/);
+    assert.doesNotMatch(source, /title=\{\s*expanded \? t\("chat\.collapseProvider"\)/);
+    assert.match(source, /pointer-events-none flex w-7 max-w-0/);
+    assert.match(source, /group-hover:max-w-7/);
+    assert.match(source, /group-focus-within:max-w-7/);
+    assert.ok(source.indexOf("<Pencil") < source.indexOf("{group.opts.length}"));
     assert.match(
       source,
       /setIsModelPickerOpen\(false\);\s+onOpenSettings\("providers", group\.id\);/,

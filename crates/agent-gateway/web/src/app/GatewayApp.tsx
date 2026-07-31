@@ -4898,6 +4898,7 @@ export default function GatewayApp() {
                             activeTurnKey={displayedTranscript.activeTurnKey}
                             contentWidth={settings.customSettings.chatTranscript.width}
                             isViewportFollowing={transcriptFollow.isFollowing}
+                            viewportFollowing={transcriptFollowing}
                             navRef={transcriptNavRef}
                             onAnchorUserRowChange={setActiveFloorKey}
                             error={transcriptError}

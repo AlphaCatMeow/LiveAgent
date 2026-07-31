@@ -213,7 +213,6 @@ async function executeCronPromptRun(
           ...DEFAULT_CHAT_RUNTIME_CONTROLS,
           reasoning: resolveCronReasoning(request.reasoning),
         },
-        settings.customSettings.providerIdentities,
       ),
       // 后台定时任务恒开提示词缓存：与前台会话共享同一前缀，命中率远高于按
       // 供应商开关逐个判断。

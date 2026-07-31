@@ -15,7 +15,9 @@ import type {
 } from "@/components/chat/MentionComposer";
 import { type NotifyItem, NotifyToast } from "@/components/chat/NotifyToast";
 import { SharedHistoryManagerModal } from "@/components/chat/SharedHistoryManagerModal";
+import { TaskProgressIndicator } from "@/components/chat/TaskProgressIndicator";
 import { ToolApprovalBar } from "@/components/chat/ToolApprovalBar";
+import { useSequencedTaskProgress } from "@/components/chat/useSequencedTaskProgress";
 import { ChevronDown, PanelRightClose, PanelRightOpen, Terminal } from "@/components/icons";
 import type {
   GitCommitContextPayload,
@@ -25,7 +27,7 @@ import { RightDockPanel } from "@/components/project-tools/RightDockPanel";
 import { Button } from "@/components/ui/button";
 import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { LocaleContext, t as translate } from "@/i18n";
+import { type Locale, LocaleContext, t as translate } from "@/i18n";
 import { registerAskUserQuestionAnswerHandler } from "@/lib/chat/askUserQuestionBridge";
 import type { ChatFileLink } from "@/lib/chat/chatFileLinks";
 import type { ChatHistorySummary } from "@/lib/chat/chatHistory";
@@ -60,6 +62,7 @@ import {
   createTranscriptStoreRegistry,
   useConversationChat,
 } from "@/lib/chat/stream/useConversationChat";
+import { selectTodoProgressUpdates, type TodoProgressUpdate } from "@/lib/chat/taskProgress";
 import {
   readToolApprovalDeadlineAt,
   readToolApprovalPending,
@@ -137,6 +140,42 @@ import type { SectionId } from "@/pages/settings/types";
 import { SkillsHubPage } from "@/pages/skills-hub/SkillsHubPage";
 
 const LOCAL_DRAFT_PREFIX = "__local_draft__:";
+
+function CurrentTaskProgress(props: {
+  updates: readonly TodoProgressUpdate[];
+  isConversationRunning: boolean;
+  locale: Locale;
+}) {
+  const { updates, isConversationRunning, locale } = props;
+  const snapshot = useSequencedTaskProgress(updates, isConversationRunning);
+  const labels = useMemo(() => {
+    if (!snapshot) return null;
+    return {
+      title: translate("chat.taskProgress.title", locale),
+      step: translate("chat.taskProgress.step", locale)
+        .replace("{current}", String(snapshot.currentStep))
+        .replace("{total}", String(snapshot.totalCount)),
+      completedCount: `${snapshot.completedCount}/${snapshot.totalCount} ${translate(
+        "chat.taskProgress.completedCount",
+        locale,
+      )}`,
+      running: translate("chat.taskProgress.running", locale),
+      pending: translate("chat.taskProgress.pending", locale),
+      paused: translate("chat.taskProgress.paused", locale),
+      completed: translate("chat.taskProgress.completed", locale),
+    };
+  }, [locale, snapshot]);
+
+  if (!snapshot || !labels) return null;
+  return (
+    <TaskProgressIndicator
+      snapshot={snapshot}
+      isConversationRunning={isConversationRunning}
+      labels={labels}
+    />
+  );
+}
+
 function createLocalDraftConversationId() {
   return `${LOCAL_DRAFT_PREFIX}${createUuid()}`;
 }
@@ -4404,6 +4443,10 @@ export default function GatewayApp() {
     return item?.title ?? "";
   }, [selectedHistoryId, sidebarConversationsById]);
   const transcriptRows = displayedTranscript.rows;
+  const taskProgressUpdates = useMemo(
+    () => selectTodoProgressUpdates(transcriptRows),
+    [transcriptRows],
+  );
   // 当前会话的待审批工具:遍历渲染中的 transcript,筛出带 __toolApprovalPending 标记
   // 且尚无结果的 tool call(与 ToolCallItem 判定同源)。用于输入框上方的集中审批栏,
   // 取代埋在各折叠项里的分散卡片。快照 revision 变化时经 useConversationChat 重渲染,
@@ -5102,6 +5145,14 @@ export default function GatewayApp() {
                       onMoveQueuedTurnUp={moveQueuedTurnUp}
                       onEditQueuedTurn={editQueuedTurn}
                       onRemoveQueuedTurn={removeQueuedTurn}
+                      taskProgressBar={
+                        <CurrentTaskProgress
+                          key={displayedConversationId}
+                          updates={taskProgressUpdates}
+                          isConversationRunning={transcriptBusy}
+                          locale={settings.locale}
+                        />
+                      }
                       approvalBar={approvalBar}
                     />
                     {isFileDropActive ? (

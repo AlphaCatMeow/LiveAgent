@@ -6,12 +6,12 @@ Keep the active assistant turn structurally stable while thinking, tools, tool r
 
 ## Baseline and isolation
 
-- Baseline: `upstream/main` at `849daf269762846557cc8243c5fe6e7fb155ed72`.
-- Post-acceptance fetch on 2026-08-01 advanced `upstream/main` to `7de95a20bf93cfe026a57f6367c453e74a50acef` (two commits affecting only `.github/workflows/pr-governance.yml`). A read-only merge-tree check found no conflict; the accepted branch was intentionally not rebased or rewritten.
-- Branch: `codex/fix-live-transcript-jitter`.
-- Worktree: `D:\Documents\Projects\Web\LiveAgent\target\codex-live-transcript-jitter-worktree`.
-- The main worktree and its existing `crates/agent-gui/src-tauri/Cargo.toml` edit remain untouched.
-- The older `target\codex-transcript-order-scroll-jitter-worktree` is not reused or modified.
+- Original development baseline: `upstream/main` at `849daf269762846557cc8243c5fe6e7fb155ed72`.
+- Original development branch and Worktree: `codex/fix-live-transcript-jitter` in `target\codex-live-transcript-jitter-worktree`; the older `target\codex-transcript-order-scroll-jitter-worktree` was not reused or modified.
+- A post-acceptance fetch on 2026-08-01 advanced `upstream/main` to `7de95a20bf93cfe026a57f6367c453e74a50acef`. The accepted branch was intentionally left unchanged at that time because the two new commits affected only PR governance.
+- 2026-08-06 maintenance baseline: latest `upstream/main` at `00a2c6fc43754f40022b0703459824559bee73ea` in the current main workspace on `chore-pr-350-rebase`; no historical Worktree was entered, modified, or cleaned.
+- Original PR head `babfd48d` rebased without conflicts to product HEAD `e61a2bdf`; both commits are patch-equivalent in `git range-diff`, with the same 44-file `1681 insertions / 417 deletions` scope.
+- The current main workspace's protected `Cargo.toml`, `.codegraph/`, `output/`, and local-only `start-tauri-dev.bat` state remain outside this PR maintenance change.
 
 ## Confirmed causes
 
@@ -77,6 +77,7 @@ The task-progress PR worktree is based on a different stack and changes GUI `row
 - Gateway was started from this task source with `go run ./cmd/gateway`, listening at `127.0.0.1:18080` with an isolated temporary agent database; no credential value is recorded in this worklog.
 - WebUI Vite was rooted in this task worktree. Because the package script forwarded an extra literal `--`, Vite ignored the requested 15173 value; with an older unrelated server already on 5173, this verified task server selected `http://127.0.0.1:5174`. Its root returned HTTP 200 and the expected title.
 - A headed Playwright browser authenticated against the task Gateway, and the desktop agent connected to that independent Gateway. The real acceptance conversation executed tools from the task worktree and reported the required branch and baseline HEAD.
+- Gateway WebUI acceptance preview: `docs/images/live-transcript-stability-webui.png` captures the completed sequential run in the verified task client.
 - At 390x844, document and body widths remain 390px with no horizontal overflow. Sidebar overlay interception followed the normal close-sidebar path. Dark mode applied (`html.dark`, `color-scheme: dark`) and emulated `prefers-reduced-motion: reduce` matched true. Screenshot: `output/playwright/webui-narrow-dark-reduced.png` (acceptance artifact only, not a task source file).
 - The first 12-step live run kept two outer transcript rows (one user and one assistant activity) while more than 24 internal activity buttons accumulated, proving that live growth stayed inside one assistant row.
 - Diagnostic sampling before the final status fix recorded 57 explicit scroll writes, all owned by `useScrollFollow`, and repeated `+15.2px/-15.2px` pairs. This ruled out a second JavaScript writer and identified conditional/wrapping status height as the remaining oscillator.
@@ -170,4 +171,18 @@ All prompts below are read-only unless the row explicitly asks the user to press
 
 ## Resume
 
-Manual acceptance is complete. Continue only from the task worktree above: stage task source and this worklog explicitly (excluding `.playwright-cli/`, `output/`, and the content-identical `crates/agent-gui/src-tauri/Cargo.toml` status artifact), review the staged diff, commit, push, create the upstream PR with `Depends-On: none`, and monitor required CI to terminal state.
+The original 2026-08-01 manual acceptance is complete. The 2026-08-06 maintenance run must obtain fresh acceptance from the current main workspace and rebased product HEAD before amending this worklog or updating the remote PR branch.
+
+## 2026-08-06 rebase verification
+
+- Range audit: rebased both commits from merge base `849daf26` onto `upstream/main@00a2c6fc`; each commit is `=` in `git range-diff`, old/new file sets remain the same 44 files, and both ranges remain `1681 insertions / 417 deletions`.
+- Latest-main overlap audit: only `GatewayApp.tsx` and `scripts/mirror-manifest.json` overlap changes made between the old and new baselines. The main-side CLI identity removal and overlay-host placement remain intact together with the PR's viewport-following prop and new mirror entries.
+- Pairwise audit: PR #350 overlaps PR #345 in 6 files and the live PR #366 head in 12 files; neither PR is an ancestor or descendant of #350, so all three remain independent roots.
+- Focused validation: GUI activity/identity/scroll/overlay suites pass 46/46; Gateway WebUI equivalents pass 47/47, including stable ordinary-tool identity, 100-item pressure, out-of-order/duplicate results, frame-pin coalescing, following/detached resize policy, overlay placement, status width, and stream-caret removal.
+- Full validation: Gateway WebUI passes 504/504. GUI passes 1411/1416; the same two mention-selection extractors, two mention-refetch extractors, and one Rust/TypeScript preset-sync test fail on the previously captured fresh non-Worktree `upstream/main@00a2c6fc` baseline at 1398/1403.
+- GUI and Gateway WebUI production builds pass. Full lint equals the same-main baseline exactly: GUI `424 errors / 358 warnings / 9 infos`, WebUI `292 / 310 / 10`. Focused lint exits zero for all 14 GUI and 11 WebUI production files, with warnings only.
+- Gateway full tests pass every package except the Windows-only agent-token file-mode assertion (`0666`, expected POSIX `0600`), reproduced identically on latest main; `go vet ./...` passes.
+- `cargo check --manifest-path crates/agent-gui/src-tauri/Cargo.toml --tests` passes using the existing local Python clang runtime, with five unchanged unused/dead-code warnings.
+- Mirror Check passes for 118 files and `git diff --check upstream/main..HEAD` passes. Independent Git and GUI/WebUI semantic reviews found no P0/P1/P2 blocker; the details overlay remains intentionally user-activated while `thinkingOpen` drives only the compact running state, matching Issue #349 and the original acceptance matrix.
+- Fresh same-HEAD Tauri acceptance ran from `chore-pr-350-rebase@e61a2bdf`: Vite returned HTTP 200 and the current-workspace `target/debug/liveagent.exe` window remained responsive.
+- The user explicitly confirmed `PR #350 通过` on 2026-08-06 after the rebase acceptance matrix covering stable streaming identity/order, bottom-follow and detached-reader anchoring, thinking overlay interactions, parallel/out-of-order tools, failure/retry, Stop/cancel, AskUserQuestion, history/reconnect restoration, narrow layout, themes, and reduced motion. This authorizes the guarded amend and exact force-with-lease update of the PR branch.

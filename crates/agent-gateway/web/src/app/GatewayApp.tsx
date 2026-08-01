@@ -30,6 +30,7 @@ import { registerAskUserQuestionAnswerHandler } from "@/lib/chat/askUserQuestion
 import type { ChatFileLink } from "@/lib/chat/chatFileLinks";
 import type { ChatHistorySummary } from "@/lib/chat/chatHistory";
 import { buildModelOptions } from "@/lib/chat/chatPageHelpers";
+import { normalizeLogicalLineEndings } from "@/lib/chat/composerText";
 import type { HistoryMessageRef } from "@/lib/chat/conversationState";
 import {
   adoptHistoryWindowState,
@@ -2391,11 +2392,11 @@ export default function GatewayApp() {
     files: PendingUploadedFile[],
     workdir: string,
   ) {
-    let text = (
+    let text = normalizeLogicalLineEndings(
       isAgentMode && draft.largePastes.length > 0
         ? draft.textWithoutLargePastes
-        : buildTextFromComposerDraft(draft)
-    ).trim();
+        : buildTextFromComposerDraft(draft),
+    );
     let uploadedFiles = files;
 
     if (isAgentMode && draft.largePastes.length > 0) {
@@ -2413,7 +2414,7 @@ export default function GatewayApp() {
         if (apiRef.current?.getActiveAgent().trim() !== agentID) {
           throw new Error("Agent 已切换，已取消发送本次大段粘贴内容。");
         }
-        text = buildTextFromComposerDraft(draft, imported.fileByPasteId).trim();
+        text = buildTextFromComposerDraft(draft, imported.fileByPasteId);
         uploadedFiles = mergePendingUploadedFiles(files, imported.files);
       } finally {
         isImportingPastedTextRef.current = false;

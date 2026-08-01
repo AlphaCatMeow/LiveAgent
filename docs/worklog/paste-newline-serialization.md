@@ -5,15 +5,15 @@
 ## 恢复指令（覆盖式，永远只反映此刻）
 
 - **总目标**：在桌面 GUI 与 Gateway WebUI 中保持粘贴、编辑、发送、历史/重连恢复和用户消息气泡渲染的逻辑换行数量与位置一致，同时不改变其他消息类型的 Markdown 语义。
-- **当前任务**：用户已明确回复“通过”；正在固化公开截图、暂存/提交本任务文件，随后推送、创建上游 Issue/PR 并收敛 required CI。
-- **上一个完成的动作**：用 GUI/WebUI 实际生产模块 fixture 生成两张公开截图，均显示 ClipboardEvent、composer、outbound、history 与 bubble DOM 的逻辑换行计数为 2，气泡为 3 个视觉行且无放大空隙，并显示 history/reconnect replay 通过；用户人工验收结论为“通过”。
-- **下一步第一个动作**：执行最终范围/敏感文件/生成物审计，只暂存本任务源代码、测试、mirror manifest 和 worklog，复核 staged diff 后提交。
+- **当前任务**：用户验收、提交和 fork push 已完成；上游 bug Issue #352 已创建，正在创建 PR、上传公开截图并收敛 required CI。
+- **上一个完成的动作**：23 个任务文件经 staged 范围/二进制/凭据审计和独立审查后提交为 `3bd4183c`，推送到 `AlphaCatMeow/LiveAgent:codex/fix-paste-newline-serialization`；创建上游 Issue #352。
+- **下一步第一个动作**：创建关联 `Closes #352` 的上游 draft PR，回填 `Depends-On: none` 与自身 `Stack-Root`，补公开截图附件并监测 required CI。
 - **当前假设/约束/待确认**：只允许在 `D:\Documents\Projects\Web\LiveAgent\target\codex-paste-newline-serialization-worktree` 工作；不改 Rust、Go、数据库、协议或依赖，除非数据证据证明纯前端不足并先报告；用户验收通过前不 commit、push、创建 Issue/PR 或改远端状态。
 
 ## 未提交改动 & 验证边界
 
-- **最近 checkpoint commit**：无。
-- **未提交的改动**：双端 composer/newline helper/发送/用户消息渲染与局部用户气泡 CSS；双端 Node pipeline 测试；双端 Vite/Playwright 浏览器 fixture；`mirror-manifest`；相关旧 trim/SSR 断言；本 worklog。临时日志和基线副本已移动到 worktree 内 Git-ignored 的 `target/paste-newline-artifacts/`。
+- **最近 checkpoint commit**：`3bd4183c8246c4dde5f489b8e672b9328335071e`（已推送 fork）。
+- **未提交的改动**：仅本次远端交接状态的 worklog 更新；临时日志、截图、数据库和基线副本均位于 worktree 内 Git-ignored 的 `target/paste-newline-artifacts/`。
 - **已验证**：分支/基线隔离；双端 build/typecheck；定向与全量测试（含基线对照）；定向 lint；全量 lint 逐项基线对照；Mirror Check；`git diff --check`；真实 Chromium 生产模块 pipeline、CSS 高度、undo/redo、reload/reconnect 与双端交叉 replay；独立只读审查。
 - **未验证**：提交、push、上游 Issue/PR 与 required CI 终态。
 
@@ -100,6 +100,8 @@
   - Gateway WebUI：`target/paste-newline-artifacts/runtime/screenshots/acceptance-webui-pipeline-2026-08-01T01-31-45-337Z.png`
 - 两张截图逐张人工检查：均显示 `alpha\n\nbeta` 在 Clipboard、Composer、Outbound、History、Bubble DOM 五阶段为 2 个换行；composer 与发送后气泡各显示一个普通空行；气泡 `white-space=pre-wrap`、3 个视觉行；`reload\n\nreconnect` replay 显示相同单空行。
 - 截图后只终止本 worktree 的 fixture Vite PID 70764/66684，并确认 1431/1432 关闭；Tauri/Gateway/WebUI 1420/15052/15174 保持运行。Playwright 临时状态移入 ignored `playwright-public-evidence/`。
+- 最终显式暂存 23 个任务文本文件；无 Rust、Go、协议、依赖锁、数据库、图片、视频、凭据、构建产物或可见 unstaged/untracked 文件。独立 staged review 未发现高/中确定性问题。
+- 主实现提交：`3bd4183c8246c4dde5f489b8e672b9328335071e`，已推送 fork 分支；远端 `upstream/main` 仍精确等于固定基线。上游 Issue：[Stack-Cairn/LiveAgent#352](https://github.com/Stack-Cairn/LiveAgent/issues/352)。
 
 ## 关键决策（只增不删）
 

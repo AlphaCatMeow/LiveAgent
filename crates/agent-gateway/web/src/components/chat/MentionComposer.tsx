@@ -17,10 +17,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useLocale } from "../../i18n";
-import {
-  insertPlainTextWithUndo,
-  normalizeLogicalLineEndings,
-} from "../../lib/chat/composerText";
+import { insertPlainTextWithUndo, normalizeLogicalLineEndings } from "../../lib/chat/composerText";
 import {
   type CodeMentionReference,
   codeMentionDisplayName,
@@ -402,8 +399,7 @@ function collectDraftSegments(
           childParts.push({ type: "largePaste", paste: largePaste });
           childIsLogical = true;
         } else if (el.tagName === "BR") {
-          const parentEl =
-            parent.nodeType === Node.ELEMENT_NODE ? (parent as HTMLElement) : null;
+          const parentEl = parent.nodeType === Node.ELEMENT_NODE ? (parent as HTMLElement) : null;
           const isEmptyBlockPlaceholder =
             parentEl != null &&
             (parentEl.tagName === "DIV" || parentEl.tagName === "P") &&
@@ -2451,10 +2447,8 @@ export const MentionComposer = memo(
               } else if (segment.type === "codeMention") {
                 const chip = createCodeMentionChip(segment.reference);
                 if (chip) el.appendChild(chip);
-            } else if (segment.text) {
-              el.appendChild(
-                document.createTextNode(normalizeLogicalLineEndings(segment.text)),
-              );
+              } else if (segment.text) {
+                el.appendChild(document.createTextNode(normalizeLogicalLineEndings(segment.text)));
               }
             }
             largePasteCounterRef.current = Math.max(

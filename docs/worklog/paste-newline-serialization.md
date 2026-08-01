@@ -5,17 +5,17 @@
 ## 恢复指令（覆盖式，永远只反映此刻）
 
 - **总目标**：在桌面 GUI 与 Gateway WebUI 中保持粘贴、编辑、发送、历史/重连恢复和用户消息气泡渲染的逻辑换行数量与位置一致，同时不改变其他消息类型的 Markdown 语义。
-- **当前任务**：用户验收、提交和 fork push 已完成；上游 bug Issue #352 已创建，正在创建 PR、上传公开截图并收敛 required CI。
-- **上一个完成的动作**：23 个任务文件经 staged 范围/二进制/凭据审计和独立审查后提交为 `3bd4183c`，推送到 `AlphaCatMeow/LiveAgent:codex/fix-paste-newline-serialization`；创建上游 Issue #352。
-- **下一步第一个动作**：创建关联 `Closes #352` 的上游 draft PR，回填 `Depends-On: none` 与自身 `Stack-Root`，补公开截图附件并监测 required CI。
-- **当前假设/约束/待确认**：只允许在 `D:\Documents\Projects\Web\LiveAgent\target\codex-paste-newline-serialization-worktree` 工作；不改 Rust、Go、数据库、协议或依赖，除非数据证据证明纯前端不足并先报告；用户验收通过前不 commit、push、创建 Issue/PR 或改远端状态。
+- **当前任务**：上游 Draft PR #353 已在当前主工作区无冲突 rebase 到执行时最新 `upstream/main@00a2c6fc`；自动验证和同 HEAD Tauri 人工验收均已通过，正在折叠本轮 worklog、更新 fork 分支、转 Ready 并收敛新一轮 CI/Governance。
+- **上一个完成的动作**：用户完成粘贴、首尾/空白换行、undo/redo、重复发送、取消和 reload/history 恢复验收，并对当前 rebase 产品 HEAD 明确回复“通过”。
+- **下一步第一个动作**：只暂存本 worklog，创建 fixup 并 autosquash 到既有 `docs(chat): record paste newline handoff` 提交；复核最终三提交范围后，以显式 lease 更新唯一指定的 fork PR 分支。
+- **当前假设/约束/待确认**：只允许在 `D:\Documents\Projects\Web\LiveAgent` 当前工作区工作；保护既有 `Cargo.toml` 内容以及未跟踪的 `.codegraph/`、`output/`，不得 stash/reset/恢复/删除；人工验收门禁已解除，但仍只允许推送 `origin/codex/fix-paste-newline-serialization`，launcher 永不跟踪或提交。
 
 ## 未提交改动 & 验证边界
 
-- **最近 checkpoint commit**：`3bd4183c8246c4dde5f489b8e672b9328335071e`（已推送 fork）。
-- **未提交的改动**：仅本次远端交接状态的 worklog 更新；临时日志、截图、数据库和基线副本均位于 worktree 内 Git-ignored 的 `target/paste-newline-artifacts/`。
-- **已验证**：分支/基线隔离；双端 build/typecheck；定向与全量测试（含基线对照）；定向 lint；全量 lint 逐项基线对照；Mirror Check；`git diff --check`；真实 Chromium 生产模块 pipeline、CSS 高度、undo/redo、reload/reconnect 与双端交叉 replay；独立只读审查。
-- **未验证**：提交、push、上游 Issue/PR 与 required CI 终态。
+- **最近 checkpoint commit**：人工验收使用的产品 HEAD 为 `bb060885f569cdb2c6240a60e413e442e90330c1`；即将进行的 docs-only autosquash 只更新本 worklog，不改变已验收产品树。远端 PR head 在 push 前仍为 `bcbd4a5ce0b6015583dda036e034ae01807f5120`。
+- **未提交的改动**：仅本轮恢复状态与变基记录的 worklog 更新；`.codegraph/`、`output/` 和本地 launcher 均保持未跟踪/忽略状态。
+- **已验证**：受保护 `Cargo.toml` 保持 Git clean 且过滤后 blob 与原 PR/最新 main 一致，launcher 仍只由 `.git/info/exclude` 忽略；最新远端基线；rebase 拓扑；原/新提交 range-diff；23 文件集合与统计；三个主线重叠文件的最终语义；双端 build；GUI 定向 19/19、WebUI 定向 5/5、WebUI 全量 498/498；GUI 全量 1404/1409，5 项失败在最新 main 快照精确复现为同一 2+2+1；完整 lint 当前/基线 GUI errors 421/424、WebUI 290/292 且 warning/info 相同，双端定向 lint 与 LF Git blob check exit 0；Mirror Check 116 files；`git diff --check`；真实 Chromium 双端 pipeline、视觉行、undo/redo、reload replay 与交叉 replay；独立只读审查。
+- **未验证**：worklog 状态折叠提交、force-with-lease push、Ready 转换及新一轮 required CI/Governance 终态。
 
 ## 复现与数据链路证据
 
@@ -145,3 +145,19 @@
 - 做了：收到用户明确“通过”；捕获当前 Tauri 后发现未显示目标样例，拒绝将无关画面作为证据；随后从 GUI/WebUI 实际生产模块 fixture 重新执行粘贴、序列化、history/reconnect replay 并生成两张公开截图。
 - 验证：双端截图五阶段换行计数一致，空行视觉高度一致；公开截图无用户既有会话内容。只关闭本任务 1431/1432 fixture，三端人工环境仍在。
 - 遗留：最终 staged 审计、commit/push、上游 Issue/PR、required CI 收敛。
+
+### 2026-08-01 — 上游交付与首轮 CI 格式修正
+
+- 做了：提交并推送主实现与 worklog；创建上游 Issue #352 和 Draft PR #353（`Depends-On: none`、`Stack-Root: #353`）。首轮 Actions run `30678600187` 中 Gateway、Gateway Docker Smoke、Tauri Rust Check、Mirror Check 与 Diff Hygiene 通过，GUI 与 Gateway WebUI 均在 `pnpm lint` 失败。
+- 根因：完整 job 日志只显示数百条基线 warning 并截断唯一 error；通过对 Git 中的 LF blob 运行 Biome formatter 后定位到双端 `MentionComposer.tsx` 的 3 个新增换行格式点，以及 WebUI 镜像文件 `setDraft` 分支的缩进偏差。没有修改既有 lint warning，也没有扩大到业务逻辑。
+- 修复与验证：按 formatter 精确输出最小同步修正两个镜像文件；GUI/WebUI build 通过，双端 paste pipeline 各 5/5，Mirror Check 120 files 与 `git diff --check` 通过；对 staged LF blob 再次格式化后均为零 diff。
+- 遗留：提交并推送格式修正，等待新一轮 required CI 全部终态；将两张已审查公开截图通过已认证 GitHub Web UI 附加到 PR，再将 Draft 标记为 ready 并等待 PR Governance 终态。
+
+### 2026-08-06 — 变基到最新 main 与范围审计
+
+- 做了：在主工作区记录并保护用户已有 `Cargo.toml`、`.codegraph/`、`output/` 与本地 launcher 状态；获取 `upstream/main@00a2c6fc` 和远端 PR head；因同名本地分支被历史 Worktree 占用，从远端 PR head 创建当前工作区维护分支 `fix-pr-353-rebase`，未修改或使用历史 Worktree；将 PR 的 3 个提交无冲突 rebase 到最新 main。
+- 验证：新 HEAD `bb060885` 以 `00a2c6fc` 为 merge base，PR-only/main-only 计数为 3/0；`git range-diff` 三个提交均为 `=`；原/新文件集合均为 23，统计均为 1194 insertions/135 deletions；新树与此前同基线独立重写树一致；重点点验 `GatewayApp.tsx`、`useSendChatTurn.ts`、`scripts/mirror-manifest.json`，确认主线修改保留且 PR 只叠加原换行保真补丁。
+- 自动验证：GUI/WebUI production build 通过；GUI 定向换行与用户气泡 19/19、WebUI 定向 5/5、WebUI 全量 498/498；GUI 全量 1404/1409，5 项失败在最新 main 的临时非 Worktree 快照精确复现为 2 个 selection 提取、2 个 mention refetch 提取和 1 个 provider preset 字节比较基线失败。完整 lint 在 Windows CRLF checkout 下当前/基线分别为 GUI 421/424 errors、WebUI 290/292 errors，warning/info 相同；双端变更文件语义 lint 与 LF Git blob check 均 exit 0。Mirror Check 116 files、`git diff --check` 和真实 Chromium 双端 pipeline 均通过；fixture 专用 1431/1432 服务与临时文件已清理。
+- 同 HEAD Tauri：从当前工作区执行 `start-tauri-dev.bat`，launcher 记录正确仓库路径与 `LIBCLANG_PATH`；Rust dev profile 747/747 在 42.24 秒完成，运行当前工作区 `target/debug/liveagent.exe`。Vite PID 40096 监听 1420，Tauri PID 45488 的窗口句柄非零、`Responding=true`，Vite HTTP 200；没有复用或终止其他客户端。Playwright CLI 本轮产生的两个工具状态文件已精确删除。
+- 人工验收：用户按矩阵完成普通/CRLF/首尾/多空行、Unicode/HTML-like 纯文本、纯空白拒绝、undo/redo、重复操作、取消响应和 reload/history 恢复，并于 2026-08-06 对当前 rebase 产品 HEAD 明确回复“通过”。
+- 遗留：将本 worklog 状态修正折叠进既有 docs 提交、使用显式 `--force-with-lease` 更新 PR head、转 Ready 并收敛 CI/Governance。

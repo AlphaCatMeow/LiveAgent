@@ -610,6 +610,64 @@ test("DeepSeek OpenAI payload adapter injects thinking and reasoning_content", a
   assert.equal(adapted.messages[0].reasoning_content, "");
 });
 
+test("DeepSeek OpenAI payload adapter maps reasoning=max to reasoning_effort=max (regression)", async () => {
+  let captured;
+  const localLoader = createTsModuleLoader({
+    mocks: {
+      "@earendil-works/pi-ai/api/openai-completions": {
+        stream(model, context, options) {
+          captured = { model, context, options };
+          return createMockAssistantStream();
+        },
+      },
+    },
+  });
+  const localProviders = localLoader.loadModule("src/lib/providers/llm.ts");
+  const model = localProviders.createModelFromConfig(
+    "codex",
+    "deepseek-v4-pro",
+    "https://api.deepseek.com",
+    "openai-responses",
+  );
+
+  // 选 max 档 -> clampOpenAIReasoningEffort 保留 max -> payload 发 max
+  const result = localProviders.streamSimpleByApi(
+    model,
+    { messages: [] },
+    { reasoning: "max", toolChoice: "auto" },
+  );
+  assert.equal(typeof result.result, "function");
+  assert.equal(typeof captured.options.onPayload, "function");
+  assert.equal(
+    captured.options.reasoningEffort,
+    "max",
+    "clampOpenAIReasoningEffort should preserve max for deepseek-v4-pro",
+  );
+
+  const adapted = await captured.options.onPayload(
+    {
+      messages: [
+        {
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            {
+              id: "call_1",
+              type: "function",
+              function: { name: "Read", arguments: "{}" },
+            },
+          ],
+        },
+      ],
+    },
+    model,
+  );
+
+  assert.deepEqual(adapted.thinking, { type: "enabled" });
+  assert.equal(adapted.reasoning_effort, "max", "wire reasoning_effort should be max when UI selects max");
+  assert.equal(adapted.messages[0].reasoning_content, "");
+});
+
 test("DeepSeek Anthropic streamSimpleByApi strips aborted tool calls before conversion", () => {
   const { localProviders, state } = loadProvidersWithCapturedAnthropicStream();
   const model = createDeepSeekAnthropicModel();

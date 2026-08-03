@@ -38,6 +38,7 @@ import {
 import type { GitClient } from "@/lib/git/types";
 import { DEFAULT_CHAT_TRANSCRIPT_WIDTH } from "@/lib/settings";
 import { cn } from "@/lib/shared/utils";
+import { estimateAssistantResponseRowHeight } from "@/lib/transcript-virtual/assistantResponseEstimate";
 import { extractLiveRange } from "@/lib/transcript-virtual/liveRangeExtractor";
 import { createLiveRowScrollAdjustPolicy } from "@/lib/transcript-virtual/liveScrollAdjustPolicy";
 import {
@@ -46,9 +47,7 @@ import {
 } from "@/lib/transcript-virtual/measurementsLru";
 import {
   CHECKPOINT_ROW_ESTIMATE_PX,
-  estimateAssistantRowHeight,
   estimateUserRowHeight,
-  measureEstimateText,
 } from "@/lib/transcript-virtual/rowEstimates";
 import {
   AssistantAvatar,
@@ -89,6 +88,7 @@ type GatewayTranscriptProps = {
   // Key of the actively streaming turn (caret / live structural state).
   activeTurnKey?: string | null;
   contentWidth?: number;
+  processDetailsExpanded?: boolean;
   // Whether the scroll-follow engine is attached to the bottom; gates the
   // virtualizer's resize-compensation carve-out for live-row growth.
   isViewportFollowing?: () => boolean;
@@ -1120,14 +1120,20 @@ const GatewayAssistantMessageActions = memo(function GatewayAssistantMessageActi
   );
 });
 
-const rowEstimateCache = new WeakMap<TranscriptRow, number>();
+type CachedRowEstimates = {
+  collapsed?: number;
+  expanded?: number;
+};
+
+const rowEstimateCache = new WeakMap<TranscriptRow, CachedRowEstimates>();
 
 // Content-shaped height estimates: only ever used for rows the virtualizer
 // has never measured (the measurement cache is keyed by row key and survives
 // folding), but a shaped guess keeps scroll corrections small while reading
 // unmeasured history.
-function estimateRowHeight(row: TranscriptRow): number {
-  const cached = rowEstimateCache.get(row);
+function estimateRowHeight(row: TranscriptRow, processDetailsExpanded: boolean): number {
+  const variant = processDetailsExpanded ? "expanded" : "collapsed";
+  const cached = rowEstimateCache.get(row)?.[variant];
   if (cached !== undefined) {
     return cached;
   }
@@ -1135,45 +1141,35 @@ function estimateRowHeight(row: TranscriptRow): number {
   if (row.kind === "user") {
     estimate = estimateUserRowHeight(row.text.length, row.attachments.length);
   } else if (row.kind === "assistant") {
-    let proseChars = 0;
-    let codeLines = 0;
-    let codeFences = 0;
-    let toolCount = 0;
-    let thinkingCount = 0;
-    for (const round of row.rounds) {
-      for (const block of round.blocks) {
-        if (block.kind === "text") {
-          const measured = measureEstimateText(block.text);
-          proseChars += measured.proseChars;
-          codeLines += measured.codeLines;
-          codeFences += measured.codeFences;
-        } else if (block.kind === "thinking") {
-          thinkingCount += 1;
-        } else {
-          toolCount += 1;
-        }
-      }
-    }
-    estimate = estimateAssistantRowHeight({
-      proseChars,
-      codeLines,
-      codeFences,
-      toolCount,
-      thinkingCount,
-    });
+    estimate = estimateAssistantResponseRowHeight(row.rounds, processDetailsExpanded);
   } else if (row.kind === "checkpoint") {
     estimate = CHECKPOINT_ROW_ESTIMATE_PX;
   } else {
     estimate = 120;
   }
-  rowEstimateCache.set(row, estimate);
+  const nextCache = rowEstimateCache.get(row) ?? {};
+  nextCache[variant] = estimate;
+  rowEstimateCache.set(row, nextCache);
   return estimate;
 }
 
-function estimateVirtualItemHeight(item: GatewayTranscriptVirtualItem): number {
+function estimateVirtualItemHeight(
+  item: GatewayTranscriptVirtualItem,
+  processDetailsExpanded: boolean,
+): number {
   if (item.kind === "loadRemoteHistory") return 44;
   if (item.kind === "pendingBubble") return 56;
-  return estimateRowHeight(item.row);
+  return estimateRowHeight(item.row, processDetailsExpanded);
+}
+
+function buildGatewayTranscriptLayoutKey(
+  viewportWidth: number,
+  contentWidth: number,
+  processDetailsExpanded: boolean,
+) {
+  const baseKey = buildTranscriptLayoutKey(viewportWidth, contentWidth);
+  if (!baseKey) return "";
+  return `${baseKey}:process-details-${processDetailsExpanded ? "expanded" : "collapsed"}`;
 }
 
 const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(props: {
@@ -1182,6 +1178,7 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
   liveStartIndex: number;
   activeTurnKey?: string | null;
   contentWidth: number;
+  processDetailsExpanded: boolean;
   scrollViewport: HTMLDivElement | null;
   isViewportFollowing?: () => boolean;
   navRef?: MutableRefObject<GatewayTranscriptNavHandle | null>;
@@ -1216,6 +1213,7 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
     liveStartIndex,
     activeTurnKey,
     contentWidth,
+    processDetailsExpanded,
     scrollViewport,
     isViewportFollowing,
     navRef,
@@ -1345,7 +1343,11 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
       (conversationId && scrollViewport
         ? transcriptMeasurementsLru.restore(
             conversationId,
-            buildTranscriptLayoutKey(scrollViewport.clientWidth, contentWidth),
+            buildGatewayTranscriptLayoutKey(
+              scrollViewport.clientWidth,
+              contentWidth,
+              processDetailsExpanded,
+            ),
           )
         : null) ?? [],
   );
@@ -1355,7 +1357,9 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
     getScrollElement: () => scrollViewport,
     estimateSize: (index) => {
       const item = virtualItems[index];
-      return item ? estimateVirtualItemHeight(item) : TRANSCRIPT_ROW_ESTIMATED_HEIGHT;
+      return item
+        ? estimateVirtualItemHeight(item, processDetailsExpanded)
+        : TRANSCRIPT_ROW_ESTIMATED_HEIGHT;
     },
     getItemKey: getTranscriptItemKey,
     gap: TRANSCRIPT_ROW_GAP,
@@ -1375,6 +1379,16 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
     initialMeasurementsCache,
     rangeExtractor: (range) => extractLiveRange(range, forceMountStartRef.current),
   });
+
+  const previousProcessDetailsExpandedRef = useRef(processDetailsExpanded);
+  useLayoutEffect(() => {
+    if (previousProcessDetailsExpandedRef.current === processDetailsExpanded) return;
+    previousProcessDetailsExpandedRef.current = processDetailsExpanded;
+    // The preference can change every unmounted history row's default height
+    // at once. Clear virtualizer measurements without changing React row keys,
+    // preserving any per-response manual disclosure choices on mounted rows.
+    transcriptVirtualizer.measure();
+  }, [processDetailsExpanded, transcriptVirtualizer]);
 
   // TanStack exposes the resize-compensation predicate as an instance field,
   // not an option; reassigning per render keeps the closure's inputs current.
@@ -1577,7 +1591,11 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
     if (!conversationId || !scrollViewport) return;
     transcriptMeasurementsLru.save(
       conversationId,
-      buildTranscriptLayoutKey(scrollViewport.clientWidth, contentWidth),
+      buildGatewayTranscriptLayoutKey(
+        scrollViewport.clientWidth,
+        contentWidth,
+        processDetailsExpanded,
+      ),
       transcriptVirtualizer.takeSnapshot(),
     );
   };
@@ -1717,6 +1735,7 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
             >
               <div className="group/assistant min-w-0 w-full max-w-full space-y-1">
                 <AssistantBubble
+                  disclosureKey={`${conversationId ?? "shared"}:${row.key}`}
                   rounds={row.rounds}
                   showUsage={showUsage}
                   usageContextWindow={usageContextWindow}
@@ -1725,6 +1744,7 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
                   renderMode={rowRenderMode(row)}
                   readOnly={readOnly}
                   redactToolContent={redactToolContent}
+                  processDetailsExpanded={processDetailsExpanded}
                   workdir={workspaceRoot}
                   onOpenFileLink={onOpenFileLink}
                 />
@@ -1795,6 +1815,7 @@ export function GatewayTranscript({
   liveStartIndex = -1,
   activeTurnKey = null,
   contentWidth = DEFAULT_CHAT_TRANSCRIPT_WIDTH,
+  processDetailsExpanded = false,
   isViewportFollowing,
   navRef,
   onAnchorUserRowChange,
@@ -1882,6 +1903,7 @@ export function GatewayTranscript({
           liveStartIndex={liveStartIndex}
           activeTurnKey={activeTurnKey}
           contentWidth={contentWidth}
+          processDetailsExpanded={processDetailsExpanded}
           scrollViewport={transcriptScrollViewport}
           isViewportFollowing={isViewportFollowing}
           navRef={navRef}

@@ -11,6 +11,7 @@ import { AssistantRowFooter } from "./RowActions";
 import type { AssistantFooterRenderUnit, AssistantUnitRow } from "./rowModel";
 
 export type AssistantRenderUnitProps = {
+  conversationId: string;
   row: AssistantUnitRow;
   showUsage?: boolean;
   usageContextWindow?: number;
@@ -18,6 +19,7 @@ export type AssistantRenderUnitProps = {
   isCompactionRunning: boolean;
   toolStatus: string | null;
   retryAttempts?: RetryAttemptRecord[];
+  processDetailsExpanded: boolean;
   workdir?: string;
   onOpenFileLink?: (link: ChatFileLink) => void;
   onResendFromEdit: (
@@ -75,6 +77,7 @@ export const AssistantRenderUnit = memo(function AssistantRenderUnit(
   props: AssistantRenderUnitProps,
 ) {
   const {
+    conversationId,
     row,
     showUsage,
     usageContextWindow,
@@ -82,6 +85,7 @@ export const AssistantRenderUnit = memo(function AssistantRenderUnit(
     isCompactionRunning,
     toolStatus,
     retryAttempts,
+    processDetailsExpanded,
     workdir,
     onOpenFileLink,
     onResendFromEdit,
@@ -104,6 +108,7 @@ export const AssistantRenderUnit = memo(function AssistantRenderUnit(
   return (
     <div className={`group/assistant w-full max-w-full${compactedClass}`}>
       <AssistantBubbleUnit
+        conversationId={conversationId}
         row={row}
         showUsage={showUsage}
         usageContextWindow={usageContextWindow}
@@ -111,6 +116,7 @@ export const AssistantRenderUnit = memo(function AssistantRenderUnit(
         isCompactionRunning={isCompactionRunning}
         toolStatus={toolStatus}
         retryAttempts={retryAttempts}
+        processDetailsExpanded={processDetailsExpanded}
         workdir={workdir}
         onOpenFileLink={onOpenFileLink}
       />

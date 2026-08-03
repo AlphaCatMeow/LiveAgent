@@ -13,6 +13,25 @@ import { MemoToolCallItem } from "./ToolCallItem";
 import { getNativeDisplayImagePayload, NativeDisplayImageBlock } from "./ToolImages";
 import { ToolTraceGroup } from "./ToolTraceGroup";
 
+const ThinkingMarkdown = memo(function ThinkingMarkdown(props: {
+  text: string;
+  renderMode: "streaming" | "static";
+  workdir?: string;
+  onOpenFileLink?: (link: ChatFileLink) => void;
+}) {
+  const { text, renderMode, workdir, onOpenFileLink } = props;
+  return (
+    <Markdown
+      content={text}
+      className="thinking-markdown space-y-1.5"
+      renderMode={renderMode}
+      showCaret={false}
+      workdir={workdir}
+      onOpenFileLink={onOpenFileLink}
+    />
+  );
+});
+
 const ThinkingBlock = memo(function ThinkingBlock({
   text,
   open,
@@ -66,11 +85,9 @@ const ThinkingBlock = memo(function ThinkingBlock({
       <LazyCollapse open={isOpen}>
         {() => (
           <div className="pb-1 pt-1.5">
-            <Markdown
-              content={text}
-              className="thinking-markdown space-y-1.5"
+            <ThinkingMarkdown
+              text={text}
               renderMode={renderMode}
-              showCaret={false}
               workdir={workdir}
               onOpenFileLink={onOpenFileLink}
             />
@@ -138,6 +155,7 @@ export const RoundBlockContent = memo(function RoundBlockContent(props: {
   thinkingOpen: boolean;
   isLatestThinking: boolean;
   isAborted: boolean;
+  withinProcessDetails?: boolean;
   workdir?: string;
   onOpenFileLink?: (link: ChatFileLink) => void;
 }) {
@@ -150,14 +168,35 @@ export const RoundBlockContent = memo(function RoundBlockContent(props: {
     thinkingOpen,
     isLatestThinking,
     isAborted,
+    withinProcessDetails = false,
     workdir,
     onOpenFileLink,
   } = props;
+  const { t } = useLocale();
 
   let content: ReactNode;
   if (block.kind === "thinking") {
     const isRunning = isLive && thinkingOpen && isLatestThinking;
-    content = (
+    content = withinProcessDetails ? (
+      <div className="group/think w-full py-1.5">
+        <div className="mb-1.5 flex items-center gap-2 text-[calc(13px*var(--zone-font-scale,1))] text-muted-foreground/80">
+          {isRunning ? (
+            <AssistantStatus className="min-h-0">{t("chat.thinking")}</AssistantStatus>
+          ) : (
+            <>
+              <Lightbulb className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+              <span className="thinking-block-label">{t("chat.thinkingProcess")}</span>
+            </>
+          )}
+        </div>
+        <ThinkingMarkdown
+          text={block.text}
+          renderMode={renderMode}
+          workdir={workdir}
+          onOpenFileLink={onOpenFileLink}
+        />
+      </div>
+    ) : (
       <ThinkingBlock
         text={block.text}
         open={isRunning}
@@ -169,9 +208,13 @@ export const RoundBlockContent = memo(function RoundBlockContent(props: {
     );
   } else if (block.kind === "tool") {
     const displayImagePayload = getNativeDisplayImagePayload(block.item);
-    if (displayImagePayload) {
+    if (displayImagePayload && !withinProcessDetails) {
       content = <NativeDisplayImageBlock payload={displayImagePayload} />;
-    } else if (block.item.toolCall.name === "Image" && !block.item.toolResult?.isError) {
+    } else if (
+      !withinProcessDetails &&
+      block.item.toolCall.name === "Image" &&
+      !block.item.toolResult?.isError
+    ) {
       content = null;
     } else {
       content = (
@@ -190,6 +233,7 @@ export const RoundBlockContent = memo(function RoundBlockContent(props: {
         items={block.items}
         isAborted={isAborted}
         runningToolCallIds={isLive ? runningToolCallIds : []}
+        defaultOpen={withinProcessDetails}
       />
     );
   } else if (block.kind === "hostedSearch" || block.kind === "hostedSearchGroup") {
@@ -197,6 +241,7 @@ export const RoundBlockContent = memo(function RoundBlockContent(props: {
       <HostedSearchGroupView
         items={block.kind === "hostedSearch" ? [block.item] : block.items}
         isLive={isLive}
+        defaultOpen={withinProcessDetails}
       />
     );
   } else if (block.text.trim()) {

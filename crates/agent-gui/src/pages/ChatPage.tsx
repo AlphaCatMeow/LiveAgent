@@ -2009,6 +2009,9 @@ export function ChatPage(props: ChatPageProps) {
                   isCompactionRunning={isCompactionRunning}
                   bottomReservePx={composerOverlayHeight}
                   contentWidth={settings.customSettings.chatTranscript.width}
+                  processDetailsExpanded={
+                    settings.customSettings.chatTranscript.processDetailsExpanded
+                  }
                   onContentWidthChange={handleChatTranscriptWidthChange}
                   onOpenFileLink={handleOpenChatFileLink}
                   onResendFromEdit={handleResendFromEdit}

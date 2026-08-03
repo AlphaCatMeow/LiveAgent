@@ -168,6 +168,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.stopGeneration": "停止生成",
     "chat.thinking": "思考中",
     "chat.thinkingProcess": "思考过程",
+    "chat.processDetails": "过程详情",
     "chat.retryDetailsToggle": "重试详情 ({count})",
     "chat.retryAttemptLabel": "第 {attempt}/{maxAttempts} 次重试",
     "chat.runtime.thinkingOn": "Thinking 已开启",
@@ -1189,6 +1190,9 @@ export const translations: Record<Locale, Record<string, string>> = {
     /* ── Settings System ── */
     "settings.appearance": "外观主题",
     "settings.appearanceDesc": "选择应用的颜色主题，偏好会自动保存。",
+    "settings.processDetailsExpanded": "默认展开过程详情",
+    "settings.processDetailsExpandedDesc":
+      "开启后，思考和工具调用默认展开；关闭后，生成正式回答时自动收起，仍可手动查看。",
     "settings.systemProxy": "应用代理",
     "settings.systemProxyEnable": "启用应用代理",
     "settings.systemProxyDesc":
@@ -2436,6 +2440,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.stopGeneration": "Stop Generation",
     "chat.thinking": "Thinking",
     "chat.thinkingProcess": "Thinking Process",
+    "chat.processDetails": "Process details",
     "chat.retryDetailsToggle": "Retry details ({count})",
     "chat.retryAttemptLabel": "Retry {attempt}/{maxAttempts}",
     "chat.runtime.thinkingOn": "Thinking enabled",
@@ -3498,6 +3503,9 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.appearance": "Appearance",
     "settings.appearanceDesc":
       "Choose the color theme for the application. Your preference will be saved automatically.",
+    "settings.processDetailsExpanded": "Expand process details by default",
+    "settings.processDetailsExpandedDesc":
+      "Keep reasoning and tool activity expanded by default. When disabled, they collapse as the final answer appears and can still be opened manually.",
     "settings.systemProxy": "App Proxy",
     "settings.systemProxyEnable": "Enable app proxy",
     "settings.systemProxyDesc":

@@ -41,7 +41,7 @@ import { extractRenderUnitRange } from "./renderUnitRangeExtractor";
 import { createTranscriptRowModel } from "./rowModel";
 import { UserMessageRow } from "./UserMessageRow";
 
-const TRANSCRIPT_MEASUREMENT_LAYOUT_VERSION = "assistant-units-v1";
+const TRANSCRIPT_MEASUREMENT_LAYOUT_VERSION = "assistant-process-details-v1";
 
 function buildVersionedTranscriptLayoutKey(viewportWidth: number, contentWidth: number) {
   const layoutKey = buildTranscriptLayoutKey(viewportWidth, contentWidth);
@@ -108,6 +108,7 @@ export type TranscriptListProps = {
   liveTranscriptStore: LiveTranscriptStore;
   scrollViewport: HTMLDivElement | null;
   layoutWidth: number;
+  processDetailsExpanded: boolean;
   // Whether the scroll-follow engine is attached to the bottom; gates the
   // virtualizer's resize-compensation carve-out for live-row growth.
   isViewportFollowing?: () => boolean;
@@ -137,8 +138,9 @@ export type TranscriptListProps = {
 };
 
 // The whole transcript lives in one virtualized container. Assistant replies
-// are block-level render units, so a long reply no longer becomes one giant
-// row; only its mutable live tail stays force-mounted.
+// use one aggregate process-details unit followed by block-level answer units,
+// so a long final answer never becomes one giant row; only its mutable live
+// tail stays force-mounted.
 export const TranscriptList = memo(function TranscriptList(props: TranscriptListProps) {
   const {
     conversationId,
@@ -146,6 +148,7 @@ export const TranscriptList = memo(function TranscriptList(props: TranscriptList
     liveTranscriptStore,
     scrollViewport,
     layoutWidth,
+    processDetailsExpanded,
     isViewportFollowing,
     isSending,
     isAgentMode,
@@ -178,8 +181,8 @@ export const TranscriptList = memo(function TranscriptList(props: TranscriptList
   );
 
   const { rows, liveStartIndex } = useMemo(
-    () => rowModel.build(historyItems, { ...liveState, isSending }),
-    [rowModel, historyItems, liveState, isSending],
+    () => rowModel.build(historyItems, { ...liveState, isSending }, processDetailsExpanded),
+    [rowModel, historyItems, liveState, isSending, processDetailsExpanded],
   );
 
   const rowsRef = useRef(rows);
@@ -518,6 +521,7 @@ export const TranscriptList = memo(function TranscriptList(props: TranscriptList
           body = (
             <div className="flex justify-start">
               <AssistantRenderUnit
+                conversationId={conversationId}
                 row={row}
                 showUsage={showUsage}
                 usageContextWindow={usageContextWindow}
@@ -525,6 +529,7 @@ export const TranscriptList = memo(function TranscriptList(props: TranscriptList
                 isCompactionRunning={row.mutable ? isCompactionRunning : false}
                 toolStatus={row.mutable ? displayedToolStatus : null}
                 retryAttempts={row.mutable ? liveState.retryAttempts : undefined}
+                processDetailsExpanded={processDetailsExpanded}
                 workdir={workspaceRoot}
                 onOpenFileLink={onOpenFileLink}
                 onResendFromEdit={onResendFromEdit}

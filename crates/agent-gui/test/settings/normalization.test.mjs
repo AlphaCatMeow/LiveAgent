@@ -1441,8 +1441,12 @@ test("gateway settings sync keeps right dock width local and syncs project state
   const payload = sync.buildGatewaySettingsSyncPayload(incoming);
   const synced = sync.applyGatewaySettingsSyncPayload(current, payload);
 
-  assert.equal(payload.customSettings.chatTranscript.width, 768);
+  assert.deepEqual(payload.customSettings.chatTranscript, {
+    width: 768,
+    processDetailsExpanded: false,
+  });
   assert.equal(synced.customSettings.chatTranscript.width, 920);
+  assert.equal(synced.customSettings.chatTranscript.processDetailsExpanded, false);
   assert.equal(synced.customSettings.rightDock.width, 612);
   assert.deepEqual(Object.keys(synced.customSettings.rightDock.projects).sort(), [
     "/desktop/project",
@@ -2179,16 +2183,64 @@ test("font scale settings normalize invalid values to 1 and clamp out-of-range v
   assert.deepEqual(custom.fontScale, { sidebar: 1, chat: 1.2, rightDock: 1 });
 });
 
-test("chat transcript width defaults, clamps, and updates locally", () => {
-  assert.deepEqual(settings.normalizeChatTranscriptSettings(undefined), { width: 768 });
-  assert.deepEqual(settings.normalizeChatTranscriptSettings({ width: 400 }), { width: 560 });
-  assert.deepEqual(settings.normalizeChatTranscriptSettings({ width: 1400 }), { width: 1200 });
-  assert.deepEqual(settings.normalizeChatTranscriptSettings({ width: 920.4 }), { width: 920 });
+test("chat transcript presentation defaults, clamps, and updates locally", () => {
+  assert.deepEqual(settings.normalizeChatTranscriptSettings(undefined), {
+    width: 768,
+    processDetailsExpanded: false,
+  });
+  assert.deepEqual(settings.normalizeChatTranscriptSettings({ width: 400 }), {
+    width: 560,
+    processDetailsExpanded: false,
+  });
+  assert.deepEqual(settings.normalizeChatTranscriptSettings({ width: 1400 }), {
+    width: 1200,
+    processDetailsExpanded: false,
+  });
+  assert.deepEqual(
+    settings.normalizeChatTranscriptSettings({
+      width: 920.4,
+      processDetailsExpanded: true,
+    }),
+    { width: 920, processDetailsExpanded: true },
+  );
+  assert.equal(
+    settings.normalizeChatTranscriptSettings({ processDetailsExpanded: "true" })
+      .processDetailsExpanded,
+    false,
+  );
 
-  const current = settings.normalizeSettings({ customSettings: { chatTranscript: { width: 768 } } });
+  const current = settings.normalizeSettings({
+    customSettings: { chatTranscript: { width: 768, processDetailsExpanded: true } },
+  });
   const updated = settings.updateChatTranscriptWidth(current, 960);
   assert.equal(updated.customSettings.chatTranscript.width, 960);
+  assert.equal(updated.customSettings.chatTranscript.processDetailsExpanded, true);
   assert.equal(settings.updateChatTranscriptWidth(updated, 960), updated);
+});
+
+test("gateway settings sync keeps process detail expansion local", () => {
+  const current = settings.normalizeSettings({
+    customSettings: {
+      chatTranscript: { width: 920, processDetailsExpanded: true },
+    },
+  });
+  const incoming = settings.normalizeSettings({
+    customSettings: {
+      chatTranscript: { width: 1100, processDetailsExpanded: false },
+    },
+  });
+
+  const payload = sync.buildGatewaySettingsSyncPayload(incoming);
+  const synced = sync.applyGatewaySettingsSyncPayload(current, payload);
+
+  assert.deepEqual(payload.customSettings.chatTranscript, {
+    width: 768,
+    processDetailsExpanded: false,
+  });
+  assert.deepEqual(synced.customSettings.chatTranscript, {
+    width: 920,
+    processDetailsExpanded: true,
+  });
 });
 
 test("close window behavior defaults to minimize and only accepts exit", () => {

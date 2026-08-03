@@ -367,6 +367,34 @@ export function SystemSettingsForm(props: SettingsSectionProps) {
 
       <div className="border-t" />
 
+      <section className="rounded-2xl border border-border/60 bg-card p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-foreground">
+              {t("settings.processDetailsExpanded")}
+            </div>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {t("settings.processDetailsExpandedDesc")}
+            </p>
+          </div>
+          <AgentActivationSwitch
+            checked={settings.customSettings.chatTranscript.processDetailsExpanded}
+            title={t("settings.processDetailsExpanded")}
+            onToggle={() =>
+              setSettings((prev) =>
+                updateCustomSettings(prev, {
+                  chatTranscript: {
+                    ...prev.customSettings.chatTranscript,
+                    processDetailsExpanded:
+                      !prev.customSettings.chatTranscript.processDetailsExpanded,
+                  },
+                }),
+              )
+            }
+          />
+        </div>
+      </section>
+
       <div className="grid gap-4 md:grid-cols-2">
         <section className="space-y-3 rounded-2xl border border-border/60 bg-card p-4">
           <div className="flex items-start gap-3">

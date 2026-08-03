@@ -6,6 +6,11 @@ import type {
 import type { LiveTranscriptState } from "../../../lib/chat/conversation/liveTranscriptStore";
 import { getRoundText, type LiveRound, type UiRound } from "../../../lib/chat/messages/uiMessages";
 import {
+  getProcessDetailsDefaultOpen,
+  partitionAssistantResponse,
+  shouldForceProcessDetailsOpen,
+} from "../../../lib/chat/processDetailsModel";
+import {
   CHECKPOINT_ROW_ESTIMATE_PX,
   estimateAssistantRowHeight,
   estimateUserRowHeight,
@@ -50,6 +55,18 @@ export type AssistantBlockRenderUnit = {
   hasRunningToolCall: boolean;
 };
 
+export type AssistantProcessBlock = Omit<AssistantBlockRenderUnit, "kind"> & {
+  key: string;
+};
+
+export type AssistantProcessRenderUnit = {
+  kind: "process";
+  blocks: AssistantProcessBlock[];
+  hasRunningToolCall: boolean;
+  hasSubstantiveAnswer: boolean;
+  forceOpen: boolean;
+};
+
 export type AssistantPlaceholderRenderUnit = {
   kind: "placeholder";
   showFallbackStatus: boolean;
@@ -66,6 +83,7 @@ export type AssistantFooterRenderUnit = {
 
 export type AssistantRenderUnit =
   | AssistantBlockRenderUnit
+  | AssistantProcessRenderUnit
   | AssistantPlaceholderRenderUnit
   | AssistantFooterRenderUnit;
 
@@ -100,8 +118,11 @@ export type LiveTailInput = LiveTranscriptState & {
 };
 
 function buildReplyText(rounds: (UiRound | LiveRound)[]): string {
-  return rounds
-    .map((round) => getRoundText(round).trim())
+  const partition = partitionAssistantResponse<UiRound["blocks"][number], UiRound | LiveRound>(
+    rounds,
+  );
+  return partition.answerRounds
+    .map(({ blocks }) => getRoundText({ blocks }).trim())
     .filter((text) => text.length > 0)
     .join("\n\n");
 }
@@ -236,6 +257,19 @@ function sameGroupedBlock(previous: GroupedRoundBlock, next: GroupedRoundBlock) 
   );
 }
 
+function sameProcessBlock(previous: AssistantProcessBlock, next: AssistantProcessBlock) {
+  return (
+    previous.key === next.key &&
+    sameGroupedBlock(previous.block, next.block) &&
+    previous.roundMeta === next.roundMeta &&
+    sameStringArray(previous.runningToolCallIds, next.runningToolCallIds) &&
+    previous.thinkingOpen === next.thinkingOpen &&
+    previous.isLatestThinking === next.isLatestThinking &&
+    previous.isRoundTail === next.isRoundTail &&
+    previous.hasRunningToolCall === next.hasRunningToolCall
+  );
+}
+
 function canReuseLiveUnit(previous: AssistantUnitRow, next: AssistantUnitRow) {
   if (previous.mutable || next.mutable) return false;
   if (
@@ -250,9 +284,24 @@ function canReuseLiveUnit(previous: AssistantUnitRow, next: AssistantUnitRow) {
     previous.compacted !== next.compacted ||
     previous.showAvatar !== next.showAvatar ||
     previous.isAborted !== next.isAborted ||
-    previous.unit.kind !== "block" ||
-    next.unit.kind !== "block"
+    previous.unit.kind !== next.unit.kind
   ) {
+    return false;
+  }
+  if (previous.unit.kind === "process" && next.unit.kind === "process") {
+    const nextBlocks = next.unit.blocks;
+    return (
+      previous.unit.hasRunningToolCall === next.unit.hasRunningToolCall &&
+      previous.unit.hasSubstantiveAnswer === next.unit.hasSubstantiveAnswer &&
+      previous.unit.forceOpen === next.unit.forceOpen &&
+      previous.unit.blocks.length === next.unit.blocks.length &&
+      previous.unit.blocks.every((block, index) => {
+        const nextBlock = nextBlocks[index];
+        return Boolean(nextBlock && sameProcessBlock(block, nextBlock));
+      })
+    );
+  }
+  if (previous.unit.kind !== "block" || next.unit.kind !== "block") {
     return false;
   }
   return (
@@ -276,6 +325,7 @@ type BuildAssistantUnitsInput = {
   replyText: string;
   retryTarget: RenderUserMessage | null;
   anchorUserKey: string | null;
+  processDetailsExpanded: boolean;
   liveUnitCache?: Map<string, AssistantUnitRow>;
 };
 
@@ -290,16 +340,105 @@ function buildAssistantUnits(input: BuildAssistantUnitsInput): AssistantUnitRow[
     replyText,
     retryTarget,
     anchorUserKey,
+    processDetailsExpanded,
     liveUnitCache,
   } = input;
   const latestTodoItem = findLatestTodoItem(rounds);
   const isAborted = rounds.some((round) => round.meta?.stopReason === "aborted");
   const rows: AssistantUnitRow[] = [];
+  const partition = partitionAssistantResponse<UiRound["blocks"][number], UiRound | LiveRound>(
+    rounds,
+  );
+  // An active process with no answer is already opened by
+  // getProcessDetailsDefaultOpen. Do not force all live rows open: the first
+  // substantive answer token must immediately hand control to the local
+  // preference, while terminal failures/timeouts still override it.
+  const forceProcessDetailsOpen = shouldForceProcessDetailsOpen(rounds);
+  const prepareBlocks = (blocks: UiRound["blocks"]) =>
+    groupRoundBlocks(blocks).filter((block) => isVisibleGroupedBlock(block, latestTodoItem));
+  const answerParts = partition.answerRounds.map(({ round, blocks }) => ({
+    round,
+    groupedBlocks: prepareBlocks(blocks),
+  }));
+  const answerBlocksByRound = new Map(
+    answerParts.map(({ round, groupedBlocks }) => [round, groupedBlocks] as const),
+  );
+  const processBlocks: AssistantProcessBlock[] = [];
 
-  rounds.forEach((round, roundIndex) => {
-    const groupedBlocks = groupRoundBlocks(round.blocks).filter((block) =>
-      isVisibleGroupedBlock(block, latestTodoItem),
+  for (const { round, blocks } of partition.processRounds) {
+    const groupedBlocks = prepareBlocks(blocks);
+    const runningToolCallIds = "runningToolCallIds" in round ? round.runningToolCallIds : [];
+    const roundHasRunningToolCall = hasRunningToolCall(groupedBlocks, runningToolCallIds);
+    let latestThinkingKey: string | null = null;
+    for (let blockIndex = groupedBlocks.length - 1; blockIndex >= 0; blockIndex -= 1) {
+      const block = groupedBlocks[blockIndex];
+      if (block?.kind === "thinking") {
+        latestThinkingKey = block.key;
+        break;
+      }
+    }
+
+    groupedBlocks.forEach((block, blockIndex) => {
+      processBlocks.push({
+        key: `round:${round.key}:block:${block.key}`,
+        block,
+        roundMeta: round.meta,
+        runningToolCallIds,
+        thinkingOpen: "thinkingOpen" in round ? round.thinkingOpen : false,
+        isLatestThinking: block.kind === "thinking" && block.key === latestThinkingKey,
+        isRoundTail:
+          blockIndex === groupedBlocks.length - 1 &&
+          (answerBlocksByRound.get(round)?.length ?? 0) === 0,
+        hasRunningToolCall: roundHasRunningToolCall,
+      });
+    });
+  }
+
+  if (processBlocks.length > 0) {
+    const expandedMeasurement = processBlocks.reduce(
+      (total, entry) => {
+        const measurement = measureBlockUnit(
+          entry.block,
+          Boolean(entry.isRoundTail && entry.roundMeta?.usage),
+        );
+        return {
+          estimate: total.estimate + measurement.estimate + ASSISTANT_UNIT_GAP_PX,
+          renderCost: total.renderCost + measurement.renderCost,
+        };
+      },
+      { estimate: 44, renderCost: 1 },
     );
+    const defaultOpen =
+      forceProcessDetailsOpen ||
+      getProcessDetailsDefaultOpen({
+        hasSubstantiveAnswer: partition.hasSubstantiveAnswer,
+        expandByDefault: processDetailsExpanded,
+      });
+    rows.push({
+      kind: "assistant-unit",
+      key: `${replyKey}:process-details`,
+      replyKey,
+      estimate: defaultOpen ? expandedMeasurement.estimate : 44,
+      renderCost: defaultOpen ? Math.min(24, expandedMeasurement.renderCost) : 1,
+      gapAfter: ASSISTANT_UNIT_GAP_PX,
+      anchorUserKey,
+      live,
+      mutable: false,
+      renderMode,
+      compacted,
+      showAvatar: true,
+      isAborted,
+      unit: {
+        kind: "process",
+        blocks: processBlocks,
+        hasRunningToolCall: processBlocks.some((entry) => entry.hasRunningToolCall),
+        hasSubstantiveAnswer: partition.hasSubstantiveAnswer,
+        forceOpen: forceProcessDetailsOpen,
+      },
+    });
+  }
+
+  for (const { round, groupedBlocks } of answerParts) {
     const runningToolCallIds = "runningToolCallIds" in round ? round.runningToolCallIds : [];
     const roundHasRunningToolCall = hasRunningToolCall(groupedBlocks, runningToolCallIds);
     let latestThinkingKey: string | null = null;
@@ -340,26 +479,7 @@ function buildAssistantUnits(input: BuildAssistantUnitsInput): AssistantUnitRow[
         },
       });
     });
-
-    if (live && roundIndex === rounds.length - 1 && groupedBlocks.length === 0) {
-      rows.push({
-        kind: "assistant-unit",
-        key: `${replyKey}:round:${round.key}:placeholder`,
-        replyKey,
-        estimate: 64,
-        renderCost: 1,
-        gapAfter: TRANSCRIPT_ROW_GAP_PX,
-        anchorUserKey,
-        live: true,
-        mutable: true,
-        renderMode,
-        compacted,
-        showAvatar: rows.length === 0,
-        isAborted,
-        unit: { kind: "placeholder", showFallbackStatus: false },
-      });
-    }
-  });
+  }
 
   if (live && rows.length === 0) {
     rows.push({
@@ -445,7 +565,11 @@ export type TranscriptRowModelOptions = {
 };
 
 export type TranscriptRowModel = {
-  build: (historyItems: RenderTimelineItem[], live: LiveTailInput) => TranscriptRowsSnapshot;
+  build: (
+    historyItems: RenderTimelineItem[],
+    live: LiveTailInput,
+    processDetailsExpanded?: boolean,
+  ) => TranscriptRowsSnapshot;
   reset: () => void;
 };
 
@@ -455,10 +579,15 @@ export function createTranscriptRowModel(options?: TranscriptRowModelOptions): T
     {
       anchorUserKey: string | null;
       retryTarget: RenderUserMessage | null;
+      processDetailsExpanded: boolean;
       rows: TranscriptRow[];
     }
   >();
-  let historyRowsCache: { items: RenderTimelineItem[]; rows: TranscriptRow[] } | null = null;
+  let historyRowsCache: {
+    items: RenderTimelineItem[];
+    processDetailsExpanded: boolean;
+    rows: TranscriptRow[];
+  } | null = null;
   let streamOrigins = new Map<string, string>();
   let knownKeys = new Set<string>();
   let hasBuilt = false;
@@ -520,10 +649,16 @@ export function createTranscriptRowModel(options?: TranscriptRowModelOptions): T
   const buildHistoryRows = (
     item: RenderTimelineItem,
     retryTarget: RenderUserMessage | null,
+    processDetailsExpanded: boolean,
   ): TranscriptRow[] => {
     const anchorUserKey = item.kind === "user" ? item.key : (retryTarget?.key ?? null);
     const cached = rowCache.get(item);
-    if (cached && cached.anchorUserKey === anchorUserKey && cached.retryTarget === retryTarget) {
+    if (
+      cached &&
+      cached.anchorUserKey === anchorUserKey &&
+      cached.retryTarget === retryTarget &&
+      cached.processDetailsExpanded === processDetailsExpanded
+    ) {
       return cached.rows;
     }
 
@@ -564,15 +699,17 @@ export function createTranscriptRowModel(options?: TranscriptRowModelOptions): T
         replyText: buildReplyText(item.rounds),
         retryTarget,
         anchorUserKey,
+        processDetailsExpanded,
       });
     }
-    rowCache.set(item, { anchorUserKey, retryTarget, rows });
+    rowCache.set(item, { anchorUserKey, retryTarget, processDetailsExpanded, rows });
     return rows;
   };
 
   const build = (
     historyItems: RenderTimelineItem[],
     live: LiveTailInput,
+    processDetailsExpanded = false,
   ): TranscriptRowsSnapshot => {
     const liveTailVisible = live.isSending && !live.isSettled;
     const isInitialBuild = !hasBuilt;
@@ -606,18 +743,21 @@ export function createTranscriptRowModel(options?: TranscriptRowModelOptions): T
     };
 
     let historyRows: TranscriptRow[];
-    if (historyRowsCache?.items === historyItems) {
+    if (
+      historyRowsCache?.items === historyItems &&
+      historyRowsCache.processDetailsExpanded === processDetailsExpanded
+    ) {
       historyRows = historyRowsCache.rows;
     } else {
       historyRows = [];
       let retryTarget: RenderUserMessage | null = null;
       for (const item of historyItems) {
-        const itemRows = buildHistoryRows(item, retryTarget);
+        const itemRows = buildHistoryRows(item, retryTarget, processDetailsExpanded);
         historyRows.push(...itemRows);
         for (const row of itemRows) trackBirth(row.key);
         if (item.kind === "user") retryTarget = item;
       }
-      historyRowsCache = { items: historyItems, rows: historyRows };
+      historyRowsCache = { items: historyItems, processDetailsExpanded, rows: historyRows };
     }
 
     let rows = historyRows;
@@ -638,6 +778,7 @@ export function createTranscriptRowModel(options?: TranscriptRowModelOptions): T
         replyText: "",
         retryTarget: null,
         anchorUserKey: historyRows.at(-1)?.anchorUserKey ?? null,
+        processDetailsExpanded,
         liveUnitCache: activeTurn.liveUnitCache,
       });
       rows = [...historyRows, ...liveRows];

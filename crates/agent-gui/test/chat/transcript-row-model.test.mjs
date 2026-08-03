@@ -57,6 +57,12 @@ function blockRows(snapshot) {
   );
 }
 
+function processRows(snapshot) {
+  return snapshot.rows.filter(
+    (row) => row.kind === "assistant-unit" && row.unit.kind === "process",
+  );
+}
+
 function footerRows(snapshot) {
   return snapshot.rows.filter(
     (row) => row.kind === "assistant-unit" && row.unit.kind === "footer",
@@ -100,6 +106,45 @@ test("settling a live turn preserves every block-unit key and adds one footer un
     idleLive,
   );
   assert.equal(blockRows(rebuilt)[0].key, liveBlockKey);
+});
+
+test("the aggregate process key survives the live-to-history handoff", () => {
+  const model = createTranscriptRowModel();
+  const history = [userItem("u1")];
+  const thinkingBlock = { kind: "thinking", id: "thinking-1", text: "working" };
+  const liveRound = {
+    round: 1,
+    key: "r1",
+    blocks: [thinkingBlock],
+    runningToolCallIds: [],
+    thinkingOpen: true,
+  };
+
+  const streaming = model.build(history, {
+    ...idleLive,
+    isSending: true,
+    liveRounds: [liveRound],
+  });
+  const liveProcessKey = processRows(streaming)[0].key;
+  assert.match(liveProcessKey, /^live-turn-\d+:process-details$/);
+
+  const settled = model.build(
+    [
+      ...history,
+      assistantItem("a1", [
+        {
+          round: 1,
+          key: "r1",
+          blocks: [thinkingBlock, { kind: "text", id: "text-1", text: "Final answer" }],
+        },
+      ]),
+    ],
+    idleLive,
+  );
+
+  assert.equal(processRows(settled)[0].key, liveProcessKey);
+  assert.equal(processRows(settled)[0].renderMode, "streaming");
+  assert.equal(blockRows(settled)[0].unit.block.text, "Final answer");
 });
 
 test("persist lag: block-unit aliases still land one build later", () => {
@@ -270,7 +315,7 @@ test("terminal settlement removes the live tail before sending clears", () => {
   assert.equal(nextPending.rows[3].mutable, true);
 });
 
-test("assistant rounds flatten into grouped top-level render units", () => {
+test("assistant process activity becomes one cross-round top-level render unit", () => {
   const model = createTranscriptRowModel();
   const tool = (id, name = "Read") => ({
     kind: "tool",
@@ -290,13 +335,15 @@ test("assistant rounds flatten into grouped top-level render units", () => {
     },
   ];
   const snapshot = model.build([userItem("u1"), assistantItem("a1", rounds)], idleLive);
+  assert.equal(processRows(snapshot).length, 1);
   assert.deepEqual(
-    blockRows(snapshot).map((row) => row.unit.block.kind),
+    processRows(snapshot)[0].unit.blocks.map((entry) => entry.block.kind),
     ["text", "thinking", "toolGroup", "hostedSearchGroup"],
   );
+  assert.equal(blockRows(snapshot).length, 0);
   assert.equal(footerRows(snapshot).length, 1);
-  assert.equal(blockRows(snapshot)[0].showAvatar, true);
-  assert.ok(blockRows(snapshot).slice(1).every((row) => !row.showAvatar));
+  assert.equal(processRows(snapshot)[0].showAvatar, true);
+  assert.match(processRows(snapshot)[0].key, /:process-details$/);
 });
 
 test("Markdown text blocks stay whole instead of being string-sliced", () => {
@@ -311,7 +358,7 @@ test("Markdown text blocks stay whole instead of being string-sliced", () => {
   assert.ok(blockRows(snapshot)[0].renderCost > 1);
 });
 
-test("only the mutable live tail is pinned while completed prefix units virtualize", () => {
+test("only the final-answer live tail is pinned while the process unit virtualizes", () => {
   const model = createTranscriptRowModel();
   const liveRound = {
     round: 1,
@@ -329,13 +376,18 @@ test("only the mutable live tail is pinned while completed prefix units virtuali
     isSending: true,
     liveRounds: [liveRound],
   });
-  const units = blockRows(snapshot);
-  assert.equal(units.length, 3);
+  const process = processRows(snapshot)[0];
+  const answer = blockRows(snapshot)[0];
+  assert.equal(process.unit.blocks.length, 2);
   assert.deepEqual(
-    units.map((row) => row.mutable),
-    [false, false, true],
+    process.unit.blocks.map((entry) => entry.block.kind),
+    ["text", "thinking"],
   );
-  assert.equal(snapshot.liveStartIndex, snapshot.rows.indexOf(units[2]));
+  assert.equal(process.mutable, false);
+  assert.equal(answer.unit.block.kind, "text");
+  assert.equal(answer.unit.block.text, "streaming tail");
+  assert.equal(answer.mutable, true);
+  assert.equal(snapshot.liveStartIndex, snapshot.rows.indexOf(answer));
   assert.equal(snapshot.liveStartIndex, snapshot.rows.length - 1);
 });
 
@@ -364,7 +416,7 @@ test("assistant unit keys do not depend on the history-window-relative index", (
   );
 });
 
-test("usage stays on each round tail and changed files stay on the reply footer", () => {
+test("usage metadata stays with process and answer tails while changed files stay on the footer", () => {
   const model = createTranscriptRowModel();
   const usage = {
     input: 10,
@@ -396,18 +448,156 @@ test("usage stays on each round tail and changed files stay on the reply footer"
       meta: { usage },
     },
     { round: 2, key: "r2", blocks: [writeTool] },
+    { round: 3, key: "r3", blocks: [{ kind: "text", id: "text-1", text: "final" }] },
   ];
   const snapshot = model.build([userItem("u1"), assistantItem("a1", rounds)], idleLive);
-  const units = blockRows(snapshot);
+  const process = processRows(snapshot)[0];
+  const answer = blockRows(snapshot)[0];
   assert.deepEqual(
-    units.map((row) => row.unit.isRoundTail),
+    process.unit.blocks.map((entry) => entry.isRoundTail),
     [false, true, true],
   );
-  assert.equal(units[1].unit.roundMeta.usage, usage);
+  assert.equal(process.unit.blocks[1].roundMeta.usage, usage);
+  assert.equal(answer.unit.isRoundTail, true);
   const footer = footerRows(snapshot)[0];
   assert.equal(footer.unit.hasChangedFilesCandidate, true);
   assert.equal(collectChangedFiles(footer.unit.rounds).files[0].path, "src/result.ts");
-  assert.equal(footer.unit.replyText, "firstsecond");
+  assert.equal(footer.unit.replyText, "final");
+});
+
+test("process estimates follow the local default while no-answer processes stay expanded", () => {
+  const model = createTranscriptRowModel();
+  const processThenAnswer = assistantItem("a1", [
+    {
+      round: 1,
+      key: "r1",
+      blocks: [
+        { kind: "thinking", id: "thinking-1", text: "long thought ".repeat(100) },
+        { kind: "text", id: "text-1", text: "final answer" },
+      ],
+    },
+  ]);
+
+  const collapsed = model.build([userItem("u1"), processThenAnswer], idleLive, false);
+  const expanded = model.build([userItem("u1"), processThenAnswer], idleLive, true);
+  assert.equal(processRows(collapsed)[0].estimate, 44);
+  assert.ok(processRows(expanded)[0].estimate > processRows(collapsed)[0].estimate);
+
+  const noAnswer = model.build(
+    [
+      userItem("u1"),
+      assistantItem("a2", [
+        {
+          round: 1,
+          key: "r1",
+          blocks: [{ kind: "thinking", id: "thinking-1", text: "unfinished" }],
+        },
+      ]),
+    ],
+    idleLive,
+    false,
+  );
+  assert.ok(processRows(noAnswer)[0].estimate > 44);
+});
+
+test("active process rows follow the answer boundary while failures and timeouts stay expanded", () => {
+  const completedBlocks = [
+    { kind: "thinking", id: "thinking-1", text: "long thought ".repeat(100) },
+    { kind: "text", id: "text-1", text: "final answer" },
+  ];
+  const normal = createTranscriptRowModel().build(
+    [userItem("u1"), assistantItem("normal", [{ round: 1, key: "r1", blocks: completedBlocks }])],
+    idleLive,
+    false,
+  );
+  assert.equal(processRows(normal)[0].estimate, 44);
+  assert.equal(processRows(normal)[0].unit.forceOpen, false);
+
+  const active = createTranscriptRowModel().build(
+    [userItem("u1")],
+    {
+      ...idleLive,
+      isSending: true,
+      liveRounds: [
+        {
+          round: 1,
+          key: "r1",
+          blocks: completedBlocks,
+          runningToolCallIds: [],
+          thinkingOpen: false,
+        },
+      ],
+    },
+    false,
+  );
+  assert.equal(processRows(active)[0].estimate, 44);
+  assert.equal(processRows(active)[0].unit.forceOpen, false);
+
+  const activeWithoutAnswer = createTranscriptRowModel().build(
+    [userItem("u1")],
+    {
+      ...idleLive,
+      isSending: true,
+      liveRounds: [
+        {
+          round: 1,
+          key: "r1",
+          blocks: [{ kind: "thinking", id: "thinking-1", text: "still working" }],
+          runningToolCallIds: [],
+          thinkingOpen: true,
+        },
+      ],
+    },
+    false,
+  );
+  assert.ok(processRows(activeWithoutAnswer)[0].estimate > 44);
+  assert.equal(processRows(activeWithoutAnswer)[0].unit.forceOpen, false);
+
+  const failed = createTranscriptRowModel().build(
+    [
+      userItem("u1"),
+      assistantItem("failed", [
+        { round: 1, key: "r1", blocks: completedBlocks, meta: { stopReason: "error" } },
+      ]),
+    ],
+    idleLive,
+    false,
+  );
+  assert.ok(processRows(failed)[0].estimate > 44);
+  assert.equal(processRows(failed)[0].unit.forceOpen, true);
+
+  const timedOut = createTranscriptRowModel().build(
+    [
+      userItem("u1"),
+      assistantItem("timed-out", [
+        {
+          round: 1,
+          key: "r1",
+          blocks: [
+            { kind: "thinking", id: "thinking-1", text: "Plan" },
+            {
+              kind: "tool",
+              item: {
+                toolCall: { type: "toolCall", id: "question-1", name: "AskUserQuestion" },
+                toolResult: {
+                  role: "toolResult",
+                  toolCallId: "question-1",
+                  isError: false,
+                  content: [],
+                  details: { kind: "ask_user_question", timedOut: true },
+                },
+              },
+            },
+            { kind: "text", id: "text-1", text: "final answer" },
+          ],
+        },
+      ]),
+    ],
+    idleLive,
+    false,
+  );
+  assert.ok(processRows(timedOut)[0].estimate > 44);
+  assert.equal(processRows(timedOut)[0].unit.forceOpen, true);
 });
 
 test("cost-aware overscan spends one giant unit instead of five fixed rows", () => {

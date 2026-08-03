@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 import { ChevronRight, Terminal } from "../../../../components/icons";
 import { useLocale } from "../../../../i18n";
@@ -19,8 +19,9 @@ function ToolTraceGroupInner(props: {
   items: ToolTraceItem[];
   runningToolCallIds?: string[];
   isAborted?: boolean;
+  defaultOpen?: boolean;
 }) {
-  const { items, runningToolCallIds = [], isAborted = false } = props;
+  const { items, runningToolCallIds = [], isAborted = false, defaultOpen = false } = props;
   const { t } = useLocale();
   const counts = useMemo(
     () => getToolGroupCounts(items, runningToolCallIds),
@@ -34,7 +35,14 @@ function ToolTraceGroupInner(props: {
     [allBash, dominantToolName],
   );
   const ToolIcon = allBash ? Terminal : meta.Icon;
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
+  const userInteractedRef = useRef(false);
+
+  useEffect(() => {
+    if (!userInteractedRef.current) {
+      setOpen(defaultOpen);
+    }
+  }, [defaultOpen]);
 
   const statusLabel =
     counts.failed > 0
@@ -58,7 +66,10 @@ function ToolTraceGroupInner(props: {
         aria-expanded={open}
         aria-label={open ? t("chat.tool.collapseActivity") : t("chat.tool.expandActivity")}
         className="grid w-full cursor-pointer select-none grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 py-1.5 text-left"
-        onClick={() => setOpen((prev) => !prev)}
+        onClick={() => {
+          userInteractedRef.current = true;
+          setOpen((prev) => !prev);
+        }}
       >
         <ToolIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60 group-hover/tool-trace:text-foreground/75" />
 
@@ -130,5 +141,6 @@ export const ToolTraceGroup = memo(
         item === next.items[index] || areToolTraceItemsEqual(item, next.items[index]),
     ) &&
     previous.isAborted === next.isAborted &&
+    previous.defaultOpen === next.defaultOpen &&
     areRunningIdsEqual(previous.runningToolCallIds, next.runningToolCallIds),
 );

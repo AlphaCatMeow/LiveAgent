@@ -17,6 +17,25 @@ import { UsagePanel } from "./UsagePanel";
 
 const EMPTY_RUNNING_TOOL_CALL_IDS: string[] = [];
 
+const ThinkingMarkdown = memo(function ThinkingMarkdown(props: {
+  text: string;
+  renderMode: "streaming" | "static";
+  workdir?: string;
+  onOpenFileLink?: (link: ChatFileLink) => void;
+}) {
+  const { text, renderMode, workdir, onOpenFileLink } = props;
+  return (
+    <Markdown
+      content={text}
+      className="thinking-markdown space-y-1.5"
+      renderMode={renderMode}
+      showCaret={false}
+      workdir={workdir}
+      onOpenFileLink={onOpenFileLink}
+    />
+  );
+});
+
 const ThinkingBlock = memo(function ThinkingBlock({
   text,
   open,
@@ -70,11 +89,9 @@ const ThinkingBlock = memo(function ThinkingBlock({
       <LazyCollapse open={isOpen}>
         {() => (
           <div className="pb-1 pt-1.5">
-            <Markdown
-              content={text}
-              className="thinking-markdown space-y-1.5"
+            <ThinkingMarkdown
+              text={text}
               renderMode={renderMode}
-              showCaret={false}
               workdir={workdir}
               onOpenFileLink={onOpenFileLink}
             />
@@ -153,6 +170,7 @@ export const RoundContent = memo(function RoundContent(props: {
   redactToolContent?: boolean;
   latestTodoItem?: ToolTraceItem | null;
   isAborted?: boolean;
+  withinProcessDetails?: boolean;
   workdir?: string;
   onOpenFileLink?: (link: ChatFileLink) => void;
 }) {
@@ -172,9 +190,11 @@ export const RoundContent = memo(function RoundContent(props: {
     redactToolContent = false,
     latestTodoItem,
     isAborted = false,
+    withinProcessDetails = false,
     workdir,
     onOpenFileLink,
   } = props;
+  const { t } = useLocale();
   const groupedBlocks = useMemo(() => groupRoundBlocks(round.blocks), [round.blocks]);
   const visibleGroupedBlocks = useMemo(
     () =>
@@ -260,12 +280,32 @@ export const RoundContent = memo(function RoundContent(props: {
 
       {visibleGroupedBlocks.map((block) => {
         if (block.kind === "thinking") {
-          return (
+          const isRunning = autoOpenThinking && block.key === latestThinkingKey;
+          return withinProcessDetails ? (
+            <div key={block.key} className="group/think w-full py-1.5">
+              <div className="mb-1.5 flex items-center gap-2 text-[calc(13px*var(--zone-font-scale,1))] text-muted-foreground/80">
+                {isRunning ? (
+                  <AssistantStatus className="min-h-0">{t("chat.thinking")}</AssistantStatus>
+                ) : (
+                  <>
+                    <Lightbulb className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+                    <span className="thinking-block-label">{t("chat.thinkingProcess")}</span>
+                  </>
+                )}
+              </div>
+              <ThinkingMarkdown
+                text={block.text}
+                renderMode={renderMode ?? (isStreaming ? "streaming" : "static")}
+                workdir={workdir}
+                onOpenFileLink={onOpenFileLink}
+              />
+            </div>
+          ) : (
             <ThinkingBlock
               key={block.key}
               text={block.text}
-              open={autoOpenThinking && block.key === latestThinkingKey}
-              isRunning={autoOpenThinking && block.key === latestThinkingKey}
+              open={isRunning}
+              isRunning={isRunning}
               renderMode={renderMode ?? (isStreaming ? "streaming" : "static")}
               workdir={workdir}
               onOpenFileLink={onOpenFileLink}
@@ -277,7 +317,7 @@ export const RoundContent = memo(function RoundContent(props: {
           const isRedactedToolContent =
             redactToolContent && isBuiltinShareToolName(block.item.toolCall.name);
           const displayImagePayload = getNativeDisplayImagePayload(block.item);
-          if (!isRedactedToolContent && displayImagePayload) {
+          if (!withinProcessDetails && !isRedactedToolContent && displayImagePayload) {
             return (
               <NativeDisplayImageBlock
                 key={block.key}
@@ -288,6 +328,7 @@ export const RoundContent = memo(function RoundContent(props: {
           }
 
           if (
+            !withinProcessDetails &&
             !isRedactedToolContent &&
             block.item.toolCall.name === "Image" &&
             !block.item.toolResult?.isError
@@ -324,6 +365,7 @@ export const RoundContent = memo(function RoundContent(props: {
               }
               readOnly={readOnly}
               redactToolContent={redactToolContent}
+              defaultOpen={withinProcessDetails}
             />
           );
         }
@@ -334,6 +376,7 @@ export const RoundContent = memo(function RoundContent(props: {
               key={block.key}
               items={block.kind === "hostedSearch" ? [block.item] : block.items}
               readOnly={readOnly}
+              defaultOpen={withinProcessDetails}
             />
           );
         }

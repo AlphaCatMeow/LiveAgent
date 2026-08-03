@@ -39,6 +39,8 @@
     "components/hub/ToolPolicyToggle.tsx",
     "lib/chat/askUserQuestion.ts",
     "lib/chat/openChatFileLink.ts",
+    "lib/chat/processDetailsDisclosureState.ts",
+    "lib/chat/processDetailsModel.ts",
     "lib/chat/toolApprovalArgs.ts",
     "components/Markdown.tsx",
     "lib/markdownCodeBlockPolicy.ts",

@@ -30,6 +30,7 @@ export type ChatTranscriptProps = {
   isCompactionRunning: boolean;
   bottomReservePx?: number;
   contentWidth: number;
+  processDetailsExpanded: boolean;
   onContentWidthChange: (width: number) => void;
   onOpenFileLink?: (link: ChatFileLink) => void;
   onResendFromEdit: (

@@ -53,6 +53,7 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
     isCompactionRunning,
     bottomReservePx = 0,
     contentWidth,
+    processDetailsExpanded,
     onContentWidthChange,
     onOpenFileLink,
     onResendFromEdit,
@@ -316,6 +317,7 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
                 liveTranscriptStore={liveTranscriptStore}
                 scrollViewport={scrollViewport}
                 layoutWidth={contentWidth}
+                processDetailsExpanded={processDetailsExpanded}
                 isViewportFollowing={scrollFollowHandle.isFollowing}
                 isSending={isSending}
                 isAgentMode={isAgentMode}

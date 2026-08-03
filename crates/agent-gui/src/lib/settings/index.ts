@@ -162,6 +162,7 @@ export { DEFAULT_CHAT_TRANSCRIPT_WIDTH, MAX_CHAT_TRANSCRIPT_WIDTH, MIN_CHAT_TRAN
 
 export type ChatTranscriptSettings = {
   width: number;
+  processDetailsExpanded: boolean;
 };
 
 export type CustomSettings = {
@@ -2158,6 +2159,7 @@ export function normalizeChatTranscriptSettings(input: unknown): ChatTranscriptS
       MAX_CHAT_TRANSCRIPT_WIDTH,
       DEFAULT_CHAT_TRANSCRIPT_WIDTH,
     ),
+    processDetailsExpanded: obj.processDetailsExpanded === true,
   };
 }
 
@@ -2493,7 +2495,9 @@ export function getRightDockProjectState(
 export function updateChatTranscriptWidth(prev: AppSettings, width: number): AppSettings {
   const nextWidth = normalizeChatTranscriptSettings({ width }).width;
   if (prev.customSettings.chatTranscript.width === nextWidth) return prev;
-  return updateCustomSettings(prev, { chatTranscript: { width: nextWidth } });
+  return updateCustomSettings(prev, {
+    chatTranscript: { ...prev.customSettings.chatTranscript, width: nextWidth },
+  });
 }
 
 export function updateRightDockWidth(prev: AppSettings, width: number): AppSettings {

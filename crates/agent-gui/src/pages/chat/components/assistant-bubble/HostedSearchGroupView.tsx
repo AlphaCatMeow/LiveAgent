@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ChevronRight, Globe } from "../../../../components/icons";
 import { useLocale } from "../../../../i18n";
@@ -83,12 +83,20 @@ function getHostedSearchCountLabel(count: number, t: (key: string) => string) {
 export function HostedSearchGroupView({
   items,
   isLive = false,
+  defaultOpen = false,
 }: {
   items: HostedSearchBlock[];
   isLive?: boolean;
+  defaultOpen?: boolean;
 }) {
   const { t } = useLocale();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
+  const userInteractedRef = useRef(false);
+  useEffect(() => {
+    if (!userInteractedRef.current) {
+      setOpen(defaultOpen);
+    }
+  }, [defaultOpen]);
   const queries = useMemo(() => getUniqueHostedSearchQueries(items), [items]);
   const sources = useMemo(() => getUniqueHostedSearchSources(items), [items]);
   const visibleSources = sources.slice(0, 10);
@@ -104,7 +112,10 @@ export function HostedSearchGroupView({
         aria-expanded={open}
         aria-label={open ? t("chat.search.collapseActivity") : t("chat.search.expandActivity")}
         className="group/search flex w-full cursor-pointer select-none items-center justify-between gap-3 py-1.5 text-left"
-        onClick={() => setOpen((prev) => !prev)}
+        onClick={() => {
+          userInteractedRef.current = true;
+          setOpen((prev) => !prev);
+        }}
       >
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <Globe className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60 group-hover/search:text-foreground/75" />

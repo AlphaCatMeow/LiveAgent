@@ -1,0 +1,77 @@
+import { memo, type ReactNode, useEffect, useId, useRef, useState } from "react";
+
+import { ChevronRight, Lightbulb } from "../../../../components/icons";
+import { useLocale } from "../../../../i18n";
+import {
+  readManualProcessDetailsOpen,
+  writeManualProcessDetailsOpen,
+} from "../../../../lib/chat/processDetailsDisclosureState";
+import { getProcessDetailsDefaultOpen } from "../../../../lib/chat/processDetailsModel";
+import { LazyCollapse } from "./LazyCollapse";
+
+export const ProcessDetailsDisclosure = memo(function ProcessDetailsDisclosure(props: {
+  disclosureKey: string;
+  hasSubstantiveAnswer: boolean;
+  expandByDefault: boolean;
+  forceOpen?: boolean;
+  retainWhileClosed?: boolean;
+  children: () => ReactNode;
+}) {
+  const {
+    disclosureKey,
+    hasSubstantiveAnswer,
+    expandByDefault,
+    forceOpen = false,
+    retainWhileClosed = false,
+    children,
+  } = props;
+  const { t } = useLocale();
+  const regionId = useId();
+  const toggleId = `${regionId}-toggle`;
+  const automaticOpen =
+    forceOpen ||
+    getProcessDetailsDefaultOpen({
+      hasSubstantiveAnswer,
+      expandByDefault,
+    });
+  const manualOpen = readManualProcessDetailsOpen(disclosureKey);
+  const [open, setOpen] = useState(manualOpen ?? automaticOpen);
+  const userInteractedRef = useRef(manualOpen !== undefined);
+
+  useEffect(() => {
+    if (!userInteractedRef.current) {
+      setOpen(automaticOpen);
+    }
+  }, [automaticOpen]);
+
+  return (
+    <div className="process-details min-w-0 max-w-full">
+      <button
+        id={toggleId}
+        type="button"
+        aria-controls={regionId}
+        aria-expanded={open}
+        onClick={() => {
+          userInteractedRef.current = true;
+          setOpen((previous) => {
+            const next = !previous;
+            writeManualProcessDetailsOpen(disclosureKey, next);
+            return next;
+          });
+        }}
+        className="process-details-toggle flex w-full cursor-pointer select-none items-center gap-2 rounded-md py-1.5 text-left text-[calc(13px*var(--zone-font-scale,1))] font-normal text-muted-foreground/80 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 active:translate-y-px"
+      >
+        <Lightbulb className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+        <span>{t("chat.processDetails")}</span>
+        <ChevronRight
+          className={`ml-auto h-3.5 w-3.5 text-muted-foreground/60 transition-transform duration-200 ease-out ${open ? "rotate-90" : ""}`}
+        />
+      </button>
+      <section id={regionId} aria-labelledby={toggleId}>
+        <LazyCollapse open={open} retainWhileClosed={retainWhileClosed}>
+          {() => <div className="space-y-1 pb-1 pt-1">{children()}</div>}
+        </LazyCollapse>
+      </section>
+    </div>
+  );
+});

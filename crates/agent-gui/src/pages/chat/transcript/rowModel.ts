@@ -411,7 +411,7 @@ function buildAssistantUnits(input: BuildAssistantUnitsInput): AssistantUnitRow[
     const defaultOpen =
       forceProcessDetailsOpen ||
       getProcessDetailsDefaultOpen({
-        hasSubstantiveAnswer: partition.hasSubstantiveAnswer,
+        hasSubstantiveAnswer: !live && partition.hasSubstantiveAnswer,
         expandByDefault: processDetailsExpanded,
       });
     rows.push({

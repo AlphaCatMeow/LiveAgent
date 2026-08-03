@@ -500,7 +500,7 @@ test("process estimates follow the local default while no-answer processes stay 
   assert.ok(processRows(noAnswer)[0].estimate > 44);
 });
 
-test("active process rows follow the answer boundary while failures and timeouts stay expanded", () => {
+test("active process rows stay expanded until answers settle while failures stay expanded", () => {
   const completedBlocks = [
     { kind: "thinking", id: "thinking-1", text: "long thought ".repeat(100) },
     { kind: "text", id: "text-1", text: "final answer" },
@@ -530,7 +530,7 @@ test("active process rows follow the answer boundary while failures and timeouts
     },
     false,
   );
-  assert.equal(processRows(active)[0].estimate, 44);
+  assert.ok(processRows(active)[0].estimate > 44);
   assert.equal(processRows(active)[0].unit.forceOpen, false);
 
   const activeWithoutAnswer = createTranscriptRowModel().build(

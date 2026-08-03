@@ -134,6 +134,7 @@ export const AssistantBubble = memo(function AssistantBubble(props: {
           <ProcessDetailsDisclosure
             disclosureKey={disclosureKey}
             hasSubstantiveAnswer={presentation.hasSubstantiveAnswer}
+            isStreaming={isStreaming}
             expandByDefault={processDetailsExpanded}
             forceOpen={forceProcessDetailsOpen}
           >

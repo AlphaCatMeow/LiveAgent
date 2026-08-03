@@ -108,14 +108,22 @@ test("the setting updates mounted replies that have no manual override", () => {
   assert.equal(toggleButton(expanded).props["aria-expanded"], true);
 });
 
-test("an untouched live process collapses when the first substantive answer appears", () => {
+test("an untouched process waits for the stream to settle before collapsing", () => {
   resetHooks();
-  const processOnly = render({ hasSubstantiveAnswer: false });
+  const processOnly = render({ hasSubstantiveAnswer: false, isStreaming: true });
   assert.equal(toggleButton(processOnly).props["aria-expanded"], true);
 
-  render({ hasSubstantiveAnswer: true });
-  const answerStarted = render({ hasSubstantiveAnswer: true });
-  assert.equal(toggleButton(answerStarted).props["aria-expanded"], false);
+  render({ hasSubstantiveAnswer: true, isStreaming: true });
+  const candidateAnswer = render({ hasSubstantiveAnswer: true, isStreaming: true });
+  assert.equal(toggleButton(candidateAnswer).props["aria-expanded"], true);
+
+  render({ hasSubstantiveAnswer: false, isStreaming: true });
+  const laterProcessEvent = render({ hasSubstantiveAnswer: false, isStreaming: true });
+  assert.equal(toggleButton(laterProcessEvent).props["aria-expanded"], true);
+
+  render({ hasSubstantiveAnswer: true, isStreaming: false });
+  const settledAnswer = render({ hasSubstantiveAnswer: true, isStreaming: false });
+  assert.equal(toggleButton(settledAnswer).props["aria-expanded"], false);
 });
 
 test("manual state survives a virtualized unmount and remount", () => {

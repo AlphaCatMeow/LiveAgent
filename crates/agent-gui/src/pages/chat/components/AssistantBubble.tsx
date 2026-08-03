@@ -46,6 +46,7 @@ const AssistantProcessDetails = memo(function AssistantProcessDetails(props: {
       <ProcessDetailsDisclosure
         disclosureKey={`${conversationId}:${row.key}`}
         hasSubstantiveAnswer={unit.hasSubstantiveAnswer}
+        isStreaming={row.live}
         expandByDefault={processDetailsExpanded}
         forceOpen={unit.forceOpen}
         retainWhileClosed={row.live && row.mutable}

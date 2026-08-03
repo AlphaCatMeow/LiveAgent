@@ -12,6 +12,7 @@ import { LazyCollapse } from "./LazyCollapse";
 export const ProcessDetailsDisclosure = memo(function ProcessDetailsDisclosure(props: {
   disclosureKey: string;
   hasSubstantiveAnswer: boolean;
+  isStreaming?: boolean;
   expandByDefault: boolean;
   forceOpen?: boolean;
   children: () => ReactNode;
@@ -19,6 +20,7 @@ export const ProcessDetailsDisclosure = memo(function ProcessDetailsDisclosure(p
   const {
     disclosureKey,
     hasSubstantiveAnswer,
+    isStreaming = false,
     expandByDefault,
     forceOpen = false,
     children,
@@ -29,7 +31,7 @@ export const ProcessDetailsDisclosure = memo(function ProcessDetailsDisclosure(p
   const automaticOpen =
     forceOpen ||
     getProcessDetailsDefaultOpen({
-      hasSubstantiveAnswer,
+      hasSubstantiveAnswer: hasSubstantiveAnswer && !isStreaming,
       expandByDefault,
     });
   const manualOpen = readManualProcessDetailsOpen(disclosureKey);

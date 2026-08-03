@@ -536,12 +536,24 @@ test("Codex Chat Completions streams forward reasoning effort", async () => {
   assert.equal(captured.options.toolChoice, "auto");
 });
 
-test("DeepSeek Codex models force Chat Completions compat", () => {
+test("DeepSeek Codex models respect explicit Responses request format", () => {
+  for (const baseUrl of ["https://api.deepseek.com", "https://relay.example.test/v1"]) {
+    const model = providers.createModelFromConfig(
+      "codex",
+      "deepseek-v4-pro",
+      baseUrl,
+      "openai-responses",
+    );
+    assert.equal(model.api, "openai-responses", baseUrl);
+  }
+});
+
+test("DeepSeek Codex Chat Completions keep DeepSeek compat", () => {
   const model = providers.createModelFromConfig(
     "codex",
     "deepseek-v4-pro",
     "https://api.deepseek.com",
-    "openai-responses",
+    "openai-completions",
   );
 
   assert.equal(model.api, "openai-completions");
@@ -575,7 +587,7 @@ test("DeepSeek OpenAI payload adapter injects thinking and reasoning_content", a
     "codex",
     "deepseek-v4-pro",
     "https://api.deepseek.com",
-    "openai-responses",
+    "openai-completions",
   );
 
   const result = localProviders.streamSimpleByApi(
@@ -608,6 +620,21 @@ test("DeepSeek OpenAI payload adapter injects thinking and reasoning_content", a
   assert.deepEqual(adapted.thinking, { type: "enabled" });
   assert.equal(adapted.reasoning_effort, "high");
   assert.equal(adapted.messages[0].reasoning_content, "");
+});
+
+test("DeepSeek Responses requests do not attach Chat payload adapter", () => {
+  const options = providers.finalizeProviderStreamOptions({
+    providerId: "codex",
+    baseUrl: "https://api.deepseek.com",
+    options: {},
+    model: {
+      api: "openai-responses",
+      provider: "openai",
+      id: "deepseek-v4-flash",
+    },
+  });
+  assert.equal(options.deepSeekProviderAdapter, undefined);
+  assert.equal(options.deepSeekDsmlToolCallRepair, undefined);
 });
 
 test("DeepSeek Anthropic streamSimpleByApi strips aborted tool calls before conversion", () => {

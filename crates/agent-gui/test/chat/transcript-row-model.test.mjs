@@ -635,3 +635,23 @@ test("transcript virtualizer keeps scroll updates off the full React measurement
   assert.doesNotMatch(transcriptListSource, /height:\s*virtualizer\.getTotalSize\(\)/);
   assert.doesNotMatch(transcriptListSource, /transform:\s*`translateY\(/);
 });
+
+test("process detail preference invalidates desktop transcript measurements", () => {
+  assert.match(
+    transcriptListSource,
+    /process-details-\$\{\s*processDetailsExpanded \? "expanded" : "collapsed"\s*\}/,
+  );
+  assert.equal(
+    (transcriptListSource.match(/buildVersionedTranscriptLayoutKey\(/g) ?? []).length,
+    3,
+    "the preference-aware layout key must gate both restore and save",
+  );
+  assert.match(
+    transcriptListSource,
+    /const previousProcessDetailsExpandedRef = useRef\(processDetailsExpanded\);/,
+  );
+  assert.match(
+    transcriptListSource,
+    /previousProcessDetailsExpandedRef\.current = processDetailsExpanded;[\s\S]*?virtualizer\.measure\(\);/,
+  );
+});

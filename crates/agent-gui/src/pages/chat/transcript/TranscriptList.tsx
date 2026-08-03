@@ -43,9 +43,16 @@ import { UserMessageRow } from "./UserMessageRow";
 
 const TRANSCRIPT_MEASUREMENT_LAYOUT_VERSION = "assistant-process-details-v1";
 
-function buildVersionedTranscriptLayoutKey(viewportWidth: number, contentWidth: number) {
+function buildVersionedTranscriptLayoutKey(
+  viewportWidth: number,
+  contentWidth: number,
+  processDetailsExpanded: boolean,
+) {
   const layoutKey = buildTranscriptLayoutKey(viewportWidth, contentWidth);
-  return layoutKey ? `${layoutKey}:${TRANSCRIPT_MEASUREMENT_LAYOUT_VERSION}` : "";
+  if (!layoutKey) return "";
+  return `${layoutKey}:${TRANSCRIPT_MEASUREMENT_LAYOUT_VERSION}:process-details-${
+    processDetailsExpanded ? "expanded" : "collapsed"
+  }`;
 }
 
 // Measured row heights survive conversation switches: saved on unmount,
@@ -269,7 +276,11 @@ export const TranscriptList = memo(function TranscriptList(props: TranscriptList
       (scrollViewport
         ? transcriptMeasurementsLru.restore(
             conversationId,
-            buildVersionedTranscriptLayoutKey(scrollViewport.clientWidth, layoutWidth),
+            buildVersionedTranscriptLayoutKey(
+              scrollViewport.clientWidth,
+              layoutWidth,
+              processDetailsExpanded,
+            ),
           )
         : null) ?? [],
   );
@@ -297,6 +308,16 @@ export const TranscriptList = memo(function TranscriptList(props: TranscriptList
     scrollEndThreshold: 8,
     rangeExtractor: extractVirtualRange,
   });
+
+  const previousProcessDetailsExpandedRef = useRef(processDetailsExpanded);
+  useLayoutEffect(() => {
+    if (previousProcessDetailsExpandedRef.current === processDetailsExpanded) return;
+    previousProcessDetailsExpandedRef.current = processDetailsExpanded;
+    // Unmounted process rows retain their last measured height in the
+    // virtualizer. Clear that cache so every row immediately uses the estimate
+    // for the new presentation preference instead of correcting on first view.
+    virtualizer.measure();
+  }, [processDetailsExpanded, virtualizer]);
 
   // TanStack exposes the resize-compensation predicate as an instance field,
   // not an option; reassigning per render keeps the closure's inputs current.
@@ -487,7 +508,11 @@ export const TranscriptList = memo(function TranscriptList(props: TranscriptList
     if (!scrollViewport) return;
     transcriptMeasurementsLru.save(
       conversationId,
-      buildVersionedTranscriptLayoutKey(scrollViewport.clientWidth, layoutWidth),
+      buildVersionedTranscriptLayoutKey(
+        scrollViewport.clientWidth,
+        layoutWidth,
+        processDetailsExpanded,
+      ),
       virtualizer.takeSnapshot(),
     );
   };

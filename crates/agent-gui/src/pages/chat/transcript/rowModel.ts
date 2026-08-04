@@ -348,11 +348,11 @@ function buildAssistantUnits(input: BuildAssistantUnitsInput): AssistantUnitRow[
   const rows: AssistantUnitRow[] = [];
   const partition = partitionAssistantResponse<UiRound["blocks"][number], UiRound | LiveRound>(
     rounds,
+    { preserveStreamingText: live },
   );
-  // An active process with no answer is already opened by
-  // getProcessDetailsDefaultOpen. Do not force all live rows open: the first
-  // substantive answer token must immediately hand control to the local
-  // preference, while terminal failures/timeouts still override it.
+  // Keep provisional text in stable answer rows while streaming. A later tool
+  // can extend the process without deleting that live tail; settled history
+  // still uses the final last-process boundary.
   const forceProcessDetailsOpen = shouldForceProcessDetailsOpen(rounds);
   const prepareBlocks = (blocks: UiRound["blocks"]) =>
     groupRoundBlocks(blocks).filter((block) => isVisibleGroupedBlock(block, latestTodoItem));

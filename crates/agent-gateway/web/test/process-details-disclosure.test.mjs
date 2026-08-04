@@ -8,6 +8,10 @@ import { createWebModuleLoader } from "../../test/helpers/load-web-module.mjs";
 
 const rootDir = fileURLToPath(new URL("../", import.meta.url));
 const resolveSource = (relativePath) => path.join(rootDir, "src", relativePath);
+const assistantBubbleSource = fs.readFileSync(
+  resolveSource("pages/chat/AssistantBubble.tsx"),
+  "utf8",
+);
 
 let currentOpen;
 let interactionRef;
@@ -96,6 +100,13 @@ test("thinking and activity inside process details start collapsed", () => {
 
   assert.match(source, /open=\{withinProcessDetails \? false : isRunning\}/);
   assert.equal((source.match(/defaultOpen=\{false\}/g) ?? []).length, 2);
+});
+
+test("streaming text keeps its answer identity when later process activity arrives", () => {
+  assert.match(
+    assistantBubbleSource,
+    /preserveStreamingText:\s*Boolean\(isStreaming\)/,
+  );
 });
 
 test("process-only replies open automatically until the user intervenes", () => {

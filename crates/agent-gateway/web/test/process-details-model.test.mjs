@@ -64,6 +64,23 @@ test("a later process event reclassifies earlier narration and removes the final
   assert.equal(partition.hasSubstantiveAnswer, false);
 });
 
+test("streaming partition preserves provisional text when a later process event arrives", () => {
+  const partition = model.partitionAssistantResponse(
+    [
+      round("r1", [
+        { kind: "thinking", id: "thinking-1", text: "Plan" },
+        { kind: "text", id: "text-1", text: "Possible answer" },
+        { kind: "tool", item: { toolCall: { id: "call-2" } } },
+      ]),
+    ],
+    { preserveStreamingText: true },
+  );
+
+  assert.deepEqual(kinds(partition.processRounds), ["thinking", "tool"]);
+  assert.deepEqual(kinds(partition.answerRounds), ["text"]);
+  assert.equal(partition.hasSubstantiveAnswer, true);
+});
+
 test("process-only, cancelled, or whitespace-only replies remain open", () => {
   const partition = model.partitionAssistantResponse([
     round("r1", [

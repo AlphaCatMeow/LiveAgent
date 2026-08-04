@@ -377,18 +377,67 @@ test("only the final-answer live tail is pinned while the process unit virtualiz
     liveRounds: [liveRound],
   });
   const process = processRows(snapshot)[0];
-  const answer = blockRows(snapshot)[0];
-  assert.equal(process.unit.blocks.length, 2);
+  const answers = blockRows(snapshot);
+  const answer = answers.at(-1);
+  assert.equal(process.unit.blocks.length, 1);
   assert.deepEqual(
     process.unit.blocks.map((entry) => entry.block.kind),
-    ["text", "thinking"],
+    ["thinking"],
   );
   assert.equal(process.mutable, false);
+  assert.deepEqual(
+    answers.map((row) => row.unit.block.text),
+    ["prefix", "streaming tail"],
+  );
   assert.equal(answer.unit.block.kind, "text");
   assert.equal(answer.unit.block.text, "streaming tail");
   assert.equal(answer.mutable, true);
   assert.equal(snapshot.liveStartIndex, snapshot.rows.indexOf(answer));
   assert.equal(snapshot.liveStartIndex, snapshot.rows.length - 1);
+});
+
+test("later live process events preserve the provisional answer row identity", () => {
+  const births = [];
+  const model = createTranscriptRowModel({
+    onRowsBorn: (keys, isInitialBuild) => births.push([keys.slice(), isInitialBuild]),
+  });
+  const thinkingBlock = { kind: "thinking", id: "thinking-1", text: "working" };
+  const textBlock = { kind: "text", id: "text-1", text: "provisional answer" };
+  const toolBlock = {
+    kind: "tool",
+    item: { toolCall: { type: "toolCall", id: "call-1", name: "Read", arguments: {} } },
+  };
+  const buildLive = (blocks) =>
+    model.build([userItem("u1")], {
+      ...idleLive,
+      isSending: true,
+      liveRounds: [
+        {
+          round: 1,
+          key: "r1",
+          blocks,
+          runningToolCallIds: [],
+          thinkingOpen: false,
+        },
+      ],
+    });
+
+  const provisional = buildLive([thinkingBlock, textBlock]);
+  const withLaterTool = buildLive([thinkingBlock, textBlock, toolBlock]);
+  const provisionalAnswer = blockRows(provisional)[0];
+  const stableAnswer = blockRows(withLaterTool)[0];
+
+  assert.deepEqual(
+    withLaterTool.rows.map((row) => row.key),
+    provisional.rows.map((row) => row.key),
+  );
+  assert.equal(stableAnswer.key, provisionalAnswer.key);
+  assert.equal(withLaterTool.liveStartIndex, provisional.liveStartIndex);
+  assert.equal(births.length, 1);
+  assert.deepEqual(
+    processRows(withLaterTool)[0].unit.blocks.map((entry) => entry.block.kind),
+    ["thinking", "tool"],
+  );
 });
 
 test("assistant unit keys do not depend on the history-window-relative index", () => {

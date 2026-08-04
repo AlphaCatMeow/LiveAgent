@@ -21,6 +21,10 @@ export type AssistantResponsePartition<TRound, TBlock> = {
   hasSubstantiveAnswer: boolean;
 };
 
+export type PartitionAssistantResponseOptions = {
+  preserveStreamingText?: boolean;
+};
+
 export function isProcessDetailsBlock(block: AssistantResponseBlockLike): boolean {
   return block.kind === "thinking" || block.kind === "tool" || block.kind === "hostedSearch";
 }
@@ -28,7 +32,10 @@ export function isProcessDetailsBlock(block: AssistantResponseBlockLike): boolea
 export function partitionAssistantResponse<
   TBlock extends AssistantResponseBlockLike,
   TRound extends { blocks: readonly TBlock[] },
->(rounds: readonly TRound[]): AssistantResponsePartition<TRound, TBlock> {
+>(
+  rounds: readonly TRound[],
+  options: PartitionAssistantResponseOptions = {},
+): AssistantResponsePartition<TRound, TBlock> {
   let blockPosition = 0;
   let lastProcessPosition = -1;
 
@@ -51,7 +58,10 @@ export function partitionAssistantResponse<
     const answerBlocks: TBlock[] = [];
 
     for (const block of round.blocks) {
-      if (blockPosition <= lastProcessPosition) {
+      if (
+        blockPosition <= lastProcessPosition &&
+        !(options.preserveStreamingText && block.kind === "text")
+      ) {
         processBlocks.push(block);
       } else {
         answerBlocks.push(block);

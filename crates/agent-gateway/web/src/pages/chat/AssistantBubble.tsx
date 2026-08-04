@@ -94,6 +94,7 @@ export const AssistantBubble = memo(function AssistantBubble(props: {
   const presentation = useMemo(() => {
     const partition = partitionAssistantResponse<UiRound["blocks"][number], AssistantBubbleRound>(
       rounds,
+      { preserveStreamingText: Boolean(isStreaming) },
     );
     const answerRoundSet = new Set(partition.answerRounds.map((entry) => entry.round));
     return {
@@ -108,7 +109,7 @@ export const AssistantBubble = memo(function AssistantBubble(props: {
         displayRound: { ...entry.round, blocks: entry.blocks },
       })),
     };
-  }, [rounds]);
+  }, [isStreaming, rounds]);
   const lastRound = rounds.at(-1);
   const displayImages = useMemo(
     () =>

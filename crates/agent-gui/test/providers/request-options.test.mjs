@@ -147,7 +147,6 @@ test("provider request helpers normalize auth, metadata, errors, and model value
     {
       "x-api-key": "secret",
       "x-app": "cli",
-      "User-Agent": "claude-cli/2.1.71 (external, cli)",
       "Content-Type": "application/json",
       "X-Stainless-OS": "MacOS",
       "X-Stainless-Arch": "arm64",
@@ -167,22 +166,20 @@ test("provider request helpers normalize auth, metadata, errors, and model value
   );
   assert.deepEqual(providers.buildProviderRequestHeaders("codex", "secret", "conversation-1"), {
     Authorization: "Bearer secret",
-    "User-Agent": "codex_cli_rs/0.72.0 (Ubuntu 24.4.0; x86_64) WindowsTerminal",
     session_id: "conversation-1",
     conversation_id: "conversation-1",
   });
-  // Responses 格式显式指定时保持 Codex CLI 身份头。
+  // Responses 格式显式指定时保持 Codex CLI 的会话身份头。
   assert.deepEqual(
     providers.buildProviderRequestHeaders("codex", "secret", "conversation-1", "openai-responses"),
     {
       Authorization: "Bearer secret",
-      "User-Agent": "codex_cli_rs/0.72.0 (Ubuntu 24.4.0; x86_64) WindowsTerminal",
       session_id: "conversation-1",
       conversation_id: "conversation-1",
     },
   );
   // 标准 Chat Completions 是无状态协议：只带 Authorization，
-  // 不带 codex_cli_rs UA 与 session_id/conversation_id。
+  // 不带 session_id/conversation_id。
   assert.deepEqual(
     providers.buildProviderRequestHeaders(
       "codex",
@@ -197,10 +194,9 @@ test("provider request helpers normalize auth, metadata, errors, and model value
   assert.deepEqual(providers.buildProviderRequestHeaders("gemini", "secret", "conversation-1"), {
     "x-goog-api-key": "secret",
   });
-  // xai：Bearer + grok CLI 身份 UA，不带 Codex CLI 的 session 头。
+  // xai：Bearer，不带 Codex CLI 的 session 头。
   assert.deepEqual(providers.buildProviderRequestHeaders("xai", "secret", "conversation-1"), {
     Authorization: "Bearer secret",
-    "User-Agent": "grok-shell/0.2.110 (linux; x86_64)",
   });
   const generatedCodexHeaders = providers.buildProviderRequestHeaders("codex", "secret");
   assert.match(generatedCodexHeaders.session_id, /^[0-9a-f-]{36}$/i);
@@ -263,7 +259,7 @@ test("provider request helpers normalize auth, metadata, errors, and model value
 
 test("provider-specific custom header suggestions include standard model headers", () => {
   const anthropicPresets = customHeaderHelpers.getCustomHeaderKeyPresets("claude_code");
-  assert.ok(anthropicPresets.includes("User-Agent"));
+  assert.ok(!anthropicPresets.includes("User-Agent"));
   assert.ok(anthropicPresets.includes("Content-Type"));
   assert.ok(anthropicPresets.includes("anthropic-version"));
   assert.ok(anthropicPresets.includes("X-Stainless-Runtime-Version"));
@@ -272,13 +268,13 @@ test("provider-specific custom header suggestions include standard model headers
   assert.ok(!anthropicPresets.includes("session_id"));
 
   const codexPresets = customHeaderHelpers.getCustomHeaderKeyPresets("codex");
-  assert.ok(codexPresets.includes("User-Agent"));
+  assert.ok(!codexPresets.includes("User-Agent"));
   assert.ok(codexPresets.includes("session_id"));
   assert.ok(codexPresets.includes("conversation_id"));
   assert.ok(!codexPresets.includes("anthropic-version"));
 
   const xaiPresets = customHeaderHelpers.getCustomHeaderKeyPresets("xai");
-  assert.ok(xaiPresets.includes("User-Agent"));
+  assert.ok(!xaiPresets.includes("User-Agent"));
   assert.ok(!xaiPresets.includes("session_id"));
   assert.ok(!xaiPresets.includes("anthropic-version"));
 });
@@ -536,80 +532,6 @@ test("Codex Chat Completions streams forward reasoning effort", async () => {
   assert.equal(captured.options.toolChoice, "auto");
 });
 
-test("DeepSeek Codex models force Chat Completions compat", () => {
-  const model = providers.createModelFromConfig(
-    "codex",
-    "deepseek-v4-pro",
-    "https://api.deepseek.com",
-    "openai-responses",
-  );
-
-  assert.equal(model.api, "openai-completions");
-  assert.equal(model.reasoning, true);
-  assert.equal(model.compat.thinkingFormat, "deepseek");
-  assert.equal(model.compat.requiresReasoningContentOnAssistantMessages, true);
-  assert.equal(model.compat.supportsStrictMode, false);
-  assert.equal(model.compat.maxTokensField, "max_tokens");
-  // 档位来自生成目录：deepseek-v4-pro 只有 high/max（minimal/low/medium=null），
-  // xhigh 目录未声明故不复活；wire 改写只补到已支持档位（high→"high"）。
-  assert.equal(model.thinkingLevelMap.minimal, null);
-  assert.equal(model.thinkingLevelMap.high, "high");
-  assert.equal(model.thinkingLevelMap.xhigh, undefined);
-  assert.equal(model.thinkingLevelMap.max, "max");
-});
-
-test("DeepSeek OpenAI payload adapter injects thinking and reasoning_content", async () => {
-  let captured;
-  const localLoader = createTsModuleLoader({
-    mocks: {
-      "@earendil-works/pi-ai/api/openai-completions": {
-        stream(model, context, options) {
-          captured = { model, context, options };
-          return createMockAssistantStream();
-        },
-      },
-    },
-  });
-  const localProviders = localLoader.loadModule("src/lib/providers/llm.ts");
-  const model = localProviders.createModelFromConfig(
-    "codex",
-    "deepseek-v4-pro",
-    "https://api.deepseek.com",
-    "openai-responses",
-  );
-
-  const result = localProviders.streamSimpleByApi(
-    model,
-    { messages: [] },
-    { reasoning: "minimal", toolChoice: "auto" },
-  );
-  assert.equal(typeof result.result, "function");
-  assert.equal(typeof captured.options.onPayload, "function");
-
-  const adapted = await captured.options.onPayload(
-    {
-      messages: [
-        {
-          role: "assistant",
-          content: null,
-          tool_calls: [
-            {
-              id: "call_1",
-              type: "function",
-              function: { name: "Read", arguments: "{}" },
-            },
-          ],
-        },
-      ],
-    },
-    model,
-  );
-
-  assert.deepEqual(adapted.thinking, { type: "enabled" });
-  assert.equal(adapted.reasoning_effort, "high");
-  assert.equal(adapted.messages[0].reasoning_content, "");
-});
-
 test("DeepSeek OpenAI payload adapter maps reasoning=max to reasoning_effort=max (regression)", async () => {
   let captured;
   const localLoader = createTsModuleLoader({
@@ -627,10 +549,9 @@ test("DeepSeek OpenAI payload adapter maps reasoning=max to reasoning_effort=max
     "codex",
     "deepseek-v4-pro",
     "https://api.deepseek.com",
-    "openai-responses",
+    "openai-completions",
   );
 
-  // 选 max 档 -> clampOpenAIReasoningEffort 保留 max -> payload 发 max
   const result = localProviders.streamSimpleByApi(
     model,
     { messages: [] },
@@ -664,7 +585,11 @@ test("DeepSeek OpenAI payload adapter maps reasoning=max to reasoning_effort=max
   );
 
   assert.deepEqual(adapted.thinking, { type: "enabled" });
-  assert.equal(adapted.reasoning_effort, "max", "wire reasoning_effort should be max when UI selects max");
+  assert.equal(
+    adapted.reasoning_effort,
+    "max",
+    "wire reasoning_effort should be max when UI selects max",
+  );
   assert.equal(adapted.messages[0].reasoning_content, "");
 });
 

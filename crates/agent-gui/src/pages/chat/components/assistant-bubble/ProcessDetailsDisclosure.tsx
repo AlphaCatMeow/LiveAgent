@@ -1,4 +1,4 @@
-import { memo, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { memo, type ReactNode, useId, useState } from "react";
 
 import { ChevronRight, Lightbulb } from "../../../../components/icons";
 import { useLocale } from "../../../../i18n";
@@ -36,15 +36,8 @@ export const ProcessDetailsDisclosure = memo(function ProcessDetailsDisclosure(p
       hasSubstantiveAnswer: hasSubstantiveAnswer && !isStreaming,
       expandByDefault,
     });
-  const manualOpen = readManualProcessDetailsOpen(disclosureKey);
-  const [open, setOpen] = useState(manualOpen ?? automaticOpen);
-  const userInteractedRef = useRef(manualOpen !== undefined);
-
-  useEffect(() => {
-    if (!userInteractedRef.current) {
-      setOpen(automaticOpen);
-    }
-  }, [automaticOpen]);
+  const [manualOpen, setManualOpen] = useState(() => readManualProcessDetailsOpen(disclosureKey));
+  const open = manualOpen ?? automaticOpen;
 
   return (
     <div className="process-details min-w-0 max-w-full">
@@ -54,12 +47,9 @@ export const ProcessDetailsDisclosure = memo(function ProcessDetailsDisclosure(p
         aria-controls={regionId}
         aria-expanded={open}
         onClick={() => {
-          userInteractedRef.current = true;
-          setOpen((previous) => {
-            const next = !previous;
-            writeManualProcessDetailsOpen(disclosureKey, next);
-            return next;
-          });
+          const next = !open;
+          setManualOpen(next);
+          writeManualProcessDetailsOpen(disclosureKey, next);
         }}
         className="process-details-toggle flex w-full cursor-pointer select-none items-center gap-2 rounded-md py-1.5 text-left text-[calc(13px*var(--zone-font-scale,1))] font-normal text-muted-foreground/80 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 active:translate-y-px"
       >

@@ -6,13 +6,13 @@ import { fileURLToPath } from "node:url";
 import { createTsModuleLoader } from "../helpers/load-ts-module.mjs";
 
 let currentOpen;
-let interactionRef;
+let stateInitialized;
 let disclosureKey;
 let disclosureKeySequence = 0;
 
 function resetHooks({ preserveDisclosureKey = false } = {}) {
   currentOpen = undefined;
-  interactionRef = undefined;
+  stateInitialized = false;
   if (!preserveDisclosureKey) {
     disclosureKey = `conversation:reply-${++disclosureKeySequence}`;
   }
@@ -22,14 +22,12 @@ const loader = createTsModuleLoader({
   mocks: {
     react: {
       memo: (component) => component,
-      useEffect: (effect) => effect(),
       useId: () => "process-details-region",
-      useRef(initial) {
-        interactionRef ??= { current: initial };
-        return interactionRef;
-      },
       useState(initial) {
-        if (currentOpen === undefined) currentOpen = initial;
+        if (!stateInitialized) {
+          currentOpen = typeof initial === "function" ? initial() : initial;
+          stateInitialized = true;
+        }
         return [
           currentOpen,
           (next) => {
@@ -100,8 +98,6 @@ test("thinking and activity inside process details start collapsed", () => {
 
 test("process-only replies open automatically until the user intervenes", () => {
   resetHooks();
-  render();
-  render({ hasSubstantiveAnswer: false });
   const automaticallyOpen = render({ hasSubstantiveAnswer: false });
   assert.equal(toggleButton(automaticallyOpen).props["aria-expanded"], true);
 
@@ -119,8 +115,8 @@ test("process-only replies open automatically until the user intervenes", () => 
 
 test("the setting updates mounted replies that have no manual override", () => {
   resetHooks();
-  render();
-  render({ expandByDefault: true });
+  const collapsed = render();
+  assert.equal(toggleButton(collapsed).props["aria-expanded"], false);
   const expanded = render({ expandByDefault: true });
   assert.equal(toggleButton(expanded).props["aria-expanded"], true);
 });
@@ -130,15 +126,12 @@ test("an untouched process waits for the stream to settle before collapsing", ()
   const processOnly = render({ hasSubstantiveAnswer: false, isStreaming: true });
   assert.equal(toggleButton(processOnly).props["aria-expanded"], true);
 
-  render({ hasSubstantiveAnswer: true, isStreaming: true });
   const candidateAnswer = render({ hasSubstantiveAnswer: true, isStreaming: true });
   assert.equal(toggleButton(candidateAnswer).props["aria-expanded"], true);
 
-  render({ hasSubstantiveAnswer: false, isStreaming: true });
   const laterProcessEvent = render({ hasSubstantiveAnswer: false, isStreaming: true });
   assert.equal(toggleButton(laterProcessEvent).props["aria-expanded"], true);
 
-  render({ hasSubstantiveAnswer: true, isStreaming: false });
   const settledAnswer = render({ hasSubstantiveAnswer: true, isStreaming: false });
   assert.equal(toggleButton(settledAnswer).props["aria-expanded"], false);
 });

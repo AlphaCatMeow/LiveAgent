@@ -20,6 +20,7 @@ export const DEEPSEEK_THINKING_LEVEL_MAP: Model<"openai-completions">["thinkingL
   low: "high",
   medium: "high",
   high: "high",
+  max: "max",
   xhigh: "max",
 };
 
@@ -150,7 +151,7 @@ export function mapDeepSeekReasoningEffort(
   reasoning: SimpleStreamOptions["reasoning"] | undefined,
 ) {
   if (!reasoning) return undefined;
-  return reasoning === "xhigh" ? "max" : "high";
+  return reasoning === "xhigh" || reasoning === "max" ? "max" : "high";
 }
 
 function sanitizeTextValue(value: string) {

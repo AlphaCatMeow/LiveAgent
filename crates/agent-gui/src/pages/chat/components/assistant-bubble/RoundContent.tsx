@@ -172,34 +172,14 @@ export const RoundBlockContent = memo(function RoundBlockContent(props: {
     workdir,
     onOpenFileLink,
   } = props;
-  const { t } = useLocale();
 
   let content: ReactNode;
   if (block.kind === "thinking") {
     const isRunning = isLive && thinkingOpen && isLatestThinking;
-    content = withinProcessDetails ? (
-      <div className="group/think w-full py-1.5">
-        <div className="mb-1.5 flex items-center gap-2 text-[calc(13px*var(--zone-font-scale,1))] text-muted-foreground/80">
-          {isRunning ? (
-            <AssistantStatus className="min-h-0">{t("chat.thinking")}</AssistantStatus>
-          ) : (
-            <>
-              <Lightbulb className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
-              <span className="thinking-block-label">{t("chat.thinkingProcess")}</span>
-            </>
-          )}
-        </div>
-        <ThinkingMarkdown
-          text={block.text}
-          renderMode={renderMode}
-          workdir={workdir}
-          onOpenFileLink={onOpenFileLink}
-        />
-      </div>
-    ) : (
+    content = (
       <ThinkingBlock
         text={block.text}
-        open={isRunning}
+        open={withinProcessDetails ? false : isRunning}
         isRunning={isRunning}
         renderMode={renderMode}
         workdir={workdir}
@@ -233,7 +213,7 @@ export const RoundBlockContent = memo(function RoundBlockContent(props: {
         items={block.items}
         isAborted={isAborted}
         runningToolCallIds={isLive ? runningToolCallIds : []}
-        defaultOpen={withinProcessDetails}
+        defaultOpen={false}
       />
     );
   } else if (block.kind === "hostedSearch" || block.kind === "hostedSearchGroup") {
@@ -241,7 +221,7 @@ export const RoundBlockContent = memo(function RoundBlockContent(props: {
       <HostedSearchGroupView
         items={block.kind === "hostedSearch" ? [block.item] : block.items}
         isLive={isLive}
-        defaultOpen={withinProcessDetails}
+        defaultOpen={false}
       />
     );
   } else if (block.text.trim()) {

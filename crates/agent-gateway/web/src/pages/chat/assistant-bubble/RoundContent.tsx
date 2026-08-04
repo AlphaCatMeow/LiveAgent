@@ -194,7 +194,6 @@ export const RoundContent = memo(function RoundContent(props: {
     workdir,
     onOpenFileLink,
   } = props;
-  const { t } = useLocale();
   const groupedBlocks = useMemo(() => groupRoundBlocks(round.blocks), [round.blocks]);
   const visibleGroupedBlocks = useMemo(
     () =>
@@ -281,30 +280,11 @@ export const RoundContent = memo(function RoundContent(props: {
       {visibleGroupedBlocks.map((block) => {
         if (block.kind === "thinking") {
           const isRunning = autoOpenThinking && block.key === latestThinkingKey;
-          return withinProcessDetails ? (
-            <div key={block.key} className="group/think w-full py-1.5">
-              <div className="mb-1.5 flex items-center gap-2 text-[calc(13px*var(--zone-font-scale,1))] text-muted-foreground/80">
-                {isRunning ? (
-                  <AssistantStatus className="min-h-0">{t("chat.thinking")}</AssistantStatus>
-                ) : (
-                  <>
-                    <Lightbulb className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
-                    <span className="thinking-block-label">{t("chat.thinkingProcess")}</span>
-                  </>
-                )}
-              </div>
-              <ThinkingMarkdown
-                text={block.text}
-                renderMode={renderMode ?? (isStreaming ? "streaming" : "static")}
-                workdir={workdir}
-                onOpenFileLink={onOpenFileLink}
-              />
-            </div>
-          ) : (
+          return (
             <ThinkingBlock
               key={block.key}
               text={block.text}
-              open={isRunning}
+              open={withinProcessDetails ? false : isRunning}
               isRunning={isRunning}
               renderMode={renderMode ?? (isStreaming ? "streaming" : "static")}
               workdir={workdir}
@@ -365,7 +345,7 @@ export const RoundContent = memo(function RoundContent(props: {
               }
               readOnly={readOnly}
               redactToolContent={redactToolContent}
-              defaultOpen={withinProcessDetails}
+              defaultOpen={false}
             />
           );
         }
@@ -376,7 +356,7 @@ export const RoundContent = memo(function RoundContent(props: {
               key={block.key}
               items={block.kind === "hostedSearch" ? [block.item] : block.items}
               readOnly={readOnly}
-              defaultOpen={withinProcessDetails}
+              defaultOpen={false}
             />
           );
         }

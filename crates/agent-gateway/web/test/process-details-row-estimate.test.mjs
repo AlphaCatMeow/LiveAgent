@@ -15,7 +15,7 @@ function round(blocks, meta) {
   return { blocks, ...(meta ? { meta } : {}) };
 }
 
-test("completed replies estimate one process header while collapsed", () => {
+test("expanded process estimates keep nested thinking collapsed", () => {
   const rounds = [
     round([
       { kind: "thinking", text: "reasoning ".repeat(500) },
@@ -26,8 +26,19 @@ test("completed replies estimate one process header while collapsed", () => {
 
   const collapsed = estimateAssistantResponseRowHeight(rounds, false);
   const expanded = estimateAssistantResponseRowHeight(rounds, true);
+  const shortThinking = estimateAssistantResponseRowHeight(
+    [
+      round([
+        { kind: "thinking", text: "reasoning" },
+        { kind: "tool", item: { toolCall: { name: "Read" } } },
+        { kind: "text", text: "Final answer" },
+      ]),
+    ],
+    true,
+  );
 
-  assert.ok(expanded > collapsed * 3, `${expanded} should greatly exceed ${collapsed}`);
+  assert.ok(expanded > collapsed);
+  assert.equal(expanded, shortThinking);
 });
 
 test("process-only replies estimate as open regardless of the setting", () => {

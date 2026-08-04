@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -85,6 +86,16 @@ test("the aggregate disclosure exposes an accessible collapsed default", () => {
   const region = rendered.props.children[1];
   assert.equal(region.type, "section");
   assert.equal(region.props["aria-labelledby"], "process-details-region-toggle");
+});
+
+test("thinking and activity inside process details start collapsed", () => {
+  const source = fs.readFileSync(
+    fileURLToPath(new URL("../src/pages/chat/assistant-bubble/RoundContent.tsx", import.meta.url)),
+    "utf8",
+  );
+
+  assert.match(source, /open=\{withinProcessDetails \? false : isRunning\}/);
+  assert.equal((source.match(/defaultOpen=\{false\}/g) ?? []).length, 2);
 });
 
 test("process-only replies open automatically until the user intervenes", () => {

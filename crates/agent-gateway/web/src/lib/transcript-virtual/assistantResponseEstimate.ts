@@ -39,7 +39,15 @@ function addMarkdownEstimate(stats: AssistantRowEstimateStats, text: string) {
   stats.codeFences += measured.codeFences;
 }
 
-function addVisibleBlockEstimate(stats: AssistantRowEstimateStats, block: EstimableAssistantBlock) {
+function addVisibleBlockEstimate(
+  stats: AssistantRowEstimateStats,
+  block: EstimableAssistantBlock,
+  collapseThinking = false,
+) {
+  if (block.kind === "thinking" && collapseThinking) {
+    stats.thinkingCount += 1;
+    return;
+  }
   if (block.kind === "text" || block.kind === "thinking") {
     addMarkdownEstimate(stats, block.text ?? "");
     return;
@@ -107,7 +115,7 @@ export function estimateAssistantResponseRowHeight<
 
   if (processDetailsOpen) {
     for (const { blocks } of partition.processRounds) {
-      for (const block of blocks) addVisibleBlockEstimate(stats, block);
+      for (const block of blocks) addVisibleBlockEstimate(stats, block, true);
     }
   }
   for (const { blocks } of partition.answerRounds) {

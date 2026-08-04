@@ -377,6 +377,8 @@ export function attachDeepSeekProviderPayloadAdapter<TOptions extends DeepSeekSt
   },
 ): TOptions {
   const model = params.model;
+  // DeepSeek adapter 只服务实际选中的 chat/anthropic 协议；Responses 由用户配置决定。
+  if (params.providerId === "codex" && model && model.api !== "openai-completions") return options;
   const isDeepSeek =
     params.providerId === "codex"
       ? isDeepSeekCodexTarget({

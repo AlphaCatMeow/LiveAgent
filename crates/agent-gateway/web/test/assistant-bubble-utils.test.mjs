@@ -70,3 +70,25 @@ test("hosted search activity keeps one group identity as later searches append",
   assert.equal(appended[0].kind, "hostedSearchGroup");
   assert.equal(appended[0].key, first[0].key);
 });
+
+test("TodoWrite stays standalone so transcript filtering cannot hide ordinary tools", () => {
+  const tool = (id, name) => ({
+    kind: "tool",
+    item: { toolCall: { type: "toolCall", id, name, arguments: {} } },
+  });
+  const grouped = groupRoundBlocks([
+    tool("todo-1", "TodoWrite"),
+    tool("read-1", "Read"),
+    tool("read-2", "Read"),
+  ]);
+
+  assert.deepEqual(
+    grouped.map((block) => block.kind),
+    ["tool", "toolGroup"],
+  );
+  assert.equal(grouped[0].item.toolCall.name, "TodoWrite");
+  assert.deepEqual(
+    grouped[1].items.map((item) => item.toolCall.name),
+    ["Read", "Read"],
+  );
+});

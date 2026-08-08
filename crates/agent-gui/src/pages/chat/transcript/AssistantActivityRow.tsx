@@ -49,7 +49,7 @@ export const AssistantActivityRow = memo(function AssistantActivityRow(props: {
             isAgentMode={isAgentMode}
             isCompactionRunning={unit.mutable ? isCompactionRunning : false}
             toolStatus={unit.mutable ? toolStatus : null}
-            retryAttempts={unit.mutable ? retryAttempts : undefined}
+            retryAttempts={unit.mutable && unit.unit.kind === "status" ? retryAttempts : undefined}
             workdir={workdir}
             onOpenFileLink={onOpenFileLink}
             onResendFromEdit={onResendFromEdit}

@@ -18,3 +18,13 @@ test("the streaming assistant always owns one stable live-status footer", () => 
   assert.match(transcriptSource, /<VibingText className="w-full"/);
   assert.match(transcriptSource, /<AssistantStatus className="w-full"/);
 });
+
+test("compaction does not add a second pending bubble after assistant output", () => {
+  const pendingBubbleSource = transcriptSource.match(
+    /const shouldShowPendingLiveBubble = useMemo\(\(\) => \{[\s\S]*?\n  \}, \[[^\]]*\]\);/,
+  )?.[0];
+  assert.ok(pendingBubbleSource);
+  assert.match(pendingBubbleSource, /liveAssistantIndex >= 0[\s\S]*?return false/);
+  assert.match(pendingBubbleSource, /displayedToolStatusIsCompaction[\s\S]*?return true/);
+  assert.match(pendingBubbleSource, /lastRowKind === "user" \|\| lastRowKind === "checkpoint"/);
+});

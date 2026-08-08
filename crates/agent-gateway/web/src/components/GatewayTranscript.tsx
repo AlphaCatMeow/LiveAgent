@@ -1264,12 +1264,15 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
     if (readOnly || !isStreaming) {
       return false;
     }
+    if (liveAssistantIndex >= 0) {
+      return false;
+    }
     if (displayedToolStatusIsCompaction) {
       return true;
     }
     const lastRowKind = rows[rows.length - 1]?.kind;
     return !lastRowKind || lastRowKind === "user" || lastRowKind === "checkpoint";
-  }, [displayedToolStatusIsCompaction, isStreaming, readOnly, rows]);
+  }, [displayedToolStatusIsCompaction, isStreaming, liveAssistantIndex, readOnly, rows]);
 
   // Row keys are unique by construction (the row builder's single canonical
   // pass) and feed both React reconciliation and the virtualizer's

@@ -17,3 +17,11 @@ test("desktop live status cannot widen the transcript", () => {
   assert.match(bubbleSource, /<VibingText className="w-full"/);
   assert.match(bubbleSource, /<AssistantStatus className="w-full"/);
 });
+
+test("desktop retry details render only in the stable live-status unit", () => {
+  assert.match(
+    activitySource,
+    /retryAttempts=\{\s*unit\.mutable && unit\.unit\.kind === "status"\s*\? retryAttempts\s*: undefined\s*\}/,
+  );
+  assert.doesNotMatch(activitySource, /retryAttempts=\{unit\.mutable \? retryAttempts/);
+});

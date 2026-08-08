@@ -125,7 +125,7 @@ export function TaskProgressIndicator({
     <fieldset
       ref={rootRef}
       aria-label={labels.title}
-      className="relative z-40 mx-auto mb-2 flex w-fit max-w-full justify-center border-0 p-0"
+      className="relative z-40 mx-auto mb-4 flex w-fit max-w-full justify-center border-0 p-0"
       onPointerEnter={handlePointerEnter}
       onPointerLeave={handlePointerLeave}
       onFocusCapture={handleFocusCapture}

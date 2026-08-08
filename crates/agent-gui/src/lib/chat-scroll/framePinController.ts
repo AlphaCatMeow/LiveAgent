@@ -5,6 +5,7 @@ export function createFramePinController(
   write: () => void,
   scheduleFrame: ScheduleFrame,
   cancelFrame: CancelFrame,
+  shouldWrite: () => boolean = () => true,
 ) {
   let pendingFrame: number | null = null;
 
@@ -18,13 +19,13 @@ export function createFramePinController(
     if (pendingFrame !== null) return;
     pendingFrame = scheduleFrame(() => {
       pendingFrame = null;
-      write();
+      if (shouldWrite()) write();
     });
   };
 
   const flush = () => {
     cancel();
-    write();
+    if (shouldWrite()) write();
   };
 
   return { cancel, flush, schedule };

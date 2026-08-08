@@ -28,3 +28,30 @@ test("coalesces repeated live growth into one pin per frame", () => {
   callbacks.shift()();
   assert.equal(writes, 1);
 });
+
+test("a queued growth pin cannot reclaim a detached reader", () => {
+  const callbacks = [];
+  let following = true;
+  let writes = 0;
+  const controller = createFramePinController(
+    () => {
+      writes += 1;
+    },
+    (callback) => {
+      callbacks.push(callback);
+      return callbacks.length;
+    },
+    () => {},
+    () => following,
+  );
+
+  controller.schedule();
+  following = false;
+  callbacks.shift()();
+  assert.equal(writes, 0);
+
+  following = true;
+  controller.schedule();
+  callbacks.shift()();
+  assert.equal(writes, 1);
+});

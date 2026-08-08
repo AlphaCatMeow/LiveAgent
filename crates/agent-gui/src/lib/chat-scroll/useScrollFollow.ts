@@ -122,6 +122,7 @@ export function useScrollFollow(args: UseScrollFollowArgs): {
         },
         (callback) => requestAnimationFrame(callback),
         (handle) => cancelAnimationFrame(handle),
+        () => stateRef.current.following,
       ),
     [],
   );
@@ -149,6 +150,9 @@ export function useScrollFollow(args: UseScrollFollowArgs): {
       const wasFollowing = stateRef.current.following;
       const step = reduceFollowEvent(stateRef.current, event, configRef.current);
       stateRef.current = step.state;
+      if (wasFollowing && !step.state.following) {
+        pinController.cancel();
+      }
       if (step.pin) {
         if (pinMode === "frame") schedulePinToBottom();
         else pinToBottom();
@@ -157,7 +161,7 @@ export function useScrollFollow(args: UseScrollFollowArgs): {
         setFollowing(step.state.following);
       }
     },
-    [pinToBottom, schedulePinToBottom],
+    [pinController, pinToBottom, schedulePinToBottom],
   );
 
   const stickToBottom = useCallback(() => {

@@ -1143,10 +1143,13 @@ export function GitBranchSelector(props: {
 
   // 分支被 worktree 检出时，删除入口切换为删除 worktree（连带分支）。
   const checkedOutWorktreePath = branchAction
-    ? worktrees.find((worktree) => worktree.branch === branchAction.branch.fullName)?.path
+    ? gitClient?.removeWorktree
+      ? worktrees.find((worktree) => worktree.branch === branchAction.branch.fullName)?.path
+      : undefined
     : undefined;
   const deleteWorktreeFlow = useCallback(async () => {
-    if (!branchAction || !gitClient) return;
+    if (!branchAction || !gitClient?.removeWorktree) return;
+    const removeWorktree = gitClient.removeWorktree;
     const { branch } = branchAction;
     const worktreePath = worktrees.find((worktree) => worktree.branch === branch.fullName)?.path;
     if (!worktreePath) return;
@@ -1165,7 +1168,7 @@ export function GitBranchSelector(props: {
     });
     if (!confirmed) return;
     const ok = await runSheetMutation(() =>
-      gitClient.removeWorktree(workdir, worktreePath, false, branch.fullName),
+      removeWorktree(workdir, worktreePath, false, branch.fullName),
     );
     if (ok) {
       resetBranchAction();
@@ -1182,7 +1185,7 @@ export function GitBranchSelector(props: {
     });
     if (!forced) return;
     const forcedOk = await runSheetMutation(() =>
-      gitClient.removeWorktree(workdir, worktreePath, true, branch.fullName),
+      removeWorktree(workdir, worktreePath, true, branch.fullName),
     );
     if (forcedOk) resetBranchAction();
   }, [
@@ -1255,11 +1258,12 @@ export function GitBranchSelector(props: {
   ]);
 
   const openWorktreeModal = useCallback(() => {
+    if (!gitClient?.createWorktree) return;
     setWorktreeDraft("");
     setWorktreeError("");
     setWorktreeModalOpen(true);
     handleMenuOpenChange(false);
-  }, [handleMenuOpenChange]);
+  }, [gitClient, handleMenuOpenChange]);
 
   const closeWorktreeModal = useCallback(() => {
     if (worktreeBusy) return;
@@ -1271,15 +1275,15 @@ export function GitBranchSelector(props: {
 
   const createWorktree = useCallback(() => {
     const name = worktreeDraft.trim();
-    if (!name || !gitClient || !workdir.trim() || worktreeBusy) return;
+    if (!name || !gitClient?.createWorktree || !workdir.trim() || worktreeBusy) return;
+    const createWorktreeRequest = gitClient.createWorktree;
     if (!canWrite) {
       setWorktreeError(disabledMessage || t("git.branchSelector.writeDisabled"));
       return;
     }
     setWorktreeBusy(true);
     setWorktreeError("");
-    void gitClient
-      .createWorktree(workdir, name, worktreeStartPoint)
+    void createWorktreeRequest(workdir, name, worktreeStartPoint)
       .then((response) => {
         if (!response.ok) {
           setWorktreeError(
@@ -1711,7 +1715,8 @@ export function GitBranchSelector(props: {
                       </DropdownMenuSubContent>
                     </DropdownMenuSub>
                   </div>
-                  <button
+                  {gitClient?.createWorktree ? (
+                    <button
                       type="button"
                       disabled={!canWrite || mutating}
                       title={!canWrite ? disabledMessage : undefined}
@@ -1725,6 +1730,7 @@ export function GitBranchSelector(props: {
                       <FolderTree className="h-3.5 w-3.5" />
                       {t("git.branchSelector.createWorktree")}
                     </button>
+                  ) : null}
                 </div>
               )}
             </div>
@@ -1750,7 +1756,8 @@ export function GitBranchSelector(props: {
         onClose={resetBranchAction}
       />
       {confirmDialog}
-      <WorktreeCreateModal
+      {gitClient?.createWorktree ? (
+        <WorktreeCreateModal
           open={worktreeModalOpen}
           repoRoot={state.repoRoot}
           startPoint={worktreeStartPoint}
@@ -1761,6 +1768,7 @@ export function GitBranchSelector(props: {
           onClose={closeWorktreeModal}
           onSubmit={createWorktree}
         />
+      ) : null}
       <GitInitModal
         open={initModalOpen}
         workdir={workdir.trim()}

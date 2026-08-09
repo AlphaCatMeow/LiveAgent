@@ -28,7 +28,6 @@ import {
 import {
   DEFAULT_WORKSPACE_PROJECT_ID,
   type WorkspaceProject,
-  type WorkspaceProjectGroup,
   workspaceProjectPathKey,
 } from "@liveagent/app/lib/settings";
 import { Button } from "@liveagent/ui/components/ui/button";
@@ -73,6 +72,7 @@ import {
   buildWorkspaceProjectSections,
   sliceWorkspaceProjectSections,
 } from "../../lib/workspaceProjects";
+import type { WorkspaceProjectGroup } from "../../lib/workspaceProjectTypes";
 
 export type ChatHistorySidebarListStatus = "initial" | "loading" | "syncing" | "ready";
 export type ChatHistorySidebarMutationKind = "rename" | "pin" | "move" | "delete";

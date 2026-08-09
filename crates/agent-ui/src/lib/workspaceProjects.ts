@@ -3,11 +3,11 @@ import {
   DEFAULT_WORKSPACE_PROJECT_NAME,
   type SystemSettings,
   type WorkspaceProject,
-  type WorkspaceProjectGroup,
   workspaceProjectPathKey,
 } from "@liveagent/app/lib/settings";
 import { createUuid } from "./shared/id";
 import type { SidebarWorkdirSummary } from "./sidebar/types";
+import type { WorkspaceProjectGroup } from "./workspaceProjectTypes";
 
 type WorkspaceProjectActivitySource = {
   path?: string;

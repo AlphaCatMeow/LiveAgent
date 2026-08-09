@@ -95,6 +95,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.workspaceRemoveConfirm": "移除「{name}」？",
     "chat.workspaceShowAll": "显示全部（{count}）",
     "chat.workspaceShowLess": "收起",
+    "chat.workspaceShowAllProjects": "显示全部（{count}）",
+    "chat.workspaceShowLessProjects": "收起",
     "chat.workspaceRemoveRunning": "后台任务运行中，暂时不能移除。",
     "chat.workspaceRemoveDescription": "会删除此工作空间下的历史对话，不会删除文件夹。",
     "chat.workspaceOpenSystemFileManagerFailed": "打开资源管理器失败",
@@ -2363,6 +2365,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.workspaceRemoveConfirm": 'Remove "{name}"?',
     "chat.workspaceShowAll": "Show all ({count})",
     "chat.workspaceShowLess": "Show less",
+    "chat.workspaceShowAllProjects": "Show all ({count})",
+    "chat.workspaceShowLessProjects": "Show less",
     "chat.workspaceRemoveRunning":
       "A background task is running, so this workspace cannot be removed yet.",
     "chat.workspaceRemoveDescription":

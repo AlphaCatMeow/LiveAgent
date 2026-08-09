@@ -8,7 +8,6 @@ import {
   toFontFamilySelectValue,
 } from "@liveagent/adapters/systemSettings";
 import {
-  CheckCircle2,
   ChevronRight,
   Cpu,
   MessageSquare,
@@ -41,7 +40,12 @@ import {
 } from "@liveagent/ui/components/ui/select";
 import { type Locale, SUPPORTED_LOCALES, useLocale } from "@liveagent/ui/i18n/index";
 import { cn } from "@liveagent/ui/lib/shared/utils";
-import { AgentActivationSwitch } from "@liveagent/ui/pages/settings/shared";
+import {
+  AgentActivationSwitch,
+  SettingsChoiceRow,
+  SettingsGroup,
+  SettingsRow,
+} from "@liveagent/ui/pages/settings/shared";
 import { type ComponentProps, type ReactNode, useEffect, useMemo, useState } from "react";
 
 const FONT_SCALE_OPTIONS = [0.9, 1, 1.1, 1.2] as const;
@@ -52,22 +56,6 @@ const FONT_FAMILY_FIELDS: ReadonlyArray<{ key: FontFamilySettingKey; labelKey: s
   { key: "chatFontFamily", labelKey: "settings.chatFontFamily" },
   { key: "codeFontFamily", labelKey: "settings.codeFontFamily" },
 ];
-
-type SettingsGroupProps = {
-  title: string;
-  children: ReactNode;
-};
-
-function SettingsGroup({ title, children }: SettingsGroupProps) {
-  return (
-    <section className="space-y-2.5">
-      <h2 className="px-1 text-[15px] font-semibold tracking-tight text-foreground">{title}</h2>
-      <div className="overflow-hidden rounded-2xl border border-border/75 bg-card shadow-[0_1px_2px_hsl(var(--foreground)/0.02)]">
-        {children}
-      </div>
-    </section>
-  );
-}
 
 type SettingsSelectTriggerProps = ComponentProps<typeof SelectTrigger>;
 
@@ -94,28 +82,6 @@ function SettingsSelectContent({ className = "", ...props }: SettingsSelectConte
       )}
       {...props}
     />
-  );
-}
-
-type SettingsRowProps = {
-  title: string;
-  description?: string;
-  control: ReactNode;
-};
-
-function SettingsRow({ title, description, control }: SettingsRowProps) {
-  return (
-    <div className="relative flex min-h-[72px] flex-col gap-3 px-5 py-4 after:pointer-events-none after:absolute after:bottom-0 after:left-5 after:right-5 after:h-px after:bg-border/60 after:content-[''] last:after:hidden sm:flex-row sm:items-center sm:justify-between">
-      <div className="min-w-0 flex-1 pr-2">
-        <div className="text-sm font-medium text-foreground">{title}</div>
-        {description ? (
-          <p className="mt-0.5 max-w-2xl text-xs leading-relaxed text-muted-foreground">
-            {description}
-          </p>
-        ) : null}
-      </div>
-      <div className="flex w-full items-center sm:w-auto sm:shrink-0 sm:justify-end">{control}</div>
-    </div>
   );
 }
 
@@ -166,45 +132,6 @@ function ProxySettingsRow({
         {switchControl}
       </div>
     </div>
-  );
-}
-
-type ExecutionModeRowProps = {
-  icon: ReactNode;
-  title: string;
-  description: string;
-  selected: boolean;
-  onClick: () => void;
-};
-
-function ExecutionModeRow({ icon, title, description, selected, onClick }: ExecutionModeRowProps) {
-  return (
-    <button
-      type="button"
-      aria-pressed={selected}
-      onClick={onClick}
-      className="group relative flex w-full items-center gap-3 px-5 py-4 text-left transition-colors after:pointer-events-none after:absolute after:bottom-0 after:left-5 after:right-5 after:h-px after:bg-border/60 after:content-[''] last:after:hidden hover:bg-muted/20"
-    >
-      <span
-        className={cn(
-          "flex h-5 w-5 shrink-0 items-center justify-center transition-colors",
-          selected
-            ? "text-foreground/70"
-            : "text-muted-foreground/45 group-hover:text-foreground/60",
-        )}
-      >
-        {icon}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-sm font-medium text-foreground">{title}</span>
-        <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-          {description}
-        </span>
-      </span>
-      <span className="ml-2 flex h-5 w-5 shrink-0 items-center justify-center">
-        {selected ? <CheckCircle2 className="h-4.5 w-4.5 text-foreground/80" /> : null}
-      </span>
-    </button>
   );
 }
 
@@ -428,7 +355,7 @@ export function SystemSettingsForm(props: SettingsSectionProps) {
     <div className="settings-system-section space-y-9 pb-10">
       <SettingsGroup title={t("settings.executionMode")}>
         <fieldset aria-label={t("settings.executionMode")} className="m-0 min-w-0 border-0 p-0">
-          <ExecutionModeRow
+          <SettingsChoiceRow
             icon={<MessageSquare className="h-4.5 w-4.5" />}
             title={t("settings.chatMode")}
             description={t("settings.chatModeDesc")}
@@ -437,7 +364,7 @@ export function SystemSettingsForm(props: SettingsSectionProps) {
               setSettings((prev) => updateSystem(prev, { executionMode: "text" as ExecutionMode }))
             }
           />
-          <ExecutionModeRow
+          <SettingsChoiceRow
             icon={<Wrench className="h-4.5 w-4.5" />}
             title={t("settings.agentMode")}
             description={t("settings.agentModeDesc")}
@@ -446,7 +373,7 @@ export function SystemSettingsForm(props: SettingsSectionProps) {
               setSettings((prev) => updateSystem(prev, { executionMode: "tools" as ExecutionMode }))
             }
           />
-          <ExecutionModeRow
+          <SettingsChoiceRow
             icon={<Cpu className="h-4.5 w-4.5" />}
             title={t("settings.agentDevMode")}
             description={t("settings.agentDevModeDesc")}

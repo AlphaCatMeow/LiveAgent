@@ -135,7 +135,7 @@ test("no plan when failover is disabled or nothing qualifies", () => {
 });
 
 test("failover config applied from gateway sync feeds the plan builder", () => {
-  const sync = loader.loadModule("src/lib/settings/sync.ts");
+  const sync = loader.loadModule("@liveagent/ui/lib/settings/sync.ts");
 
   // WebUI edits the config and publishes it through the sync protocol...
   const webSide = settings.updateModelFailover(

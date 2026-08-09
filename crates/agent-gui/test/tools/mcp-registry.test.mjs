@@ -3,8 +3,8 @@ import test from "node:test";
 import { createTsModuleLoader } from "../helpers/load-ts-module.mjs";
 
 const loader = createTsModuleLoader();
-const registry = loader.loadModule("src/lib/mcpRegistry/index.ts");
-const metadata = loader.loadModule("src/lib/mcpServerMetadata.ts");
+const registry = loader.loadModule("@liveagent/ui/lib/mcpRegistry/index.ts");
+const metadata = loader.loadModule("@liveagent/ui/lib/mcpServerMetadata.ts");
 
 function mockFetch(handler) {
   return async (url, init) => {

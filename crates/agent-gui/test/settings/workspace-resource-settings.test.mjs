@@ -3,26 +3,12 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createTsModuleLoader } from "../helpers/load-ts-module.mjs";
 
-const guiDrawer = readFileSync(
-  new URL("../../src/components/chat/WorkspaceResourceSettingsDrawer.tsx", import.meta.url),
+const sharedDrawer = readFileSync(
+  new URL("../../../agent-ui/src/components/chat/WorkspaceResourceSettingsDrawer.tsx", import.meta.url),
   "utf8",
 );
-const webDrawer = readFileSync(
-  new URL(
-    "../../../agent-gateway/web/src/components/chat/WorkspaceResourceSettingsDrawer.tsx",
-    import.meta.url,
-  ),
-  "utf8",
-);
-const guiSidebar = readFileSync(
-  new URL("../../src/components/chat/ChatHistorySidebar.tsx", import.meta.url),
-  "utf8",
-);
-const webSidebar = readFileSync(
-  new URL(
-    "../../../agent-gateway/web/src/components/chat/ChatHistorySidebar.tsx",
-    import.meta.url,
-  ),
+const sharedSidebar = readFileSync(
+  new URL("../../../agent-ui/src/components/chat/ChatHistorySidebar.tsx", import.meta.url),
   "utf8",
 );
 const sendRuntime = readFileSync(
@@ -38,26 +24,23 @@ const webGatewayApp = readFileSync(
   new URL("../../../agent-gateway/web/src/app/GatewayApp.tsx", import.meta.url),
   "utf8",
 );
-const guiSkillsHub = readFileSync(
-  new URL("../../src/pages/skills-hub/SkillsHubPage.tsx", import.meta.url),
+const sharedSkillsHub = readFileSync(
+  new URL("../../../agent-ui/src/pages/skills-hub/SkillsHubPage.tsx", import.meta.url),
   "utf8",
 );
-const guiMcpHub = readFileSync(
-  new URL("../../src/pages/mcp-hub/McpServersForm.tsx", import.meta.url),
+const sharedMcpHub = readFileSync(
+  new URL("../../../agent-ui/src/pages/mcp-hub/McpServersForm.tsx", import.meta.url),
   "utf8",
 );
 
 test("workspace resources use one entry and one combined settings drawer", () => {
-  for (const sidebar of [guiSidebar, webSidebar]) {
-    assert.match(sidebar, /chat\.workspaceResources/);
-    assert.match(sidebar, /onConfigureProjectResources\(project\)/);
-  }
-  assert.equal(guiDrawer, webDrawer);
-  assert.match(guiDrawer, /\["inherit", "custom", "off"\]/);
-  assert.match(guiDrawer, /\["skills", "mcp"\]/);
-  assert.match(guiDrawer, /CLAWHUB_CATEGORY_SLUGS/);
-  assert.match(guiDrawer, /ResourceActivationSwitch/);
-  assert.doesNotMatch(guiDrawer, /McpImportView|McpRegistryBrowser|SkillsStoreView/);
+  assert.match(sharedSidebar, /chat\.workspaceResources/);
+  assert.match(sharedSidebar, /onConfigureProjectResources\(project\)/);
+  assert.match(sharedDrawer, /\["inherit", "custom", "off"\]/);
+  assert.match(sharedDrawer, /\["skills", "mcp"\]/);
+  assert.match(sharedDrawer, /CLAWHUB_CATEGORY_SLUGS/);
+  assert.match(sharedDrawer, /ResourceActivationSwitch/);
+  assert.doesNotMatch(sharedDrawer, /McpImportView|McpRegistryBrowser|SkillsStoreView/);
 });
 
 test("chat runtime resolves and snapshots workspace resources from the effective workdir", () => {
@@ -68,16 +51,16 @@ test("chat runtime resolves and snapshots workspace resources from the effective
   assert.match(sendRuntime, /missing\.length > 0 && workspaceResources\.mode !== "custom"/);
   assert.match(guiChatPage, /resolveWorkspaceResources\(settings, displayedConversationWorkdir\)/);
   assert.match(guiChatPage, /skillsEnabled: settings\.skills\.enabled && isAgentMode/);
-  assert.match(guiDrawer, /chat\.workspaceResourcesMissingSkill/);
+  assert.match(sharedDrawer, /chat\.workspaceResourcesMissingSkill/);
 });
 
 test("workspace and resource deletion paths clear workspace-scoped references", () => {
   assert.match(guiWorkspaceRemoval, /resetWorkspaceResourceSettings\(nextSettings, pathKey\)/);
   assert.match(webGatewayApp, /resetWorkspaceResourceSettings\(nextSettings, pathKey\)/);
-  assert.match(guiSkillsHub, /removeWorkspaceResourceReferences\(/);
-  assert.match(guiSkillsHub, /skillNames: \[skillName\]/);
-  assert.match(guiMcpHub, /removeWorkspaceResourceReferences\(/);
-  assert.match(guiMcpHub, /mcpServerIds: \[serverConfig\.id\]/);
+  assert.match(sharedSkillsHub, /removeWorkspaceResourceReferences\(/);
+  assert.match(sharedSkillsHub, /skillNames: \[skillName\]/);
+  assert.match(sharedMcpHub, /removeWorkspaceResourceReferences\(/);
+  assert.match(sharedMcpHub, /mcpServerIds: \[serverConfig\.id\]/);
   assert.match(sendRuntime, /change\.action !== "delete"/);
   assert.match(sendRuntime, /skillNames: change\.names/);
   assert.match(sendRuntime, /op\.kind === "remove"/);
@@ -112,7 +95,7 @@ test("workspace settings control the actual Skill prompt and MCP tool registry",
     },
   });
   const settingsModule = loader.loadModule("src/lib/settings/index.ts");
-  const skillsModule = loader.loadModule("src/lib/skills/index.ts");
+  const skillsModule = loader.loadModule("@liveagent/ui/lib/skills/index.ts");
   const { buildBuiltinToolRegistry } = loader.loadModule("src/lib/tools/builtinRegistry.ts");
   const { createFileToolState } = loader.loadModule("src/lib/tools/fileToolState.ts");
 

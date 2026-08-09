@@ -28,6 +28,10 @@ import {
 import type { AppUpdateController } from "../../../lib/appUpdates";
 import { normalizeConversationTitle } from "../../../lib/chat/page/chatPageHelpers";
 import type { WorkspaceProject } from "../../../lib/settings";
+import {
+  moveConversationsToWorkspace,
+  moveConversationToWorkspace,
+} from "./conversationWorkspaceMove";
 
 type ChatSidebarContainerProps = {
   store: SidebarStore;
@@ -67,6 +71,7 @@ type ChatSidebarContainerProps = {
   // Invoked after the store confirmed a deletion; ChatPage cleans artifacts
   // and replaces the current conversation when needed.
   onConversationDeleted: (id: string) => void;
+  onConversationCwdChanged: (id: string, cwd: string) => void;
   canShareConversations: boolean;
   sharedConversationCount: number;
   onShareConversation: (item: SidebarConversation) => void;
@@ -87,7 +92,7 @@ function selectMutationErrors(snapshot: SidebarSnapshot) {
 }
 
 export function ChatSidebarContainer(props: ChatSidebarContainerProps) {
-  const { store, projects, onConversationDeleted } = props;
+  const { store, projects, onConversationDeleted, onConversationCwdChanged } = props;
   const { t } = useLocale();
 
   const items = useSidebarSelector(store, selectConversations);
@@ -149,6 +154,20 @@ export function ChatSidebarContainer(props: ChatSidebarContainerProps) {
       void store.setPinned(id, isPinned);
     },
     [store],
+  );
+
+  const handleMoveToWorkspace = useCallback(
+    (id: string, cwd: string) => {
+      void moveConversationToWorkspace(store, id, cwd, onConversationCwdChanged);
+    },
+    [onConversationCwdChanged, store],
+  );
+
+  const handleMoveConversationsToWorkspace = useCallback(
+    async (ids: readonly string[], cwd: string) => {
+      return moveConversationsToWorkspace(store, ids, cwd, onConversationCwdChanged);
+    },
+    [onConversationCwdChanged, store],
   );
 
   const handleDeleteConversation = useCallback(
@@ -251,6 +270,8 @@ export function ChatSidebarContainer(props: ChatSidebarContainerProps) {
       onCommitRename={handleCommitRename}
       onCancelRename={handleCancelRename}
       onSetPinned={handleSetPinned}
+      onMoveToWorkspace={handleMoveToWorkspace}
+      onMoveConversationsToWorkspace={handleMoveConversationsToWorkspace}
       canShareConversations={props.canShareConversations}
       sharedConversationCount={props.sharedConversationCount}
       onShareConversation={props.onShareConversation}

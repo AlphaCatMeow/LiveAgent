@@ -3,7 +3,6 @@ import {
   Check,
   Download,
   FileText,
-  Folder,
   Globe2,
   Loader2,
   RefreshCw,
@@ -22,23 +21,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GlassPanel } from "../../components/hub/HubChrome";
 import { Button } from "../../components/ui/button";
 import { cn } from "../../lib/shared/utils";
-
-const EXTERNAL_MCP_TOOL_LABELS: Record<string, string> = {
-  "claude-code": "Claude Code",
-  codex: "Codex",
-  "claude-desktop": "Claude Desktop",
-  codebuddy: "CodeBuddy",
-};
-
-/** 与后端 `LOCAL_FILE_MCP_TOOL` 对齐的「从文件导入」来源标识 */
-const LOCAL_FILE_TOOL = "local-file";
+import { LOCAL_FILE_TOOL, McpImportSourcePicker } from "./McpImportSourcePicker";
 
 const DEFAULT_IMPORT_TIMEOUT_MS = 60_000;
-
-function fileScanLabel(scan: ExternalMcpToolScan, fallback: string) {
-  const basename = scan.configPath.split(/[\\/]/).pop();
-  return basename || fallback;
-}
 
 function externalServerKey(tool: string, server: ExternalMcpServerEntry) {
   return `${tool}:${server.id.toLowerCase()}`;
@@ -270,55 +255,14 @@ export function McpImportView(props: {
         ) : (
           <>
             <div className="hub-panel-enter flex flex-wrap items-center justify-between gap-3">
-              <div className="inline-flex shrink-0 rounded-2xl border border-border/40 bg-background/60 p-1 backdrop-blur-xl shadow-[0_1px_0_rgba(255,255,255,0.5)_inset] dark:border-white/[0.06] dark:bg-white/[0.04] dark:shadow-[0_1px_0_rgba(255,255,255,0.04)_inset]">
-                {allScans.map((scan) => {
-                  const isLocalFile = scan.tool === LOCAL_FILE_TOOL;
-                  const toolLabel = isLocalFile
-                    ? fileScanLabel(scan, t("mcpHub.importFileTab"))
-                    : (EXTERNAL_MCP_TOOL_LABELS[scan.tool] ?? scan.tool);
-                  const active = scan.tool === activeTool;
-                  return (
-                    <button
-                      key={scan.tool}
-                      type="button"
-                      title={isLocalFile ? scan.configPath : undefined}
-                      onClick={() => {
-                        userChoseToolRef.current = true;
-                        setActiveTool(scan.tool);
-                      }}
-                      className={cn(
-                        "relative inline-flex h-9 items-center justify-center gap-2 rounded-xl px-4 text-[12.5px] font-medium transition-all",
-                        active
-                          ? "bg-background/85 text-foreground shadow-[0_1px_0_rgba(255,255,255,0.6)_inset,0_4px_12px_-8px_rgba(15,23,42,0.18)] ring-1 ring-border/45 dark:bg-white/[0.08] dark:ring-white/[0.09] dark:shadow-[0_1px_0_rgba(255,255,255,0.07)_inset,0_4px_12px_-8px_rgba(0,0,0,0.55)]"
-                          : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
-                      )}
-                    >
-                      {isLocalFile ? (
-                        <FileText className="h-3.5 w-3.5" />
-                      ) : (
-                        <Folder className="h-3.5 w-3.5" />
-                      )}
-                      <span className="max-w-[10rem] truncate">{toolLabel}</span>
-                      {scan.exists ? (
-                        <span
-                          className={cn(
-                            "ml-0.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums",
-                            active
-                              ? "bg-foreground/[0.08] text-foreground/85"
-                              : "bg-muted/70 text-muted-foreground",
-                          )}
-                        >
-                          {scan.servers.length}
-                        </span>
-                      ) : (
-                        <span className="ml-0.5 text-[10px] text-muted-foreground/70">
-                          {t("mcpHub.importNotDetected")}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+              <McpImportSourcePicker
+                scans={allScans}
+                value={activeTool}
+                onChange={(nextTool) => {
+                  userChoseToolRef.current = true;
+                  setActiveTool(nextTool);
+                }}
+              />
 
               <div className="flex shrink-0 items-center gap-2">
                 <Button
@@ -361,7 +305,7 @@ export function McpImportView(props: {
             {activeScan ? (
               <div key={activeScan.tool} className="hub-panel-enter flex flex-col gap-3">
                 <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                  <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground/70">
+                  <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
                     <span className="font-mono">{activeScan.configPath}</span>
                     {activeScan.errors.length > 0 ? (
                       <>
@@ -385,15 +329,17 @@ export function McpImportView(props: {
                           .replace("{selected}", String(selectedInActive))
                           .replace("{total}", String(importableInActive.length))}
                       </span>
-                      <button
+                      <Button
                         type="button"
+                        variant="outline"
+                        size="sm"
                         onClick={toggleAllActive}
-                        className="rounded-full border border-border/45 bg-background/70 px-2 py-0.5 text-[11px] font-medium text-foreground/80 transition-colors hover:bg-background/90"
+                        className="h-7 rounded-lg border-border/70 bg-card px-2 text-[11px] shadow-xs"
                       >
                         {allActiveSelected
                           ? t("mcpHub.importDeselectAll")
                           : t("mcpHub.importSelectAll")}
-                      </button>
+                      </Button>
                     </div>
                   ) : null}
                 </div>
@@ -438,10 +384,10 @@ export function McpImportView(props: {
                           className={cn(
                             "group flex items-start gap-2.5 rounded-xl border p-3 text-left transition-all",
                             alreadyImported
-                              ? "cursor-not-allowed border-border/35 bg-muted/30 opacity-70"
+                              ? "cursor-not-allowed border-border/70 bg-muted/50"
                               : checked
-                                ? "border-primary/60 bg-primary/5 shadow-sm shadow-primary/10"
-                                : "border-border/40 bg-background/60 hover:border-border/70 hover:bg-background/85",
+                                ? "border-primary/60 bg-primary/10 shadow-xs"
+                                : "border-border/70 bg-card shadow-xs hover:border-border hover:bg-accent/30",
                           )}
                         >
                           <span

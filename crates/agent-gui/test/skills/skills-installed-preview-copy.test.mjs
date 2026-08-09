@@ -6,7 +6,10 @@ const pageSources = [
   {
     label: "共享 Skills Hub",
     source: readFileSync(
-      new URL("../../../agent-ui/src/pages/skills-hub/SkillsHubPage.tsx", import.meta.url),
+      new URL(
+        "../../../agent-ui/src/pages/skills-hub/InstalledSkillPreviewDrawer.tsx",
+        import.meta.url,
+      ),
       "utf8",
     ),
   },

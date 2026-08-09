@@ -14,6 +14,7 @@ import { McpServerEditModal, McpServersForm } from "@liveagent/ui/pages/mcp-hub/
 import { useState } from "react";
 import { HubBackdrop, HubHeader } from "../../components/hub/HubChrome";
 import { Button } from "../../components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../components/ui/tabs";
 import { cn } from "../../lib/shared/utils";
 import { McpImportView } from "./McpImportView";
 
@@ -28,6 +29,10 @@ type McpHubPageProps = {
 type McpHubView = "installed" | "store" | "import";
 
 type EditingState = { mode: "add" } | { mode: "edit"; idx: number; server: McpServerConfig };
+
+function isMcpHubView(value: unknown): value is McpHubView {
+  return value === "installed" || value === "store" || value === "import";
+}
 
 export function McpHubPage(props: McpHubPageProps) {
   const { settings, setSettings, sidebarOpen, onOpenSidebar } = props;
@@ -81,10 +86,8 @@ export function McpHubPage(props: McpHubPageProps) {
             {/* Status banner */}
             <div
               className={cn(
-                "hub-panel-enter relative overflow-hidden rounded-2xl border backdrop-blur-xl",
-                ready
-                  ? "border-border/50 bg-background/75 shadow-[0_1px_0_rgba(255,255,255,0.6)_inset,0_8px_24px_-18px_rgba(15,23,42,0.18)] dark:border-white/[0.09] dark:bg-white/[0.05] dark:shadow-[0_1px_0_rgba(255,255,255,0.06)_inset,0_8px_24px_-18px_rgba(0,0,0,0.6)]"
-                  : "border-border/40 bg-background/60",
+                "hub-panel-enter relative overflow-hidden rounded-2xl border bg-card shadow-xs",
+                ready ? "border-emerald-500/30" : "border-border/70",
               )}
             >
               <div className="flex items-center gap-3 px-4 py-3.5 sm:gap-x-5 sm:px-5">
@@ -93,8 +96,8 @@ export function McpHubPage(props: McpHubPageProps) {
                     className={cn(
                       "relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border transition-colors",
                       ready
-                        ? "border-border/50 bg-background/80 text-foreground/85 shadow-[0_1px_0_rgba(255,255,255,0.55)_inset] dark:border-white/[0.09] dark:bg-white/[0.06] dark:shadow-[0_1px_0_rgba(255,255,255,0.06)_inset]"
-                        : "border-border/40 bg-muted/40 text-muted-foreground",
+                        ? "border-border/70 bg-background text-foreground shadow-xs"
+                        : "border-border/70 bg-muted text-muted-foreground",
                     )}
                   >
                     <Plug className="h-5 w-5" />
@@ -110,10 +113,10 @@ export function McpHubPage(props: McpHubPageProps) {
                       {ready ? (
                         <span
                           className={cn(
-                            "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-medium tabular-nums backdrop-blur-md",
+                            "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10.5px] font-medium tabular-nums",
                             enabledCount > 0
-                              ? "bg-foreground/[0.06] text-foreground/85 ring-1 ring-border/50"
-                              : "bg-background/60 text-muted-foreground ring-1 ring-border/40",
+                              ? "bg-emerald-500/10 text-emerald-700 ring-1 ring-emerald-500/20 dark:text-emerald-300"
+                              : "bg-muted text-muted-foreground ring-1 ring-border/60",
                           )}
                         >
                           <span className="font-semibold">{enabledCount}</span>
@@ -134,7 +137,7 @@ export function McpHubPage(props: McpHubPageProps) {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-8 shrink-0 gap-1.5 rounded-full border-border/50 bg-background/70 px-3 backdrop-blur-md sm:px-3.5"
+                  className="h-8 shrink-0 gap-1.5 rounded-lg border-border/70 bg-background px-3 shadow-xs sm:px-3.5"
                   onClick={openAdd}
                   title={t("mcpHub.add")}
                 >
@@ -144,85 +147,90 @@ export function McpHubPage(props: McpHubPageProps) {
               </div>
             </div>
 
-            {/* Tab bar */}
-            <div className="hub-panel-enter flex items-center justify-between gap-3">
-              <div className="inline-flex shrink-0 rounded-2xl border border-border/40 bg-background/60 p-1 backdrop-blur-xl shadow-[0_1px_0_rgba(255,255,255,0.5)_inset] dark:border-white/[0.06] dark:bg-white/[0.04] dark:shadow-[0_1px_0_rgba(255,255,255,0.04)_inset]">
-                {[
-                  {
-                    value: "installed" as const,
-                    label: t("mcpHub.tabInstalled"),
-                    icon: Server,
-                    count: serverCount,
-                  },
-                  {
-                    value: "store" as const,
-                    label: t("mcpHub.tabStore"),
-                    icon: Cloud,
-                    count: null,
-                  },
-                  {
-                    value: "import" as const,
-                    label: t("mcpHub.tabImport"),
-                    icon: Download,
-                    count: null,
-                  },
-                ].map((item) => {
-                  const Icon = item.icon;
-                  const active = view === item.value;
-                  return (
-                    <button
-                      key={item.value}
-                      type="button"
-                      onClick={() => setView(item.value)}
-                      className={cn(
-                        "relative inline-flex h-9 items-center justify-center gap-2 rounded-xl px-4 text-[12.5px] font-medium transition-all",
-                        active
-                          ? "bg-background/85 text-foreground shadow-[0_1px_0_rgba(255,255,255,0.6)_inset,0_4px_12px_-8px_rgba(15,23,42,0.18)] ring-1 ring-border/45 dark:bg-white/[0.08] dark:ring-white/[0.09] dark:shadow-[0_1px_0_rgba(255,255,255,0.07)_inset,0_4px_12px_-8px_rgba(0,0,0,0.55)]"
-                          : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
-                      )}
-                    >
-                      <Icon className="h-3.5 w-3.5" />
-                      <span>{item.label}</span>
-                      {item.count !== null && item.count > 0 ? (
-                        <span
-                          className={cn(
-                            "ml-0.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums",
-                            active
-                              ? "bg-foreground/[0.08] text-foreground/85"
-                              : "bg-muted/70 text-muted-foreground",
-                          )}
-                        >
-                          {item.count}
-                        </span>
-                      ) : null}
-                    </button>
-                  );
-                })}
+            <Tabs
+              value={view}
+              onValueChange={(nextView) => {
+                if (isMcpHubView(nextView)) setView(nextView);
+              }}
+              className="flex min-h-0 flex-1 flex-col gap-4"
+            >
+              <div className="hub-panel-enter flex items-center justify-between gap-3">
+                <TabsList className="h-10 shrink-0 rounded-xl border border-border/70 bg-muted/50 p-1 text-muted-foreground shadow-xs">
+                  {[
+                    {
+                      value: "installed" as const,
+                      label: t("mcpHub.tabInstalled"),
+                      icon: Server,
+                      count: serverCount,
+                    },
+                    {
+                      value: "store" as const,
+                      label: t("mcpHub.tabStore"),
+                      icon: Cloud,
+                      count: null,
+                    },
+                    {
+                      value: "import" as const,
+                      label: t("mcpHub.tabImport"),
+                      icon: Download,
+                      count: null,
+                    },
+                  ].map((item) => {
+                    const Icon = item.icon;
+                    const active = view === item.value;
+                    return (
+                      <TabsTrigger
+                        key={item.value}
+                        value={item.value}
+                        className={cn(
+                          "relative h-8 gap-1.5 rounded-lg px-3 text-[12.5px] data-[active]:ring-1 data-[active]:ring-border/60",
+                          !active && "hover:bg-background/70 hover:text-foreground",
+                        )}
+                      >
+                        <Icon className="h-3.5 w-3.5" />
+                        <span>{item.label}</span>
+                        {item.count !== null && item.count > 0 ? (
+                          <span
+                            className={cn(
+                              "ml-0.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums",
+                              active
+                                ? "bg-foreground/[0.08] text-foreground/85"
+                                : "bg-muted/70 text-muted-foreground",
+                            )}
+                          >
+                            {item.count}
+                          </span>
+                        ) : null}
+                      </TabsTrigger>
+                    );
+                  })}
+                </TabsList>
+
+                {view === "store" ? (
+                  <div className="hidden text-[11.5px] text-muted-foreground sm:flex items-center gap-1.5">
+                    <Sparkles className="h-3.5 w-3.5 text-foreground/55" />
+                    <span>{t("mcpHub.storeSubtitle")}</span>
+                  </div>
+                ) : null}
               </div>
 
-              {view === "store" ? (
-                <div className="hidden text-[11.5px] text-muted-foreground sm:flex items-center gap-1.5">
-                  <Sparkles className="h-3.5 w-3.5 text-foreground/55" />
-                  <span>{t("mcpHub.storeSubtitle")}</span>
-                </div>
-              ) : null}
-            </div>
-
-            {/* Content */}
-            <div className="min-h-0 flex-1 overflow-hidden">
-              {view === "installed" ? (
-                <McpServersForm
-                  settings={settings}
-                  setSettings={setSettings}
-                  onAddServer={openAdd}
-                  onEditServer={openEdit}
-                />
-              ) : view === "store" ? (
-                <McpRegistryBrowser settings={settings} setSettings={setSettings} />
-              ) : (
-                <McpImportView settings={settings} setSettings={setSettings} />
-              )}
-            </div>
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <TabsContent value="installed" className="h-full min-h-0">
+                  <McpServersForm
+                    settings={settings}
+                    setSettings={setSettings}
+                    onAddServer={openAdd}
+                    onEditServer={openEdit}
+                  />
+                </TabsContent>
+                <TabsContent value="store" className="h-full min-h-0">
+                  <McpRegistryBrowser settings={settings} setSettings={setSettings} />
+                </TabsContent>
+                <TabsContent value="import" className="h-full min-h-0">
+                  <McpImportView settings={settings} setSettings={setSettings} />
+                </TabsContent>
+              </div>
+            </Tabs>
           </div>
         </div>
       </div>

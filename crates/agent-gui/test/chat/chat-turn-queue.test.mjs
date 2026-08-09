@@ -61,20 +61,6 @@ test("queued chat turns append, promote, remove, and take the next turn", () => 
   assert.deepEqual(queue.removeQueuedChatTurn(taken.queue, "a1"), []);
 });
 
-test("queued gateway turns preserve per-request Skills overrides", () => {
-  const queued = queue.createQueuedChatTurn({
-    ...turn("gateway-1", "conversation-a", "queued"),
-    gatewayRequest: {
-      requestId: "request-1",
-      skillPresetId: "focused",
-      skillsDisabled: true,
-    },
-  });
-
-  assert.equal(queued.gatewayRequest.skillPresetId, "focused");
-  assert.equal(queued.gatewayRequest.skillsDisabled, true);
-});
-
 test("queued chat turn movement stays scoped to the same conversation", () => {
   const mixed = [
     turn("a1", "conversation-a", "a one"),
@@ -151,7 +137,7 @@ test("queued chat turn preview keeps structured draft hints compact", () => {
     },
   ]);
 
-  assert.equal(queue.buildQueuedChatTurnPreview(richDraft), "hello pasted.txt$reviewer");
+  assert.equal(queue.buildQueuedChatTurnPreview(richDraft), "hello pasted.txt/reviewer");
   assert.equal(queue.queuedChatTurnHasContent(richDraft, []), true);
   assert.equal(queue.queuedChatTurnHasContent(draft(""), [{ fileName: "a.txt" }]), true);
 });

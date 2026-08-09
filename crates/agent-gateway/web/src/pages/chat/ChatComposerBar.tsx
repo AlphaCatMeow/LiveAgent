@@ -58,7 +58,6 @@ import {
   type ChatRuntimeControls,
   DEFAULT_CHAT_RUNTIME_CONTROLS,
   type ReasoningLevel,
-  type SkillPreset,
 } from "../../lib/settings";
 import { cn } from "../../lib/shared/utils";
 import type { WorkspaceActivityClient } from "../../lib/workspace-activity/types";
@@ -228,11 +227,6 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
   workdir: string;
   enabledSkills: MentionComposerSkill[];
   isAgentMode: boolean;
-  skillPresets: SkillPreset[];
-  skillPresetId: string;
-  skillsDisabled: boolean;
-  skillsGloballyEnabled: boolean;
-  onSkillsChange: (presetId: string, disabled: boolean) => void;
   chatRuntimeControls: ChatRuntimeControls;
   reasoningOptions: ReasoningLevel[];
   thinkingAlwaysOn: boolean;
@@ -257,6 +251,8 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
   onMoveQueuedTurnUp: (id: string) => void;
   onEditQueuedTurn: (id: string) => void;
   onRemoveQueuedTurn: (id: string) => void;
+  /** 当前会话任务进度（存在时渲染在审批栏和队列面板之上）。 */
+  taskProgressBar?: ReactNode;
   /** 输入框上方的集中审批栏(待审批时由上层注入,渲染在队列面板之上)。 */
   approvalBar?: ReactNode;
 }) {
@@ -269,11 +265,6 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
     workdir,
     enabledSkills,
     isAgentMode,
-    skillPresets,
-    skillPresetId,
-    skillsDisabled,
-    skillsGloballyEnabled,
-    onSkillsChange,
     chatRuntimeControls,
     reasoningOptions,
     thinkingAlwaysOn,
@@ -297,6 +288,7 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
     onMoveQueuedTurnUp,
     onEditQueuedTurn,
     onRemoveQueuedTurn,
+    taskProgressBar,
     approvalBar,
   } = props;
   const { t } = useLocale();
@@ -643,6 +635,7 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
           isComposerExpanded && "flex min-h-0 flex-col justify-end",
         )}
       >
+        {taskProgressBar}
         {approvalBar}
         {queuedTurns.length > 0 ? (
           <div
@@ -875,16 +868,6 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
               disabled={isInputDisabled}
               workdir={workdir}
               enabledSkills={enabledSkills}
-              skillsCommand={
-                isAgentMode && skillsGloballyEnabled && !controlsDisabled
-                  ? {
-                      presets: skillPresets,
-                      presetId: skillPresetId,
-                      disabled: skillsDisabled,
-                      onChange: onSkillsChange,
-                    }
-                  : undefined
-              }
               // !：移动端 .gateway-chat-frame .mention-composer 的 max-height 钳制特异性更高，展开态必须压过它。
               className={cn("px-0 py-0 pr-8", isComposerExpanded && "h-full! max-h-none!")}
             />

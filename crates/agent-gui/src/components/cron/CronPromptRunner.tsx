@@ -10,10 +10,11 @@ import { resolveRuntimePlatform } from "../../lib/runtimePlatform";
 import {
   type AppSettings,
   DEFAULT_CHAT_RUNTIME_CONTROLS,
+  filterMcpSettingsForWorkspace,
   isAgentDevMode,
   isAgentExecutionMode,
   type ReasoningLevel,
-  resolveEffectiveSkillNames,
+  resolveWorkspaceResources,
 } from "../../lib/settings";
 import {
   buildSkillsSystemPrompt,
@@ -60,15 +61,10 @@ function getActiveAgentPrompt(settings: AppSettings) {
   );
 }
 
-async function buildCronSkillsContext(settings: AppSettings, request: PromptRunRequest) {
-  const effective = resolveEffectiveSkillNames({
-    settings: settings.skills,
-    presetId: request.skillPresetId,
-    skillsDisabled: request.skillsDisabled,
-    executionMode: settings.system.executionMode,
-  });
-  const selectedSkillNames = effective.skillNames.filter((name) => !isAlwaysEnabledSkillName(name));
-  if (!effective.enabled || selectedSkillNames.length === 0) {
+async function buildCronSkillsContext(settings: AppSettings, workdir: string) {
+  const resources = resolveWorkspaceResources(settings, workdir);
+  const selectedSkillNames = resources.skillNames.filter((name) => !isAlwaysEnabledSkillName(name));
+  if (!resources.skillsEnabled || selectedSkillNames.length === 0) {
     return {
       enabled: false,
       prompt: "",
@@ -80,13 +76,21 @@ async function buildCronSkillsContext(settings: AppSettings, request: PromptRunR
   const discovery = await discoverSkills({ force: true });
   const skillByName = new Map(discovery.skills.map((skill) => [skill.name, skill]));
   const missing = selectedSkillNames.filter((name) => !skillByName.has(name));
-  if (missing.length > 0) {
+  if (missing.length > 0 && resources.mode !== "custom") {
     throw new Error(`找不到以下 Skills：${missing.join(", ")}（请先重新扫描固定 Skills 目录）`);
   }
 
   const selectedSkills = selectedSkillNames
     .map((name) => skillByName.get(name))
     .filter((skill): skill is SkillSummary => Boolean(skill));
+  if (selectedSkills.length === 0) {
+    return {
+      enabled: false,
+      prompt: "",
+      rootDir: "",
+      accessPolicy: undefined as SkillAccessPolicy | undefined,
+    };
+  }
 
   return {
     enabled: true,
@@ -158,7 +162,8 @@ async function executeCronPromptRun(
     throw new Error(`Auto Prompt provider API key is empty: ${providerLabel}`);
   }
 
-  const skillsContext = await buildCronSkillsContext(settings, request);
+  const workspaceResources = resolveWorkspaceResources(settings, workdir);
+  const skillsContext = await buildCronSkillsContext(settings, workdir);
   const activeAgentPrompt = getActiveAgentPrompt(settings);
   const runtimePlatform = await resolveRuntimePlatform();
   const builtinRegistry = await buildBuiltinToolRegistry({
@@ -174,7 +179,7 @@ async function executeCronPromptRun(
       customProviderId: request.providerId,
       model: request.model,
     },
-    getMcpSettings: () => settings.mcp,
+    getMcpSettings: () => filterMcpSettingsForWorkspace(settings.mcp, workspaceResources),
     mcpLoadFailureMode: "throw",
   });
 
@@ -211,15 +216,10 @@ async function executeCronPromptRun(
     providerId: provider.type,
     model: request.model,
     runtime: {
-      ...createProviderRuntimeConfig(
-        provider,
-        request.model,
-        {
-          ...DEFAULT_CHAT_RUNTIME_CONTROLS,
-          reasoning: resolveCronReasoning(request.reasoning),
-        },
-        settings.customSettings.providerIdentities,
-      ),
+      ...createProviderRuntimeConfig(provider, request.model, {
+        ...DEFAULT_CHAT_RUNTIME_CONTROLS,
+        reasoning: resolveCronReasoning(request.reasoning),
+      }),
       // 后台定时任务恒开提示词缓存：与前台会话共享同一前缀，命中率远高于按
       // 供应商开关逐个判断。
       promptCachingEnabled: true,

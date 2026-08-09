@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { ToolPolicyToggle } from "../../components/hub/ToolPolicyToggle";
 import {
   AlertTriangle,
+  ExternalLink,
   Globe2,
   Pencil,
   Plug,
@@ -14,6 +15,7 @@ import {
   Wifi,
   X,
 } from "../../components/icons";
+import { ResourceActivationSwitch } from "../../components/resources/ResourceActivationSwitch";
 import { Button } from "../../components/ui/button";
 import { ConfirmDeletePopover } from "../../components/ui/confirm-action-popover";
 import { Input } from "../../components/ui/input";
@@ -27,9 +29,11 @@ import {
 } from "../../components/ui/select";
 import { Textarea } from "../../components/ui/textarea";
 import { useLocale } from "../../i18n";
+import { resolveMcpDocsHref } from "../../lib/mcpServerMetadata";
 import {
   type AppSettings,
   type McpServerConfig,
+  removeWorkspaceResourceReferences,
   type ToolPolicy,
   updateMcp,
   updateSystem,
@@ -57,6 +61,8 @@ type McpServersFormProps = {
 
 type ServerDraft = {
   id: string;
+  description: string;
+  docsUrl: string;
   transport: McpServerConfig["transport"];
   timeoutMs: string;
   command: string;
@@ -116,6 +122,8 @@ function suggestServerName(existing: string[]): string {
 function blankDraft(existingIds: string[]): ServerDraft {
   return {
     id: suggestServerName(existingIds),
+    description: "",
+    docsUrl: "",
     transport: "stdio",
     timeoutMs: "60000",
     command: "",
@@ -132,6 +140,8 @@ function draftFromServer(server: McpServerConfig): ServerDraft {
   const transport: McpServerConfig["transport"] = server.transport ?? "stdio";
   return {
     id: server.id,
+    description: server.description ?? "",
+    docsUrl: server.docsUrl ?? "",
     transport,
     timeoutMs: String(server.timeoutMs ?? 60_000),
     command: server.command ?? "",
@@ -170,6 +180,8 @@ function buildServerFromDraft(
     return {
       ...(base ?? {}),
       id,
+      description: draft.description.trim() || undefined,
+      docsUrl: draft.docsUrl.trim() || undefined,
       enabled: base?.enabled ?? true,
       transport: "stdio",
       command,
@@ -190,6 +202,8 @@ function buildServerFromDraft(
   return {
     ...(base ?? {}),
     id,
+    description: draft.description.trim() || undefined,
+    docsUrl: draft.docsUrl.trim() || undefined,
     enabled: base?.enabled ?? true,
     transport: draft.transport,
     command: "",
@@ -273,6 +287,7 @@ const McpServerCard = memo(function McpServerCard(props: {
     : isHttp
       ? t("mcpHub.urlHttp")
       : t("mcpHub.urlSse");
+  const docsLink = resolveMcpDocsHref(serverConfig.docsUrl);
 
   return (
     <div
@@ -285,24 +300,12 @@ const McpServerCard = memo(function McpServerCard(props: {
     >
       <div className="flex items-center gap-3 px-4 py-3">
         {/* Toggle */}
-        <button
-          type="button"
-          title={enabled ? t("settings.disable") : t("settings.enable")}
-          onClick={() => patchServer({ enabled: !enabled })}
-          className={cn(
-            "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full ring-1 transition-colors",
-            enabled
-              ? "bg-foreground/80 ring-foreground/30 shadow-[0_2px_8px_-3px_rgba(15,23,42,0.4)] dark:shadow-[0_2px_8px_-3px_rgba(0,0,0,0.6)]"
-              : "bg-muted-foreground/25 ring-border/40",
-          )}
-        >
-          <span
-            className={cn(
-              "pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform",
-              enabled ? "translate-x-[1.05rem]" : "translate-x-[0.125rem]",
-            )}
-          />
-        </button>
+        <ResourceActivationSwitch
+          checked={enabled}
+          compact
+          label={enabled ? t("settings.disable") : t("settings.enable")}
+          onCheckedChange={(next) => patchServer({ enabled: next })}
+        />
 
         {/* Clickable body */}
         <button
@@ -341,6 +344,14 @@ const McpServerCard = memo(function McpServerCard(props: {
                 {meta.label}
               </span>
             </div>
+            {serverConfig.description ? (
+              <div
+                className="truncate text-[11px] text-foreground/70"
+                title={serverConfig.description}
+              >
+                {serverConfig.description}
+              </div>
+            ) : null}
             {previewLine ? (
               <div className="truncate text-[11px] text-muted-foreground/85" title={previewLine}>
                 <span className="text-muted-foreground/55">{previewLabel}:</span>{" "}
@@ -375,6 +386,17 @@ const McpServerCard = memo(function McpServerCard(props: {
             onChange={onPolicyChange}
             size="sm"
           />
+          {docsLink ? (
+            <a
+              href={docsLink}
+              target="_blank"
+              rel="noreferrer"
+              title={serverConfig.docsUrl}
+              className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          ) : null}
           <button
             type="button"
             onClick={onEdit}
@@ -387,9 +409,12 @@ const McpServerCard = memo(function McpServerCard(props: {
             name={serverConfig.id || `Server ${idx + 1}`}
             onConfirm={() =>
               setSettings((prev) =>
-                updateMcp(prev, {
-                  servers: prev.mcp.servers.filter((_, index) => index !== idx),
-                }),
+                removeWorkspaceResourceReferences(
+                  updateMcp(prev, {
+                    servers: prev.mcp.servers.filter((_, index) => index !== idx),
+                  }),
+                  { mcpServerIds: [serverConfig.id] },
+                ),
               )
             }
           >
@@ -650,6 +675,32 @@ export function McpServerEditModal(props: {
               </div>
             )}
 
+            <div className="space-y-1.5">
+              <Label htmlFor="mcp-edit-description" className="text-xs text-muted-foreground">
+                {t("mcpHub.description")}
+              </Label>
+              <Textarea
+                id="mcp-edit-description"
+                value={draft.description}
+                placeholder={t("mcpHub.descriptionPlaceholder")}
+                className="min-h-[72px] text-[12.5px]"
+                onChange={(event) => updateDraft({ description: event.currentTarget.value })}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="mcp-edit-docs-url" className="text-xs text-muted-foreground">
+                {t("mcpHub.docsUrl")}
+              </Label>
+              <Input
+                id="mcp-edit-docs-url"
+                value={draft.docsUrl}
+                placeholder={t("mcpHub.docsUrlPlaceholder")}
+                className="font-mono text-[12.5px]"
+                onChange={(event) => updateDraft({ docsUrl: event.currentTarget.value })}
+              />
+            </div>
+
             {formError ? (
               <div className="flex items-start gap-2 rounded-xl border border-destructive/25 bg-destructive/[0.06] px-3 py-2.5 text-xs text-destructive">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -688,7 +739,14 @@ export function McpServersForm(props: McpServersFormProps) {
     return servers
       .map((server, idx) => ({ server, idx }))
       .filter(({ server }) => {
-        const haystack = [server.id, server.command, server.url, server.transport ?? ""]
+        const haystack = [
+          server.id,
+          server.description,
+          server.docsUrl,
+          server.command,
+          server.url,
+          server.transport ?? "",
+        ]
           .join("\n")
           .toLowerCase();
         return haystack.includes(text);

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AppSettings } from "../../lib/settings";
+import { type AppSettings, updateSkills } from "../../lib/settings";
 import {
   discoverSkills,
+  isAlwaysEnabledSkillName,
+  mergeAlwaysEnabledSkillNames,
   type SkillSummary,
   subscribeSkillsDiscoveryUpdated,
 } from "../../lib/skills";
@@ -12,14 +14,40 @@ type UseChatSkillsParams = {
   setSettings: (updater: (prev: AppSettings) => AppSettings) => void;
 };
 
+function reconcileSelectedSkills(params: {
+  skills: SkillSummary[];
+  selectedSkillNames: string[];
+  setSettings: (updater: (prev: AppSettings) => AppSettings) => void;
+}) {
+  const { skills, selectedSkillNames, setSettings } = params;
+  const names = new Set(skills.map((skill) => skill.name));
+  const filtered = mergeAlwaysEnabledSkillNames(selectedSkillNames).filter(
+    (name) => isAlwaysEnabledSkillName(name) || names.has(name),
+  );
+  if (filtered.join("\n") === selectedSkillNames.join("\n")) return;
+
+  setSettings((prev) => {
+    const current = mergeAlwaysEnabledSkillNames(prev.skills.selected);
+    const next = current.filter((name) => isAlwaysEnabledSkillName(name) || names.has(name));
+    if (next.join("\n") === current.join("\n")) return prev;
+    return updateSkills(prev, { selected: next });
+  });
+}
+
 export function useChatSkills(params: UseChatSkillsParams) {
-  const { skillsEnabled } = params;
+  const { skillsEnabled, selectedSkillNames, setSettings } = params;
   const [availableSkills, setAvailableSkills] = useState<SkillSummary[]>([]);
   const [skillsRootDir, setSkillsRootDir] = useState("");
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [skillsLoadError, setSkillsLoadError] = useState<string | null>(null);
   const mountedRef = useRef(true);
   const requestSequenceRef = useRef(0);
+  const selectedSkillNamesRef = useRef(selectedSkillNames);
+
+  useEffect(() => {
+    selectedSkillNamesRef.current = selectedSkillNames;
+  }, [selectedSkillNames]);
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -57,6 +85,11 @@ export function useChatSkills(params: UseChatSkillsParams) {
         }
         setSkillsRootDir(discovery.rootDir);
         setAvailableSkills(discovery.skills);
+        reconcileSelectedSkills({
+          skills: discovery.skills,
+          selectedSkillNames: selectedSkillNamesRef.current,
+          setSettings,
+        });
         return discovery;
       } catch (err) {
         if (!mountedRef.current || requestSequenceRef.current !== requestId) {
@@ -73,7 +106,7 @@ export function useChatSkills(params: UseChatSkillsParams) {
         }
       }
     },
-    [applyDisabledState, skillsEnabled],
+    [applyDisabledState, setSettings, skillsEnabled],
   );
 
   const refreshSkills = useCallback(async () => {

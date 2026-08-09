@@ -52,7 +52,6 @@ import {
   type ChatRuntimeControls,
   DEFAULT_CHAT_RUNTIME_CONTROLS,
   type ReasoningLevel,
-  type SkillPreset,
 } from "../../../lib/settings";
 import { cn } from "../../../lib/shared/utils";
 import type { WorkspaceActivityClient } from "../../../lib/workspace-activity/types";
@@ -182,11 +181,6 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
   workdir: string;
   enabledSkills: MentionComposerSkill[];
   isAgentMode: boolean;
-  skillPresets: SkillPreset[];
-  skillPresetId: string;
-  skillsDisabled: boolean;
-  skillsGloballyEnabled: boolean;
-  onSkillsChange: (presetId: string, disabled: boolean) => void;
   chatRuntimeControls: ChatRuntimeControls;
   reasoningOptions: ReasoningLevel[];
   thinkingAlwaysOn: boolean;
@@ -210,6 +204,8 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
   onEditQueuedTurn: (id: string) => void;
   onRemoveQueuedTurn: (id: string) => void;
   onHeightChange?: (height: number) => void;
+  /** 当前会话任务进度（存在时渲染在审批栏和队列面板之上）。 */
+  taskProgressBar?: ReactNode;
   /** 输入框上方的集中审批栏(待审批时由上层注入,渲染在队列面板之上)。 */
   approvalBar?: ReactNode;
 }) {
@@ -222,11 +218,6 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
     workdir,
     enabledSkills,
     isAgentMode,
-    skillPresets,
-    skillPresetId,
-    skillsDisabled,
-    skillsGloballyEnabled,
-    onSkillsChange,
     chatRuntimeControls,
     reasoningOptions,
     thinkingAlwaysOn,
@@ -249,6 +240,7 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
     onEditQueuedTurn,
     onRemoveQueuedTurn,
     onHeightChange,
+    taskProgressBar,
     approvalBar,
   } = props;
   const { t } = useLocale();
@@ -584,12 +576,18 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
       )}
     >
       <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 bottom-0 bg-background"
+        style={{ height: "1rem" }}
+      />
+      <div
         className={cn(
           "pointer-events-auto relative w-full max-w-[768px]",
           // justify-end：展开动画途中卡片被钳在中间高度时保持贴底，向上生长。
           isComposerExpanded && "flex min-h-0 flex-col justify-end",
         )}
       >
+        {taskProgressBar}
         {approvalBar}
         {queuedTurns.length > 0 ? (
           <div
@@ -822,16 +820,6 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: {
               disabled={isInputDisabled}
               workdir={workdir}
               enabledSkills={enabledSkills}
-              skillsCommand={
-                isAgentMode && skillsGloballyEnabled && !controlsDisabled
-                  ? {
-                      presets: skillPresets,
-                      presetId: skillPresetId,
-                      disabled: skillsDisabled,
-                      onChange: onSkillsChange,
-                    }
-                  : undefined
-              }
               className={cn("px-0 py-0 pr-8", isComposerExpanded && "h-full max-h-none")}
             />
           </div>

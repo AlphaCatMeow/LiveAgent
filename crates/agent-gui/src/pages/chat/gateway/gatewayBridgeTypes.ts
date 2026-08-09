@@ -29,8 +29,6 @@ export type GatewayChatRequestEvent = {
   workdir?: string;
   uploadedFiles?: PendingUploadedFile[];
   queuePolicy?: "auto" | "append" | "interrupt" | string;
-  skillPresetId?: string;
-  skillsDisabled?: boolean;
 };
 
 export type GatewayChatClaimedRequest = {
@@ -67,8 +65,6 @@ export type ActiveGatewayBridgeRequest = {
   runtimeControlsOverride?: ChatRuntimeControls;
   executionModeOverride?: ExecutionMode;
   workdirOverride?: string;
-  skillPresetIdOverride?: string;
-  skillsDisabledOverride?: boolean;
 };
 
 export type SendChatAction = (overrides?: {
@@ -78,8 +74,6 @@ export type SendChatAction = (overrides?: {
   conversationIdOverride?: string;
   executionModeOverride?: ExecutionMode;
   workdirOverride?: string;
-  skillPresetIdOverride?: string;
-  skillsDisabledOverride?: boolean;
   runtimeControlsOverride?: ChatRuntimeControls;
   gatewayBridgeRequestOverride?: ActiveGatewayBridgeRequest | null;
   preserveComposerOnStart?: boolean;

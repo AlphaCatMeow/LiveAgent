@@ -8,6 +8,7 @@ import type {
 } from "../../../components/chat/MentionComposer";
 import { getAutomationState } from "../../../lib/automation";
 import { createHookRunScope } from "../../../lib/automation/hookRunner";
+import { normalizeLogicalLineEndings } from "../../../lib/chat/composerText";
 import {
   buildPersistableMessagesFromSnapshot,
   type SuppressedToolTraceSnapshot,
@@ -47,15 +48,14 @@ import {
   applyMcpOpsToAppSettings,
   type ChatRuntimeControls,
   type ExecutionMode,
+  filterMcpSettingsForWorkspace,
   getSshProjectHostIds,
   isAgentDevMode,
   isAgentExecutionMode,
-  removeSkillFromAllPresets,
-  resolveEffectiveSkillNames,
-  resolveSkillPreset,
+  removeWorkspaceResourceReferences,
+  resolveWorkspaceResources,
   type SelectedModel,
   updateMemorySettings,
-  updateSkillPreset,
   updateSkills,
   workspaceProjectPathKey,
 } from "../../../lib/settings";
@@ -105,6 +105,7 @@ import {
   resolveEffectiveChatModelSelection,
 } from "./modelSelection";
 import {
+  buildModelFailoverPlan,
   resolveConversationTitleModelSelection,
   resolveMemorySummaryModelSelection,
   selectedModelsMatch,
@@ -273,15 +274,13 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
   }
 
   const enableManagedSkills = useCallback(
-    (names: readonly string[], presetId: string) => {
+    (names: readonly string[]) => {
       const normalizedNames = names.map((name) => String(name).trim()).filter(Boolean);
       if (normalizedNames.length === 0) return;
       setSettings((prev) => {
-        const preset = resolveSkillPreset(prev.skills, presetId);
-        const skillNames = appendManagedSkillSelections(preset.skillNames, normalizedNames);
-        if (skillNames.join("\n") === preset.skillNames.join("\n")) return prev;
-        const skills = updateSkillPreset(prev.skills, preset.id, { skillNames });
-        return updateSkills(prev, { presets: skills.presets });
+        const selected = appendManagedSkillSelections(prev.skills.selected, normalizedNames);
+        if (selected.join("\n") === prev.skills.selected.join("\n")) return prev;
+        return updateSkills(prev, { selected });
       });
     },
     [setSettings],
@@ -294,8 +293,6 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     conversationIdOverride?: string;
     executionModeOverride?: ExecutionMode;
     workdirOverride?: string;
-    skillPresetIdOverride?: string;
-    skillsDisabledOverride?: boolean;
     runtimeControlsOverride?: ChatRuntimeControls;
     gatewayBridgeRequestOverride?: ActiveGatewayBridgeRequest | null;
     preserveComposerOnStart?: boolean;
@@ -332,20 +329,11 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       effectiveProjectPathKey,
     );
     const effectiveIsAgentDevExecutionMode = isAgentDevMode(effectiveExecutionMode);
-    const effectiveSkillsSelection = resolveEffectiveSkillNames({
-      settings: settings.skills,
-      presetId:
-        overrides?.skillPresetIdOverride ??
-        gatewayBridgeRequest?.skillPresetIdOverride ??
-        runtimeEntry?.state.meta.skillPresetId,
-      skillsDisabled:
-        overrides?.skillsDisabledOverride ??
-        gatewayBridgeRequest?.skillsDisabledOverride ??
-        runtimeEntry?.state.meta.skillsDisabled,
-      executionMode: effectiveExecutionMode,
-    });
-    const effectiveSkillsEnabled = effectiveSkillsSelection.enabled;
-    const effectiveSkillNames = effectiveSkillsSelection.skillNames;
+    const workspaceResources = resolveWorkspaceResources(settings, effectiveWorkdir);
+    const effectiveSkillsEnabled = workspaceResources.skillsEnabled && effectiveIsAgentMode;
+    const selectedSkillNames = effectiveSkillsEnabled ? workspaceResources.skillNames : [];
+    const getEffectiveMcpSettings = () =>
+      filterMcpSettingsForWorkspace(getMcpSettings(), workspaceResources);
     const hasRemoteGatewayTarget =
       settings.remote.enabled &&
       settings.remote.gatewayUrl.trim() !== "" &&
@@ -439,12 +427,32 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       gatewayBridgeRequest?.runtimeControlsOverride ??
       overrides?.runtimeControlsOverride ??
       settings.chatRuntimeControls;
-    const providerConfig = createProviderRuntimeConfig(
-      provider,
-      model,
-      runtimeControls,
-      settings.customSettings.providerIdentities,
-    );
+    const providerConfig = createProviderRuntimeConfig(provider, model, runtimeControls);
+    // cc-switch style auto-failover plan for this turn (shared by the agent
+    // and text runtimes). The switch callback makes the winning fallback the
+    // conversation's selection so follow-up turns start on the healthy
+    // provider directly.
+    const failoverPlan = buildModelFailoverPlan(settings, effectiveSelectedModel, runtimeControls);
+    const failoverParams = failoverPlan
+      ? {
+          config: failoverPlan.config,
+          primary: failoverPlan.primary,
+          fallbacks: failoverPlan.fallbacks,
+          onSwitched: (event: {
+            target: { selectedModel: SelectedModel } | null;
+            round: number;
+            errorMessage: string;
+          }) => {
+            const nextSelectedModel =
+              event.target?.selectedModel ?? failoverPlan.primary.selectedModel;
+            updateConversationRuntimeEntry(conversationId, (prev) =>
+              selectedModelsMatch(prev.selectedModel, nextSelectedModel)
+                ? prev
+                : { ...prev, selectedModel: nextSelectedModel },
+            );
+          },
+        }
+      : undefined;
     const memorySummaryModelSelection = resolveMemorySummaryModelSelection(settings);
     const memoryExtractionModel = memorySummaryModelSelection
       ? {
@@ -454,7 +462,6 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
             memorySummaryModelSelection.provider,
             memorySummaryModelSelection.model,
             runtimeControls,
-            settings.customSettings.providerIdentities,
           ),
           selectedModel: memorySummaryModelSelection.selectedModel,
         }
@@ -491,14 +498,15 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     const composerDraft = hasTextOverride
       ? null
       : (overrides?.composerDraftOverride ?? composerRef.current?.getDraft() ?? null);
-    let text = hasTextOverride
-      ? textOverride.trim()
-      : composerDraft
-        ? (effectiveIsAgentMode && composerDraft.largePastes.length > 0
+    let text = normalizeLogicalLineEndings(
+      hasTextOverride
+        ? textOverride
+        : composerDraft
+          ? effectiveIsAgentMode && composerDraft.largePastes.length > 0
             ? composerDraft.textWithoutLargePastes
             : buildTextFromComposerDraft(composerDraft)
-          ).trim()
-        : "";
+          : "",
+    );
     let uploadedFiles = overrides?.uploadedFilesOverride ?? pendingUploadedFiles;
 
     if (
@@ -514,7 +522,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
           effectiveWorkdir,
           composerDraft.largePastes,
         );
-        text = buildTextFromComposerDraft(composerDraft, imported.fileByPasteId).trim();
+        text = buildTextFromComposerDraft(composerDraft, imported.fileByPasteId);
         uploadedFiles = mergePendingUploadedFiles(uploadedFiles, imported.files);
       } catch (error) {
         const message = asErrorMessage(error, "大段粘贴内容导入附件失败");
@@ -596,26 +604,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       providerId,
       model,
     });
-    const baseConversationState =
-      overrides?.skillPresetIdOverride !== undefined ||
-      overrides?.skillsDisabledOverride !== undefined ||
-      gatewayBridgeRequest?.skillPresetIdOverride !== undefined ||
-      gatewayBridgeRequest?.skillsDisabledOverride !== undefined
-        ? {
-            ...runtimeEntry.state,
-            meta: {
-              ...runtimeEntry.state.meta,
-              skillPresetId:
-                overrides?.skillPresetIdOverride ??
-                gatewayBridgeRequest?.skillPresetIdOverride ??
-                runtimeEntry.state.meta.skillPresetId,
-              skillsDisabled:
-                overrides?.skillsDisabledOverride ??
-                gatewayBridgeRequest?.skillsDisabledOverride ??
-                runtimeEntry.state.meta.skillsDisabled,
-            },
-          }
-        : runtimeEntry.state;
+    const baseConversationState = runtimeEntry.state;
     const isFirstTurn = baseConversationState.meta.totalMessageCount === 0;
     const existingHistoryItem =
       sidebarStore.peek(conversationId) ??
@@ -646,7 +635,6 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
         titleModelSelection.provider,
         titleModelSelection.model,
         runtimeControls,
-        settings.customSettings.providerIdentities,
       );
       titlePromise = startConversationTitleJob({
         providerId: titleModelSelection.providerId,
@@ -1244,14 +1232,14 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     compactionBound = true;
 
     // Optionally append skills metadata to system prompt (progressive disclosure).
-    if (effectiveSkillsEnabled && effectiveSkillNames.length > 0) {
+    if (effectiveSkillsEnabled && selectedSkillNames.length > 0) {
       // In case the user sends quickly after startup (availableSkills not loaded yet),
       // do a best-effort refresh before failing.
       let skillsList = availableSkills;
       let rootDir = skillsRootDir;
       let byName = new Map(skillsList.map((s) => [s.name, s]));
-      let missing = effectiveSkillNames.filter((n) => !byName.has(n));
-      if (missing.length > 0) {
+      let missing = selectedSkillNames.filter((n) => !byName.has(n));
+      if (missing.length > 0 && workspaceResources.mode !== "custom") {
         const fresh = await refreshSkills();
         if (await finishRequestedStopBeforeRuntime()) {
           return true;
@@ -1260,7 +1248,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
           skillsList = fresh.skills;
           rootDir = fresh.rootDir;
           byName = new Map(skillsList.map((s) => [s.name, s]));
-          missing = effectiveSkillNames.filter((n) => !byName.has(n));
+          missing = selectedSkillNames.filter((n) => !byName.has(n));
         }
       }
 
@@ -1277,7 +1265,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
         return true;
       }
 
-      const selectedSkills = effectiveSkillNames
+      const selectedSkills = selectedSkillNames
         .map((name) => byName.get(name))
         .filter((skill): skill is SkillSummary => Boolean(skill));
       const allowBuiltinSkillManagement = selectedSkills.some(
@@ -1445,6 +1433,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
             providerId,
             model,
             runtime: providerConfig,
+            failover: failoverParams,
             runtimeModel,
             selectedModel,
             memoryExtractionModel,
@@ -1455,25 +1444,30 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
             showSilentMemoryExtraction: effectiveIsAgentDevExecutionMode,
             skillsRootDir: skillsRootDirForTools,
             skillAccessPolicy: skillAccessPolicyForTools,
-            skillsPrompt,
             onManagedSkillsChanged: (change) => {
-              if (change.action === "delete") {
-                setSettings((prev) => {
-                  const skills = change.names.reduce(
-                    (next, name) => removeSkillFromAllPresets(next, name),
-                    prev.skills,
-                  );
-                  return updateSkills(prev, { presets: skills.presets });
-                });
+              if (change.action !== "delete") {
+                enableManagedSkills(change.names);
                 return;
               }
-              enableManagedSkills(change.names, effectiveSkillsSelection.presetId);
+              setSettings((prev) =>
+                removeWorkspaceResourceReferences(
+                  updateSkills(prev, {
+                    selected: prev.skills.selected.filter((name) => !change.names.includes(name)),
+                  }),
+                  { skillNames: change.names },
+                ),
+              );
             },
             agentTemplates: settings.agents,
-            getMcpSettings,
+            getMcpSettings: getEffectiveMcpSettings,
             getToolPolicies,
             applyMcpOps: (ops) => {
-              setSettings((prev) => applyMcpOpsToAppSettings(prev, ops));
+              const removedIds = ops.filter((op) => op.kind === "remove").map((op) => op.serverId);
+              setSettings((prev) =>
+                removeWorkspaceResourceReferences(applyMcpOpsToAppSettings(prev, ops), {
+                  mcpServerIds: removedIds,
+                }),
+              );
             },
             remoteWebTunnelsEnabled: settings.remote.enableWebTunnels,
             tunnelPublicBaseUrl: settings.remote.gatewayUrl.trim(),
@@ -1527,6 +1521,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
             providerId,
             model,
             runtime: providerConfig,
+            failover: failoverParams,
             runtimeModel,
             selectedModel,
             memoryExtractionModel,

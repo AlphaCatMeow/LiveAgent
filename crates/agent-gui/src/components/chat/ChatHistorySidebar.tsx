@@ -1,6 +1,15 @@
 import { Tooltip } from "@base-ui/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { type CSSProperties, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type CSSProperties,
+  Fragment,
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import iconSimpleUrl from "../../../src-tauri/icons/icon-simple.png";
 import { useLocale } from "../../i18n";
 import type { AppUpdateController } from "../../lib/appUpdates";
@@ -96,6 +105,7 @@ type ChatHistorySidebarProps = {
   onNewConversationForProject?: (project: WorkspaceProject) => void;
   onBrowseProjectInFileTree?: (project: WorkspaceProject) => void;
   onBrowseProjectInSystemFileManager?: (project: WorkspaceProject) => void;
+  onConfigureProjectResources?: (project: WorkspaceProject) => void;
   onStartRenamingProject?: (project: WorkspaceProject) => void;
   onProjectRenameDraftChange?: (value: string) => void;
   onCommitProjectRename?: () => void;
@@ -390,7 +400,7 @@ const HistoryRow = memo(function HistoryRow(props: {
         <div
           className={cn(
             "relative flex items-center justify-end overflow-hidden transition-[max-width,opacity] duration-200 ease-out",
-            isRunning
+            isRunning || item.isPinned
               ? "max-w-7 opacity-100 group-hover/item:max-w-16 group-focus-within/item:max-w-16"
               : "max-w-0 opacity-0 group-hover/item:max-w-16 group-hover/item:opacity-100 group-focus-within/item:max-w-16 group-focus-within/item:opacity-100",
             menuOpen && "max-w-16 opacity-100",
@@ -409,11 +419,22 @@ const HistoryRow = memo(function HistoryRow(props: {
             >
               <Loader2 className="h-4 w-4 animate-spin" />
             </span>
+          ) : item.isPinned ? (
+            <span
+              aria-hidden="true"
+              className={cn(
+                "pointer-events-none absolute right-1.5 flex h-4 w-4 items-center justify-center text-amber-500/90 transition-opacity duration-200",
+                "opacity-100 group-hover/item:opacity-0 group-focus-within/item:opacity-0",
+                menuOpen && "opacity-0",
+              )}
+            >
+              <Pin className="h-3 w-3" />
+            </span>
           ) : null}
           <div
             className={cn(
               "flex items-center gap-0.5 transition-opacity duration-200",
-              isRunning
+              isRunning || item.isPinned
                 ? "opacity-0 group-hover/item:opacity-100 group-focus-within/item:opacity-100"
                 : "opacity-100",
               menuOpen && "opacity-100",
@@ -506,6 +527,7 @@ const ProjectRow = memo(function ProjectRow(props: {
   onSelectProject: (project: WorkspaceProject) => void;
   onBrowseProjectInFileTree?: (project: WorkspaceProject) => void;
   onBrowseProjectInSystemFileManager?: (project: WorkspaceProject) => void;
+  onConfigureProjectResources: (project: WorkspaceProject) => void;
   onStartRenamingProject: (project: WorkspaceProject) => void;
   onProjectRenameDraftChange: (value: string) => void;
   onCommitProjectRename: () => void;
@@ -532,6 +554,7 @@ const ProjectRow = memo(function ProjectRow(props: {
     onSelectProject,
     onBrowseProjectInFileTree,
     onBrowseProjectInSystemFileManager,
+    onConfigureProjectResources,
     onStartRenamingProject,
     onProjectRenameDraftChange,
     onCommitProjectRename,
@@ -760,7 +783,7 @@ const ProjectRow = memo(function ProjectRow(props: {
             "relative flex items-center justify-end overflow-hidden transition-[max-width,opacity] duration-200 ease-out",
             isMissing
               ? "max-w-8 opacity-100"
-              : isRunning
+              : isRunning || (isPinned && !isArchived)
                 ? "max-w-7 opacity-100 group-hover/project:max-w-16 group-focus-within/project:max-w-16"
                 : "max-w-0 opacity-0 group-hover/project:max-w-16 group-hover/project:opacity-100 group-focus-within/project:max-w-16 group-focus-within/project:opacity-100",
             menuOpen && "max-w-16 opacity-100",
@@ -779,11 +802,22 @@ const ProjectRow = memo(function ProjectRow(props: {
             >
               <Loader2 className="h-4 w-4 animate-spin" />
             </span>
+          ) : !isMissing && !isArchived && isPinned ? (
+            <span
+              aria-hidden="true"
+              className={cn(
+                "pointer-events-none absolute right-1.5 flex h-4 w-4 items-center justify-center text-amber-500/80 transition-opacity duration-200",
+                "opacity-100 group-hover/project:opacity-0 group-focus-within/project:opacity-0",
+                menuOpen && "opacity-0",
+              )}
+            >
+              <Pin className="h-3 w-3" />
+            </span>
           ) : null}
           <div
             className={cn(
               "flex items-center gap-0.5 transition-opacity duration-200",
-              isRunning && !isMissing
+              (isRunning || (isPinned && !isArchived)) && !isMissing
                 ? "opacity-0 group-hover/project:opacity-100 group-focus-within/project:opacity-100"
                 : "opacity-100",
               menuOpen && "opacity-100",
@@ -846,6 +880,13 @@ const ProjectRow = memo(function ProjectRow(props: {
                     sideOffset={6}
                     className="sidebar-context-menu"
                   >
+                    <DropdownMenuItem
+                      onSelect={() => onConfigureProjectResources(project)}
+                      className="gap-2"
+                    >
+                      <Blend className="h-3.5 w-3.5" />
+                      {t("chat.workspaceResources")}
+                    </DropdownMenuItem>
                     {!isDefaultProject ? (
                       <>
                         <DropdownMenuItem
@@ -1016,6 +1057,7 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
     onSelectProject,
     onBrowseProjectInFileTree,
     onBrowseProjectInSystemFileManager,
+    onConfigureProjectResources,
     onStartRenamingProject,
     onProjectRenameDraftChange,
     onCommitProjectRename,
@@ -1115,6 +1157,9 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
   });
   const handleBrowseProjectInSystemFileManager = useStableEvent((project: WorkspaceProject) => {
     onBrowseProjectInSystemFileManager?.(project);
+  });
+  const handleConfigureProjectResources = useStableEvent((project: WorkspaceProject) => {
+    onConfigureProjectResources?.(project);
   });
   const handleStartRenamingProject = useStableEvent((project: WorkspaceProject) => {
     onStartRenamingProject?.(project);
@@ -1257,6 +1302,14 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
     () => (showAllProjects ? activeProjects : activeProjects.slice(0, PROJECT_LIST_COLLAPSED_MAX)),
     [activeProjects, showAllProjects],
   );
+  // Divider slot between the pinned block and the rest of the projects.
+  const firstUnpinnedProjectIndex = useMemo(() => {
+    if (renderedProjects[0]?.isPinned !== true) {
+      return -1;
+    }
+    const index = renderedProjects.findIndex((project) => project.isPinned !== true);
+    return index > 0 ? index : -1;
+  }, [renderedProjects]);
   // Archiving must always leave at least one active workspace behind.
   const canArchiveProjects = Boolean(onArchiveProject) && activeProjects.length > 1;
   const [archivedGroupOpen, setArchivedGroupOpen] = useState(false);
@@ -1340,6 +1393,15 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
     resizeMaxHeight: sidebarSectionLayout.resizeMaxHeight,
   };
   const historyScrollRef = useRef<HTMLDivElement | null>(null);
+  // Divider slot between the pinned block and the rest: index of the first
+  // unpinned row, only when at least one pinned row sits above it.
+  const firstUnpinnedHistoryIndex = useMemo(() => {
+    if (items[0]?.isPinned !== true) {
+      return -1;
+    }
+    const index = items.findIndex((item) => item.isPinned !== true);
+    return index > 0 ? index : -1;
+  }, [items]);
   const getHistoryItemKey = useCallback((index: number) => items[index]?.id ?? index, [items]);
   const historyVirtualizer = useVirtualizer({
     count: items.length,
@@ -1802,39 +1864,47 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
                 )}
               >
                 <div ref={projectsBodyRef} className="space-y-0.5 px-2 pb-0.5">
-                  {renderedProjects.map((project) => {
+                  {renderedProjects.map((project, projectIndex) => {
                     const pathKey = workspaceProjectPathKey(project.path);
                     return (
-                      <ProjectRow
-                        key={project.id}
-                        project={project}
-                        isActive={activeProjectId === project.id}
-                        isMissing={missingProjectPathKeys.has(pathKey)}
-                        isRunning={runningProjectPathKeys.has(pathKey)}
-                        isRenaming={projectRenamingId === project.id}
-                        isPendingRemove={pendingProjectRemoveId === project.id}
-                        renameDraft={projectRenameDraft}
-                        onSelectProject={handleSelectProject}
-                        onBrowseProjectInFileTree={
-                          onBrowseProjectInFileTree ? handleBrowseProjectInFileTree : undefined
-                        }
-                        onBrowseProjectInSystemFileManager={
-                          onBrowseProjectInSystemFileManager
-                            ? handleBrowseProjectInSystemFileManager
-                            : undefined
-                        }
-                        onStartRenamingProject={handleStartRenamingProject}
-                        onProjectRenameDraftChange={handleProjectRenameDraftChange}
-                        onCommitProjectRename={handleCommitProjectRename}
-                        onCancelProjectRename={handleCancelProjectRename}
-                        onSetProjectPinned={handleSetProjectPinned}
-                        onRemoveProject={handleRemoveProject}
-                        isArchived={false}
-                        canArchive={canArchiveProjects}
-                        onArchiveProject={handleArchiveProject}
-                        onUnarchiveProject={handleUnarchiveProject}
-                        onSetPendingRemove={setPendingProjectRemoveId}
-                      />
+                      <Fragment key={project.id}>
+                        {projectIndex === firstUnpinnedProjectIndex ? (
+                          <div
+                            aria-hidden="true"
+                            className="mx-2 !my-1.5 h-px bg-gradient-to-r from-border/80 via-border/45 to-transparent"
+                          />
+                        ) : null}
+                        <ProjectRow
+                          project={project}
+                          isActive={activeProjectId === project.id}
+                          isMissing={missingProjectPathKeys.has(pathKey)}
+                          isRunning={runningProjectPathKeys.has(pathKey)}
+                          isRenaming={projectRenamingId === project.id}
+                          isPendingRemove={pendingProjectRemoveId === project.id}
+                          renameDraft={projectRenameDraft}
+                          onSelectProject={handleSelectProject}
+                          onBrowseProjectInFileTree={
+                            onBrowseProjectInFileTree ? handleBrowseProjectInFileTree : undefined
+                          }
+                          onBrowseProjectInSystemFileManager={
+                            onBrowseProjectInSystemFileManager
+                              ? handleBrowseProjectInSystemFileManager
+                              : undefined
+                          }
+                          onStartRenamingProject={handleStartRenamingProject}
+                          onConfigureProjectResources={handleConfigureProjectResources}
+                          onProjectRenameDraftChange={handleProjectRenameDraftChange}
+                          onCommitProjectRename={handleCommitProjectRename}
+                          onCancelProjectRename={handleCancelProjectRename}
+                          onSetProjectPinned={handleSetProjectPinned}
+                          onRemoveProject={handleRemoveProject}
+                          isArchived={false}
+                          canArchive={canArchiveProjects}
+                          onArchiveProject={handleArchiveProject}
+                          onUnarchiveProject={handleUnarchiveProject}
+                          onSetPendingRemove={setPendingProjectRemoveId}
+                        />
+                      </Fragment>
                     );
                   })}
                   {hiddenProjectCount > 0 || showAllProjects ? (
@@ -1894,6 +1964,7 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
                                     : undefined
                                 }
                                 onStartRenamingProject={handleStartRenamingProject}
+                                onConfigureProjectResources={handleConfigureProjectResources}
                                 onProjectRenameDraftChange={handleProjectRenameDraftChange}
                                 onCommitProjectRename={handleCommitProjectRename}
                                 onCancelProjectRename={handleCancelProjectRename}
@@ -2112,6 +2183,12 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
                             className="absolute inset-x-0 top-0 pb-0.5"
                             style={{ transform: `translateY(${virtualRow.start}px)` }}
                           >
+                            {virtualRow.index === firstUnpinnedHistoryIndex ? (
+                              <div
+                                aria-hidden="true"
+                                className="mx-2 mb-1.5 mt-1 h-px bg-gradient-to-r from-border/80 via-border/45 to-transparent"
+                              />
+                            ) : null}
                             {renderHistoryRow(item)}
                           </div>
                         );

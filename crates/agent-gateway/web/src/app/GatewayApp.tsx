@@ -9,14 +9,16 @@ import {
   useState,
 } from "react";
 import { AppErrorBoundary } from "@/components/AppErrorBoundary";
-import { CliIdentityUpdateHost } from "@/components/CliIdentityUpdateHost";
 import type {
   MentionComposerDraft,
   MentionComposerHandle,
 } from "@/components/chat/MentionComposer";
 import { type NotifyItem, NotifyToast } from "@/components/chat/NotifyToast";
 import { SharedHistoryManagerModal } from "@/components/chat/SharedHistoryManagerModal";
+import { TaskProgressIndicator } from "@/components/chat/TaskProgressIndicator";
 import { ToolApprovalBar } from "@/components/chat/ToolApprovalBar";
+import { useSequencedTaskProgress } from "@/components/chat/useSequencedTaskProgress";
+import { WorkspaceResourceSettingsDrawer } from "@/components/chat/WorkspaceResourceSettingsDrawer";
 import { ChevronDown, PanelRightClose, PanelRightOpen, Terminal } from "@/components/icons";
 import type {
   GitCommitContextPayload,
@@ -26,16 +28,12 @@ import { RightDockPanel } from "@/components/project-tools/RightDockPanel";
 import { Button } from "@/components/ui/button";
 import { useConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { LocaleContext, t as translate } from "@/i18n";
+import { type Locale, LocaleContext, t as translate } from "@/i18n";
 import { registerAskUserQuestionAnswerHandler } from "@/lib/chat/askUserQuestionBridge";
 import type { ChatFileLink } from "@/lib/chat/chatFileLinks";
 import type { ChatHistorySummary } from "@/lib/chat/chatHistory";
 import { buildModelOptions } from "@/lib/chat/chatPageHelpers";
-import {
-  applyConversationSkillsOverride,
-  applyPersistedConversationSkills,
-  rekeyConversationSkills,
-} from "@/lib/chat/conversationSkillsState";
+import { normalizeLogicalLineEndings } from "@/lib/chat/composerText";
 import type { HistoryMessageRef } from "@/lib/chat/conversationState";
 import {
   adoptHistoryWindowState,
@@ -66,6 +64,7 @@ import {
   createTranscriptStoreRegistry,
   useConversationChat,
 } from "@/lib/chat/stream/useConversationChat";
+import { selectTodoProgressUpdates, type TodoProgressUpdate } from "@/lib/chat/taskProgress";
 import {
   readToolApprovalDeadlineAt,
   readToolApprovalPending,
@@ -112,10 +111,10 @@ import {
   type RightDockFileTreeStatePatch,
   type RightDockProjectState,
   removeRightDockProjectState,
-  resolveEffectiveSkillNames,
+  resetWorkspaceResourceSettings,
   resolveEffectiveTheme,
-  resolveSkillPreset,
   resolveWorkspaceProjects,
+  resolveWorkspaceResources,
   type SelectedModel,
   setSelectedModel,
   updateChatRuntimeControlsForProvider,
@@ -124,14 +123,15 @@ import {
   updateRightDockFileTreeState,
   updateRightDockProjectState,
   updateRightDockWidth,
-  updateSkillPreset,
   updateSkills,
   updateSshProjectHostIds,
   updateSystem,
+  updateWorkspaceResourceSettings,
   type WorkspaceProject,
   workspaceProjectPathKey,
 } from "@/lib/settings";
 import { createUuid } from "@/lib/shared/id";
+import { mergeAlwaysEnabledSkillNames } from "@/lib/skills";
 import { terminalSessionBelongsToProject } from "@/lib/terminal/sessionStore";
 import type { TerminalSession } from "@/lib/terminal/types";
 import { createGatewayWorkspaceActivityClient } from "@/lib/workspace-activity/gatewayWorkspaceActivityClient";
@@ -145,6 +145,42 @@ import type { SectionId } from "@/pages/settings/types";
 import { SkillsHubPage } from "@/pages/skills-hub/SkillsHubPage";
 
 const LOCAL_DRAFT_PREFIX = "__local_draft__:";
+
+function CurrentTaskProgress(props: {
+  updates: readonly TodoProgressUpdate[];
+  isConversationRunning: boolean;
+  locale: Locale;
+}) {
+  const { updates, isConversationRunning, locale } = props;
+  const snapshot = useSequencedTaskProgress(updates, isConversationRunning);
+  const labels = useMemo(() => {
+    if (!snapshot) return null;
+    return {
+      title: translate("chat.taskProgress.title", locale),
+      step: translate("chat.taskProgress.step", locale)
+        .replace("{current}", String(snapshot.currentStep))
+        .replace("{total}", String(snapshot.totalCount)),
+      completedCount: `${snapshot.completedCount}/${snapshot.totalCount} ${translate(
+        "chat.taskProgress.completedCount",
+        locale,
+      )}`,
+      running: translate("chat.taskProgress.running", locale),
+      pending: translate("chat.taskProgress.pending", locale),
+      paused: translate("chat.taskProgress.paused", locale),
+      completed: translate("chat.taskProgress.completed", locale),
+    };
+  }, [locale, snapshot]);
+
+  if (!snapshot || !labels) return null;
+  return (
+    <TaskProgressIndicator
+      snapshot={snapshot}
+      isConversationRunning={isConversationRunning}
+      labels={labels}
+    />
+  );
+}
+
 function createLocalDraftConversationId() {
   return `${LOCAL_DRAFT_PREFIX}${createUuid()}`;
 }
@@ -282,11 +318,6 @@ export default function GatewayApp() {
   const [conversationModelOverrides, setConversationModelOverrides] = useState<
     ReadonlyMap<string, SelectedModel>
   >(new Map());
-  const [conversationSkills, setConversationSkills] = useState<
-    ReadonlyMap<string, { skillPresetId: string; skillsDisabled: boolean }>
-  >(new Map());
-  const conversationSkillsDirtyIdsRef = useRef<ReadonlySet<string>>(new Set());
-  const conversationSkillsPersistenceRef = useRef(new Map<string, Promise<void>>());
   const [chatError, setChatError] = useState<string | null>(null);
   // Top-right toast stack for upload/attachment feedback — mirrors the GUI's
   // NotifyToast usage so upload failures never render as conversation output.
@@ -305,23 +336,6 @@ export default function GatewayApp() {
   const [, setChatQueueRevision] = useState(0);
   const [selectedHistoryId, setSelectedHistoryId] = useState("");
   const [selectedHistory, setSelectedHistory] = useState<HistoryDetail | null>(null);
-  useEffect(() => {
-    const detail = selectedHistory;
-    const id = detail?.conversation_id?.trim();
-    if (!detail || !id) return;
-    setConversationSkills((current) => {
-      const next = applyPersistedConversationSkills(
-        { selections: current, dirtyIds: conversationSkillsDirtyIdsRef.current },
-        id,
-        {
-          skillPresetId: detail.skill_preset_id?.trim() || "default",
-          skillsDisabled: detail.skills_disabled === true,
-        },
-      );
-      conversationSkillsDirtyIdsRef.current = next.dirtyIds;
-      return next.selections;
-    });
-  }, [selectedHistory]);
   // Two-phase conversation open (openController): "opening" gates the
   // composer/transcript loading affordances; showOverlay drives the switch
   // overlay (appears only after ~150ms of still-loading).
@@ -378,6 +392,9 @@ export default function GatewayApp() {
   const [sharedHistoryItems, setSharedHistoryItems] = useState<ChatHistorySummary[]>([]);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [activeView, setActiveView] = useState<"chat" | "skills-hub" | "mcp-hub">("chat");
+  const [resourceSettingsProject, setResourceSettingsProject] = useState<WorkspaceProject | null>(
+    null,
+  );
   const [rightDockOpen, setRightDockOpen] = useState(false);
   const { confirm: requestConfirmDialog, dialog: confirmDialog } = useConfirmDialog();
   // Both elements arrive via callback refs → state so the scroll-follow hook
@@ -1129,15 +1146,6 @@ export default function GatewayApp() {
         next.delete(previousId);
         if (!next.has(nextId)) next.set(nextId, override);
         return next;
-      });
-      setConversationSkills((current) => {
-        const next = rekeyConversationSkills(
-          { selections: current, dirtyIds: conversationSkillsDirtyIdsRef.current },
-          previousId,
-          nextId,
-        );
-        conversationSkillsDirtyIdsRef.current = next.dirtyIds;
-        return next.selections;
       });
     },
     [moveConversationUploads, sidebarStore, transcriptStoreRegistry],
@@ -2355,8 +2363,6 @@ export default function GatewayApp() {
       runtimeControls,
       baseMessageRef: options?.editMessageRef,
       queuePolicy: options?.queuePolicy ?? "auto",
-      skillPresetId: conversationSkills.get(activeConversationId)?.skillPresetId ?? "default",
-      skillsDisabled: conversationSkills.get(activeConversationId)?.skillsDisabled ?? false,
     };
 
     const outcome = await chatCommandPipeline.submit({
@@ -2432,11 +2438,11 @@ export default function GatewayApp() {
     files: PendingUploadedFile[],
     workdir: string,
   ) {
-    let text = (
+    let text = normalizeLogicalLineEndings(
       isAgentMode && draft.largePastes.length > 0
         ? draft.textWithoutLargePastes
-        : buildTextFromComposerDraft(draft)
-    ).trim();
+        : buildTextFromComposerDraft(draft),
+    );
     let uploadedFiles = files;
 
     if (isAgentMode && draft.largePastes.length > 0) {
@@ -2454,7 +2460,7 @@ export default function GatewayApp() {
         if (apiRef.current?.getActiveAgent().trim() !== agentID) {
           throw new Error("Agent 已切换，已取消发送本次大段粘贴内容。");
         }
-        text = buildTextFromComposerDraft(draft, imported.fileByPasteId).trim();
+        text = buildTextFromComposerDraft(draft, imported.fileByPasteId);
         uploadedFiles = mergePendingUploadedFiles(files, imported.files);
       } finally {
         isImportingPastedTextRef.current = false;
@@ -2522,8 +2528,6 @@ export default function GatewayApp() {
           clientRequestId: createUuid(),
           runtimeControls: chatRuntimeControlsForCurrentProvider,
           queuePolicy,
-          skillPresetId: conversationSkills.get(conversationIdValue)?.skillPresetId ?? "default",
-          skillsDisabled: conversationSkills.get(conversationIdValue)?.skillsDisabled ?? false,
         });
         refreshChatQueueSnapshot(conversationIdValue);
         return true;
@@ -2808,7 +2812,10 @@ export default function GatewayApp() {
             getDefaultWorkspaceProjectPath(prev.system),
           ),
         };
-        return removeRightDockProjectState(nextSettings, pathKey);
+        return removeRightDockProjectState(
+          resetWorkspaceResourceSettings(nextSettings, pathKey),
+          pathKey,
+        );
       });
       setProjectRenamingId((current) => (current === project.id ? null : current));
       setProjectRenameDraft("");
@@ -3732,8 +3739,6 @@ export default function GatewayApp() {
     queuedChatEditSessionRef.current = null;
     setQueuedChatTurns([]);
     setChatQueueRevision(0);
-    setConversationSkills(new Map());
-    conversationSkillsDirtyIdsRef.current = new Set();
     resetProjectToolsRuntimeRef.current();
     setSelectedHistoryId("");
     setSelectedHistory(null);
@@ -3798,8 +3803,6 @@ export default function GatewayApp() {
       setSelectedHistoryId("");
       setSelectedHistory(null);
       setConversationModelOverrides(new Map());
-      setConversationSkills(new Map());
-      conversationSkillsDirtyIdsRef.current = new Set();
       setFullHistoryLoading(false);
       setQueuedChatTurns([]);
       setChatQueueRevision(0);
@@ -3955,75 +3958,22 @@ export default function GatewayApp() {
     [displayedConversationId, setSettings],
   );
 
-  const handleConversationSkillsChange = useCallback(
-    (presetId: string, disabled: boolean) => {
-      const targetConversationId = displayedConversationId.trim();
-      if (!targetConversationId) return;
-      const selection = {
-        skillPresetId: presetId.trim() || "default",
-        skillsDisabled: disabled,
-      };
-      setConversationSkills((current) => {
-        const next = applyConversationSkillsOverride(
-          { selections: current, dirtyIds: conversationSkillsDirtyIdsRef.current },
-          targetConversationId,
-          selection,
-        );
-        conversationSkillsDirtyIdsRef.current = next.dirtyIds;
-        return next.selections;
-      });
-      if (!api || isLocalDraftConversationId(targetConversationId)) return;
-      const previous = conversationSkillsPersistenceRef.current.get(targetConversationId);
-      const persist = (previous ?? Promise.resolve())
-        .catch(() => undefined)
-        .then(async () => {
-          await api.setHistorySkills(
-            targetConversationId,
-            selection.skillPresetId,
-            selection.skillsDisabled,
-          );
-          setConversationSkills((current) => {
-            const next = applyPersistedConversationSkills(
-              { selections: current, dirtyIds: conversationSkillsDirtyIdsRef.current },
-              targetConversationId,
-              selection,
-            );
-            conversationSkillsDirtyIdsRef.current = next.dirtyIds;
-            return next.selections;
-          });
-        })
-        .catch((error) => {
-          addNotify("error", asErrorMessage(error, "保存 Skill 预设失败"));
-        });
-      conversationSkillsPersistenceRef.current.set(targetConversationId, persist);
-      void persist.finally(() => {
-        if (conversationSkillsPersistenceRef.current.get(targetConversationId) === persist) {
-          conversationSkillsPersistenceRef.current.delete(targetConversationId);
-        }
-      });
-    },
-    [addNotify, api, displayedConversationId],
+  const resourceWorkdir =
+    sidebarConversationsById.get(displayedConversationId)?.cwd?.trim() ||
+    conversationWorkdirsRef.current.get(displayedConversationId)?.trim() ||
+    (isAgentMode ? activeWorkspaceProjectPath || settings.system.workdir.trim() : "");
+  const workspaceResources = useMemo(
+    () => resolveWorkspaceResources(settings, resourceWorkdir),
+    [resourceWorkdir, settings],
   );
-
-  const activeConversationSkills = conversationSkills.get(displayedConversationId) ?? {
-    skillPresetId: "default",
-    skillsDisabled: false,
-  };
-  const effectiveSkillsSelection = useMemo(
-    () =>
-      resolveEffectiveSkillNames({
-        settings: settings.skills,
-        presetId: activeConversationSkills.skillPresetId,
-        skillsDisabled: activeConversationSkills.skillsDisabled,
-        executionMode: settings.system.executionMode,
-      }),
-    [activeConversationSkills, settings.skills, settings.system.executionMode],
+  const skillsEnabled = workspaceResources.skillsEnabled && isAgentMode;
+  const selectedSkillNames = useMemo(
+    () => (skillsEnabled ? workspaceResources.skillNames : []),
+    [skillsEnabled, workspaceResources.skillNames],
   );
-  const skillsEnabled = effectiveSkillsSelection.enabled;
-  const selectedSkillNames = effectiveSkillsSelection.skillNames;
   const { availableSkills, skillsRootDir } = useChatSkills({
-    skillsEnabled,
-    selectedSkillNames,
+    skillsEnabled: settings.skills.enabled && isAgentMode,
+    selectedSkillNames: settings.skills.selected,
     setSettings,
   });
   const enabledComposerSkills = useMemo(() => {
@@ -4402,12 +4352,9 @@ export default function GatewayApp() {
     const composer = composerRef.current;
     if (!composer || !codeReviewSkill) return;
     setSettings((prev) => {
-      const preset = resolveSkillPreset(prev.skills, effectiveSkillsSelection.presetId);
-      if (preset.skillNames.includes(codeReviewSkill.name)) return prev;
-      const skills = updateSkillPreset(prev.skills, preset.id, {
-        skillNames: [...preset.skillNames, codeReviewSkill.name],
-      });
-      return updateSkills(prev, { presets: skills.presets });
+      const selected = mergeAlwaysEnabledSkillNames(prev.skills.selected);
+      if (selected.includes(codeReviewSkill.name)) return prev;
+      return updateSkills(prev, { selected: [...selected, codeReviewSkill.name] });
     });
     const alreadyInserted = composer
       .getDraft()
@@ -4416,7 +4363,7 @@ export default function GatewayApp() {
       composer.insertSkillMention(codeReviewSkill);
     }
     composer.focus();
-  }, [codeReviewSkill, effectiveSkillsSelection.presetId, setSettings]);
+  }, [codeReviewSkill, setSettings]);
   const handleRightDockInsertCommitMention = useCallback((commit: GitCommitContextPayload) => {
     composerRef.current?.insertCommitMention(commit);
     composerRef.current?.focus();
@@ -4515,6 +4462,10 @@ export default function GatewayApp() {
     return item?.title ?? "";
   }, [selectedHistoryId, sidebarConversationsById]);
   const transcriptRows = displayedTranscript.rows;
+  const taskProgressUpdates = useMemo(
+    () => selectTodoProgressUpdates(transcriptRows),
+    [transcriptRows],
+  );
   // 当前会话的待审批工具:遍历渲染中的 transcript,筛出带 __toolApprovalPending 标记
   // 且尚无结果的 tool call(与 ToolCallItem 判定同源)。用于输入框上方的集中审批栏,
   // 取代埋在各折叠项里的分散卡片。快照 revision 变化时经 useConversationChat 重渲染,
@@ -4741,7 +4692,6 @@ export default function GatewayApp() {
     <LocaleContext.Provider value={localeContextValue}>
       <AppErrorBoundary>
         <div className="gateway-shell">
-          <CliIdentityUpdateHost settings={settings} setSettings={setSettings} />
           <input
             ref={fileInputRef}
             type="file"
@@ -4782,6 +4732,7 @@ export default function GatewayApp() {
               onSelectProject={handleSelectWorkspaceProject}
               onNewConversationForProject={handleNewConversationForProject}
               onBrowseProjectInFileTree={handleBrowseWorkspaceProjectInFileTree}
+              onConfigureProjectResources={setResourceSettingsProject}
               onStartRenamingProject={handleStartRenamingWorkspaceProject}
               onProjectRenameDraftChange={setProjectRenameDraft}
               onCommitProjectRename={handleCommitWorkspaceProjectRename}
@@ -5010,6 +4961,7 @@ export default function GatewayApp() {
                             activeTurnKey={displayedTranscript.activeTurnKey}
                             contentWidth={settings.customSettings.chatTranscript.width}
                             isViewportFollowing={transcriptFollow.isFollowing}
+                            viewportFollowing={transcriptFollowing}
                             navRef={transcriptNavRef}
                             onAnchorUserRowChange={setActiveFloorKey}
                             error={transcriptError}
@@ -5088,11 +5040,6 @@ export default function GatewayApp() {
                       workdir={displayedConversationWorkdir}
                       enabledSkills={enabledComposerSkills}
                       isAgentMode={isAgentMode}
-                      skillPresets={settings.skills.presets}
-                      skillPresetId={effectiveSkillsSelection.presetId}
-                      skillsDisabled={activeConversationSkills.skillsDisabled}
-                      skillsGloballyEnabled={settings.skills.enabled}
-                      onSkillsChange={handleConversationSkillsChange}
                       chatRuntimeControls={chatRuntimeControlsForCurrentProvider}
                       reasoningOptions={chatRuntimeReasoningOptions}
                       thinkingAlwaysOn={chatRuntimeThinkingAlwaysOn}
@@ -5219,6 +5166,14 @@ export default function GatewayApp() {
                       onMoveQueuedTurnUp={moveQueuedTurnUp}
                       onEditQueuedTurn={editQueuedTurn}
                       onRemoveQueuedTurn={removeQueuedTurn}
+                      taskProgressBar={
+                        <CurrentTaskProgress
+                          key={displayedConversationId}
+                          updates={taskProgressUpdates}
+                          isConversationRunning={transcriptBusy}
+                          locale={settings.locale}
+                        />
+                      }
                       approvalBar={approvalBar}
                     />
                     {isFileDropActive ? (
@@ -5232,34 +5187,34 @@ export default function GatewayApp() {
                   </section>
                 </div>
               )}
+              <WorkspaceOverlayHost
+                locale={settings.locale}
+                theme={effectiveTheme}
+                workspaceEditorMounted={workspaceEditorMounted}
+                workspaceEditorOpenRequest={workspaceEditorOpenRequest}
+                workspaceEditorCloseRequestId={workspaceEditorCloseRequestId}
+                workspaceEditorOpen={workspaceEditorOpen}
+                workspaceEditorCleanupPending={workspaceEditorCleanupPending}
+                onWorkspaceEditorPreviewFile={openWorkspaceFilePreview}
+                onWorkspaceEditorInsertCodeMention={handleInsertCodeMention}
+                onWorkspaceEditorHide={handleWorkspaceEditorHide}
+                onWorkspaceEditorClose={handleWorkspaceEditorClosed}
+                workspaceFilePreviewMounted={workspaceFilePreviewMounted}
+                workspaceFilePreviewOpenRequest={workspaceFilePreviewOpenRequest}
+                workspaceFilePreviewOpen={workspaceFilePreviewOpen}
+                onWorkspaceFilePreviewOpenEditor={openWorkspaceEditorFile}
+                onWorkspaceFilePreviewRequestClose={requestWorkspaceFilePreviewClose}
+                onWorkspaceFilePreviewClose={handleWorkspaceFilePreviewClosed}
+                workspaceSshTerminalMounted={workspaceSshTerminalMounted}
+                workspaceSshTerminalOpenRequest={workspaceSshTerminalOpenRequest}
+                workspaceSshTerminalOpen={workspaceSshTerminalOpen}
+                terminalProjectPathKey={terminalProjectPathKey}
+                terminalClient={terminalClient}
+                sftpClient={sftpClient}
+                terminalSessions={terminalSessions}
+                onWorkspaceSshTerminalHide={hideWorkspaceSshTerminalOverlay}
+              />
             </main>
-            <WorkspaceOverlayHost
-              locale={settings.locale}
-              theme={effectiveTheme}
-              workspaceEditorMounted={workspaceEditorMounted}
-              workspaceEditorOpenRequest={workspaceEditorOpenRequest}
-              workspaceEditorCloseRequestId={workspaceEditorCloseRequestId}
-              workspaceEditorOpen={workspaceEditorOpen}
-              workspaceEditorCleanupPending={workspaceEditorCleanupPending}
-              onWorkspaceEditorPreviewFile={openWorkspaceFilePreview}
-              onWorkspaceEditorInsertCodeMention={handleInsertCodeMention}
-              onWorkspaceEditorHide={handleWorkspaceEditorHide}
-              onWorkspaceEditorClose={handleWorkspaceEditorClosed}
-              workspaceFilePreviewMounted={workspaceFilePreviewMounted}
-              workspaceFilePreviewOpenRequest={workspaceFilePreviewOpenRequest}
-              workspaceFilePreviewOpen={workspaceFilePreviewOpen}
-              onWorkspaceFilePreviewOpenEditor={openWorkspaceEditorFile}
-              onWorkspaceFilePreviewRequestClose={requestWorkspaceFilePreviewClose}
-              onWorkspaceFilePreviewClose={handleWorkspaceFilePreviewClosed}
-              workspaceSshTerminalMounted={workspaceSshTerminalMounted}
-              workspaceSshTerminalOpenRequest={workspaceSshTerminalOpenRequest}
-              workspaceSshTerminalOpen={workspaceSshTerminalOpen}
-              terminalProjectPathKey={terminalProjectPathKey}
-              terminalClient={terminalClient}
-              sftpClient={sftpClient}
-              terminalSessions={terminalSessions}
-              onWorkspaceSshTerminalHide={hideWorkspaceSshTerminalOverlay}
-            />
           </div>
 
           {terminalClient ? (
@@ -5304,6 +5259,21 @@ export default function GatewayApp() {
               onInsertCommitMention={handleRightDockInsertCommitMention}
               onInsertGitFileMention={handleRightDockInsertGitFileMention}
               onClose={handleRightDockClose}
+            />
+          ) : null}
+
+          {resourceSettingsProject ? (
+            <WorkspaceResourceSettingsDrawer
+              project={resourceSettingsProject}
+              settings={settings}
+              skills={availableSkills}
+              onClose={() => setResourceSettingsProject(null)}
+              onSave={(draft) => {
+                setSettings((prev) =>
+                  updateWorkspaceResourceSettings(prev, resourceSettingsProject.path, draft),
+                );
+                setResourceSettingsProject(null);
+              }}
             />
           ) : null}
 

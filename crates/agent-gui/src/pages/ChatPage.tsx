@@ -18,7 +18,10 @@ import { HistoryShareModal } from "../components/chat/HistoryShareModal";
 import type { MentionComposerHandle } from "../components/chat/MentionComposer";
 import { NotifyToast } from "../components/chat/NotifyToast";
 import { SharedHistoryManagerModal } from "../components/chat/SharedHistoryManagerModal";
+import { TaskProgressIndicator } from "../components/chat/TaskProgressIndicator";
 import { ToolApprovalBar } from "../components/chat/ToolApprovalBar";
+import { useSequencedTaskProgress } from "../components/chat/useSequencedTaskProgress";
+import { WorkspaceResourceSettingsDrawer } from "../components/chat/WorkspaceResourceSettingsDrawer";
 import { PanelRightClose, PanelRightOpen } from "../components/icons";
 import { MacOsTitleBarToggle } from "../components/MacOsTitleBarSpacer";
 import type {
@@ -41,7 +44,8 @@ import {
   createConversationStateFromContext,
   type RenderTimelineItem,
 } from "../lib/chat/conversation/conversationState";
-import { type ChatHistorySummary, setChatHistorySkills } from "../lib/chat/history/chatHistory";
+import type { LiveTranscriptStore } from "../lib/chat/conversation/liveTranscriptStore";
+import type { ChatHistorySummary } from "../lib/chat/history/chatHistory";
 import { memoryExtraction } from "../lib/chat/memory/extractionController";
 import type { CodeMentionReference } from "../lib/chat/messages/mentionReferences";
 import { openChatFileLink } from "../lib/chat/openChatFileLink";
@@ -51,6 +55,7 @@ import {
   createPendingHistoryItem,
   getFirstUserMessageText,
 } from "../lib/chat/page/chatPageHelpers";
+import { selectTodoProgressUpdates } from "../lib/chat/taskProgress";
 import type { ScrollFollowHandle } from "../lib/chat-scroll/useScrollFollow";
 import { tauriGitClient } from "../lib/git/tauriGitClient";
 import { setPreferredMonacoNlsLocale } from "../lib/monacoNls";
@@ -67,18 +72,18 @@ import {
   parseSelectedModelJson,
   type RightDockFileTreeStatePatch,
   type RightDockProjectState,
-  resolveEffectiveSkillNames,
   resolveEffectiveTheme,
-  resolveSkillPreset,
+  resolveWorkspaceResources,
   type SelectedModel,
   updateChatTranscriptWidth,
   updateRightDockFileTreeState,
   updateRightDockProjectState,
   updateRightDockWidth,
-  updateSkillPreset,
   updateSkills,
   updateSshProjectHostIds,
   updateSystem,
+  updateWorkspaceResourceSettings,
+  type WorkspaceProject,
   workspaceProjectPathKey,
 } from "../lib/settings";
 import { cn } from "../lib/shared/utils";
@@ -168,6 +173,54 @@ type ChatPageProps = {
   appUpdate?: AppUpdateController;
 };
 
+function CurrentTaskProgress(props: {
+  historyItems: readonly RenderTimelineItem[];
+  liveTranscriptStore: LiveTranscriptStore;
+  isConversationRunning: boolean;
+}) {
+  const { historyItems, liveTranscriptStore, isConversationRunning } = props;
+  const { t } = useLocale();
+  const getLiveRoundsSnapshot = useCallback(
+    () => liveTranscriptStore.getSnapshot().liveRounds,
+    [liveTranscriptStore],
+  );
+  const liveRounds = useSyncExternalStore(
+    liveTranscriptStore.subscribe,
+    getLiveRoundsSnapshot,
+    getLiveRoundsSnapshot,
+  );
+  const updates = useMemo(
+    () => selectTodoProgressUpdates(historyItems, liveRounds),
+    [historyItems, liveRounds],
+  );
+  const snapshot = useSequencedTaskProgress(updates, isConversationRunning);
+  const labels = useMemo(() => {
+    if (!snapshot) return null;
+    return {
+      title: t("chat.taskProgress.title"),
+      step: t("chat.taskProgress.step")
+        .replace("{current}", String(snapshot.currentStep))
+        .replace("{total}", String(snapshot.totalCount)),
+      completedCount: `${snapshot.completedCount}/${snapshot.totalCount} ${t(
+        "chat.taskProgress.completedCount",
+      )}`,
+      running: t("chat.taskProgress.running"),
+      pending: t("chat.taskProgress.pending"),
+      paused: t("chat.taskProgress.paused"),
+      completed: t("chat.taskProgress.completed"),
+    };
+  }, [snapshot, t]);
+
+  if (!snapshot || !labels) return null;
+  return (
+    <TaskProgressIndicator
+      snapshot={snapshot}
+      isConversationRunning={isConversationRunning}
+      labels={labels}
+    />
+  );
+}
+
 export function ChatPage(props: ChatPageProps) {
   const {
     settings,
@@ -225,26 +278,13 @@ export function ChatPage(props: ChatPageProps) {
 
   const isAgentMode = isAgentExecutionMode(settings.system.executionMode);
   const isAgentDevExecutionMode = isAgentDevMode(settings.system.executionMode);
-  const skillsConfigured = settings.skills.enabled;
-  const effectiveSkillsSelection = useMemo(
-    () =>
-      resolveEffectiveSkillNames({
-        settings: settings.skills,
-        presetId: conversationState.meta.skillPresetId,
-        skillsDisabled: conversationState.meta.skillsDisabled,
-        executionMode: settings.system.executionMode,
-      }),
-    [conversationState.meta, settings.skills, settings.system.executionMode],
-  );
-  const skillsEnabled = effectiveSkillsSelection.enabled;
+  const workdir = settings.system.workdir.trim();
   const activeAgentPrompt = useMemo(() => {
     const activeTemplate = settings.agents.find(
       (template) => template.enabled && template.prompt.trim(),
     );
     return activeTemplate?.prompt.trim() ?? "";
   }, [settings.agents]);
-  const selectedSkillNames = effectiveSkillsSelection.skillNames;
-  const workdir = settings.system.workdir.trim();
   // The sidebar store owns all sidebar domain state (conversation list,
   // workdirs, running set); ChatPage only issues imperative calls and keeps a
   // few narrow selector subscriptions.
@@ -260,6 +300,9 @@ export function ChatPage(props: ChatPageProps) {
   );
   const prepareComposerForConversationChangeActionRef = useRef<() => void>(() => undefined);
   const [activeView, setActiveView] = useState<"chat" | "skills-hub" | "mcp-hub">("chat");
+  const [resourceSettingsProject, setResourceSettingsProject] = useState<WorkspaceProject | null>(
+    null,
+  );
   const [rightDockOpen, setRightDockOpen] = useState(false);
   const {
     workspaceProjects,
@@ -352,26 +395,10 @@ export function ChatPage(props: ChatPageProps) {
   });
 
   const { availableSkills, skillsRootDir, refreshSkills } = useChatSkills({
-    skillsEnabled,
-    selectedSkillNames,
+    skillsEnabled: settings.skills.enabled && isAgentMode,
+    selectedSkillNames: settings.skills.selected,
     setSettings,
   });
-  const enabledComposerSkills = useMemo(() => {
-    if (!skillsEnabled || selectedSkillNames.length === 0 || availableSkills.length === 0) {
-      return [];
-    }
-    const byName = new Map(availableSkills.map((skill) => [skill.name, skill]));
-    return selectedSkillNames
-      .map((name) => byName.get(name))
-      .filter((skill): skill is (typeof availableSkills)[number] => Boolean(skill));
-  }, [availableSkills, selectedSkillNames, skillsEnabled]);
-  const codeReviewSkill = useMemo(
-    () =>
-      availableSkills.find(
-        (skill) => skill.name === "liveagent-code-review" && skill.builtIn === true,
-      ),
-    [availableSkills],
-  );
 
   const transcriptItems = useMemo<RenderTimelineItem[]>(
     () => conversationState.transcript.items,
@@ -575,6 +602,31 @@ export function ChatPage(props: ChatPageProps) {
     currentConversationPersistedCwd ||
     currentConversationRuntimeWorkdir ||
     (isAgentMode ? activeWorkspaceProjectPath || workdir : "");
+  const activeWorkspaceResources = useMemo(
+    () => resolveWorkspaceResources(settings, displayedConversationWorkdir),
+    [displayedConversationWorkdir, settings],
+  );
+  const skillsEnabled = activeWorkspaceResources.skillsEnabled && isAgentMode;
+  const selectedSkillNames = useMemo(
+    () => (skillsEnabled ? activeWorkspaceResources.skillNames : []),
+    [activeWorkspaceResources.skillNames, skillsEnabled],
+  );
+  const enabledComposerSkills = useMemo(() => {
+    if (!skillsEnabled || selectedSkillNames.length === 0 || availableSkills.length === 0) {
+      return [];
+    }
+    const byName = new Map(availableSkills.map((skill) => [skill.name, skill]));
+    return selectedSkillNames
+      .map((name) => byName.get(name))
+      .filter((skill): skill is (typeof availableSkills)[number] => Boolean(skill));
+  }, [availableSkills, selectedSkillNames, skillsEnabled]);
+  const codeReviewSkill = useMemo(
+    () =>
+      availableSkills.find(
+        (skill) => skill.name === "liveagent-code-review" && skill.builtIn === true,
+      ),
+    [availableSkills],
+  );
   const terminalProjectPath = isAgentMode ? activeWorkspaceProjectPath.trim() : "";
   const terminalProjectPathKey = terminalProjectPath
     ? workspaceProjectPathKey(terminalProjectPath)
@@ -670,11 +722,9 @@ export function ChatPage(props: ChatPageProps) {
     const composer = composerRef.current;
     if (!composer || !codeReviewSkill) return;
     setSettings((prev) => {
-      const preset = resolveSkillPreset(prev.skills, effectiveSkillsSelection.presetId);
-      const skillNames = appendManagedSkillSelections(preset.skillNames, [codeReviewSkill.name]);
-      if (skillNames.join("\n") === preset.skillNames.join("\n")) return prev;
-      const skills = updateSkillPreset(prev.skills, preset.id, { skillNames });
-      return updateSkills(prev, { presets: skills.presets });
+      const selected = appendManagedSkillSelections(prev.skills.selected, [codeReviewSkill.name]);
+      if (selected.join("\n") === prev.skills.selected.join("\n")) return prev;
+      return updateSkills(prev, { selected });
     });
     const alreadyInserted = composer
       .getDraft()
@@ -683,7 +733,7 @@ export function ChatPage(props: ChatPageProps) {
       composer.insertSkillMention(codeReviewSkill);
     }
     composer.focus();
-  }, [codeReviewSkill, effectiveSkillsSelection.presetId, setSettings]);
+  }, [codeReviewSkill, setSettings]);
   const handleRightDockInsertCommitMention = useCallback((commit: GitCommitContextPayload) => {
     composerRef.current?.insertCommitMention(commit);
     composerRef.current?.focus();
@@ -1700,37 +1750,6 @@ export function ChatPage(props: ChatPageProps) {
     [removeSharedHistoryItems],
   );
 
-  const handleConversationSkillsChange = useCallback(
-    (presetId: string, disabled: boolean) => {
-      if (isSending) return;
-      const conversationId = currentConversationIdRef.current.trim();
-      const normalizedPresetId = presetId.trim() || "default";
-      updateConversationRuntimeEntry(conversationId, (entry) => ({
-        ...entry,
-        state: {
-          ...entry.state,
-          meta: {
-            ...entry.state.meta,
-            skillPresetId: normalizedPresetId,
-            skillsDisabled: disabled,
-          },
-        },
-      }));
-      const persistedItem = historyItems.find(
-        (item) => item.id === conversationId && !item.isPending,
-      );
-      if (persistedItem) {
-        void setChatHistorySkills(conversationId, normalizedPresetId, disabled).catch((error) => {
-          addNotify(
-            "error",
-            error instanceof Error ? error.message : String(error || "保存 Skill 预设失败"),
-          );
-        });
-      }
-    },
-    [addNotify, currentConversationIdRef, historyItems, isSending, updateConversationRuntimeEntry],
-  );
-
   const handleSend = useCallback(() => {
     const conversationId = currentConversationIdRef.current.trim();
     const runtimeEntry = conversationRuntimeCacheRef.current.get(conversationId);
@@ -1852,6 +1871,7 @@ export function ChatPage(props: ChatPageProps) {
           onNewConversationForProject={handleNewConversationForProject}
           onBrowseProjectInFileTree={handleBrowseWorkspaceProjectInFileTree}
           onBrowseProjectInSystemFileManager={handleBrowseWorkspaceProjectInSystemFileManager}
+          onConfigureProjectResources={setResourceSettingsProject}
           onStartRenamingProject={handleStartRenamingWorkspaceProject}
           onProjectRenameDraftChange={setProjectRenameDraft}
           onCommitProjectRename={handleCommitWorkspaceProjectRename}
@@ -2075,11 +2095,6 @@ export function ChatPage(props: ChatPageProps) {
                 workdir={displayedConversationWorkdir}
                 enabledSkills={enabledComposerSkills}
                 isAgentMode={isAgentMode}
-                skillPresets={settings.skills.presets}
-                skillPresetId={effectiveSkillsSelection.presetId}
-                skillsDisabled={conversationState.meta.skillsDisabled}
-                skillsGloballyEnabled={skillsConfigured}
-                onSkillsChange={handleConversationSkillsChange}
                 chatRuntimeControls={chatRuntimeControlsForCurrentProvider}
                 reasoningOptions={chatRuntimeReasoningOptions}
                 thinkingAlwaysOn={chatRuntimeThinkingAlwaysOn}
@@ -2100,6 +2115,16 @@ export function ChatPage(props: ChatPageProps) {
                 onEditQueuedTurn={editQueuedTurn}
                 onRemoveQueuedTurn={removeQueuedTurn}
                 onHeightChange={setComposerOverlayHeight}
+                taskProgressBar={
+                  <CurrentTaskProgress
+                    key={currentConversationId}
+                    historyItems={transcriptItems}
+                    liveTranscriptStore={liveTranscriptStore}
+                    isConversationRunning={
+                      isSending || isConversationRunning(currentConversationId)
+                    }
+                  />
+                }
                 approvalBar={approvalBar}
               />
               {isFileDropActive ? (
@@ -2112,14 +2137,14 @@ export function ChatPage(props: ChatPageProps) {
               ) : null}
             </>
           )}
+          <WorkspaceOverlayHost
+            overlays={workspaceOverlays}
+            theme={effectiveTheme}
+            terminalProjectPathKey={terminalProjectPathKey}
+            terminalSessions={terminalSessions}
+            onInsertCodeMention={handleInsertCodeMention}
+          />
         </div>
-        <WorkspaceOverlayHost
-          overlays={workspaceOverlays}
-          theme={effectiveTheme}
-          terminalProjectPathKey={terminalProjectPathKey}
-          terminalSessions={terminalSessions}
-          onInsertCodeMention={handleInsertCodeMention}
-        />
       </div>
       <RightDockPanel
         isOpen={activeView === "chat" && rightDockOpen}
@@ -2158,6 +2183,20 @@ export function ChatPage(props: ChatPageProps) {
         onInsertCommitMention={handleRightDockInsertCommitMention}
         onInsertGitFileMention={handleRightDockInsertGitFileMention}
       />
+      {resourceSettingsProject ? (
+        <WorkspaceResourceSettingsDrawer
+          project={resourceSettingsProject}
+          settings={settings}
+          skills={availableSkills}
+          onClose={() => setResourceSettingsProject(null)}
+          onSave={(draft) => {
+            setSettings((prev) =>
+              updateWorkspaceResourceSettings(prev, resourceSettingsProject.path, draft),
+            );
+            setResourceSettingsProject(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

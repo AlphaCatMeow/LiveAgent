@@ -42,6 +42,7 @@ import {
   searchMcpRegistry,
   withUniqueMcpServerId,
 } from "../../lib/mcpRegistry";
+import { enrichMcpServerWithRegistryMetadata } from "../../lib/mcpServerMetadata";
 import { type AppSettings, type McpServerConfig, updateMcp } from "../../lib/settings";
 import { useModalMotion } from "../../lib/shared/modalMotion";
 import { cn } from "../../lib/shared/utils";
@@ -1388,10 +1389,11 @@ export function McpRegistryBrowser(props: McpRegistryBrowserProps) {
   }
 
   function addServerFromStore(card: McpRegistryCard, server: McpServerConfig) {
-    const installedId = server.id;
+    const enrichedServer = enrichMcpServerWithRegistryMetadata(server, card);
+    const installedId = enrichedServer.id;
     setSettings((prev) => {
       return updateMcp(prev, {
-        servers: [...prev.mcp.servers, server],
+        servers: [...prev.mcp.servers, enrichedServer],
       });
     });
     setInstalledByCardId((prev) => ({ ...prev, [card.id]: installedId }));
@@ -1415,7 +1417,7 @@ export function McpRegistryBrowser(props: McpRegistryBrowserProps) {
         return;
       }
       const draft = withUniqueMcpServerId(resolved.installDraft, settings.mcp.servers);
-      addServerFromStore(card, draft.server);
+      addServerFromStore(resolved, draft.server);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message || t("mcpHub.storeInstallFailed"));

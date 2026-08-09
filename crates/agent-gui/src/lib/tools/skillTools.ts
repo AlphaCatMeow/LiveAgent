@@ -670,16 +670,16 @@ export function createSkillTools(
         notifySkillsDiscoveryUpdated();
       }
       if (result.action === "delete") {
-        const deletedName = result.deleted?.name ?? optionalString(payload, "name");
+        const deletedName = typeof payload.name === "string" ? payload.name.trim() : "";
         if (deletedName) {
           try {
             await params.onManagedSkillsChanged?.({
               action: "delete",
               names: [deletedName],
-              baseDirs: [deletedName],
+              baseDirs: [],
             });
           } catch (error) {
-            console.warn("Failed to remove deleted Skill from presets", error);
+            console.warn("Failed to remove deleted Skill from settings", error);
           }
         }
         notifySkillsDiscoveryUpdated();

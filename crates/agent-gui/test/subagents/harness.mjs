@@ -456,7 +456,6 @@ export async function createSubagentHarness(options = {}) {
         prompt: "Focus on concrete defects.",
       },
     ],
-    skillsPrompt: options.skillsPrompt,
     store,
     scheduler,
     baseTools,

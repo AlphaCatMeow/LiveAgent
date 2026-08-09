@@ -67,7 +67,7 @@ import {
   Zap,
 } from "../../components/icons";
 import { Markdown } from "../../components/Markdown";
-import { SkillPresetManager } from "../../components/skills/SkillPresetManager";
+import { ResourceActivationSwitch } from "../../components/resources/ResourceActivationSwitch";
 import { Button } from "../../components/ui/button";
 import {
   ConfirmActionPopover,
@@ -76,14 +76,9 @@ import {
 import { useLocale } from "../../i18n";
 import {
   type AppSettings,
-  DEFAULT_SKILL_PRESET_ID,
-  removeSkillFromAllPresets,
-  resolveSkillPreset,
-  type SkillPreset,
-  updateSkillPreset,
+  removeWorkspaceResourceReferences,
   updateSkills,
 } from "../../lib/settings";
-import { createUuid } from "../../lib/shared/id";
 import { cn } from "../../lib/shared/utils";
 import {
   cancelSkillInstallJob,
@@ -135,12 +130,13 @@ import {
 } from "../../lib/skills/skillCardMetadata";
 import { getSkillTriggerHint } from "../../lib/skills/skillTriggerHint";
 
-type SkillsHubView = "installed" | "presets" | "store" | "import";
+type SkillsHubView = "installed" | "store" | "import";
 
 const EXTERNAL_TOOL_LABELS: Record<string, string> = {
   "claude-code": "Claude Code",
   codex: "Codex",
   codebuddy: "CodeBuddy",
+  agents: "Agent Skills",
 };
 
 const STORE_PAGE_LIMIT = 24;
@@ -1011,33 +1007,13 @@ const InstalledSkillCard = memo(function InstalledSkillCard(props: InstalledSkil
             >
               <span className="h-2 w-2 rounded-full border border-current opacity-40" />
             </button>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={checked}
-              aria-label={`${t("skills.select")}: ${skill.name}`}
-              title={
-                checked ? t("settings.skillsHubToggleDisable") : t("settings.skillsHubToggleEnable")
-              }
-              onClick={(event) => {
-                event.stopPropagation();
-                onToggle(skill.name, !checked);
-              }}
-              onKeyDown={(event) => event.stopPropagation()}
-              className={cn(
-                "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full ring-1 transition-all",
-                checked
-                  ? "bg-emerald-500 ring-emerald-400/45"
-                  : "bg-muted-foreground/25 ring-border/40",
-              )}
-            >
-              <span
-                className={cn(
-                  "pointer-events-none inline-block h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform",
-                  checked ? "translate-x-[1.05rem]" : "translate-x-[0.15rem]",
-                )}
-              />
-            </button>
+            <ResourceActivationSwitch
+              checked={checked}
+              compact
+              stopPropagation
+              label={`${t("skills.select")}: ${skill.name}`}
+              onCheckedChange={(next) => onToggle(skill.name, next)}
+            />
           </div>
         )}
       </div>
@@ -1343,10 +1319,9 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
     }
   }, [initialSkills?.length, refresh]);
 
-  const defaultPreset = resolveSkillPreset(settings.skills, DEFAULT_SKILL_PRESET_ID);
   const selected = useMemo(
-    () => new Set(mergeAlwaysEnabledSkillNames(defaultPreset.skillNames)),
-    [defaultPreset.skillNames],
+    () => new Set(mergeAlwaysEnabledSkillNames(settings.skills.selected)),
+    [settings.skills.selected],
   );
   // React 19 的 initialValue 让 Hub 外壳先独立提交；大量卡片在可中断的后台
   // render 中准备，全部完成后再原子替换加载态，避免页面切换被首屏列表挂载阻塞。
@@ -1777,8 +1752,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
       if (installedNames.length === 0) return;
 
       setSettings((prev) => {
-        const preset = resolveSkillPreset(prev.skills, DEFAULT_SKILL_PRESET_ID);
-        const next = new Set(preset.skillNames);
+        const next = new Set(prev.skills.selected);
         let changed = prev.skills.enabled !== true;
         for (const name of installedNames) {
           if (!next.has(name)) {
@@ -1787,12 +1761,9 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
           }
         }
         if (!changed) return prev;
-        const skills = updateSkillPreset(prev.skills, preset.id, {
-          skillNames: Array.from(next),
-        });
         return updateSkills(prev, {
           enabled: true,
-          presets: skills.presets,
+          selected: Array.from(next),
         });
       });
     },
@@ -1945,7 +1916,12 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
     try {
       await manageSkill({ action: "delete", name: skillName });
       setSettings((prev) =>
-        updateSkills(prev, { presets: removeSkillFromAllPresets(prev.skills, skillName).presets }),
+        removeWorkspaceResourceReferences(
+          updateSkills(prev, {
+            selected: prev.skills.selected.filter((name) => name !== skillName),
+          }),
+          { skillNames: [skillName] },
+        ),
       );
       setSkills((prev) => prev.filter((item) => item.name !== skillName));
       setPreviewInstalledSkill((current) => (current?.name === skillName ? null : current));
@@ -1987,16 +1963,11 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
 
   function toggleSkill(name: string, on: boolean) {
     if (isAlwaysEnabledSkillName(name)) return;
-    const next = new Set(defaultPreset.skillNames);
+    const next = new Set(settings.skills.selected);
     if (on) next.add(name);
     else next.delete(name);
     requestInstalledSkillFlip("single", [name], on ? [name] : []);
-    setSettings((prev) => {
-      const skills = updateSkillPreset(prev.skills, DEFAULT_SKILL_PRESET_ID, {
-        skillNames: Array.from(next),
-      });
-      return updateSkills(prev, { presets: skills.presets });
-    });
+    setSettings((prev) => updateSkills(prev, { selected: Array.from(next) }));
   }
 
   const clearBulkUndoTimer = useCallback(() => {
@@ -2088,7 +2059,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
       const names = [...bulkSelection].filter((name) => !isAlwaysEnabledSkillName(name));
       if (names.length === 0) return;
 
-      const before = defaultPreset.skillNames;
+      const before = settings.skills.selected;
       const current = new Set(before);
       const changedNames = names.filter((name) =>
         target ? !current.has(name) : current.has(name),
@@ -2106,44 +2077,47 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
       setBulkSelection(new Set());
       bulkAnchorRef.current = null;
       setSettings((prev) => {
-        const preset = resolveSkillPreset(prev.skills, DEFAULT_SKILL_PRESET_ID);
-        const next = new Set(preset.skillNames);
+        const next = new Set(prev.skills.selected);
         for (const name of names) {
           if (target) next.add(name);
           else next.delete(name);
         }
-        const skills = updateSkillPreset(prev.skills, preset.id, {
-          skillNames: Array.from(next),
-        });
         return updateSkills(prev, {
           enabled: target ? true : prev.skills.enabled,
-          presets: skills.presets,
+          selected: Array.from(next),
         });
       });
     },
-    [bulkSelection, clearBulkUndoTimer, requestInstalledSkillFlip, setSettings, defaultPreset],
+    [
+      bulkSelection,
+      clearBulkUndoTimer,
+      requestInstalledSkillFlip,
+      setSettings,
+      settings.skills.selected,
+    ],
   );
 
   const undoBulkSelection = useCallback(() => {
     clearBulkUndoTimer();
     if (bulkUndo) {
       const restore = bulkUndo.selected;
-      const current = new Set(defaultPreset.skillNames);
+      const current = new Set(settings.skills.selected);
       const restoreSet = new Set(restore);
       const changedNames = [...new Set([...current, ...restoreSet])].filter(
         (name) => !isAlwaysEnabledSkillName(name) && current.has(name) !== restoreSet.has(name),
       );
       const followNames = changedNames.filter((name) => restoreSet.has(name) && !current.has(name));
       requestInstalledSkillFlip("batch", changedNames, followNames);
-      setSettings((prev) => {
-        const skills = updateSkillPreset(prev.skills, DEFAULT_SKILL_PRESET_ID, {
-          skillNames: restore,
-        });
-        return updateSkills(prev, { presets: skills.presets });
-      });
+      setSettings((prev) => updateSkills(prev, { selected: restore }));
     }
     setBulkUndo(null);
-  }, [bulkUndo, clearBulkUndoTimer, requestInstalledSkillFlip, setSettings, defaultPreset]);
+  }, [
+    bulkUndo,
+    clearBulkUndoTimer,
+    requestInstalledSkillFlip,
+    setSettings,
+    settings.skills.selected,
+  ]);
 
   async function deleteBulkSelectedInstalledSkills() {
     if (lockedByChatMode || deletingSkillName || !bulkMode) return;
@@ -2159,9 +2133,12 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
       try {
         await manageSkill({ action: "delete", name: skill.name });
         setSettings((prev) =>
-          updateSkills(prev, {
-            presets: removeSkillFromAllPresets(prev.skills, skill.name).presets,
-          }),
+          removeWorkspaceResourceReferences(
+            updateSkills(prev, {
+              selected: prev.skills.selected.filter((name) => name !== skill.name),
+            }),
+            { skillNames: [skill.name] },
+          ),
         );
         setSkills((prev) => prev.filter((item) => item.name !== skill.name));
         setPreviewInstalledSkill((current) => (current?.name === skill.name ? null : current));
@@ -2349,78 +2326,14 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
     setSettings((prev) => updateSkills(prev, { enabled }));
   }
 
-  function uniquePresetName(base: string, presets: SkillPreset[]) {
-    const existing = new Set(presets.map((preset) => preset.name.toLowerCase()));
-    let candidate = base.trim() || t("settings.skillsPresetUntitled");
-    let suffix = 2;
-    while (existing.has(candidate.toLowerCase())) {
-      candidate = `${base.trim() || t("settings.skillsPresetUntitled")} ${suffix}`;
-      suffix += 1;
-    }
-    return candidate;
-  }
-
-  function createPreset(draft: { name: string; description: string; skillNames: string[] }) {
-    const id = createUuid();
-    setSettings((prev) => {
-      return updateSkills(prev, {
-        presets: [
-          ...prev.skills.presets,
-          {
-            id,
-            name: draft.name,
-            description: draft.description,
-            skillNames: draft.skillNames,
-          },
-        ],
-      });
-    });
-  }
-
-  function updatePreset(
-    id: string,
-    patch: { name: string; description: string; skillNames: string[] },
-  ) {
-    setSettings((prev) => {
-      const skills = updateSkillPreset(prev.skills, id, patch);
-      return updateSkills(prev, { presets: skills.presets });
-    });
-  }
-
-  function duplicatePreset(id: string) {
-    setSettings((prev) => {
-      const source = resolveSkillPreset(prev.skills, id);
-      const name = uniquePresetName(
-        `${source.name} ${t("settings.skillsPresetCopySuffix")}`,
-        prev.skills.presets,
-      );
-      return updateSkills(prev, {
-        presets: [
-          ...prev.skills.presets,
-          {
-            id: createUuid(),
-            name,
-            description: source.description,
-            skillNames: [...source.skillNames],
-          },
-        ],
-      });
-    });
-  }
-
-  function deletePreset(id: string) {
-    if (id === DEFAULT_SKILL_PRESET_ID) return;
-    setSettings((prev) =>
-      updateSkills(prev, {
-        presets: prev.skills.presets.filter((preset) => preset.id !== id),
-      }),
-    );
-  }
-
   const skillsEnabled = settings.skills.enabled;
   const showInitialInstalledContentLoading =
     skills.length > 0 && !hasPresentedInstalledSkills && installedContentPending;
-  const skillsStatusHint = lockedByChatMode ? t("settings.skillsDisabledInChatMode") : null;
+  const skillsStatusHint = lockedByChatMode
+    ? t("settings.skillsDisabledInChatMode")
+    : skillsEnabled
+      ? null
+      : null;
 
   return (
     <div className="hub-page hub-page-enter relative flex h-full min-h-0 flex-1 flex-col overflow-hidden">
@@ -2446,7 +2359,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                   : "border-border/40 bg-background/60",
               )}
             >
-              <div className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:gap-x-5 sm:px-5">
+              <div className="flex items-center gap-3 px-4 py-3.5 sm:gap-x-5 sm:px-5">
                 <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-3.5">
                   <div
                     className={cn(
@@ -2494,7 +2407,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                   </div>
                 </div>
 
-                <div className="flex min-w-0 flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">
+                <div className="flex shrink-0 items-center gap-2">
                   <button
                     type="button"
                     role="switch"
@@ -2564,12 +2477,6 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                     count: selectableSkills.length,
                   },
                   {
-                    value: "presets" as const,
-                    label: t("settings.skillsHubPresetsTab"),
-                    icon: Layers,
-                    count: settings.skills.presets.length,
-                  },
-                  {
                     value: "store" as const,
                     label: t("settings.skillsHubStoreTab"),
                     icon: Cloud,
@@ -2615,9 +2522,9 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                 })}
               </div>
 
-              {!lockedByChatMode && view !== "presets" ? (
+              {!lockedByChatMode ? (
                 <div className="flex w-full min-w-0 items-center justify-end gap-2">
-                  {view === "installed" || view === "import" ? (
+                  {view !== "store" ? (
                     <button
                       type="button"
                       aria-pressed={bulkMode}
@@ -2841,18 +2748,6 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                           </GlassPanel>
                         ) : null}
                       </div>
-                    </div>
-                  ) : view === "presets" ? (
-                    <div className="h-full min-h-0 overflow-y-auto px-0.5 pb-4 pr-1 pt-1.5">
-                      <SkillPresetManager
-                        presets={settings.skills.presets}
-                        skills={skills}
-                        onCreate={createPreset}
-                        onUpdate={updatePreset}
-                        onDuplicate={duplicatePreset}
-                        onDelete={deletePreset}
-                        onGoInstalled={() => setView("installed")}
-                      />
                     </div>
                   ) : view === "store" ? (
                     <SkillsStoreView

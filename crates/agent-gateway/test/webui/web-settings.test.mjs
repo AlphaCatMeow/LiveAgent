@@ -194,6 +194,34 @@ test("getWebDefaultSettings enables remote settings from the gateway token", () 
   assert.equal(settings.remote.token, "token");
 });
 
+test("web settings preserve normalized MCP additional information", () => {
+  const normalized = settings.normalizeMcpSettings({
+    servers: [
+      {
+        id: "docs",
+        description: " Search project docs ",
+        docsUrl: " https://github.com/acme/docs-mcp ",
+        enabled: true,
+        transport: "stdio",
+        command: "docs-mcp",
+      },
+      {
+        id: "empty-description",
+        description: "   ",
+        docsUrl: "   ",
+        enabled: false,
+        transport: "stdio",
+        command: "noop",
+      },
+    ],
+  });
+
+  assert.equal(normalized.servers[0].description, "Search project docs");
+  assert.equal(normalized.servers[0].docsUrl, "https://github.com/acme/docs-mcp");
+  assert.equal(normalized.servers[1].description, undefined);
+  assert.equal(normalized.servers[1].docsUrl, undefined);
+});
+
 test("web settings normalize independent font families and migrate the retired interface field", () => {
   const migrated = settings.normalizeSettings({ customSettings: { fontFamily: "Inter" } });
   assert.equal(migrated.customSettings.interfaceFontFamily, "Inter");
@@ -1662,4 +1690,46 @@ test("gateway sync keeps all web font families local", () => {
     settingsSync.applyGatewaySettingsSyncPayload(current, incoming).customSettings,
     current.customSettings,
   );
+});
+
+test("webui model failover round-trips through gateway settings sync", () => {
+  const providers = [
+    {
+      id: "provider-primary",
+      name: "Primary",
+      type: "claude_code",
+      baseUrl: "https://primary.example.com",
+      apiKey: "key-primary",
+      models: [{ id: "claude-fable-5", contextWindow: 200000, maxOutputToken: 8192 }],
+      activeModels: ["claude-fable-5"],
+    },
+    {
+      id: "provider-backup",
+      name: "Backup",
+      type: "claude_code",
+      baseUrl: "https://backup.example.com",
+      apiKey: "key-backup",
+      models: [{ id: "claude-fable-5", contextWindow: 200000, maxOutputToken: 8192 }],
+      activeModels: ["claude-fable-5"],
+    },
+  ];
+  const edited = settings.updateModelFailover(
+    settings.normalizeSettings({ customProviders: providers }),
+    "claude_code",
+    { enabled: true, queue: ["provider-backup"], cooldownSeconds: 120 },
+  );
+
+  // The changed field must be part of the outgoing update...
+  const update = settingsSync.buildGatewaySettingsSyncUpdatePayload(
+    settings.normalizeSettings({ customProviders: providers }),
+    edited,
+  );
+  assert.equal(update.modelFailover?.claude_code.enabled, true);
+
+  // ...and a receiver applying the full payload converges on the same config.
+  const received = settingsSync.applyGatewaySettingsSyncPayload(
+    settings.normalizeSettings({ customProviders: providers }),
+    settingsSync.buildGatewaySettingsSyncPayload(edited),
+  );
+  assert.deepEqual(received.modelFailover, edited.modelFailover);
 });

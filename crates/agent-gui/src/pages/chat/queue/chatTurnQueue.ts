@@ -13,8 +13,6 @@ export type QueuedGatewayChatRequest = {
   queuePolicy?: "auto" | "append" | "interrupt";
   selectedModel?: GatewaySelectedModelEvent;
   runtimeControls?: GatewayChatRuntimeControlsEvent;
-  skillPresetId?: string;
-  skillsDisabled?: boolean;
 };
 
 export type QueuedChatTurn = {
@@ -89,7 +87,7 @@ export function buildQueuedChatTurnPreview(draft: MentionComposerDraft) {
       case "largePaste":
         return segment.paste.label;
       case "skillMention":
-        return `$${segment.skill.name}`;
+        return `/${segment.skill.name}`;
       case "commitMention":
         return segment.commit.subject || segment.commit.shortSha || segment.commit.sha;
       case "gitFileMention":

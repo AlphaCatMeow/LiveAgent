@@ -87,8 +87,6 @@ export type CronTask = {
   selectedModel?: SelectedModelRef;
   /** Thinking level for prompt tasks; absent/empty = runtime default. */
   reasoning?: string;
-  skillPresetId?: string;
-  skillsDisabled?: boolean;
   /** Workspace path pinned for this task; absent/empty = follow the globally
    * active workspace. Never set on http tasks. */
   workdir?: string;
@@ -181,8 +179,6 @@ export type PromptRunRequest = {
   workdir: string;
   /** Task thinking level; empty means the runner's default. */
   reasoning: string;
-  skillPresetId: string;
-  skillsDisabled: boolean;
 };
 
 export type CompletePromptRunInput = {

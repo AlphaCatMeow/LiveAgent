@@ -28,6 +28,7 @@ import {
 } from "../../components/ui/select";
 import { Textarea } from "../../components/ui/textarea";
 import { useLocale } from "../../i18n";
+import { resolveMcpDocsHref } from "../../lib/mcpServerMetadata";
 import {
   type AppSettings,
   type McpServerConfig,
@@ -246,16 +247,6 @@ function CounterPill(props: { label: string; count: number }) {
   );
 }
 
-// 文档链接仅在能解析为 http(s) 地址时渲染跳转:裸域名自动补 https,
-// 其他 scheme(如 javascript:)一律不生成链接。
-function docsHref(raw: string | undefined): string | null {
-  const value = (raw ?? "").trim();
-  if (!value || /\s/.test(value)) return null;
-  if (/^https?:\/\//i.test(value)) return value;
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value)) return null;
-  return `https://${value}`;
-}
-
 const McpServerCard = memo(function McpServerCard(props: {
   server: McpServerConfig;
   idx: number;
@@ -294,7 +285,7 @@ const McpServerCard = memo(function McpServerCard(props: {
     : isHttp
       ? t("mcpHub.urlHttp")
       : t("mcpHub.urlSse");
-  const docsLink = docsHref(serverConfig.docsUrl);
+  const docsLink = resolveMcpDocsHref(serverConfig.docsUrl);
 
   return (
     <div
@@ -552,6 +543,9 @@ export function McpServerEditModal(props: {
                   placeholder={t("mcpHub.serverNamePlaceholder")}
                   onChange={(event) => updateDraft({ id: event.currentTarget.value })}
                 />
+                <p className="text-[10.5px] text-muted-foreground/70">
+                  {t("mcpHub.serverNameHint")}
+                </p>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="mcp-edit-transport" className="text-xs text-muted-foreground">

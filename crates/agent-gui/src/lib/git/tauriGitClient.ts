@@ -7,6 +7,7 @@ import {
   normalizeGitOperationResponse,
   normalizeGitRepositoryDiscovery,
   normalizeGitRepositoryState,
+  normalizeGitWorktreeResponse,
 } from "@liveagent/ui/lib/git/types";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -129,6 +130,23 @@ export const tauriGitClient: GitClient = {
   async renameBranch(workdir, branch, newBranch) {
     return normalizeGitOperationResponse(
       await invoke("git_rename_branch", { workdir, branch, new_branch: newBranch }),
+      workdir,
+    );
+  },
+  async createWorktree(workdir, name, startPoint) {
+    return normalizeGitWorktreeResponse(
+      await invoke("git_create_worktree", { workdir, name, start_point: startPoint }),
+      workdir,
+    );
+  },
+  async removeWorktree(workdir, worktreePath, force, deleteBranch) {
+    return normalizeGitOperationResponse(
+      await invoke("git_remove_worktree", {
+        workdir,
+        worktree_path: worktreePath,
+        force,
+        delete_branch: deleteBranch,
+      }),
       workdir,
     );
   },

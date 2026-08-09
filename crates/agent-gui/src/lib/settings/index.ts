@@ -265,6 +265,7 @@ export type SystemSettings = {
    */
   toolPolicies?: Record<string, ToolPolicy>;
   workspaceProjects: WorkspaceProject[];
+  workspaceProjectGroups: WorkspaceProjectGroup[];
   activeWorkspaceProjectId?: string;
   hiddenWorkspaceProjectPaths: string[];
   missingWorkspaceProjectPaths: string[];
@@ -295,6 +296,23 @@ export type EffectiveWorkspaceResources = {
 };
 
 export type WorkspaceProjectKind = "managed" | "folder" | "history";
+
+/**
+ * 侧边栏项目分组。成员用原始路径存储（匹配时经
+ * `workspaceProjectPathKey` 归一化），与 hidden/missing/archived 一致。
+ *
+ * `sourceProjectPath` 标记自动分组（git worktree 聚合）：指向原始仓库
+ * 项目的路径，重命名分组后仍可据此复用，避免重复建组。
+ */
+export type WorkspaceProjectGroup = {
+  id: string;
+  name: string;
+  projectPaths: string[];
+  sourceProjectPath?: string;
+  collapsed?: boolean;
+  createdAt: number;
+  updatedAt: number;
+};
 
 export type WorkspaceProject = {
   id: string;
@@ -868,6 +886,54 @@ function normalizeWorkspaceProject(input: unknown): WorkspaceProject | null {
     updatedAt,
     ...(lastConversationAt ? { lastConversationAt } : {}),
     ...(isPinned ? { isPinned: true, pinnedAt: pinnedAt ?? updatedAt } : {}),
+  };
+}
+
+function normalizeWorkspaceProjectGroups(input: unknown): WorkspaceProjectGroup[] {
+  if (!Array.isArray(input)) return [];
+  const out: WorkspaceProjectGroup[] = [];
+  const seenIds = new Set<string>();
+  for (const raw of input) {
+    const group = normalizeWorkspaceProjectGroup(raw);
+    if (!group) continue;
+    if (seenIds.has(group.id)) continue;
+    seenIds.add(group.id);
+    out.push(group);
+  }
+  return out;
+}
+
+function normalizeWorkspaceProjectGroup(input: unknown): WorkspaceProjectGroup | null {
+  const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const id = typeof obj.id === "string" && obj.id.trim() ? obj.id.trim() : createUuid();
+  const name = typeof obj.name === "string" && obj.name.trim() ? obj.name.trim() : "未命名分组";
+  const projectPaths: string[] = [];
+  const seenPaths = new Set<string>();
+  for (const raw of normalizeStringArray(obj.projectPaths)) {
+    const path = normalizeWorkspaceProjectPath(raw);
+    if (!path) continue;
+    const key = workspaceProjectPathKey(path);
+    if (seenPaths.has(key)) continue;
+    seenPaths.add(key);
+    projectPaths.push(path);
+  }
+  const sourceProjectPath = normalizeWorkspaceProjectPath(obj.sourceProjectPath);
+  const createdAt =
+    typeof obj.createdAt === "number" && Number.isFinite(obj.createdAt) && obj.createdAt > 0
+      ? obj.createdAt
+      : Date.now();
+  const updatedAt =
+    typeof obj.updatedAt === "number" && Number.isFinite(obj.updatedAt) && obj.updatedAt > 0
+      ? obj.updatedAt
+      : createdAt;
+  return {
+    id,
+    name,
+    projectPaths,
+    ...(sourceProjectPath ? { sourceProjectPath } : {}),
+    ...(obj.collapsed === true ? { collapsed: true } : {}),
+    createdAt,
+    updatedAt,
   };
 }
 
@@ -1807,6 +1873,7 @@ export function normalizeSystemSettings(input: unknown): SystemSettings {
     workdir: normalizeWorkdir(obj.workdir),
     toolPolicies: normalizeToolPolicies(obj.toolPolicies),
     workspaceProjects: normalizeWorkspaceProjects(obj.workspaceProjects),
+    workspaceProjectGroups: normalizeWorkspaceProjectGroups(obj.workspaceProjectGroups),
     activeWorkspaceProjectId:
       typeof obj.activeWorkspaceProjectId === "string" && obj.activeWorkspaceProjectId.trim()
         ? obj.activeWorkspaceProjectId.trim()
@@ -2467,6 +2534,7 @@ export function getDefaultSettings(): AppSettings {
       executionMode: "tools",
       workdir: "",
       workspaceProjects: [],
+      workspaceProjectGroups: [],
       activeWorkspaceProjectId: undefined,
       hiddenWorkspaceProjectPaths: [],
       missingWorkspaceProjectPaths: [],

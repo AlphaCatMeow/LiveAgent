@@ -3,8 +3,10 @@ import {
   DEFAULT_WORKSPACE_PROJECT_NAME,
   type SystemSettings,
   type WorkspaceProject,
+  type WorkspaceProjectGroup,
   workspaceProjectPathKey,
 } from "@liveagent/app/lib/settings";
+import { createUuid } from "./shared/id";
 import type { SidebarWorkdirSummary } from "./sidebar/types";
 
 type WorkspaceProjectActivitySource = {
@@ -345,4 +347,142 @@ export function findWorkspaceProject(
     projects.find((project) => project.id === DEFAULT_WORKSPACE_PROJECT_ID) ??
     projects[0]
   );
+}
+
+// ---------------------------------------------------------------------------
+// 侧边栏项目分组（纯函数）：分组定义存 settings.system.workspaceProjectGroups，
+// 成员用原始路径存储，匹配时经 workspaceProjectPathKey 归一化。
+// ---------------------------------------------------------------------------
+
+/** 把项目移入目标分组：先解除其他分组的归属，再幂等加入目标组。 */
+export function assignWorkspaceProjectToGroup(
+  groups: readonly WorkspaceProjectGroup[],
+  groupId: string,
+  projectPath: string,
+): WorkspaceProjectGroup[] {
+  const targetKey = workspaceProjectPathKey(projectPath);
+  if (!targetKey) return [...groups];
+  let touched = false;
+  const next = groups.map((group) => {
+    const keys = group.projectPaths.map(workspaceProjectPathKey);
+    const hasTarget = keys.includes(targetKey);
+    const isTargetGroup = group.id === groupId;
+    if (isTargetGroup && hasTarget) return group;
+    if (!isTargetGroup && !hasTarget) return group;
+    touched = true;
+    return {
+      ...group,
+      updatedAt: Date.now(),
+      projectPaths: isTargetGroup
+        ? [...group.projectPaths, projectPath]
+        : group.projectPaths.filter((path) => workspaceProjectPathKey(path) !== targetKey),
+    };
+  });
+  return touched ? next : next;
+}
+
+/**
+ * 为 worktree 派生工作区创建/复用自动分组：按 `sourceProjectPath` 匹配
+ * （而非名称），用户重命名分组后仍能复用同一个组。
+ */
+export function ensureWorktreeProjectGroup(
+  groups: readonly WorkspaceProjectGroup[],
+  options: { name: string; sourceProjectPath: string; now?: number },
+): { groups: readonly WorkspaceProjectGroup[]; groupId: string } {
+  const sourceKey = workspaceProjectPathKey(options.sourceProjectPath);
+  if (!sourceKey) {
+    throw new Error("ensureWorktreeProjectGroup requires a valid source project path");
+  }
+  const existing = groups.find(
+    (group) =>
+      group.sourceProjectPath && workspaceProjectPathKey(group.sourceProjectPath) === sourceKey,
+  );
+  if (existing) return { groups, groupId: existing.id };
+  const now = options.now ?? Date.now();
+  const group: WorkspaceProjectGroup = {
+    id: createUuid(),
+    name: options.name,
+    projectPaths: [],
+    sourceProjectPath: options.sourceProjectPath,
+    createdAt: now,
+    updatedAt: now,
+  };
+  return { groups: [...groups, group], groupId: group.id };
+}
+
+/**
+ * 把已按活动排序的项目列表组装成侧边栏区块：分组区块 + 未分组项目。
+ *
+ * - 组内成员按输入排序保持顺序；组间按组内最早成员的下标排序，
+ *   让 pinned/running 成员把整组提前。
+ * - 组内路径在列表中不存在时被忽略；空组仍保留（用户可从 UI 删除）。
+ */
+export type WorkspaceProjectSection = {
+  group: WorkspaceProjectGroup;
+  projects: WorkspaceProject[];
+};
+
+export type WorkspaceProjectSections = {
+  grouped: WorkspaceProjectSection[];
+  ungrouped: WorkspaceProject[];
+};
+
+export function buildWorkspaceProjectSections(
+  projects: readonly WorkspaceProject[],
+  groups: readonly WorkspaceProjectGroup[],
+): WorkspaceProjectSections {
+  const indexByPathKey = new Map<string, number>();
+  const byPathKey = new Map<string, WorkspaceProject>();
+  projects.forEach((project, index) => {
+    const key = workspaceProjectPathKey(project.path);
+    if (!key) return;
+    indexByPathKey.set(key, index);
+    byPathKey.set(key, project);
+  });
+
+  const groupedPathKeys = new Set<string>();
+  const grouped: WorkspaceProjectSection[] = groups.map((group) => {
+    const members: WorkspaceProject[] = [];
+    const seen = new Set<string>();
+    for (const path of group.projectPaths) {
+      const key = workspaceProjectPathKey(path);
+      const project = key ? byPathKey.get(key) : undefined;
+      if (!project || seen.has(key)) continue;
+      seen.add(key);
+      members.push(project);
+      groupedPathKeys.add(key);
+    }
+    return { group, projects: members };
+  });
+  const sectionMinIndex = (section: WorkspaceProjectSection) =>
+    section.projects.reduce(
+      (min, project) =>
+        Math.min(
+          min,
+          indexByPathKey.get(workspaceProjectPathKey(project.path)) ?? Number.MAX_SAFE_INTEGER,
+        ),
+      Number.MAX_SAFE_INTEGER,
+    );
+  grouped.sort((left, right) => sectionMinIndex(left) - sectionMinIndex(right));
+  const ungrouped = projects.filter(
+    (project) => !groupedPathKeys.has(workspaceProjectPathKey(project.path)),
+  );
+  return { grouped, ungrouped };
+}
+
+/** 折叠视图按区块切片（绝不拆开分组）；hiddenProjectCount 为被隐藏的成员数。 */
+export function sliceWorkspaceProjectSections(
+  sections: WorkspaceProjectSections,
+  maxGrouped: number,
+): { sections: WorkspaceProjectSections; hiddenProjectCount: number } {
+  const grouped = sections.grouped.slice(0, maxGrouped);
+  const totalMembers =
+    sections.ungrouped.length +
+    sections.grouped.reduce((sum, section) => sum + section.projects.length, 0);
+  const visibleMembers =
+    sections.ungrouped.length + grouped.reduce((sum, section) => sum + section.projects.length, 0);
+  return {
+    sections: { grouped, ungrouped: sections.ungrouped },
+    hiddenProjectCount: Math.max(0, totalMembers - visibleMembers),
+  };
 }

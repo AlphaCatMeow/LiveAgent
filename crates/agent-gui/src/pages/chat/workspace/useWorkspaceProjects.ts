@@ -25,8 +25,22 @@ import {
   resolveWorkspaceProjects,
   updateCustomSettings,
   type WorkspaceProject,
+  type WorkspaceProjectGroup,
   workspaceProjectPathKey,
 } from "../../../lib/settings";
+import { createUuid } from "@liveagent/ui/lib/shared/id";
+import { sidebarScopeKey } from "@liveagent/ui/lib/sidebar/scope";
+import type { SidebarStore } from "@liveagent/ui/lib/sidebar/store";
+import type { SidebarScope } from "@liveagent/ui/lib/sidebar/types";
+import { useSidebarSelector } from "@liveagent/ui/lib/sidebar/useSidebarSelector";
+import { invokeFs } from "@liveagent/ui/lib/tools/fsBackend";
+import {
+  assignWorkspaceProjectToGroup,
+  ensureWorktreeProjectGroup,
+  fallbackWorkspaceProjectName,
+  findWorkspaceProject,
+  mergeWorkspaceProjectsWithHistory,
+} from "@liveagent/ui/lib/workspaceProjects";
 import { asErrorMessage } from "../chatPageUtils";
 import { startWorkspaceCloneTask } from "./cloneTasks";
 import {
@@ -377,12 +391,154 @@ export function useWorkspaceProjects(params: UseWorkspaceProjectsParams) {
     [activateWorkspaceProject],
   );
 
+  // Git worktree 派生工作区：添加并激活后，自动归入以原始仓库项目命名
+  // 的自动分组（原项目与 worktree 同组）。从 worktree 再创建 worktree 时，
+  // 通过当前自动分组的 sourceProjectPath 追溯原始仓库。
+  const activeProjectPathKey = activeWorkspaceProject
+    ? workspaceProjectPathKey(activeWorkspaceProject.path)
+    : "";
+  const handleOpenWorktree = useCallback(
+    (path: string) => {
+      const trimmed = path.trim();
+      const worktreeKey = workspaceProjectPathKey(trimmed);
+      if (!trimmed || !worktreeKey || !activeWorkspaceProject) return;
+      const nextProject = createWorkspaceProjectFromPath(trimmed, "managed");
+      activateWorkspaceProject(nextProject);
+      setSettings((prev) => {
+        // 当前项目是否位于某个自动分组 → 溯源到原始仓库路径
+        const autoGroup = prev.system.workspaceProjectGroups.find(
+          (group) =>
+            group.sourceProjectPath &&
+            group.projectPaths.some(
+              (memberPath) => workspaceProjectPathKey(memberPath) === activeProjectPathKey,
+            ),
+        );
+        const sourcePath = autoGroup?.sourceProjectPath ?? activeWorkspaceProject.path;
+        const sourceProject = prev.system.workspaceProjects.find(
+          (item) => workspaceProjectPathKey(item.path) === workspaceProjectPathKey(sourcePath),
+        );
+        const groupName = sourceProject?.name || fallbackWorkspaceProjectName(sourcePath);
+        const ensured = ensureWorktreeProjectGroup(prev.system.workspaceProjectGroups, {
+          name: groupName,
+          sourceProjectPath: sourcePath,
+        });
+        let workspaceProjectGroups = assignWorkspaceProjectToGroup(
+          ensured.groups,
+          ensured.groupId,
+          sourcePath,
+        );
+        workspaceProjectGroups = assignWorkspaceProjectToGroup(
+          workspaceProjectGroups,
+          ensured.groupId,
+          trimmed,
+        );
+        return {
+          ...prev,
+          system: {
+            ...prev.system,
+            workspaceProjectGroups,
+          },
+        };
+      });
+    },
+    [activateWorkspaceProject, activeProjectPathKey, activeWorkspaceProject, setSettings],
+  );
+
   const handleLoadWorkspaceRemoteBranches = useCallback(
     (remoteUrl: string) =>
       invoke<{ defaultBranch: string; branches: string[] }>("git_list_remote_branches", {
         remote_url: remoteUrl,
       }),
     [],
+  );
+
+  const updateWorkspaceProjectGroups = useCallback(
+    (updater: (groups: WorkspaceProjectGroup[]) => WorkspaceProjectGroup[]) => {
+      setSettings((prev) => {
+        const next = updater(prev.system.workspaceProjectGroups);
+        if (next === prev.system.workspaceProjectGroups) return prev;
+        return { ...prev, system: { ...prev.system, workspaceProjectGroups: next } };
+      });
+    },
+    [setSettings],
+  );
+
+  const handleCreateWorkspaceGroup = useCallback(
+    (nameInput: string) => {
+      const name = nameInput.trim();
+      if (!name) return;
+      const now = Date.now();
+      updateWorkspaceProjectGroups((groups) => [
+        ...groups,
+        {
+          id: createUuid(),
+          name,
+          projectPaths: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      ]);
+    },
+    [updateWorkspaceProjectGroups],
+  );
+
+  const handleRenameWorkspaceGroup = useCallback(
+    (groupId: string, nameInput: string) => {
+      const name = nameInput.trim();
+      if (!name) return;
+      updateWorkspaceProjectGroups((groups) =>
+        groups.map((group) =>
+          group.id === groupId ? { ...group, name, updatedAt: Date.now() } : group,
+        ),
+      );
+    },
+    [updateWorkspaceProjectGroups],
+  );
+
+  const handleDeleteWorkspaceGroup = useCallback(
+    (groupId: string) => {
+      // 删除分组只解除成员归属，项目保留在列表中。
+      updateWorkspaceProjectGroups((groups) => groups.filter((group) => group.id !== groupId));
+    },
+    [updateWorkspaceProjectGroups],
+  );
+
+  const handleMoveWorkspaceProjectToGroup = useCallback(
+    (projectPath: string, groupId: string | null) => {
+      const pathKey = workspaceProjectPathKey(projectPath);
+      if (!pathKey) return;
+      updateWorkspaceProjectGroups((groups) => {
+        if (groupId === null) {
+          // 移出所有分组
+          return groups.map((group) =>
+            group.projectPaths.some((path) => workspaceProjectPathKey(path) === pathKey)
+              ? {
+                  ...group,
+                  updatedAt: Date.now(),
+                  projectPaths: group.projectPaths.filter(
+                    (path) => workspaceProjectPathKey(path) !== pathKey,
+                  ),
+                }
+              : group,
+          );
+        }
+        return assignWorkspaceProjectToGroup(groups, groupId, projectPath);
+      });
+    },
+    [updateWorkspaceProjectGroups],
+  );
+
+  const handleToggleWorkspaceGroupCollapsed = useCallback(
+    (groupId: string) => {
+      updateWorkspaceProjectGroups((groups) =>
+        groups.map((group) =>
+          group.id === groupId
+            ? { ...group, collapsed: !group.collapsed, updatedAt: Date.now() }
+            : group,
+        ),
+      );
+    },
+    [updateWorkspaceProjectGroups],
   );
   const commitWorkspaceProjectRename = useCallback(
     (project: WorkspaceProject, nextNameInput: string) => {
@@ -550,6 +706,13 @@ export function useWorkspaceProjects(params: UseWorkspaceProjectsParams) {
     handleOpenWorkspaceFolder,
     handleCloneWorkspaceProject,
     handleOpenClonedWorkspace,
+    handleOpenWorktree,
+    workspaceProjectGroups: settings.system.workspaceProjectGroups,
+    handleCreateWorkspaceGroup,
+    handleRenameWorkspaceGroup,
+    handleDeleteWorkspaceGroup,
+    handleMoveWorkspaceProjectToGroup,
+    handleToggleWorkspaceGroupCollapsed,
     handleLoadWorkspaceRemoteBranches,
     handleStartRenamingWorkspaceProject,
     handleCommitWorkspaceProjectRename,

@@ -305,6 +305,13 @@ export function ChatPage(props: ChatPageProps) {
     handleOpenWorkspaceFolder,
     handleCloneWorkspaceProject,
     handleOpenClonedWorkspace,
+    handleOpenWorktree,
+    workspaceProjectGroups,
+    handleCreateWorkspaceGroup,
+    handleRenameWorkspaceGroup,
+    handleDeleteWorkspaceGroup,
+    handleMoveWorkspaceProjectToGroup,
+    handleToggleWorkspaceGroupCollapsed,
     handleLoadWorkspaceRemoteBranches,
     handleStartRenamingWorkspaceProject,
     handleCommitWorkspaceProjectRename,
@@ -1845,6 +1852,7 @@ export function ChatPage(props: ChatPageProps) {
           activeView={activeView}
           showProjects={isAgentMode}
           projects={workspaceProjects}
+          workspaceProjectGroups={workspaceProjectGroups}
           activeProjectId={activeWorkspaceProject?.id}
           missingProjectPathKeys={missingWorkspaceProjectPathKeys}
           projectRenamingId={projectRenamingId}
@@ -1854,6 +1862,11 @@ export function ChatPage(props: ChatPageProps) {
           onProjectsCollapsedChange={handleSidebarProjectsCollapsedChange}
           onRecentCollapsedChange={handleSidebarRecentCollapsedChange}
           onCreateProject={handleOpenCreateWorkspaceProject}
+          onCreateWorkspaceGroup={handleCreateWorkspaceGroup}
+          onRenameWorkspaceGroup={handleRenameWorkspaceGroup}
+          onDeleteWorkspaceGroup={handleDeleteWorkspaceGroup}
+          onMoveProjectToGroup={handleMoveWorkspaceProjectToGroup}
+          onToggleWorkspaceGroupCollapsed={handleToggleWorkspaceGroupCollapsed}
           onSelectProject={handleSelectWorkspaceProject}
           onNewConversationForProject={handleNewConversationForProject}
           onBrowseProjectInFileTree={handleBrowseWorkspaceProjectInFileTree}
@@ -2065,6 +2078,7 @@ export function ChatPage(props: ChatPageProps) {
                   thinkingAlwaysOn={chatRuntimeThinkingAlwaysOn}
                   gitClient={tauriGitClient}
                   workspaceActivityClient={tauriWorkspaceActivityClient}
+                  onOpenWorktree={handleOpenWorktree}
                   onSend={handleSend}
                   onStop={handleStopSending}
                   onComposerBusyChange={handleComposerBusyChange}

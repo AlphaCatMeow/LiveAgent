@@ -43,6 +43,7 @@ type ChatSidebarContainerProps = {
   // Merged (settings ∪ history workdirs) but unsorted — the container sorts
   // with the store's activity/running inputs.
   projects: WorkspaceProject[];
+  workspaceProjectGroups: WorkspaceProjectGroup[];
   activeProjectId?: string;
   missingProjectPathKeys: ReadonlySet<string>;
   projectRenamingId: string | null;
@@ -52,6 +53,11 @@ type ChatSidebarContainerProps = {
   onProjectsCollapsedChange: (collapsed: boolean) => void;
   onRecentCollapsedChange: (collapsed: boolean) => void;
   onCreateProject: () => void;
+  onCreateWorkspaceGroup: (name: string) => void;
+  onRenameWorkspaceGroup: (groupId: string, name: string) => void;
+  onDeleteWorkspaceGroup: (groupId: string) => void;
+  onMoveProjectToGroup: (projectPath: string, groupId: string | null) => void;
+  onToggleWorkspaceGroupCollapsed: (groupId: string) => void;
   onSelectProject: (project: WorkspaceProject) => void;
   onNewConversationForProject: (project: WorkspaceProject) => void;
   onBrowseProjectInFileTree: (project: WorkspaceProject) => void;
@@ -239,6 +245,7 @@ export function ChatSidebarContainer(props: ChatSidebarContainerProps) {
       activeView={props.activeView}
       showProjects={props.showProjects}
       projects={sortedProjects}
+      workspaceProjectGroups={props.workspaceProjectGroups}
       activeProjectId={props.activeProjectId}
       missingProjectPathKeys={props.missingProjectPathKeys}
       runningProjectPathKeys={projectActivityInputs.runningWorkdirPathKeys}
@@ -249,6 +256,11 @@ export function ChatSidebarContainer(props: ChatSidebarContainerProps) {
       onProjectsCollapsedChange={props.onProjectsCollapsedChange}
       onRecentCollapsedChange={props.onRecentCollapsedChange}
       onCreateProject={props.onCreateProject}
+      onCreateWorkspaceGroup={props.onCreateWorkspaceGroup}
+      onRenameWorkspaceGroup={props.onRenameWorkspaceGroup}
+      onDeleteWorkspaceGroup={props.onDeleteWorkspaceGroup}
+      onMoveProjectToGroup={props.onMoveProjectToGroup}
+      onToggleWorkspaceGroupCollapsed={props.onToggleWorkspaceGroupCollapsed}
       onSelectProject={props.onSelectProject}
       onNewConversationForProject={props.onNewConversationForProject}
       onBrowseProjectInFileTree={props.onBrowseProjectInFileTree}

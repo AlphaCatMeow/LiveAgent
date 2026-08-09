@@ -45,6 +45,13 @@ export type GitBranch = {
 export type GitBranchesResponse = {
   state: GitRepositoryState;
   branches: GitBranch[];
+  // 仓库登记的 worktree（路径 + 检出分支），用于识别被 worktree 检出的分支。
+  worktrees: GitWorktreeInfo[];
+};
+
+export type GitWorktreeInfo = {
+  path: string;
+  branch: string;
 };
 
 export type GitDiffResponse = {
@@ -120,6 +127,15 @@ export type GitOperationResponse = {
   message: string;
 };
 
+export type GitWorktreeResponse = {
+  ok: boolean;
+  state: GitRepositoryState;
+  worktreePath: string;
+  stdout: string;
+  stderr: string;
+  message: string;
+};
+
 export type GitInitOptions = {
   branch?: string;
   userName?: string;
@@ -186,6 +202,13 @@ export type GitClient = {
   push(workdir: string): Promise<GitOperationResponse>;
   deleteBranch(workdir: string, branch: string, force?: boolean): Promise<GitOperationResponse>;
   renameBranch(workdir: string, branch: string, newBranch: string): Promise<GitOperationResponse>;
+  createWorktree(workdir: string, name: string, startPoint?: string): Promise<GitWorktreeResponse>;
+  removeWorktree(
+    workdir: string,
+    worktreePath: string,
+    force?: boolean,
+    deleteBranch?: string,
+  ): Promise<GitOperationResponse>;
   stashPush(workdir: string, message?: string): Promise<GitOperationResponse>;
   stashPop(workdir: string): Promise<GitOperationResponse>;
 };
@@ -302,6 +325,17 @@ export function normalizeGitBranchesResponse(input: unknown, workdir = ""): GitB
   return {
     state: normalizeGitRepositoryState(source.state, workdir),
     branches: Array.isArray(source.branches) ? source.branches.map(normalizeGitBranch) : [],
+    worktrees: Array.isArray(source.worktrees)
+      ? source.worktrees.map(normalizeGitWorktreeInfo).filter((item) => item.path)
+      : [],
+  };
+}
+
+export function normalizeGitWorktreeInfo(input: unknown): GitWorktreeInfo {
+  const source = asObject(input);
+  return {
+    path: asString(source.path),
+    branch: asString(source.branch),
   };
 }
 
@@ -402,6 +436,18 @@ export function normalizeGitOperationResponse(input: unknown, workdir = ""): Git
   return {
     ok: asBoolean(source.ok),
     state: normalizeGitRepositoryState(source.state, workdir),
+    stdout: asString(source.stdout),
+    stderr: asString(source.stderr),
+    message: asString(source.message),
+  };
+}
+
+export function normalizeGitWorktreeResponse(input: unknown, workdir = ""): GitWorktreeResponse {
+  const source = asObject(input);
+  return {
+    ok: asBoolean(source.ok),
+    state: normalizeGitRepositoryState(source.state, workdir),
+    worktreePath: asString(source.worktreePath ?? source.worktree_path),
     stdout: asString(source.stdout),
     stderr: asString(source.stderr),
     message: asString(source.message),

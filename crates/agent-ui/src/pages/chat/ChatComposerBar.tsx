@@ -235,6 +235,8 @@ export type ChatComposerBarProps = {
   gitWriteEnabled?: boolean;
   gitDisabledMessage?: string;
   workspaceActivityClient?: WorkspaceActivityClient | null;
+  /** 创建 worktree 成功后，把新目录作为工作区加入侧边栏。 */
+  onOpenWorktree?: (path: string) => void;
   onSend: () => void;
   onStop: () => void;
   onPrepareChatRuntime?: () => void;
@@ -277,6 +279,7 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
     gitWriteEnabled = true,
     gitDisabledMessage,
     workspaceActivityClient,
+    onOpenWorktree,
     onSend,
     onStop,
     onPrepareChatRuntime,
@@ -1096,6 +1099,7 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
                 disabled={controlsDisabled}
                 canWrite={gitWriteEnabled}
                 disabledMessage={gitDisabledMessage}
+                onOpenWorktree={onOpenWorktree}
               />
             </div>
 

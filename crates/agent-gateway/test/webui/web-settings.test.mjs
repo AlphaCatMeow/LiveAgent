@@ -10,6 +10,43 @@ const chatHelpers = loader.loadModule("@/lib/chat/chatPageHelpers.ts");
 const adminApi = loader.loadModule("@/lib/adminApi.ts");
 const RIGHT_DOCK_TAB_IDS = settings.RIGHT_DOCK_SINGLETON_TAB_IDS;
 
+test("web settings normalize and preserve workspace project groups", () => {
+  const normalized = settings.normalizeSettings({
+    system: {
+      workspaceProjectGroups: [
+        {
+          id: " source-group ",
+          name: " Source ",
+          projectPaths: [" /workspace/project ", "/workspace/project", "/workspace/topic"],
+          sourceProjectPath: " /workspace/project ",
+          collapsed: true,
+          createdAt: 100,
+          updatedAt: 200,
+        },
+        { id: "source-group", name: "duplicate", projectPaths: [] },
+      ],
+    },
+  });
+
+  assert.deepEqual(normalized.system.workspaceProjectGroups, [
+    {
+      id: "source-group",
+      name: "Source",
+      projectPaths: ["/workspace/project", "/workspace/topic"],
+      sourceProjectPath: "/workspace/project",
+      collapsed: true,
+      createdAt: 100,
+      updatedAt: 200,
+    },
+  ]);
+
+  const update = settingsSync.buildGatewaySettingsSyncUpdatePayload(
+    settings.normalizeSettings({}),
+    normalized,
+  );
+  assert.deepEqual(update.system.workspaceProjectGroups, normalized.system.workspaceProjectGroups);
+});
+
 test("custom provider normalization defaults and filters ordered custom headers", () => {
   assert.deepEqual(settings.normalizeCustomProvider({}).customHeaders, []);
 

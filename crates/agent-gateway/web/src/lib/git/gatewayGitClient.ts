@@ -7,6 +7,7 @@ import {
   normalizeGitOperationResponse,
   normalizeGitRepositoryDiscovery,
   normalizeGitRepositoryState,
+  normalizeGitWorktreeResponse,
 } from "@liveagent/ui/lib/git/types";
 import type { GatewayWebSocketClientLike } from "@/lib/gatewaySocket";
 
@@ -43,6 +44,12 @@ export function createGatewayGitClient(api: GatewayWebSocketClientLike): GitClie
     async createBranch(workdir, branch, startPoint) {
       return normalizeGitOperationResponse(
         await api.gitRequest("create_branch", workdir, { branch, startPoint }),
+        workdir,
+      );
+    },
+    async createWorktree(workdir, name, startPoint) {
+      return normalizeGitWorktreeResponse(
+        await api.gitRequest("create_worktree", workdir, { name, startPoint }),
         workdir,
       );
     },
@@ -134,6 +141,16 @@ export function createGatewayGitClient(api: GatewayWebSocketClientLike): GitClie
     async renameBranch(workdir, branch, newBranch) {
       return normalizeGitOperationResponse(
         await api.gitRequest("rename_branch", workdir, { branch, newBranch }),
+        workdir,
+      );
+    },
+    async removeWorktree(workdir, worktreePath, force, deleteBranch) {
+      return normalizeGitOperationResponse(
+        await api.gitRequest("remove_worktree", workdir, {
+          worktreePath,
+          force,
+          deleteBranch,
+        }),
         workdir,
       );
     },

@@ -177,9 +177,13 @@ import { sortSidebarConversations } from "@liveagent/ui/lib/sidebar/reconcile";
 import { createSidebarStore } from "@liveagent/ui/lib/sidebar/store";
 import { useSidebarSelector } from "@liveagent/ui/lib/sidebar/useSidebarSelector";
 import {
+  assignWorkspaceProjectToGroup,
+  ensureWorktreeProjectGroup,
+  fallbackWorkspaceProjectName,
   findWorkspaceProject,
   mergeWorkspaceProjectsWithHistory,
 } from "@liveagent/ui/lib/workspaceProjects";
+import type { WorkspaceProjectGroup } from "@liveagent/ui/lib/workspaceProjectTypes";
 import { FloorNavRail } from "@liveagent/ui/pages/chat/transcript/FloorNavRail";
 import {
   CHAT_TRANSCRIPT_WIDTH_CSS_VAR,
@@ -1428,6 +1432,126 @@ export default function GatewayApp() {
       void sidebarStore.refreshWorkdirs("new-workdir");
     },
     [activateWorkspaceProject, sidebarStore],
+  );
+
+  const handleOpenWorktree = useCallback(
+    (path: string) => {
+      const trimmed = path.trim();
+      const worktreeKey = workspaceProjectPathKey(trimmed);
+      const sourceProjectPath = displayedConversationWorkdirRef.current.trim();
+      if (!trimmed || !worktreeKey || !sourceProjectPath) return;
+      activateWorkspaceProject(createWorkspaceProjectFromPath(trimmed, "managed"));
+      setSettings((prev) => {
+        const autoGroup = prev.system.workspaceProjectGroups.find(
+          (group) =>
+            group.sourceProjectPath &&
+            group.projectPaths.some(
+              (memberPath) =>
+                workspaceProjectPathKey(memberPath) === workspaceProjectPathKey(sourceProjectPath),
+            ),
+        );
+        const sourcePath = autoGroup?.sourceProjectPath ?? sourceProjectPath;
+        const sourceProject = prev.system.workspaceProjects.find(
+          (project) =>
+            workspaceProjectPathKey(project.path) === workspaceProjectPathKey(sourcePath),
+        );
+        const ensured = ensureWorktreeProjectGroup(prev.system.workspaceProjectGroups, {
+          name: sourceProject?.name || fallbackWorkspaceProjectName(sourcePath),
+          sourceProjectPath: sourcePath,
+        });
+        let workspaceProjectGroups = assignWorkspaceProjectToGroup(
+          ensured.groups,
+          ensured.groupId,
+          sourcePath,
+        );
+        workspaceProjectGroups = assignWorkspaceProjectToGroup(
+          workspaceProjectGroups,
+          ensured.groupId,
+          trimmed,
+        );
+        return { ...prev, system: { ...prev.system, workspaceProjectGroups } };
+      });
+      void sidebarStore.refreshWorkdirs("new-workdir");
+    },
+    [activateWorkspaceProject, setSettings, sidebarStore],
+  );
+
+  const updateWorkspaceProjectGroups = useCallback(
+    (updater: (groups: WorkspaceProjectGroup[]) => WorkspaceProjectGroup[]) => {
+      setSettings((prev) => {
+        const next = updater(prev.system.workspaceProjectGroups);
+        if (next === prev.system.workspaceProjectGroups) return prev;
+        return { ...prev, system: { ...prev.system, workspaceProjectGroups: next } };
+      });
+    },
+    [setSettings],
+  );
+
+  const handleCreateWorkspaceGroup = useCallback(
+    (nameInput: string) => {
+      const name = nameInput.trim();
+      if (!name) return;
+      const now = Date.now();
+      updateWorkspaceProjectGroups((groups) => [
+        ...groups,
+        { id: createUuid(), name, projectPaths: [], createdAt: now, updatedAt: now },
+      ]);
+    },
+    [updateWorkspaceProjectGroups],
+  );
+
+  const handleRenameWorkspaceGroup = useCallback(
+    (groupId: string, nameInput: string) => {
+      const name = nameInput.trim();
+      if (!name) return;
+      updateWorkspaceProjectGroups((groups) =>
+        groups.map((group) =>
+          group.id === groupId ? { ...group, name, updatedAt: Date.now() } : group,
+        ),
+      );
+    },
+    [updateWorkspaceProjectGroups],
+  );
+
+  const handleDeleteWorkspaceGroup = useCallback(
+    (groupId: string) => {
+      updateWorkspaceProjectGroups((groups) => groups.filter((group) => group.id !== groupId));
+    },
+    [updateWorkspaceProjectGroups],
+  );
+
+  const handleMoveWorkspaceProjectToGroup = useCallback(
+    (projectPath: string, groupId: string | null) => {
+      const pathKey = workspaceProjectPathKey(projectPath);
+      if (!pathKey) return;
+      updateWorkspaceProjectGroups((groups) => {
+        if (groupId === null) {
+          return groups.map((group) => {
+            const projectPaths = group.projectPaths.filter(
+              (path) => workspaceProjectPathKey(path) !== pathKey,
+            );
+            return projectPaths.length === group.projectPaths.length
+              ? group
+              : { ...group, projectPaths, updatedAt: Date.now() };
+          });
+        }
+        return assignWorkspaceProjectToGroup(groups, groupId, projectPath);
+      });
+    },
+    [updateWorkspaceProjectGroups],
+  );
+
+  const handleToggleWorkspaceGroupCollapsed = useCallback(
+    (groupId: string) => {
+      updateWorkspaceProjectGroups((groups) =>
+        groups.map((group) =>
+          group.id === groupId
+            ? { ...group, collapsed: !group.collapsed, updatedAt: Date.now() }
+            : group,
+        ),
+      );
+    },
+    [updateWorkspaceProjectGroups],
   );
 
   const commitWorkspaceProjectRename = useCallback(
@@ -4682,6 +4806,7 @@ export default function GatewayApp() {
               activeView={activeView}
               showProjects={isAgentMode && status?.online === true}
               projects={workspaceProjects}
+              workspaceProjectGroups={settings.system.workspaceProjectGroups}
               activeProjectId={activeWorkspaceProject?.id}
               missingProjectPathKeys={missingWorkspaceProjectPathKeys}
               projectRenamingId={projectRenamingId}
@@ -4697,6 +4822,11 @@ export default function GatewayApp() {
               onProjectsCollapsedChange={handleSidebarProjectsCollapsedChange}
               onRecentCollapsedChange={handleSidebarRecentCollapsedChange}
               onCreateProject={handleOpenCreateWorkspaceProject}
+              onCreateWorkspaceGroup={handleCreateWorkspaceGroup}
+              onRenameWorkspaceGroup={handleRenameWorkspaceGroup}
+              onDeleteWorkspaceGroup={handleDeleteWorkspaceGroup}
+              onMoveProjectToGroup={handleMoveWorkspaceProjectToGroup}
+              onToggleWorkspaceGroupCollapsed={handleToggleWorkspaceGroupCollapsed}
               onSelectProject={handleSelectWorkspaceProject}
               onNewConversationForProject={handleNewConversationForProject}
               onBrowseProjectInFileTree={handleBrowseWorkspaceProjectInFileTree}
@@ -5009,6 +5139,7 @@ export default function GatewayApp() {
                           reasoningOptions={chatRuntimeReasoningOptions}
                           thinkingAlwaysOn={chatRuntimeThinkingAlwaysOn}
                           gitClient={gitClient}
+                          onOpenWorktree={handleOpenWorktree}
                           gitWriteEnabled={settings.remote.enableWebGit}
                           gitDisabledMessage={gitDisabledMessage}
                           workspaceActivityClient={workspaceActivityClient}

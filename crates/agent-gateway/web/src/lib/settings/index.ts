@@ -24,6 +24,7 @@ import {
   MAX_CHAT_TRANSCRIPT_WIDTH,
   MIN_CHAT_TRANSCRIPT_WIDTH,
 } from "@liveagent/ui/lib/transcript-width/transcriptWidthModel";
+import type { WorkspaceProjectGroup } from "@liveagent/ui/lib/workspaceProjectTypes";
 import { DEFAULT_LOCALE, type Locale, normalizeLocale } from "../../i18n/config";
 import { normalizeFontFamily } from "../fontFamily";
 
@@ -246,6 +247,7 @@ export type SystemSettings = {
    */
   toolPolicies?: Record<string, ToolPolicy>;
   workspaceProjects: WorkspaceProject[];
+  workspaceProjectGroups: WorkspaceProjectGroup[];
   activeWorkspaceProjectId?: string;
   hiddenWorkspaceProjectPaths: string[];
   missingWorkspaceProjectPaths: string[];
@@ -861,6 +863,47 @@ function normalizeWorkspaceProjects(input: unknown): WorkspaceProject[] {
     }
     seenIds.add(id);
     out.push({ ...project, id });
+  }
+  return out;
+}
+
+function normalizeWorkspaceProjectGroups(input: unknown): WorkspaceProjectGroup[] {
+  if (!Array.isArray(input)) return [];
+  const out: WorkspaceProjectGroup[] = [];
+  const seenIds = new Set<string>();
+  for (const raw of input) {
+    const obj = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+    const id = typeof obj.id === "string" && obj.id.trim() ? obj.id.trim() : createUuid();
+    if (seenIds.has(id)) continue;
+    const name = typeof obj.name === "string" && obj.name.trim() ? obj.name.trim() : "未命名分组";
+    const projectPaths: string[] = [];
+    const seenPaths = new Set<string>();
+    for (const path of normalizeStringArray(obj.projectPaths)) {
+      const normalizedPath = normalizeWorkspaceProjectPath(path);
+      const pathKey = workspaceProjectPathKey(normalizedPath);
+      if (!pathKey || seenPaths.has(pathKey)) continue;
+      seenPaths.add(pathKey);
+      projectPaths.push(normalizedPath);
+    }
+    const sourceProjectPath = normalizeWorkspaceProjectPath(obj.sourceProjectPath);
+    const createdAt =
+      typeof obj.createdAt === "number" && Number.isFinite(obj.createdAt) && obj.createdAt > 0
+        ? obj.createdAt
+        : Date.now();
+    const updatedAt =
+      typeof obj.updatedAt === "number" && Number.isFinite(obj.updatedAt) && obj.updatedAt > 0
+        ? obj.updatedAt
+        : createdAt;
+    seenIds.add(id);
+    out.push({
+      id,
+      name,
+      projectPaths,
+      ...(sourceProjectPath ? { sourceProjectPath } : {}),
+      ...(obj.collapsed === true ? { collapsed: true } : {}),
+      createdAt,
+      updatedAt,
+    });
   }
   return out;
 }
@@ -1843,6 +1886,7 @@ export function normalizeSystemSettings(input: unknown): SystemSettings {
     workdir: normalizeWorkdir(obj.workdir),
     toolPolicies: normalizeToolPolicies(obj.toolPolicies),
     workspaceProjects: normalizeWorkspaceProjects(obj.workspaceProjects),
+    workspaceProjectGroups: normalizeWorkspaceProjectGroups(obj.workspaceProjectGroups),
     activeWorkspaceProjectId:
       typeof obj.activeWorkspaceProjectId === "string" && obj.activeWorkspaceProjectId.trim()
         ? obj.activeWorkspaceProjectId.trim()
@@ -2493,6 +2537,7 @@ export function getDefaultSettings(): AppSettings {
       executionMode: "tools",
       workdir: "",
       workspaceProjects: [],
+      workspaceProjectGroups: [],
       activeWorkspaceProjectId: undefined,
       hiddenWorkspaceProjectPaths: [],
       missingWorkspaceProjectPaths: [],

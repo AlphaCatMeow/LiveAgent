@@ -239,6 +239,8 @@ struct GitGatewayArgs {
     user_email: Option<String>,
     force: Option<bool>,
     new_branch: Option<String>,
+    worktree_path: Option<String>,
+    delete_branch: Option<String>,
     task_id: Option<String>,
 }
 
@@ -3294,6 +3296,11 @@ pub(crate) fn git_gateway_action_sync(
             args.branch.unwrap_or_default(),
             args.start_point,
         )?),
+        "create_worktree" => serde_json::to_value(git_create_worktree_sync(
+            workdir,
+            args.name.unwrap_or_default(),
+            args.start_point,
+        )?),
         "log" => serde_json::to_value(git_log_sync(workdir, args.limit, args.skip)?),
         "commit_details" => serde_json::to_value(git_commit_details_sync(
             workdir,
@@ -3348,6 +3355,12 @@ pub(crate) fn git_gateway_action_sync(
             workdir,
             args.branch.unwrap_or_default(),
             args.new_branch.unwrap_or_default(),
+        )?),
+        "remove_worktree" => serde_json::to_value(git_remove_worktree_sync(
+            workdir,
+            args.worktree_path.unwrap_or_default(),
+            args.force,
+            args.delete_branch,
         )?),
         "stash_push" => serde_json::to_value(git_stash_push_sync(workdir, args.message)?),
         "stash_pop" => serde_json::to_value(git_stash_pop_sync(workdir)?),

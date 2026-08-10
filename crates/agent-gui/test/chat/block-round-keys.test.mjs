@@ -113,7 +113,7 @@ test("ordinary tool activity keeps one group identity as later tools append", ()
 });
 
 test("special tool result updates preserve their direct activity identity", () => {
-  for (const name of ["TodoWrite", "AskUserQuestion", "Image", "Agent"]) {
+  for (const name of ["TaskCreate", "TaskUpdate", "TaskList", "AskUserQuestion", "Image", "Agent"]) {
     const pendingItem = {
       toolCall: { type: "toolCall", id: `call-${name}`, name, arguments: {} },
     };

@@ -67,7 +67,6 @@ export const RoundBlockContent = memo(function RoundBlockContent(props: {
   runningToolCallIds: string[];
   thinkingOpen: boolean;
   isLatestThinking: boolean;
-  isAborted: boolean;
   workdir?: string;
   onOpenFileLink?: (link: ChatFileLink) => void;
 }) {
@@ -78,7 +77,6 @@ export const RoundBlockContent = memo(function RoundBlockContent(props: {
     runningToolCallIds,
     thinkingOpen,
     isLatestThinking,
-    isAborted,
     workdir,
     onOpenFileLink,
   } = props;
@@ -106,7 +104,6 @@ export const RoundBlockContent = memo(function RoundBlockContent(props: {
       content = (
         <MemoToolCallItem
           item={block.item}
-          isAborted={isAborted}
           isRunning={Boolean(
             isLive && block.item.toolCall.id && runningToolCallIds.includes(block.item.toolCall.id),
           )}
@@ -115,11 +112,7 @@ export const RoundBlockContent = memo(function RoundBlockContent(props: {
     }
   } else if (block.kind === "toolGroup") {
     content = (
-      <ToolTraceGroup
-        items={block.items}
-        isAborted={isAborted}
-        runningToolCallIds={isLive ? runningToolCallIds : []}
-      />
+      <ToolTraceGroup items={block.items} runningToolCallIds={isLive ? runningToolCallIds : []} />
     );
   } else if (block.kind === "hostedSearch" || block.kind === "hostedSearchGroup") {
     content = (
@@ -144,19 +137,5 @@ export const RoundBlockContent = memo(function RoundBlockContent(props: {
 
   if (!content) return null;
 
-  return (
-    <div
-      className={
-        isLive
-          ? undefined
-          : `w-full [&_.todo-list-view_.animate-spin]:!animate-none [&_.todo-list-view_.shimmer]:!animate-none${
-              isAborted
-                ? " [&_.todo-list-view_[data-todo-incomplete]>span:last-child]:!text-muted-foreground/40 [&_.todo-list-view_[data-todo-incomplete]>span:last-child]:line-through"
-                : ""
-            }`
-      }
-    >
-      {content}
-    </div>
-  );
+  return <div className={isLive ? undefined : "w-full"}>{content}</div>;
 });

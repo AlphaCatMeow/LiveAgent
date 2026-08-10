@@ -1063,7 +1063,9 @@ fn is_builtin_share_tool_name(name: &str) -> bool {
             | "SkillsManager"
             | "SSHManager"
             | "SshManager"
-            | "TodoWrite"
+            | "TaskCreate"
+            | "TaskUpdate"
+            | "TaskList"
             | "TunnelManager"
             | "Write"
     )

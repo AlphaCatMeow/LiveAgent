@@ -77,7 +77,6 @@ export const AssistantBubbleUnit = memo(function AssistantBubbleUnit(props: {
             runningToolCallIds={unit.runningToolCallIds}
             thinkingOpen={unit.thinkingOpen}
             isLatestThinking={unit.isLatestThinking}
-            isAborted={row.isAborted}
             workdir={workdir}
             onOpenFileLink={onOpenFileLink}
           />

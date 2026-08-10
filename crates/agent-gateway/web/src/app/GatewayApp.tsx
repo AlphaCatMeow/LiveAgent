@@ -8,7 +8,6 @@ import { type NotifyItem, NotifyToast } from "@liveagent/ui/components/chat/Noti
 import { SharedHistoryManagerModal } from "@liveagent/ui/components/chat/SharedHistoryManagerModal";
 import { TaskProgressIndicator } from "@liveagent/ui/components/chat/TaskProgressIndicator";
 import { ToolApprovalBar } from "@liveagent/ui/components/chat/ToolApprovalBar";
-import { useSequencedTaskProgress } from "@liveagent/ui/components/chat/useSequencedTaskProgress";
 import { WorkspaceResourceSettingsDrawer } from "@liveagent/ui/components/chat/WorkspaceResourceSettingsDrawer";
 import type {
   GitCommitContextPayload,
@@ -22,8 +21,8 @@ import { type Locale, LocaleContext, t as translate } from "@liveagent/ui/i18n/i
 import { normalizeLogicalLineEndings } from "@liveagent/ui/lib/chat/composerText";
 import { openChatFileLink } from "@liveagent/ui/lib/chat/openChatFileLink";
 import {
-  selectTodoProgressUpdates,
-  type TodoProgressUpdate,
+  selectLatestTaskProgress,
+  type TaskProgressSnapshot,
 } from "@liveagent/ui/lib/chat/taskProgress";
 import {
   readToolApprovalDeadlineAt,
@@ -151,12 +150,11 @@ import type { SectionId } from "@/pages/settings/types";
 const LOCAL_DRAFT_PREFIX = "__local_draft__:";
 
 function CurrentTaskProgress(props: {
-  updates: readonly TodoProgressUpdate[];
+  snapshot: TaskProgressSnapshot | null;
   isConversationRunning: boolean;
   locale: Locale;
 }) {
-  const { updates, isConversationRunning, locale } = props;
-  const snapshot = useSequencedTaskProgress(updates, isConversationRunning);
+  const { snapshot, isConversationRunning, locale } = props;
   const labels = useMemo(() => {
     if (!snapshot) return null;
     return {
@@ -4469,8 +4467,8 @@ export default function GatewayApp() {
     return item?.title ?? "";
   }, [selectedHistoryId, sidebarConversationsById]);
   const transcriptRows = displayedTranscript.rows;
-  const taskProgressUpdates = useMemo(
-    () => selectTodoProgressUpdates(transcriptRows),
+  const taskProgressSnapshot = useMemo(
+    () => selectLatestTaskProgress(transcriptRows),
     [transcriptRows],
   );
   // 当前会话的待审批工具:遍历渲染中的 transcript,筛出带 __toolApprovalPending 标记
@@ -5175,7 +5173,7 @@ export default function GatewayApp() {
                           taskProgressBar={
                             <CurrentTaskProgress
                               key={displayedConversationId}
-                              updates={taskProgressUpdates}
+                              snapshot={taskProgressSnapshot}
                               isConversationRunning={transcriptBusy}
                               locale={settings.locale}
                             />

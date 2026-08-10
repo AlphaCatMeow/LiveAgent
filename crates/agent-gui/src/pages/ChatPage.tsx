@@ -10,7 +10,6 @@ import { NotifyToast } from "@liveagent/ui/components/chat/NotifyToast";
 import { SharedHistoryManagerModal } from "@liveagent/ui/components/chat/SharedHistoryManagerModal";
 import { TaskProgressIndicator } from "@liveagent/ui/components/chat/TaskProgressIndicator";
 import { ToolApprovalBar } from "@liveagent/ui/components/chat/ToolApprovalBar";
-import { useSequencedTaskProgress } from "@liveagent/ui/components/chat/useSequencedTaskProgress";
 import { WorkspaceCloneModal } from "@liveagent/ui/components/chat/WorkspaceCloneModal";
 import { WorkspaceResourceSettingsDrawer } from "@liveagent/ui/components/chat/WorkspaceResourceSettingsDrawer";
 import type {
@@ -25,7 +24,7 @@ import { useConfirmDialog } from "@liveagent/ui/components/ui/confirm-dialog";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { getAutomationState, useAutomation } from "@liveagent/ui/lib/automation/index";
 import { openChatFileLink } from "@liveagent/ui/lib/chat/openChatFileLink";
-import { selectTodoProgressUpdates } from "@liveagent/ui/lib/chat/taskProgress";
+import { selectLatestTaskProgress } from "@liveagent/ui/lib/chat/taskProgress";
 import type { ScrollFollowHandle } from "@liveagent/ui/lib/chat-scroll/useScrollFollow";
 import { setPreferredMonacoNlsLocale } from "@liveagent/ui/lib/monacoNls";
 import {
@@ -107,7 +106,6 @@ import { createGuiSidebarBackend } from "../lib/sidebar/guiSidebarBackend";
 import { createSubagentStoreManager } from "../lib/subagents";
 import { tauriTerminalClient } from "../lib/terminal/tauriTerminalClient";
 import { cancelPendingAskUserQuestionsForConversation } from "../lib/tools/askUserQuestionTools";
-import { disposeTodoToolState } from "../lib/tools/todoTools";
 import {
   answerToolApproval,
   cancelPendingToolApprovalsForConversation,
@@ -191,11 +189,10 @@ function CurrentTaskProgress(props: {
     getLiveRoundsSnapshot,
     getLiveRoundsSnapshot,
   );
-  const updates = useMemo(
-    () => selectTodoProgressUpdates(historyItems, liveRounds),
+  const snapshot = useMemo(
+    () => selectLatestTaskProgress(historyItems, liveRounds),
     [historyItems, liveRounds],
   );
-  const snapshot = useSequencedTaskProgress(updates, isConversationRunning);
   const labels = useMemo(() => {
     if (!snapshot) return null;
     return {
@@ -1068,7 +1065,6 @@ export function ChatPage(props: ChatPageProps) {
         onPruneConversation: (conversationId) => {
           deleteConversationLocalCaches(conversationId);
           subagentStoresRef.current.dispose(conversationId);
-          disposeTodoToolState(conversationId);
           cancelPendingAskUserQuestionsForConversation(conversationId);
           cancelPendingToolApprovalsForConversation(conversationId);
         },

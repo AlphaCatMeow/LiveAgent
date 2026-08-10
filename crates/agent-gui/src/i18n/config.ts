@@ -304,15 +304,12 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.tool.running": "运行中",
     "chat.tool.failed": "失败",
     "chat.tool.success": "已完成",
-    "chat.tool.aborted": "已中止",
     "chat.tool.waiting": "等待",
     "chat.tool.command": "命令",
     "chat.tool.args": "参数",
     "chat.tool.return": "返回",
     "chat.tool.error": "(错误)",
     "chat.tool.viewReturn": "查看返回内容",
-    "chat.tool.todoTitle": "任务清单",
-    "chat.tool.todoEmpty": "暂无任务",
     "chat.taskProgress.title": "任务进度",
     "chat.taskProgress.step": "第 {current} / {total} 步",
     "chat.taskProgress.running": "运行中",
@@ -1407,10 +1404,17 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.builtinTool.send_message.desc": "与子代理之间收发消息",
     "settings.builtinTool.send_message.detail":
       "在主对话与子代理之间传递消息，用于协调多代理协作。需要子代理运行时；仅在对话场景注册。",
-    "settings.builtinTool.todo_write.name": "任务清单",
-    "settings.builtinTool.todo_write.desc": "创建与更新当前会话的任务清单",
-    "settings.builtinTool.todo_write.detail":
-      "让模型在处理多步骤任务时列出任务清单并逐项推进状态，进度以清单卡片实时展示在对话中。清单仅保存在当前对话内，不跨对话保留；仅在对话场景注册。",
+    "settings.builtinTool.task_create.name": "创建任务",
+    "settings.builtinTool.task_create.desc": "向当前运行添加一个任务",
+    "settings.builtinTool.task_create.detail": "创建带有稳定数字 ID 的持久任务；仅在对话场景注册。",
+    "settings.builtinTool.task_update.name": "更新任务",
+    "settings.builtinTool.task_update.desc": "按稳定 ID 更新一个任务",
+    "settings.builtinTool.task_update.detail":
+      "更新任务状态或内容，不替换整个任务清单；仅在对话场景注册。",
+    "settings.builtinTool.task_list.name": "查看任务",
+    "settings.builtinTool.task_list.desc": "读取当前运行的完整任务清单",
+    "settings.builtinTool.task_list.detail":
+      "返回当前运行的权威任务快照与稳定 ID；仅在对话场景注册。",
     "settings.builtinTool.ask_user_question.name": "用户提问",
     "settings.builtinTool.ask_user_question.desc": "以选项卡片向你提问并等待选择",
     "settings.builtinTool.ask_user_question.detail":
@@ -2610,15 +2614,12 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.tool.running": "Running",
     "chat.tool.failed": "Failed",
     "chat.tool.success": "Completed",
-    "chat.tool.aborted": "Aborted",
     "chat.tool.waiting": "Waiting",
     "chat.tool.command": "Command",
     "chat.tool.args": "Args",
     "chat.tool.return": "Return",
     "chat.tool.error": "(Error)",
     "chat.tool.viewReturn": "View Return",
-    "chat.tool.todoTitle": "Task list",
-    "chat.tool.todoEmpty": "No tasks yet",
     "chat.taskProgress.title": "Task progress",
     "chat.taskProgress.step": "Step {current} of {total}",
     "chat.taskProgress.running": "Running",
@@ -3758,10 +3759,18 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.builtinTool.send_message.desc": "Exchange messages with subagents",
     "settings.builtinTool.send_message.detail":
       "Relays messages between the main conversation and subagents to coordinate multi-agent work. Requires the subagent runtime; chat sessions only.",
-    "settings.builtinTool.todo_write.name": "Task List",
-    "settings.builtinTool.todo_write.desc": "Create and update a task list for the current session",
-    "settings.builtinTool.todo_write.detail":
-      "Lets the model plan multi-step work as a task list and advance each item's status as it goes, shown as a live checklist card in the conversation. The list lives only in the current conversation and is not carried across conversations; chat sessions only.",
+    "settings.builtinTool.task_create.name": "Create Task",
+    "settings.builtinTool.task_create.desc": "Add one task to the current run",
+    "settings.builtinTool.task_create.detail":
+      "Create a durable task with a stable numeric ID; chat sessions only.",
+    "settings.builtinTool.task_update.name": "Update Task",
+    "settings.builtinTool.task_update.desc": "Update one task by stable ID",
+    "settings.builtinTool.task_update.detail":
+      "Update task status or content without replacing the task list; chat sessions only.",
+    "settings.builtinTool.task_list.name": "List Tasks",
+    "settings.builtinTool.task_list.desc": "Read the current run's complete task list",
+    "settings.builtinTool.task_list.detail":
+      "Return the authoritative task snapshot and stable IDs for the current run; chat sessions only.",
     "settings.builtinTool.ask_user_question.name": "Ask User",
     "settings.builtinTool.ask_user_question.desc":
       "Ask you multiple-choice questions in a card and wait for your selections",

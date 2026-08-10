@@ -56,10 +56,6 @@ export const AssistantBubble = memo(function AssistantBubble(props: {
     workdir,
     onOpenFileLink,
   } = props;
-  const isAborted = useMemo(
-    () => rounds.some((round) => round.meta?.stopReason === "aborted"),
-    [rounds],
-  );
   // 回复末尾的已编辑文件卡：聚合整条回复所有 round 的 Write/Edit/Delete，
   // 只在回复结束（流停止）后出现；脱敏视图（分享页隐藏工具内容）不渲染。
   const changedFiles = useMemo(
@@ -87,7 +83,6 @@ export const AssistantBubble = memo(function AssistantBubble(props: {
             thinkingOpen={round.thinkingOpen}
             readOnly={readOnly}
             redactToolContent={redactToolContent}
-            isAborted={isAborted}
             workdir={workdir}
             onOpenFileLink={onOpenFileLink}
           />

@@ -96,17 +96,37 @@ function createIndicatorHarness() {
 }
 
 function createSnapshot(overrides = {}) {
-  const todos =
-    overrides.todos ??
+  const tasks =
+    overrides.tasks ??
     [
-      { content: "Inspect", status: "completed", activeForm: "Inspecting" },
-      { content: "Implement", status: "in_progress", activeForm: "Implementing" },
-      { content: "Verify", status: "pending", activeForm: "Verifying" },
+      {
+        id: "1",
+        subject: "Inspect",
+        description: "Inspect completion criteria",
+        status: "completed",
+        activeForm: "Inspecting",
+      },
+      {
+        id: "2",
+        subject: "Implement",
+        description: "Implement completion criteria",
+        status: "in_progress",
+        activeForm: "Implementing",
+      },
+      {
+        id: "3",
+        subject: "Verify",
+        description: "Verify completion criteria",
+        status: "pending",
+        activeForm: "Verifying",
+      },
     ];
   return {
-    todos,
+    runId: "run-1",
+    revision: 3,
+    tasks,
     completedCount: 1,
-    totalCount: todos.length,
+    totalCount: tasks.length,
     currentStep: 2,
     state: "in_progress",
     ...overrides,
@@ -199,7 +219,15 @@ test("web renders props-only copy, progress semantics, and an absolute reduced-m
 test("web keeps task labels stable and scopes transition motion to the changed row status", () => {
   const indicator = createIndicatorHarness();
   const runningSnapshot = createSnapshot({
-    todos: [{ content: "Stable task", status: "in_progress", activeForm: "Changing label" }],
+    tasks: [
+      {
+        id: "stable",
+        subject: "Stable task",
+        description: "Stable completion criteria",
+        status: "in_progress",
+        activeForm: "Changing label",
+      },
+    ],
     completedCount: 0,
     totalCount: 1,
     currentStep: 1,
@@ -220,7 +248,15 @@ test("web keeps task labels stable and scopes transition motion to the changed r
 
   const completedTree = indicator.render({
     snapshot: createSnapshot({
-      todos: [{ content: "Stable task", status: "completed", activeForm: "Changed again" }],
+      tasks: [
+        {
+          id: "stable",
+          subject: "Stable task",
+          description: "Stable completion criteria",
+          status: "completed",
+          activeForm: "Changed again",
+        },
+      ],
       completedCount: 1,
       totalCount: 1,
       currentStep: 1,
@@ -303,7 +339,15 @@ test("web Escape closes while touch clicks toggle", () => {
 test("web shows pending, paused, and completed states without auto-dismissing completion", () => {
   const indicator = createIndicatorHarness();
   const pending = createSnapshot({
-    todos: [{ content: "Wait", status: "pending", activeForm: "Waiting" }],
+    tasks: [
+      {
+        id: "wait",
+        subject: "Wait",
+        description: "Wait completion criteria",
+        status: "pending",
+        activeForm: "Waiting",
+      },
+    ],
     completedCount: 0,
     totalCount: 1,
     currentStep: 1,
@@ -315,11 +359,17 @@ test("web shows pending, paused, and completed states without auto-dismissing co
     /Paused/,
   );
 
-  const completedTodos = [
-    { content: "Done", status: "completed", activeForm: "Finishing" },
+  const completedTasks = [
+    {
+      id: "done",
+      subject: "Done",
+      description: "Done completion criteria",
+      status: "completed",
+      activeForm: "Finishing",
+    },
   ];
   const completed = createSnapshot({
-    todos: completedTodos,
+    tasks: completedTasks,
     completedCount: 1,
     totalCount: 1,
     currentStep: 1,

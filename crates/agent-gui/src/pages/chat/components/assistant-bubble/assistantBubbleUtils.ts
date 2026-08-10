@@ -73,7 +73,9 @@ export function getToolMeta(name: string): {
       return { Icon: Search, accent: "var(--tool-search-accent)", category: "search" };
     case "List":
       return { Icon: FolderTree, accent: "var(--tool-list-accent)", category: "list" };
-    case "TodoWrite":
+    case "TaskCreate":
+    case "TaskUpdate":
+    case "TaskList":
       return { Icon: ListChecks, accent: "var(--tool-list-accent)", category: "system" };
     case "AskUserQuestion":
       return { Icon: CircleHelp, accent: "var(--tool-list-accent)", category: "system" };
@@ -306,7 +308,9 @@ export function groupRoundBlocks(blocks: UiRound["blocks"]): GroupedRoundBlock[]
       flushPendingSearches();
       if (
         block.item.toolCall.name === "Image" ||
-        block.item.toolCall.name === "TodoWrite" ||
+        block.item.toolCall.name === "TaskCreate" ||
+        block.item.toolCall.name === "TaskUpdate" ||
+        block.item.toolCall.name === "TaskList" ||
         block.item.toolCall.name === "AskUserQuestion" ||
         isAgentToolName(block.item.toolCall.name)
       ) {

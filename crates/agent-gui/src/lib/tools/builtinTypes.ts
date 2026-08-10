@@ -366,15 +366,30 @@ export type GrepResultDetails = {
   files: GrepResultFileSummary[];
 };
 
-export type TodoItem = {
-  content: string;
-  status: "pending" | "in_progress" | "completed";
+export type TaskStatus = "pending" | "in_progress" | "completed";
+
+export type TaskItem = {
+  id: string;
+  subject: string;
+  description: string;
   activeForm: string;
+  status: TaskStatus;
 };
 
-export type TodoWriteResultDetails = {
-  kind: "todo_write";
-  todos: TodoItem[];
+export type TaskListState = {
+  runId: string;
+  revision: number;
+  nextTaskId: number;
+  tasks: TaskItem[];
+};
+
+export type TaskListResultDetails = {
+  kind: "task_list";
+  action: "created" | "updated" | "listed";
+  runId: string;
+  revision: number;
+  tasks: TaskItem[];
+  taskId?: string;
 };
 
 export type BuiltinToolResultDetails =
@@ -395,5 +410,5 @@ export type BuiltinToolResultDetails =
   | ListResultDetails
   | GlobResultDetails
   | GrepResultDetails
-  | TodoWriteResultDetails
+  | TaskListResultDetails
   | Record<string, unknown>;

@@ -442,6 +442,14 @@ export function normalizeGitOperationResponse(input: unknown, workdir = ""): Git
   };
 }
 
+/**
+ * Worktree 已成功移除，但其未完全合并的分支无法被普通删除；此时应
+ * 直接引导用户确认强制删除分支，而不是重试已经注销的 Worktree。
+ */
+export function isGitWorktreeBranchNotFullyMergedError(message: string): boolean {
+  return /worktree .*分支删除失败/i.test(message) && /not fully merged/i.test(message);
+}
+
 export function normalizeGitWorktreeResponse(input: unknown, workdir = ""): GitWorktreeResponse {
   const source = asObject(input);
   return {

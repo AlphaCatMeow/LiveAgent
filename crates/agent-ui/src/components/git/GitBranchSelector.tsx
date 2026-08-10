@@ -49,6 +49,7 @@ import type {
 import {
   emptyGitRepositoryState,
   gitDiscoveredRepositoryLabel,
+  isGitWorktreeBranchNotFullyMergedError,
   selectedGitRepositoryLabel,
 } from "../../lib/git/types";
 
@@ -1172,6 +1173,23 @@ export function GitBranchSelector(props: {
     );
     if (ok) {
       resetBranchAction();
+      return;
+    }
+    // worktree 已移除但分支未完全合并：不能重试 removeWorktree，直接对
+    // 仍然存在的分支执行强制删除，并复用普通分支删除的确认文案。
+    if (isGitWorktreeBranchNotFullyMergedError(actionErrorRef.current)) {
+      const forced = await confirm({
+        title: t("git.branchSelector.deleteForceTitle"),
+        description: t("git.branchSelector.deleteForceDescription"),
+        confirmLabel: t("git.branchSelector.forceDelete"),
+        cancelLabel: t("chat.cancel"),
+        tone: "destructive",
+      });
+      if (!forced) return;
+      const forcedOk = await runSheetMutation(() =>
+        gitClient.deleteBranch(workdir, branch.fullName, true),
+      );
+      if (forcedOk) resetBranchAction();
       return;
     }
     // Worktree 含未提交改动时 git 拒绝移除 → 提供强制移除的二次确认。

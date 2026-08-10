@@ -3199,6 +3199,8 @@ pub(crate) fn git_remove_worktree_sync(
         Ok(_) => {
             // worktree 移除成功后，尝试删除其检出的分支；分支删除失败时
             // worktree 已不在（重试会提示未登记），错误信息必须说明这一点。
+            // force 同时传导到分支删除：`--force` 时用 `-D`，
+            // 让未合并提交的分支也能被清理。
             let branch = delete_branch.as_deref().map(str::trim).unwrap_or("");
             if branch.is_empty() {
                 Ok(GitOutput {
@@ -3206,7 +3208,8 @@ pub(crate) fn git_remove_worktree_sync(
                     stderr: String::new(),
                 })
             } else {
-                match git_success(&state.repo_root, &["branch", "-d", branch]) {
+                let delete_flag = if force == Some(true) { "-D" } else { "-d" };
+                match git_success(&state.repo_root, &["branch", delete_flag, branch]) {
                     Ok(output) => Ok(output),
                     Err(error) => Err(format!("Worktree 已移除，但分支删除失败：{error}")),
                 }
@@ -5066,6 +5069,102 @@ mod tests {
                 .iter()
                 .any(|branch| branch.full_name == "wt-remove"),
             "branch should be deleted with the worktree"
+        );
+    }
+
+    #[test]
+    fn git_remove_worktree_reports_unmerged_branch_after_removing_worktree() {
+        let Some(repo) = init_temp_repo() else {
+            return;
+        };
+        let workdir = repo.path().to_string_lossy().to_string();
+        let worktree_root = tempfile::tempdir().expect("worktree root");
+        let created = git_create_worktree_in_base(
+            workdir.clone(),
+            "wt-unmerged".to_string(),
+            None,
+            worktree_root.path(),
+        )
+        .expect("create worktree");
+        let worktree_path = PathBuf::from(&created.worktree_path);
+        fs::write(worktree_path.join("unmerged.txt"), "unmerged\n").expect("write worktree file");
+        run_temp_git(&worktree_path, &["add", "unmerged.txt"]);
+        run_temp_git(
+            &worktree_path,
+            &["commit", "-m", "unmerged worktree commit"],
+        );
+
+        let result = git_remove_worktree_sync(
+            workdir.clone(),
+            created.worktree_path.clone(),
+            None,
+            Some("wt-unmerged".to_string()),
+        )
+        .expect("worktree removal should return an operation response");
+
+        assert!(
+            !result.ok,
+            "unmerged branch deletion should report an error"
+        );
+        assert!(
+            result.message.contains("Worktree 已移除，但分支删除失败")
+                && result.message.contains("not fully merged"),
+            "unexpected removal error: {}",
+            result.message
+        );
+        assert!(
+            !worktree_path.exists(),
+            "worktree should already be removed"
+        );
+        let branches = git_branches_sync(workdir).expect("branches");
+        assert!(
+            branches
+                .branches
+                .iter()
+                .any(|branch| branch.full_name == "wt-unmerged"),
+            "the unmerged branch should remain available for force deletion"
+        );
+    }
+
+    #[test]
+    fn git_remove_worktree_force_deletes_unmerged_branch() {
+        let Some(repo) = init_temp_repo() else {
+            return;
+        };
+        let workdir = repo.path().to_string_lossy().to_string();
+        let worktree_root = tempfile::tempdir().expect("worktree root");
+        let created = git_create_worktree_in_base(
+            workdir.clone(),
+            "wt-force-unmerged".to_string(),
+            None,
+            worktree_root.path(),
+        )
+        .expect("create worktree");
+        let worktree_path = PathBuf::from(&created.worktree_path);
+        fs::write(worktree_path.join("unmerged.txt"), "unmerged\n").expect("write worktree file");
+        run_temp_git(&worktree_path, &["add", "unmerged.txt"]);
+        run_temp_git(
+            &worktree_path,
+            &["commit", "-m", "unmerged worktree commit"],
+        );
+
+        let result = git_remove_worktree_sync(
+            workdir.clone(),
+            created.worktree_path.clone(),
+            Some(true),
+            Some("wt-force-unmerged".to_string()),
+        )
+        .expect("force remove worktree");
+
+        assert!(result.ok, "force removal failed: {}", result.message);
+        assert!(!worktree_path.exists(), "worktree should be removed");
+        let branches = git_branches_sync(workdir).expect("branches");
+        assert!(
+            !branches
+                .branches
+                .iter()
+                .any(|branch| branch.full_name == "wt-force-unmerged"),
+            "force removal should delete the unmerged branch"
         );
     }
 

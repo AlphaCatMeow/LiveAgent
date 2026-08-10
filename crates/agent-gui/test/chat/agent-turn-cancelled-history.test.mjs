@@ -75,8 +75,8 @@ const memoryExtractionPath = fileURLToPath(
 const fileToolStatePath = fileURLToPath(
   new URL("../../src/lib/tools/fileToolState.ts", import.meta.url),
 );
-const todoToolsPath = fileURLToPath(
-  new URL("../../src/lib/tools/todoTools.ts", import.meta.url),
+const taskToolsPath = fileURLToPath(
+  new URL("../../src/lib/tools/taskTools.ts", import.meta.url),
 );
 
 async function replayCancelledHistoryScenario(params) {
@@ -142,9 +142,9 @@ const loader = createTsModuleLoader({
         return {};
       },
     },
-    [todoToolsPath]: {
-      getOrCreateTodoToolState() {
-        return {};
+    [taskToolsPath]: {
+      formatTaskListRuntimeContext() {
+        return "";
       },
     },
   },

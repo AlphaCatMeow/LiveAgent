@@ -169,7 +169,9 @@ export function buildToolsSuffix(
   if (has("SendMessage")) toolGroups.push("subagent message bus (SendMessage)");
   if (has("Bash")) toolGroups.push("the command tool (Bash)");
   if (has("ManagedProcess")) toolGroups.push("managed local processes (ManagedProcess)");
-  if (has("TodoWrite")) toolGroups.push("task planning checklist (TodoWrite)");
+  if (hasAny("TaskCreate", "TaskUpdate", "TaskList")) {
+    toolGroups.push("durable task planning (TaskCreate / TaskUpdate / TaskList)");
+  }
   if (hasDynamicMcp) toolGroups.push("MCP business tools whose names are prefixed with mcp_");
 
   const sections: string[] = [];
@@ -366,15 +368,14 @@ export function buildToolsSuffix(
     );
   }
 
-  if (has("TodoWrite")) {
+  if (hasAny("TaskCreate", "TaskUpdate", "TaskList")) {
     sections.push(
       [
-        "## Task Planning (TodoWrite)",
-        "- Proactively use TodoWrite for multi-step tasks (3+ distinct steps) or when the user gives multiple tasks; skip it for a single trivial action.",
-        "- Every call replaces the entire list — pass the complete, current set of todos each time, not a delta.",
-        "- Exactly one item may have status=in_progress at a time; mark it in_progress before starting, and immediately (not batched) mark it completed as soon as it is done, before starting the next.",
-        '- content is the imperative/declarative form ("Run tests"); activeForm is the present-continuous form shown only while in_progress ("Running tests").',
-        "- Keep each item specific and actionable; break vague or large items into smaller ones.",
+        "## Task Planning",
+        "- Proactively use TaskCreate for multi-step work (3+ distinct steps) or multiple user requests; skip it for one trivial action.",
+        "- Task IDs are stable and executor-assigned. Use TaskUpdate with taskId; never replace or recreate the list after context compaction.",
+        "- Exactly one task may be in_progress. Mark it in_progress before work and completed immediately after it is fully done.",
+        "- Use TaskList whenever the authoritative task state is unclear.",
       ].join("\n"),
     );
   }

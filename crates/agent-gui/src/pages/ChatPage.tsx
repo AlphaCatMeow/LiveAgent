@@ -4,14 +4,15 @@ import {
   type ChangedFilesActions,
   ChangedFilesActionsProvider,
 } from "@liveagent/ui/components/chat/ChangedFilesCard";
+import { FileDropOverlay } from "@liveagent/ui/components/chat/FileDropOverlay";
 import { HistoryShareModal } from "@liveagent/ui/components/chat/HistoryShareModal";
 import type { MentionComposerHandle } from "@liveagent/ui/components/chat/MentionComposer";
 import { NotifyToast } from "@liveagent/ui/components/chat/NotifyToast";
 import { SharedHistoryManagerModal } from "@liveagent/ui/components/chat/SharedHistoryManagerModal";
-import { TaskProgressIndicator } from "@liveagent/ui/components/chat/TaskProgressIndicator";
+import { TaskProgressBar } from "@liveagent/ui/components/chat/TaskProgressBar";
 import { ToolApprovalBar } from "@liveagent/ui/components/chat/ToolApprovalBar";
-import { useSequencedTaskProgress } from "@liveagent/ui/components/chat/useSequencedTaskProgress";
 import { WorkspaceCloneModal } from "@liveagent/ui/components/chat/WorkspaceCloneModal";
+import { WorkspaceResourceSettingsDrawer } from "@liveagent/ui/components/chat/WorkspaceResourceSettingsDrawer";
 import type {
   GitCommitContextPayload,
   GitFileContextPayload,
@@ -21,10 +22,11 @@ import { RightDockPanel } from "@liveagent/ui/components/project-tools/RightDock
 import { expandedPathsForFileTreePath } from "@liveagent/ui/components/project-tools/rightDockModel";
 import { Button } from "@liveagent/ui/components/ui/button";
 import { useConfirmDialog } from "@liveagent/ui/components/ui/confirm-dialog";
+import { WorkspaceOverlayHost } from "@liveagent/ui/components/workspace-editor/WorkspaceOverlayHost";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { getAutomationState, useAutomation } from "@liveagent/ui/lib/automation/index";
 import { openChatFileLink } from "@liveagent/ui/lib/chat/openChatFileLink";
-import { selectTodoProgressUpdates } from "@liveagent/ui/lib/chat/taskProgress";
+import { selectLatestTaskProgress } from "@liveagent/ui/lib/chat/taskProgress";
 import type { ScrollFollowHandle } from "@liveagent/ui/lib/chat-scroll/useScrollFollow";
 import { setPreferredMonacoNlsLocale } from "@liveagent/ui/lib/monacoNls";
 import {
@@ -38,7 +40,6 @@ import {
 } from "@liveagent/ui/lib/sidebar/selectors";
 import { createSidebarStore } from "@liveagent/ui/lib/sidebar/store";
 import { useSidebarSelector } from "@liveagent/ui/lib/sidebar/useSidebarSelector";
-import { mergeAlwaysEnabledSkillNames } from "@liveagent/ui/lib/skills/index";
 import { terminalSessionBelongsToProject } from "@liveagent/ui/lib/terminal/sessionStore";
 import type { LocalTunnelClient } from "@liveagent/ui/lib/tunnels/constants";
 import { listen } from "@tauri-apps/api/event";
@@ -90,6 +91,7 @@ import {
   type RightDockFileTreeStatePatch,
   type RightDockProjectState,
   resolveEffectiveTheme,
+  resolveWorkspaceResources,
   type SelectedModel,
   updateChatTranscriptWidth,
   updateRightDockFileTreeState,
@@ -98,13 +100,15 @@ import {
   updateSkills,
   updateSshProjectHostIds,
   updateSystem,
+  updateWorkspaceResourceSettings,
+  type WorkspaceProject,
   workspaceProjectPathKey,
 } from "../lib/settings";
+import { tauriSftpClient } from "../lib/sftp/tauriSftpClient";
 import { createGuiSidebarBackend } from "../lib/sidebar/guiSidebarBackend";
 import { createSubagentStoreManager } from "../lib/subagents";
 import { tauriTerminalClient } from "../lib/terminal/tauriTerminalClient";
 import { cancelPendingAskUserQuestionsForConversation } from "../lib/tools/askUserQuestionTools";
-import { disposeTodoToolState } from "../lib/tools/todoTools";
 import {
   answerToolApproval,
   cancelPendingToolApprovalsForConversation,
@@ -133,8 +137,6 @@ import {
   usePendingUploads,
 } from "./chat";
 import { appendManagedSkillSelections } from "./chat/chatPageUtils";
-import { ChatFileDropOverlay } from "./chat/components/ChatFileDropOverlay";
-import { WorkspaceOverlayHost } from "./chat/components/WorkspaceOverlayHost";
 import { useComposerDraftCache } from "./chat/composer/useComposerDraftCache";
 import { useGatewayBridgeReadiness } from "./chat/gateway/useGatewayBridgeReadiness";
 import { useGatewayRunMirrorCoordinator } from "./chat/gateway/useGatewayRunMirrorCoordinator";
@@ -148,6 +150,7 @@ import {
   removeQueuedChatTurnsForConversation,
 } from "./chat/queue/chatTurnQueue";
 import { useChatTurnQueue } from "./chat/queue/useChatTurnQueue";
+import { syncMovedConversationRuntimeWorkdir } from "./chat/runtime/chatPageRuntime";
 import { useChatModelSelection } from "./chat/runtime/useChatModelSelection";
 import { useSendChatTurn } from "./chat/runtime/useSendChatTurn";
 import { ChatSidebarContainer } from "./chat/sidebar/ChatSidebarContainer";
@@ -177,7 +180,6 @@ function CurrentTaskProgress(props: {
   isConversationRunning: boolean;
 }) {
   const { historyItems, liveTranscriptStore, isConversationRunning } = props;
-  const { t } = useLocale();
   const getLiveRoundsSnapshot = useCallback(
     () => liveTranscriptStore.getSnapshot().liveRounds,
     [liveTranscriptStore],
@@ -187,36 +189,11 @@ function CurrentTaskProgress(props: {
     getLiveRoundsSnapshot,
     getLiveRoundsSnapshot,
   );
-  const updates = useMemo(
-    () => selectTodoProgressUpdates(historyItems, liveRounds),
+  const snapshot = useMemo(
+    () => selectLatestTaskProgress(historyItems, liveRounds),
     [historyItems, liveRounds],
   );
-  const snapshot = useSequencedTaskProgress(updates, isConversationRunning);
-  const labels = useMemo(() => {
-    if (!snapshot) return null;
-    return {
-      title: t("chat.taskProgress.title"),
-      step: t("chat.taskProgress.step")
-        .replace("{current}", String(snapshot.currentStep))
-        .replace("{total}", String(snapshot.totalCount)),
-      completedCount: `${snapshot.completedCount}/${snapshot.totalCount} ${t(
-        "chat.taskProgress.completedCount",
-      )}`,
-      running: t("chat.taskProgress.running"),
-      pending: t("chat.taskProgress.pending"),
-      paused: t("chat.taskProgress.paused"),
-      completed: t("chat.taskProgress.completed"),
-    };
-  }, [snapshot, t]);
-
-  if (!snapshot || !labels) return null;
-  return (
-    <TaskProgressIndicator
-      snapshot={snapshot}
-      isConversationRunning={isConversationRunning}
-      labels={labels}
-    />
-  );
+  return <TaskProgressBar snapshot={snapshot} isConversationRunning={isConversationRunning} />;
 }
 
 export function ChatPage(props: ChatPageProps) {
@@ -276,19 +253,13 @@ export function ChatPage(props: ChatPageProps) {
 
   const isAgentMode = isAgentExecutionMode(settings.system.executionMode);
   const isAgentDevExecutionMode = isAgentDevMode(settings.system.executionMode);
-  const skillsConfigured = settings.skills.enabled;
-  const skillsEnabled = skillsConfigured && isAgentMode;
+  const workdir = settings.system.workdir.trim();
   const activeAgentPrompt = useMemo(() => {
     const activeTemplate = settings.agents.find(
       (template) => template.enabled && template.prompt.trim(),
     );
     return activeTemplate?.prompt.trim() ?? "";
   }, [settings.agents]);
-  const selectedSkillNames = useMemo(
-    () => (skillsEnabled ? mergeAlwaysEnabledSkillNames(settings.skills.selected) : []),
-    [skillsEnabled, settings.skills.selected],
-  );
-  const workdir = settings.system.workdir.trim();
   // The sidebar store owns all sidebar domain state (conversation list,
   // workdirs, running set); ChatPage only issues imperative calls and keeps a
   // few narrow selector subscriptions.
@@ -304,6 +275,9 @@ export function ChatPage(props: ChatPageProps) {
   );
   const prepareComposerForConversationChangeActionRef = useRef<() => void>(() => undefined);
   const [activeView, setActiveView] = useState<"chat" | "skills-hub" | "mcp-hub">("chat");
+  const [resourceSettingsProject, setResourceSettingsProject] = useState<WorkspaceProject | null>(
+    null,
+  );
   const [rightDockOpen, setRightDockOpen] = useState(false);
   const {
     workspaceProjects,
@@ -396,26 +370,10 @@ export function ChatPage(props: ChatPageProps) {
   });
 
   const { availableSkills, skillsRootDir, refreshSkills } = useChatSkills({
-    skillsEnabled,
-    selectedSkillNames,
+    skillsEnabled: settings.skills.enabled && isAgentMode,
+    selectedSkillNames: settings.skills.selected,
     setSettings,
   });
-  const enabledComposerSkills = useMemo(() => {
-    if (!skillsEnabled || selectedSkillNames.length === 0 || availableSkills.length === 0) {
-      return [];
-    }
-    const byName = new Map(availableSkills.map((skill) => [skill.name, skill]));
-    return selectedSkillNames
-      .map((name) => byName.get(name))
-      .filter((skill): skill is (typeof availableSkills)[number] => Boolean(skill));
-  }, [availableSkills, selectedSkillNames, skillsEnabled]);
-  const codeReviewSkill = useMemo(
-    () =>
-      availableSkills.find(
-        (skill) => skill.name === "liveagent-code-review" && skill.builtIn === true,
-      ),
-    [availableSkills],
-  );
 
   const transcriptItems = useMemo<RenderTimelineItem[]>(
     () => conversationState.transcript.items,
@@ -619,6 +577,31 @@ export function ChatPage(props: ChatPageProps) {
     currentConversationPersistedCwd ||
     currentConversationRuntimeWorkdir ||
     (isAgentMode ? activeWorkspaceProjectPath || workdir : "");
+  const activeWorkspaceResources = useMemo(
+    () => resolveWorkspaceResources(settings, displayedConversationWorkdir),
+    [displayedConversationWorkdir, settings],
+  );
+  const skillsEnabled = activeWorkspaceResources.skillsEnabled && isAgentMode;
+  const selectedSkillNames = useMemo(
+    () => (skillsEnabled ? activeWorkspaceResources.skillNames : []),
+    [activeWorkspaceResources.skillNames, skillsEnabled],
+  );
+  const enabledComposerSkills = useMemo(() => {
+    if (!skillsEnabled || selectedSkillNames.length === 0 || availableSkills.length === 0) {
+      return [];
+    }
+    const byName = new Map(availableSkills.map((skill) => [skill.name, skill]));
+    return selectedSkillNames
+      .map((name) => byName.get(name))
+      .filter((skill): skill is (typeof availableSkills)[number] => Boolean(skill));
+  }, [availableSkills, selectedSkillNames, skillsEnabled]);
+  const codeReviewSkill = useMemo(
+    () =>
+      availableSkills.find(
+        (skill) => skill.name === "liveagent-code-review" && skill.builtIn === true,
+      ),
+    [availableSkills],
+  );
   const terminalProjectPath = isAgentMode ? activeWorkspaceProjectPath.trim() : "";
   const terminalProjectPathKey = terminalProjectPath
     ? workspaceProjectPathKey(terminalProjectPath)
@@ -1058,7 +1041,6 @@ export function ChatPage(props: ChatPageProps) {
         onPruneConversation: (conversationId) => {
           deleteConversationLocalCaches(conversationId);
           subagentStoresRef.current.dispose(conversationId);
-          disposeTodoToolState(conversationId);
           cancelPendingAskUserQuestionsForConversation(conversationId);
           cancelPendingToolApprovalsForConversation(conversationId);
         },
@@ -1218,6 +1200,19 @@ export function ChatPage(props: ChatPageProps) {
     sidebarStore,
     updateConversationRuntimeEntry,
   ]);
+
+  const handleConversationCwdChanged = useCallback(
+    (conversationId: string, cwd: string) => {
+      syncMovedConversationRuntimeWorkdir({
+        conversationId,
+        cwd,
+        runtimeCache: conversationRuntimeCacheRef.current,
+        isConversationRunning,
+        updateConversationRuntimeEntry,
+      });
+    },
+    [conversationRuntimeCacheRef, isConversationRunning, updateConversationRuntimeEntry],
+  );
 
   useEffect(() => {
     const previous = previousSubagentRuntimeConversationRef.current;
@@ -1475,7 +1470,6 @@ export function ChatPage(props: ChatPageProps) {
     availableSkills,
     skillsRootDir,
     refreshSkills,
-    selectedSkillNames,
     activeAgentPrompt,
     ensureTunnelToolTab,
     ensureSshTunnelToolTab,
@@ -1864,6 +1858,7 @@ export function ChatPage(props: ChatPageProps) {
           onNewConversationForProject={handleNewConversationForProject}
           onBrowseProjectInFileTree={handleBrowseWorkspaceProjectInFileTree}
           onBrowseProjectInSystemFileManager={handleBrowseWorkspaceProjectInSystemFileManager}
+          onConfigureProjectResources={setResourceSettingsProject}
           onStartRenamingProject={handleStartRenamingWorkspaceProject}
           onProjectRenameDraftChange={setProjectRenameDraft}
           onCommitProjectRename={handleCommitWorkspaceProjectRename}
@@ -1885,6 +1880,7 @@ export function ChatPage(props: ChatPageProps) {
             handleSelectConversation(id);
           }}
           onConversationDeleted={handleConversationDeleted}
+          onConversationCwdChanged={handleConversationCwdChanged}
           canShareConversations={canShareHistory}
           sharedConversationCount={sharedHistoryItems.length}
           onShareConversation={handleOpenShareModal}
@@ -2098,7 +2094,7 @@ export function ChatPage(props: ChatPageProps) {
                   approvalBar={approvalBar}
                 />
                 {isFileDropActive ? (
-                  <ChatFileDropOverlay
+                  <FileDropOverlay
                     canDropUpload={canDropUpload}
                     title={fileDropTitle}
                     description={fileDropDescription}
@@ -2110,11 +2106,41 @@ export function ChatPage(props: ChatPageProps) {
           }}
           workspaceOverlays={
             <WorkspaceOverlayHost
-              overlays={workspaceOverlays}
+              locale={settings.locale}
               theme={effectiveTheme}
+              workspaceEditorMounted={workspaceOverlays.workspaceEditorMounted}
+              workspaceEditorOpenRequest={workspaceOverlays.workspaceEditorOpenRequest}
+              workspaceEditorCloseRequestId={workspaceOverlays.workspaceEditorCloseRequestId}
+              workspaceEditorOpen={workspaceOverlays.workspaceEditorOpen}
+              workspaceEditorCleanupPending={workspaceOverlays.workspaceEditorCleanupPending}
+              onWorkspaceEditorPreviewFile={workspaceOverlays.openWorkspaceFilePreview}
+              onWorkspaceEditorInsertCodeMention={handleInsertCodeMention}
+              onWorkspaceEditorHide={() => workspaceOverlays.setWorkspaceEditorOpen(false)}
+              onWorkspaceEditorClose={() => {
+                workspaceOverlays.setWorkspaceEditorOpen(false);
+                workspaceOverlays.setWorkspaceEditorMounted(false);
+                workspaceOverlays.setWorkspaceEditorCleanupPending(false);
+                workspaceOverlays.setWorkspaceEditorOpenRequest(null);
+                workspaceOverlays.setWorkspaceEditorCloseRequestId(0);
+              }}
+              workspaceFilePreviewMounted={workspaceOverlays.workspaceFilePreviewMounted}
+              workspaceFilePreviewOpenRequest={workspaceOverlays.workspaceFilePreviewOpenRequest}
+              workspaceFilePreviewOpen={workspaceOverlays.workspaceFilePreviewOpen}
+              onWorkspaceFilePreviewOpenEditor={workspaceOverlays.openWorkspaceEditorFile}
+              onWorkspaceFilePreviewRequestClose={
+                workspaceOverlays.requestWorkspaceFilePreviewClose
+              }
+              onWorkspaceFilePreviewClose={workspaceOverlays.handleWorkspaceFilePreviewClosed}
+              workspaceSshTerminalMounted={workspaceOverlays.workspaceSshTerminalMounted}
+              workspaceSshTerminalOpenRequest={workspaceOverlays.workspaceSshTerminalOpenRequest}
+              workspaceSshTerminalOpen={workspaceOverlays.workspaceSshTerminalOpen}
               terminalProjectPathKey={terminalProjectPathKey}
+              terminalClient={tauriTerminalClient}
+              sftpClient={tauriSftpClient}
               terminalSessions={terminalSessions}
-              onInsertCodeMention={handleInsertCodeMention}
+              onWorkspaceSshTerminalHide={() =>
+                workspaceOverlays.setWorkspaceSshTerminalOpen(false)
+              }
             />
           }
         />
@@ -2156,6 +2182,20 @@ export function ChatPage(props: ChatPageProps) {
         onInsertCommitMention={handleRightDockInsertCommitMention}
         onInsertGitFileMention={handleRightDockInsertGitFileMention}
       />
+      {resourceSettingsProject ? (
+        <WorkspaceResourceSettingsDrawer
+          project={resourceSettingsProject}
+          settings={settings}
+          skills={availableSkills}
+          onClose={() => setResourceSettingsProject(null)}
+          onSave={(draft) => {
+            setSettings((prev) =>
+              updateWorkspaceResourceSettings(prev, resourceSettingsProject.path, draft),
+            );
+            setResourceSettingsProject(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

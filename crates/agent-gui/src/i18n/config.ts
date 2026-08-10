@@ -1,3 +1,5 @@
+import { TASK_TRANSLATIONS } from "@liveagent/ui/i18n/taskTranslations";
+
 /**
  * Simple i18n translation layer
  * Maps keys to localized strings for zh-CN and en-US
@@ -11,6 +13,7 @@ export const SUPPORTED_LOCALES = ["zh-CN", "en-US"] as const satisfies readonly 
 
 export const translations: Record<Locale, Record<string, string>> = {
   "zh-CN": {
+    ...TASK_TRANSLATIONS["zh-CN"],
     /* ── App / Global ── */
     "app.errorBoundaryCopy": "复制错误信息",
     "app.errorBoundaryDesc": "界面渲染发生错误，正在进行的任务不受影响。请重新加载页面。",
@@ -83,6 +86,17 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.workspaceCloneWebDisabled": "请先在远程设置中启用网页 Git 操作。",
     "chat.workspaceNewConversation": "新对话",
     "chat.workspaceMore": "更多",
+    "chat.workspaceResources": "配置 Skills 与 MCP",
+    "chat.workspaceResourcesTitle": "工作空间资源设置",
+    "chat.workspaceResourcesModeInherit": "跟随全局",
+    "chat.workspaceResourcesModeCustom": "自定义",
+    "chat.workspaceResourcesModeOff": "全部关闭",
+    "chat.workspaceResourcesInheritHint": "使用 Skill Hub 与 MCP Hub 中的默认启用设置。",
+    "chat.workspaceResourcesCustomHint": "选择仅向此工作空间中的 Agent 暴露的 Skills 与 MCP。",
+    "chat.workspaceResourcesOffHint": "此工作空间不会向 Agent 暴露 Skills 或 MCP。",
+    "chat.workspaceResourcesSearch": "搜索名称或描述",
+    "chat.workspaceResourcesSelected": "已选择 {skills} 个 Skills、{mcp} 个 MCP",
+    "chat.workspaceResourcesMissingSkill": "此 Skill 尚未安装在当前设备上。",
     "chat.workspacePin": "置顶工作空间",
     "chat.workspaceUnpin": "取消置顶",
     "chat.workspaceRename": "修改标题",
@@ -114,6 +128,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.conversationPin": "置顶对话",
     "chat.conversationUnpin": "取消置顶",
     "chat.conversationRename": "修改标题",
+    "chat.conversationMoveToWorkspace": "移动到工作空间",
     "chat.conversationShare": "分享",
     "chat.conversationDelete": "删除对话",
     "chat.conversationDeleteConfirm": "删除「{title}」？",
@@ -137,6 +152,8 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.history.renameFailed": "修改历史对话标题失败",
     "chat.history.renameBlockedRunning": "后台任务仍在运行，暂时不能修改该对话标题。",
     "chat.history.pinFailed": "更新历史对话置顶状态失败",
+    "chat.history.moveFailed": "移动历史对话工作空间失败",
+    "chat.history.moveBlockedRunning": "后台任务仍在运行，暂时不能移动该对话。",
     "chat.history.deleteFailed": "删除历史对话失败",
     "chat.history.deleteBlockedRunning": "后台任务仍在运行，暂时不能删除该对话。",
     "chat.history.openFailed": "读取历史对话失败",
@@ -290,22 +307,12 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.tool.running": "运行中",
     "chat.tool.failed": "失败",
     "chat.tool.success": "已完成",
-    "chat.tool.aborted": "已中止",
     "chat.tool.waiting": "等待",
     "chat.tool.command": "命令",
     "chat.tool.args": "参数",
     "chat.tool.return": "返回",
     "chat.tool.error": "(错误)",
     "chat.tool.viewReturn": "查看返回内容",
-    "chat.tool.todoTitle": "任务清单",
-    "chat.tool.todoEmpty": "暂无任务",
-    "chat.taskProgress.title": "任务进度",
-    "chat.taskProgress.step": "第 {current} / {total} 步",
-    "chat.taskProgress.running": "运行中",
-    "chat.taskProgress.pending": "待处理",
-    "chat.taskProgress.paused": "已暂停或中断",
-    "chat.taskProgress.completed": "全部完成",
-    "chat.taskProgress.completedCount": "已完成",
     "chat.tool.askUserTitle": "向你提问",
     "chat.askUser.preparing": "正在准备问题",
     "chat.askUser.waiting": "等待你的选择",
@@ -1393,10 +1400,6 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.builtinTool.send_message.desc": "与子代理之间收发消息",
     "settings.builtinTool.send_message.detail":
       "在主对话与子代理之间传递消息，用于协调多代理协作。需要子代理运行时；仅在对话场景注册。",
-    "settings.builtinTool.todo_write.name": "任务清单",
-    "settings.builtinTool.todo_write.desc": "创建与更新当前会话的任务清单",
-    "settings.builtinTool.todo_write.detail":
-      "让模型在处理多步骤任务时列出任务清单并逐项推进状态，进度以清单卡片实时展示在对话中。清单仅保存在当前对话内，不跨对话保留；仅在对话场景注册。",
     "settings.builtinTool.ask_user_question.name": "用户提问",
     "settings.builtinTool.ask_user_question.desc": "以选项卡片向你提问并等待选择",
     "settings.builtinTool.ask_user_question.detail":
@@ -2282,6 +2285,7 @@ export const translations: Record<Locale, Record<string, string>> = {
   },
 
   "en-US": {
+    ...TASK_TRANSLATIONS["en-US"],
     /* ── App / Global ── */
     "app.errorBoundaryCopy": "Copy error details",
     "app.errorBoundaryDesc":
@@ -2358,6 +2362,20 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.workspaceCloneWebDisabled": "Enable Web Git in Remote settings before cloning.",
     "chat.workspaceNewConversation": "New conversation",
     "chat.workspaceMore": "More",
+    "chat.workspaceResources": "Configure Skills & MCP",
+    "chat.workspaceResourcesTitle": "Workspace resources",
+    "chat.workspaceResourcesModeInherit": "Use defaults",
+    "chat.workspaceResourcesModeCustom": "Custom",
+    "chat.workspaceResourcesModeOff": "Disable all",
+    "chat.workspaceResourcesInheritHint":
+      "Uses the default enabled resources from Skill Hub and MCP Hub.",
+    "chat.workspaceResourcesCustomHint":
+      "Choose the Skills and MCP servers exposed to agents in this workspace.",
+    "chat.workspaceResourcesOffHint":
+      "No Skills or MCP servers are exposed to agents in this workspace.",
+    "chat.workspaceResourcesSearch": "Search names or descriptions",
+    "chat.workspaceResourcesSelected": "{skills} Skills and {mcp} MCP servers selected",
+    "chat.workspaceResourcesMissingSkill": "This Skill is not installed on this device.",
     "chat.workspacePin": "Pin workspace",
     "chat.workspaceUnpin": "Unpin",
     "chat.workspaceRename": "Rename",
@@ -2394,6 +2412,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.conversationPin": "Pin conversation",
     "chat.conversationUnpin": "Unpin",
     "chat.conversationRename": "Rename",
+    "chat.conversationMoveToWorkspace": "Move to workspace",
     "chat.conversationShare": "Share",
     "chat.conversationDelete": "Delete conversation",
     "chat.conversationDeleteConfirm": 'Delete "{title}"?',
@@ -2420,6 +2439,9 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.history.renameBlockedRunning":
       "A background task is still running; the title cannot be changed yet.",
     "chat.history.pinFailed": "Failed to update pin state",
+    "chat.history.moveFailed": "Failed to move conversation to workspace",
+    "chat.history.moveBlockedRunning":
+      "A background task is still running; the conversation cannot be moved yet.",
     "chat.history.deleteFailed": "Failed to delete conversation",
     "chat.history.deleteBlockedRunning":
       "A background task is still running; the conversation cannot be deleted yet.",
@@ -2578,22 +2600,12 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.tool.running": "Running",
     "chat.tool.failed": "Failed",
     "chat.tool.success": "Completed",
-    "chat.tool.aborted": "Aborted",
     "chat.tool.waiting": "Waiting",
     "chat.tool.command": "Command",
     "chat.tool.args": "Args",
     "chat.tool.return": "Return",
     "chat.tool.error": "(Error)",
     "chat.tool.viewReturn": "View Return",
-    "chat.tool.todoTitle": "Task list",
-    "chat.tool.todoEmpty": "No tasks yet",
-    "chat.taskProgress.title": "Task progress",
-    "chat.taskProgress.step": "Step {current} of {total}",
-    "chat.taskProgress.running": "Running",
-    "chat.taskProgress.pending": "Pending",
-    "chat.taskProgress.paused": "Paused or interrupted",
-    "chat.taskProgress.completed": "All completed",
-    "chat.taskProgress.completedCount": "completed",
     "chat.tool.askUserTitle": "Question for you",
     "chat.askUser.preparing": "Preparing questions",
     "chat.askUser.waiting": "Waiting for your choice",
@@ -3726,10 +3738,6 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.builtinTool.send_message.desc": "Exchange messages with subagents",
     "settings.builtinTool.send_message.detail":
       "Relays messages between the main conversation and subagents to coordinate multi-agent work. Requires the subagent runtime; chat sessions only.",
-    "settings.builtinTool.todo_write.name": "Task List",
-    "settings.builtinTool.todo_write.desc": "Create and update a task list for the current session",
-    "settings.builtinTool.todo_write.detail":
-      "Lets the model plan multi-step work as a task list and advance each item's status as it goes, shown as a live checklist card in the conversation. The list lives only in the current conversation and is not carried across conversations; chat sessions only.",
     "settings.builtinTool.ask_user_question.name": "Ask User",
     "settings.builtinTool.ask_user_question.desc":
       "Ask you multiple-choice questions in a card and wait for your selections",

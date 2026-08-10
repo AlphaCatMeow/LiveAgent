@@ -24,8 +24,10 @@ import {
   appendMessagesToConversation,
   buildRequestContext,
   type ConversationViewState,
+  clearTaskListState,
   findHistoryMessageRefByMessageId,
   type HistoryMessageRef,
+  setTaskListState,
 } from "../../../lib/chat/conversation/conversationState";
 import {
   createConversationHookLifecycle,
@@ -54,9 +56,12 @@ import {
   applyMcpOpsToAppSettings,
   type ChatRuntimeControls,
   type ExecutionMode,
+  filterMcpSettingsForWorkspace,
   getSshProjectHostIds,
   isAgentDevMode,
   isAgentExecutionMode,
+  removeWorkspaceResourceReferences,
+  resolveWorkspaceResources,
   type SelectedModel,
   updateMemorySettings,
   updateSkills,
@@ -68,6 +73,7 @@ import {
   type SubagentStoreManager,
 } from "../../../lib/subagents";
 import type { SkillAccessPolicy } from "../../../lib/tools/skillAccessPolicy";
+import type { TaskStateStore } from "../../../lib/tools/taskTools";
 import { appendManagedSkillSelections, asErrorMessage } from "../chatPageUtils";
 import {
   buildTextFromComposerDraft,
@@ -85,7 +91,11 @@ import type { PersistConversationParams } from "../history/useConversationHistor
 import type { useChatPageRuntimeStore } from "../hooks/useChatPageRuntimeStore";
 import type { useLiveTranscriptController } from "../hooks/useLiveTranscriptController";
 import type { createChatRuntimeHost } from "./ChatRuntimeHost";
-import { buildErrorAssistantMessage, formatHookWarningMessage } from "./chatPageRuntime";
+import {
+  buildErrorAssistantMessage,
+  formatHookWarningMessage,
+  resolveEffectiveConversationWorkdir,
+} from "./chatPageRuntime";
 import {
   finalizeChatRunInOrder,
   releaseChatRunUi,
@@ -172,7 +182,6 @@ type UseSendChatTurnParams = {
   availableSkills: SkillSummary[];
   skillsRootDir: string;
   refreshSkills: () => Promise<{ skills: SkillSummary[]; rootDir: string } | null>;
-  selectedSkillNames: string[];
   activeAgentPrompt: string;
   ensureTunnelToolTab: (projectPathKey?: string) => void;
   ensureSshTunnelToolTab: (projectPathKey?: string) => void;
@@ -247,7 +256,6 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     availableSkills,
     skillsRootDir,
     refreshSkills,
-    selectedSkillNames,
     activeAgentPrompt,
     ensureTunnelToolTab,
     ensureSshTunnelToolTab,
@@ -317,18 +325,25 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       gatewayBridgeRequest?.executionModeOverride ??
       settings.system.executionMode;
     const effectiveIsAgentMode = isAgentExecutionMode(effectiveExecutionMode);
-    const effectiveWorkdir = (
-      overrides?.workdirOverride ??
-      gatewayBridgeRequest?.workdirOverride ??
-      (effectiveIsAgentMode ? (runtimeEntry?.workdir ?? settings.system.workdir) : "")
-    ).trim();
+    const effectiveWorkdir = resolveEffectiveConversationWorkdir({
+      isAgentMode: effectiveIsAgentMode,
+      workdirOverride: overrides?.workdirOverride,
+      gatewayWorkdirOverride: gatewayBridgeRequest?.workdirOverride,
+      persistedWorkdir: sidebarStore.peek(conversationId)?.cwd,
+      runtimeWorkdir: runtimeEntry?.workdir,
+      globalWorkdir: settings.system.workdir,
+    });
     const effectiveProjectPathKey = workspaceProjectPathKey(effectiveWorkdir);
     const effectiveAssociatedSshHostIds = getSshProjectHostIds(
       settings.ssh,
       effectiveProjectPathKey,
     );
     const effectiveIsAgentDevExecutionMode = isAgentDevMode(effectiveExecutionMode);
-    const effectiveSkillsEnabled = settings.skills.enabled && effectiveIsAgentMode;
+    const workspaceResources = resolveWorkspaceResources(settings, effectiveWorkdir);
+    const effectiveSkillsEnabled = workspaceResources.skillsEnabled && effectiveIsAgentMode;
+    const selectedSkillNames = effectiveSkillsEnabled ? workspaceResources.skillNames : [];
+    const getEffectiveMcpSettings = () =>
+      filterMcpSettingsForWorkspace(getMcpSettings(), workspaceResources);
     const hasRemoteGatewayTarget =
       settings.remote.enabled &&
       settings.remote.gatewayUrl.trim() !== "" &&
@@ -599,7 +614,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       providerId,
       model,
     });
-    const baseConversationState = runtimeEntry.state;
+    const baseConversationState = clearTaskListState(runtimeEntry.state);
     const isFirstTurn = baseConversationState.meta.totalMessageCount === 0;
     const existingHistoryItem =
       sidebarStore.peek(conversationId) ??
@@ -911,10 +926,14 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
 
     if (overrides?.editResendBaseMessageRef) {
       try {
-        nextConversationState = await replaceConversationAtMessage(
-          conversationId,
-          overrides.editResendBaseMessageRef,
-          pendingUserMessage,
+        // 重发同样是新用户消息开启新 Run:替换回来的历史 meta 可能带着上一
+        // Run 持久化的 taskList,必须与常规发送一样在 Run 边界清除。
+        nextConversationState = clearTaskListState(
+          await replaceConversationAtMessage(
+            conversationId,
+            overrides.editResendBaseMessageRef,
+            pendingUserMessage,
+          ),
         );
         initialUserTurnPersisted = true;
         const keepParentToolCallIds =
@@ -1234,7 +1253,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       let rootDir = skillsRootDir;
       let byName = new Map(skillsList.map((s) => [s.name, s]));
       let missing = selectedSkillNames.filter((n) => !byName.has(n));
-      if (missing.length > 0) {
+      if (missing.length > 0 && workspaceResources.mode !== "custom") {
         const fresh = await refreshSkills();
         if (await finishRequestedStopBeforeRuntime()) {
           return true;
@@ -1260,7 +1279,9 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
         return true;
       }
 
-      const selectedSkills = selectedSkillNames.map((n) => byName.get(n)!).filter(Boolean);
+      const selectedSkills = selectedSkillNames
+        .map((name) => byName.get(name))
+        .filter((skill): skill is SkillSummary => Boolean(skill));
       const allowBuiltinSkillManagement = selectedSkills.some(
         (skill) => skill.name === "skills-creator" || skill.name === "skills-installer",
       );
@@ -1418,6 +1439,33 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       resetLiveTranscript(transcriptStore);
     }
 
+    // Run 级任务清单存储:先落盘、成功后才应用到运行时状态,失败时状态从未
+    // 变更(无需回滚)。持久化走非终态通道——中途任务写盘失败只属于本次工具
+    // 调用(模型收到错误可重试),绝不能点亮 terminalHistoryPersistFailed 把
+    // 已成功收尾的 run 误报为 history_persist_failed。
+    const taskStateStore: TaskStateStore = {
+      runId: gatewayBridgeRequestId,
+      getState: () => nextConversationState.meta.taskList,
+      commitState: async (taskList) => {
+        const persisted = await persistConversationWithHistorySync({
+          conversationId,
+          sessionId,
+          providerId,
+          model,
+          selectedModel,
+          cwd: conversationCwd,
+          state: setTaskListState(nextConversationState, taskList),
+          fallbackTitle,
+          createdAt,
+          titlePromise,
+        }).catch(() => false);
+        if (!persisted) {
+          throw new Error("Failed to persist task state.");
+        }
+        applyConversationState(setTaskListState(nextConversationState, taskList));
+      },
+    };
+
     try {
       if (effectiveIsAgentMode) {
         await chatRuntimeHost.runTurn({
@@ -1438,13 +1486,29 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
             skillsRootDir: skillsRootDirForTools,
             skillAccessPolicy: skillAccessPolicyForTools,
             onManagedSkillsChanged: (change) => {
-              enableManagedSkills(change.names);
+              if (change.action !== "delete") {
+                enableManagedSkills(change.names);
+                return;
+              }
+              setSettings((prev) =>
+                removeWorkspaceResourceReferences(
+                  updateSkills(prev, {
+                    selected: prev.skills.selected.filter((name) => !change.names.includes(name)),
+                  }),
+                  { skillNames: change.names },
+                ),
+              );
             },
             agentTemplates: settings.agents,
-            getMcpSettings,
+            getMcpSettings: getEffectiveMcpSettings,
             getToolPolicies,
             applyMcpOps: (ops) => {
-              setSettings((prev) => applyMcpOpsToAppSettings(prev, ops));
+              const removedIds = ops.filter((op) => op.kind === "remove").map((op) => op.serverId);
+              setSettings((prev) =>
+                removeWorkspaceResourceReferences(applyMcpOpsToAppSettings(prev, ops), {
+                  mcpServerIds: removedIds,
+                }),
+              );
             },
             remoteWebTunnelsEnabled: settings.remote.enableWebTunnels,
             tunnelPublicBaseUrl: settings.remote.gatewayUrl.trim(),
@@ -1463,6 +1527,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
               }
             },
             sessionId,
+            taskStateStore,
             conversationId,
             conversationCwd,
             fallbackTitle,

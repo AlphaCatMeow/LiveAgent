@@ -8,7 +8,7 @@ import { HistoryShareModal } from "@liveagent/ui/components/chat/HistoryShareMod
 import type { MentionComposerHandle } from "@liveagent/ui/components/chat/MentionComposer";
 import { NotifyToast } from "@liveagent/ui/components/chat/NotifyToast";
 import { SharedHistoryManagerModal } from "@liveagent/ui/components/chat/SharedHistoryManagerModal";
-import { TaskProgressIndicator } from "@liveagent/ui/components/chat/TaskProgressIndicator";
+import { TaskProgressBar } from "@liveagent/ui/components/chat/TaskProgressBar";
 import { ToolApprovalBar } from "@liveagent/ui/components/chat/ToolApprovalBar";
 import { WorkspaceCloneModal } from "@liveagent/ui/components/chat/WorkspaceCloneModal";
 import { WorkspaceResourceSettingsDrawer } from "@liveagent/ui/components/chat/WorkspaceResourceSettingsDrawer";
@@ -179,7 +179,6 @@ function CurrentTaskProgress(props: {
   isConversationRunning: boolean;
 }) {
   const { historyItems, liveTranscriptStore, isConversationRunning } = props;
-  const { t } = useLocale();
   const getLiveRoundsSnapshot = useCallback(
     () => liveTranscriptStore.getSnapshot().liveRounds,
     [liveTranscriptStore],
@@ -193,31 +192,7 @@ function CurrentTaskProgress(props: {
     () => selectLatestTaskProgress(historyItems, liveRounds),
     [historyItems, liveRounds],
   );
-  const labels = useMemo(() => {
-    if (!snapshot) return null;
-    return {
-      title: t("chat.taskProgress.title"),
-      step: t("chat.taskProgress.step")
-        .replace("{current}", String(snapshot.currentStep))
-        .replace("{total}", String(snapshot.totalCount)),
-      completedCount: `${snapshot.completedCount}/${snapshot.totalCount} ${t(
-        "chat.taskProgress.completedCount",
-      )}`,
-      running: t("chat.taskProgress.running"),
-      pending: t("chat.taskProgress.pending"),
-      paused: t("chat.taskProgress.paused"),
-      completed: t("chat.taskProgress.completed"),
-    };
-  }, [snapshot, t]);
-
-  if (!snapshot || !labels) return null;
-  return (
-    <TaskProgressIndicator
-      snapshot={snapshot}
-      isConversationRunning={isConversationRunning}
-      labels={labels}
-    />
-  );
+  return <TaskProgressBar snapshot={snapshot} isConversationRunning={isConversationRunning} />;
 }
 
 export function ChatPage(props: ChatPageProps) {

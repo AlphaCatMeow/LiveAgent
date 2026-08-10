@@ -1,3 +1,5 @@
+import { TASK_TRANSLATIONS } from "@liveagent/ui/i18n/taskTranslations";
+
 /**
  * Simple i18n translation layer
  * Maps keys to localized strings for zh-CN and en-US
@@ -11,6 +13,7 @@ export const SUPPORTED_LOCALES = ["zh-CN", "en-US"] as const satisfies readonly 
 
 export const translations: Record<Locale, Record<string, string>> = {
   "zh-CN": {
+    ...TASK_TRANSLATIONS["zh-CN"],
     /* ── App / Global ── */
     "app.errorBoundaryCopy": "复制错误信息",
     "app.errorBoundaryDesc": "界面渲染发生错误，正在进行的任务不受影响。请重新加载页面。",
@@ -310,13 +313,6 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.tool.return": "返回",
     "chat.tool.error": "(错误)",
     "chat.tool.viewReturn": "查看返回内容",
-    "chat.taskProgress.title": "任务进度",
-    "chat.taskProgress.step": "第 {current} / {total} 步",
-    "chat.taskProgress.running": "运行中",
-    "chat.taskProgress.pending": "待处理",
-    "chat.taskProgress.paused": "已暂停或中断",
-    "chat.taskProgress.completed": "全部完成",
-    "chat.taskProgress.completedCount": "已完成",
     "chat.tool.askUserTitle": "向你提问",
     "chat.askUser.preparing": "正在准备问题",
     "chat.askUser.waiting": "等待你的选择",
@@ -1404,17 +1400,6 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.builtinTool.send_message.desc": "与子代理之间收发消息",
     "settings.builtinTool.send_message.detail":
       "在主对话与子代理之间传递消息，用于协调多代理协作。需要子代理运行时；仅在对话场景注册。",
-    "settings.builtinTool.task_create.name": "创建任务",
-    "settings.builtinTool.task_create.desc": "向当前运行添加一个任务",
-    "settings.builtinTool.task_create.detail": "创建带有稳定数字 ID 的持久任务；仅在对话场景注册。",
-    "settings.builtinTool.task_update.name": "更新任务",
-    "settings.builtinTool.task_update.desc": "按稳定 ID 更新一个任务",
-    "settings.builtinTool.task_update.detail":
-      "更新任务状态或内容，不替换整个任务清单；仅在对话场景注册。",
-    "settings.builtinTool.task_list.name": "查看任务",
-    "settings.builtinTool.task_list.desc": "读取当前运行的完整任务清单",
-    "settings.builtinTool.task_list.detail":
-      "返回当前运行的权威任务快照与稳定 ID；仅在对话场景注册。",
     "settings.builtinTool.ask_user_question.name": "用户提问",
     "settings.builtinTool.ask_user_question.desc": "以选项卡片向你提问并等待选择",
     "settings.builtinTool.ask_user_question.detail":
@@ -2300,6 +2285,7 @@ export const translations: Record<Locale, Record<string, string>> = {
   },
 
   "en-US": {
+    ...TASK_TRANSLATIONS["en-US"],
     /* ── App / Global ── */
     "app.errorBoundaryCopy": "Copy error details",
     "app.errorBoundaryDesc":
@@ -2620,13 +2606,6 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.tool.return": "Return",
     "chat.tool.error": "(Error)",
     "chat.tool.viewReturn": "View Return",
-    "chat.taskProgress.title": "Task progress",
-    "chat.taskProgress.step": "Step {current} of {total}",
-    "chat.taskProgress.running": "Running",
-    "chat.taskProgress.pending": "Pending",
-    "chat.taskProgress.paused": "Paused or interrupted",
-    "chat.taskProgress.completed": "All completed",
-    "chat.taskProgress.completedCount": "completed",
     "chat.tool.askUserTitle": "Question for you",
     "chat.askUser.preparing": "Preparing questions",
     "chat.askUser.waiting": "Waiting for your choice",
@@ -3759,18 +3738,6 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.builtinTool.send_message.desc": "Exchange messages with subagents",
     "settings.builtinTool.send_message.detail":
       "Relays messages between the main conversation and subagents to coordinate multi-agent work. Requires the subagent runtime; chat sessions only.",
-    "settings.builtinTool.task_create.name": "Create Task",
-    "settings.builtinTool.task_create.desc": "Add one task to the current run",
-    "settings.builtinTool.task_create.detail":
-      "Create a durable task with a stable numeric ID; chat sessions only.",
-    "settings.builtinTool.task_update.name": "Update Task",
-    "settings.builtinTool.task_update.desc": "Update one task by stable ID",
-    "settings.builtinTool.task_update.detail":
-      "Update task status or content without replacing the task list; chat sessions only.",
-    "settings.builtinTool.task_list.name": "List Tasks",
-    "settings.builtinTool.task_list.desc": "Read the current run's complete task list",
-    "settings.builtinTool.task_list.detail":
-      "Return the authoritative task snapshot and stable IDs for the current run; chat sessions only.",
     "settings.builtinTool.ask_user_question.name": "Ask User",
     "settings.builtinTool.ask_user_question.desc":
       "Ask you multiple-choice questions in a card and wait for your selections",

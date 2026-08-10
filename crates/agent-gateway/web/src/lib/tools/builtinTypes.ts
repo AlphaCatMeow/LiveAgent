@@ -1,9 +1,17 @@
+import type { TaskListResultDetails } from "@liveagent/ui/contracts/task";
 import type {
   SubagentBatchDetails,
   SubagentCardDetails,
   SubagentMessageDetails,
 } from "@liveagent/ui/lib/subagents/protocol";
 import type { Tool, ToolCall, ToolResultMessage } from "../agentTypes";
+
+export type {
+  TaskItem,
+  TaskListResultDetails,
+  TaskListState,
+  TaskStatus,
+} from "@liveagent/ui/contracts/task";
 
 export type BuiltinToolGroupId = "fs" | "shell" | "skill" | "system" | "mcp" | "subagent";
 
@@ -343,32 +351,6 @@ export type GrepResultDetails = {
   hasMore: boolean;
   matches: GrepResultMatch[];
   files: GrepResultFileSummary[];
-};
-
-export type TaskStatus = "pending" | "in_progress" | "completed";
-
-export type TaskItem = {
-  id: string;
-  subject: string;
-  description: string;
-  activeForm: string;
-  status: TaskStatus;
-};
-
-export type TaskListState = {
-  runId: string;
-  revision: number;
-  nextTaskId: number;
-  tasks: TaskItem[];
-};
-
-export type TaskListResultDetails = {
-  kind: "task_list";
-  action: "created" | "updated" | "listed";
-  runId: string;
-  revision: number;
-  tasks: TaskItem[];
-  taskId?: string;
 };
 
 export type BuiltinToolResultDetails =

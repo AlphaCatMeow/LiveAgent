@@ -1,4 +1,4 @@
-import type { TaskItem } from "@liveagent/app/lib/tools/builtinTypes";
+import { isTaskToolName, type TaskItem } from "../../contracts/task";
 
 export type TaskProgressState = "pending" | "in_progress" | "completed";
 
@@ -17,8 +17,6 @@ type TaskToolBlock = RecordLike & {
   item: RecordLike & { toolCall: RecordLike };
 };
 
-const TASK_TOOL_NAMES = new Set(["TaskCreate", "TaskUpdate", "TaskList"]);
-
 function isRecord(value: unknown): value is RecordLike {
   return Boolean(value) && typeof value === "object";
 }
@@ -26,9 +24,7 @@ function isRecord(value: unknown): value is RecordLike {
 export function isTaskToolBlock(block: unknown): block is TaskToolBlock {
   if (!isRecord(block) || block.kind !== "tool" || !isRecord(block.item)) return false;
   const toolCall = block.item.toolCall;
-  return (
-    isRecord(toolCall) && typeof toolCall.name === "string" && TASK_TOOL_NAMES.has(toolCall.name)
-  );
+  return isRecord(toolCall) && isTaskToolName(toolCall.name);
 }
 
 function readTaskItems(value: unknown): TaskItem[] | null {

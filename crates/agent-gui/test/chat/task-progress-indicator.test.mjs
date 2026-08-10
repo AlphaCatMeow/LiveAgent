@@ -6,6 +6,15 @@ import { createTsModuleLoader } from "../helpers/load-ts-module.mjs";
 
 const iconsPath = fileURLToPath(new URL("../../src/components/icons/index.ts", import.meta.url));
 const utilsPath = fileURLToPath(new URL("../../src/lib/shared/utils.ts", import.meta.url));
+const localeContextPath = fileURLToPath(
+  new URL("../../../agent-ui/src/i18n/LocaleContext.tsx", import.meta.url),
+);
+const taskProgressIndicatorPath = fileURLToPath(
+  new URL(
+    "../../../agent-ui/src/components/chat/TaskProgressIndicator.tsx",
+    import.meta.url,
+  ),
+);
 
 const labels = {
   title: "Task progress",
@@ -375,4 +384,34 @@ test("shows pending, paused, and completed states without auto-dismissing comple
   });
   assert.match(treeText(indicator.render({ snapshot: completed })), /All completed/);
   assert.match(treeText(indicator.render({ snapshot: completed })), /All completed/);
+});
+
+test("shared task progress bar localizes labels and handles an empty snapshot", () => {
+  const indicator = (props) => ({ type: "TaskProgressIndicator", props });
+  const translations = {
+    "chat.taskProgress.title": "Task progress",
+    "chat.taskProgress.step": "Step {current} of {total}",
+    "chat.taskProgress.completedCount": "completed",
+    "chat.taskProgress.running": "Running",
+    "chat.taskProgress.pending": "Pending",
+    "chat.taskProgress.paused": "Paused",
+    "chat.taskProgress.completed": "All completed",
+  };
+  const loader = createTsModuleLoader({
+    mocks: {
+      [localeContextPath]: {
+        useLocale: () => ({ t: (key) => translations[key] ?? key }),
+      },
+      [taskProgressIndicatorPath]: { TaskProgressIndicator: indicator },
+    },
+  });
+  const { TaskProgressBar } = loader.loadModule(
+    "@liveagent/ui/components/chat/TaskProgressBar.tsx",
+  );
+  const snapshot = createSnapshot();
+  const tree = TaskProgressBar({ snapshot, isConversationRunning: true });
+
+  assert.equal(tree.type, indicator);
+  assert.deepEqual(tree.props.labels, labels);
+  assert.equal(TaskProgressBar({ snapshot: null, isConversationRunning: false }), null);
 });

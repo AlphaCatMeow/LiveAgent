@@ -50,7 +50,7 @@ export function SkillsContentLoadingState(props: { title: string; description: s
         <div className="hub-frost-track mt-3.5" />
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
         {[1, 2, 3, 4, 5, 6].map((item) => (
           <div key={item} className="hub-frost-skeleton skill-card-enter p-3.5">
             <div className="flex items-center gap-3">

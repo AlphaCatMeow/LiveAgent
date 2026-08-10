@@ -37,7 +37,13 @@ export function ConfirmActionPopover(props: {
       <Popover.Trigger render={children(() => {}) as React.ReactElement} />
       <Popover.Portal>
         <Popover.Positioner side={side} align={align} sideOffset={6} className="z-[9999]">
-          <Popover.Popup className="confirm-action-popover-popup w-64 rounded-xl border border-border bg-popover shadow-lg outline-none">
+          <Popover.Popup
+            className="confirm-action-popover-popup w-64 rounded-xl border border-border bg-popover shadow-lg outline-none"
+            onPointerDown={(event) => event.stopPropagation()}
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+          >
             <div className="p-3">
               <div className="flex items-start gap-2.5">
                 <div
@@ -58,7 +64,14 @@ export function ConfirmActionPopover(props: {
               </div>
               <div className="mt-3 flex justify-end gap-2">
                 <Popover.Close
-                  render={<Button variant="outline" size="sm" className="h-7 px-2.5 text-xs" />}
+                  render={
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2.5 text-xs"
+                      onClick={(event) => event.stopPropagation()}
+                    />
+                  }
                 >
                   {t("settings.cancel")}
                 </Popover.Close>
@@ -68,7 +81,10 @@ export function ConfirmActionPopover(props: {
                       variant={tone === "destructive" ? "destructive" : "default"}
                       size="sm"
                       className="h-7 px-2.5 text-xs"
-                      onClick={onConfirm}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onConfirm();
+                      }}
                     />
                   }
                 >

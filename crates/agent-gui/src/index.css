@@ -929,6 +929,80 @@
     @apply my-5 border-border/45;
   }
 
+  /* Long-form files and documentation use a calmer, denser reading rhythm
+   * than conversational Markdown. This profile is shared by Skill and
+   * workspace file previews; chat typography remains unchanged. */
+  .document-markdown {
+    @apply text-[calc(13px*var(--zone-font-scale,1))] leading-6 text-foreground/85;
+  }
+  .document-markdown p {
+    @apply my-2.5 text-[calc(13px*var(--zone-font-scale,1))] leading-6 text-foreground/85;
+  }
+  .document-markdown strong,
+  .document-markdown [data-streamdown="strong"] {
+    @apply font-semibold text-foreground;
+  }
+  .document-markdown [data-streamdown="heading-1"] {
+    @apply mb-3 mt-7 text-xl font-semibold leading-7 tracking-tight text-foreground;
+  }
+  .document-markdown [data-streamdown="heading-2"] {
+    @apply mb-2.5 mt-7 text-lg font-semibold leading-7 tracking-tight text-foreground;
+  }
+  .document-markdown [data-streamdown="heading-3"] {
+    @apply mb-2 mt-6 text-base font-semibold leading-6 tracking-tight text-foreground;
+  }
+  .document-markdown [data-streamdown="heading-4"],
+  .document-markdown [data-streamdown="heading-5"] {
+    @apply mb-1.5 mt-5 text-sm font-semibold leading-6 tracking-tight text-foreground;
+  }
+  .document-markdown [data-streamdown="heading-6"] {
+    @apply mb-1.5 mt-5 text-xs font-semibold leading-5 tracking-wide text-foreground/80;
+  }
+  .document-markdown [data-streamdown="unordered-list"],
+  .document-markdown [data-streamdown="ordered-list"] {
+    @apply my-3 ml-0 space-y-1 pl-5;
+  }
+  .document-markdown [data-streamdown="unordered-list"] [data-streamdown="unordered-list"],
+  .document-markdown [data-streamdown="ordered-list"] [data-streamdown="ordered-list"],
+  .document-markdown [data-streamdown="unordered-list"] [data-streamdown="ordered-list"],
+  .document-markdown [data-streamdown="ordered-list"] [data-streamdown="unordered-list"] {
+    @apply my-1;
+  }
+  .document-markdown [data-streamdown="list-item"] {
+    @apply pl-0.5 text-[calc(13px*var(--zone-font-scale,1))] leading-6 text-foreground/85;
+  }
+  .document-markdown [data-streamdown="list-item"] > p {
+    @apply my-0;
+  }
+  .document-markdown [data-streamdown="blockquote"] {
+    @apply my-4 border-l-2 border-border pl-3 not-italic text-foreground/75;
+  }
+  .document-markdown [data-streamdown="inline-code"] {
+    @apply rounded border border-border/50 bg-muted/65 px-1 py-0.5 text-[0.9em] text-foreground;
+  }
+  .document-markdown [data-streamdown="code-block"] {
+    @apply my-4;
+  }
+  .document-markdown [data-streamdown="code-block-header"] {
+    @apply h-7 px-1 text-[calc(10px*var(--zone-font-scale,1))] tracking-[0.04em] text-muted-foreground;
+  }
+  .document-markdown [data-streamdown="code-block-body"] {
+    @apply rounded-lg bg-muted/55 p-3;
+  }
+  .document-markdown pre > code {
+    @apply !py-3 text-[calc(12px*var(--zone-font-scale,1))] leading-5 text-foreground/90;
+  }
+  .document-markdown [data-streamdown="table"] {
+    @apply text-[calc(13px*var(--zone-font-scale,1))];
+  }
+  .document-markdown [data-streamdown="table-header-cell"],
+  .document-markdown [data-streamdown="table-cell"] {
+    @apply py-2 leading-5;
+  }
+  .document-markdown [data-streamdown="horizontal-rule"] {
+    @apply my-7 border-border/60;
+  }
+
   /* First/last child margin reset */
   .chat-markdown > *:first-child,
   .chat-markdown > *:first-child > *:first-child {

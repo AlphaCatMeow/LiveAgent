@@ -15,7 +15,9 @@ import {
   Wrench,
   Zap,
 } from "@liveagent/app/components/icons";
-import { ToggleGroup, ToggleGroupItem } from "@liveagent/ui/components/ui/toggle-group";
+import { Badge } from "@liveagent/ui/components/ui/badge";
+import { Button } from "@liveagent/ui/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@liveagent/ui/components/ui/tabs";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { cn } from "@liveagent/ui/lib/shared/utils";
 import {
@@ -67,38 +69,55 @@ export function StoreCategoryChips(props: {
   counts: ReadonlyMap<StoreCategoryValue, number>;
   onChange: (value: StoreCategoryValue) => void;
   className?: string;
+  appearance?: "quiet" | "outlined";
+  showIcons?: boolean;
 }) {
   const { t } = useLocale();
+  const appearance = props.appearance ?? "quiet";
+  const showIcons = props.showIcons ?? true;
   return (
     <div className={cn("hub-panel-enter", props.className)}>
-      <ToggleGroup
-        value={[props.value]}
-        onValueChange={(values) => {
-          const nextValue = values[0] as StoreCategoryValue | undefined;
-          if (nextValue) props.onChange(nextValue);
+      <Tabs
+        value={props.value}
+        onValueChange={(value) => {
+          if (STORE_CATEGORY_OPTIONS.includes(value as StoreCategoryValue)) {
+            props.onChange(value as StoreCategoryValue);
+          }
         }}
-        aria-label={t("settings.skillsStoreCategoryAll")}
-        className="flex max-w-full flex-wrap items-center gap-1 rounded-xl border border-border/70 bg-muted/35 p-1.5 shadow-xs"
+        className="max-w-full"
       >
-        {STORE_CATEGORY_OPTIONS.map((value) => {
-          const CategoryIcon = STORE_CATEGORY_ICONS[value];
-          const count = props.counts.get(value) ?? 0;
-          return (
-            <ToggleGroupItem
-              key={value}
-              value={value}
-              aria-label={`${t(storeCategoryLabelKey(value))}: ${count}`}
-              className="group h-8 shrink-0 gap-1.5 rounded-lg border border-transparent px-2.5 text-[11.5px] text-foreground/70 hover:bg-background/70 hover:text-foreground data-[pressed]:border-border/70 data-[pressed]:bg-card data-[pressed]:text-foreground data-[pressed]:shadow-xs"
-            >
-              <CategoryIcon className="h-3.5 w-3.5" />
-              <span>{t(storeCategoryLabelKey(value))}</span>
-              <span className="inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-background px-1 text-[10px] font-semibold tabular-nums text-muted-foreground ring-1 ring-border/50 group-data-[pressed]:text-foreground">
-                {count}
-              </span>
-            </ToggleGroupItem>
-          );
-        })}
-      </ToggleGroup>
+        <TabsList
+          aria-label={t("settings.skillsStoreCategoryAll")}
+          className="flex h-auto max-w-full flex-nowrap justify-start gap-1 overflow-x-auto rounded-none bg-transparent p-0 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {STORE_CATEGORY_OPTIONS.map((value) => {
+            const CategoryIcon = STORE_CATEGORY_ICONS[value];
+            const count = props.counts.get(value) ?? 0;
+            return (
+              <TabsTrigger
+                key={value}
+                value={value}
+                aria-label={`${t(storeCategoryLabelKey(value))}: ${count}`}
+                className={cn(
+                  "group h-7 shrink-0 gap-1 rounded-md px-2 text-[11.5px] font-medium text-muted-foreground shadow-none hover:text-foreground data-[active]:text-foreground data-[active]:shadow-none",
+                  appearance === "outlined"
+                    ? "border border-border/70 bg-background hover:border-foreground/20 hover:bg-muted/50 data-[active]:border-foreground/25 data-[active]:bg-muted data-[active]:shadow-xs"
+                    : "border border-transparent hover:bg-muted/60 data-[active]:bg-muted",
+                )}
+              >
+                {showIcons ? <CategoryIcon className="h-3.5 w-3.5" /> : null}
+                <span>{t(storeCategoryLabelKey(value))}</span>
+                <Badge
+                  variant="muted"
+                  className="h-4 min-w-4 rounded-full px-1 text-[9.5px] font-semibold tabular-nums group-data-[active]:bg-foreground/[0.08] group-data-[active]:text-foreground"
+                >
+                  {count}
+                </Badge>
+              </TabsTrigger>
+            );
+          })}
+        </TabsList>
+      </Tabs>
     </div>
   );
 }
@@ -110,18 +129,19 @@ export function InstalledSkillCategoryChip(props: {
   const { t } = useLocale();
   const CategoryIcon = STORE_CATEGORY_ICONS[props.category];
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
+      size="sm"
       onClick={(event) => {
         event.stopPropagation();
         props.onSelect(props.category);
       }}
       onKeyDown={(event) => event.stopPropagation()}
-      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/70 px-2 py-0.5 text-[10px] font-medium text-foreground/80 ring-1 ring-border/60 transition-colors hover:bg-muted hover:text-foreground"
+      className="h-6 shrink-0 gap-1 px-1.5 text-[10px] font-medium text-muted-foreground hover:text-foreground"
     >
       <CategoryIcon className="h-2.5 w-2.5" />
       <span>{t(storeCategoryLabelKey(props.category))}</span>
-    </button>
+    </Button>
   );
 }
 
@@ -136,25 +156,26 @@ export function SkillCategoryBadges(props: {
       {props.categories.map((category) => {
         const BadgeIcon = STORE_CATEGORY_ICONS[category];
         return (
-          <button
+          <Button
             key={category}
-            type="button"
+            variant="ghost"
+            size="sm"
             onClick={(event) => {
               event.stopPropagation();
               props.onSelect(category);
             }}
             onKeyDown={(event) => event.stopPropagation()}
-            className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/70 px-2 py-0.5 text-[10px] font-medium text-foreground/80 ring-1 ring-border/60 transition-colors hover:bg-muted hover:text-foreground"
+            className="h-6 shrink-0 gap-1 px-1.5 text-[10px] font-medium text-muted-foreground hover:text-foreground"
           >
             <BadgeIcon className="h-2.5 w-2.5" />
             <span>{t(storeCategoryLabelKey(category))}</span>
-          </button>
+          </Button>
         );
       })}
       {(props.topics ?? []).slice(0, 3).map((topic) => (
         <span
           key={topic}
-          className="shrink-0 rounded-full bg-muted/70 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+          className="shrink-0 rounded-md bg-muted px-1.5 py-1 text-[10px] text-muted-foreground"
         >
           {topic}
         </span>

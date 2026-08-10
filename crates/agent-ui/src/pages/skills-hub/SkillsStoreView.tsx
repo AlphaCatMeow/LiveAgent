@@ -10,6 +10,14 @@ import {
 } from "@liveagent/app/components/icons";
 import { GlassPanel } from "@liveagent/ui/components/hub/HubChrome";
 import { Button } from "@liveagent/ui/components/ui/button";
+import { Separator } from "@liveagent/ui/components/ui/separator";
+import {
+  Sheet,
+  SheetContent,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@liveagent/ui/components/ui/sheet";
 import { ToggleGroup, ToggleGroupItem } from "@liveagent/ui/components/ui/toggle-group";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { cn } from "@liveagent/ui/lib/shared/utils";
@@ -18,16 +26,13 @@ import {
   type ClawHubSkillCard,
   type ClawHubSkillDetail,
   type ClawHubSort,
-  getClawHubSkillDetail,
-  resolveClawHubSkillOwner,
 } from "@liveagent/ui/lib/skills/clawHub";
 import { classifyClawHubSkill } from "@liveagent/ui/lib/skills/clawHubCategories";
 import {
   cancelSkillInstallJob,
   type SkillInstallJobSnapshot,
 } from "@liveagent/ui/lib/skills/index";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useMemo, useState } from "react";
 import {
   SkillCategoryBadges,
   STORE_CATEGORY_ICONS,
@@ -35,6 +40,11 @@ import {
   type StoreCategoryValue,
 } from "./SkillCategoryControls";
 import { FrostSpinner } from "./SkillsLoading";
+import {
+  isSkillStoreDetailFresh,
+  loadSkillStoreDetail,
+  readSkillStoreDetail,
+} from "./skillStoreCache";
 
 export const TERMINAL_INSTALL_PHASES = new Set(["done", "error", "cancelled"]);
 const STORE_CATEGORY_FILL_TARGET = 12;
@@ -157,27 +167,20 @@ export function SkillsStoreView(props: {
     }
 
     let cancelled = false;
-    setPreviewDetail(null);
+    const cached = readSkillStoreDetail(previewSkill);
+    setPreviewDetail(cached?.detail ?? null);
     setPreviewError(null);
-    setPreviewLoading(true);
+    setPreviewLoading(!cached);
+    if (cached && isSkillStoreDetailFresh(cached, previewSkill)) return;
 
-    void resolveClawHubSkillOwner(previewSkill)
-      .then((resolvedSkill) => {
-        if (
-          !cancelled &&
-          buildClawHubSkillKey(resolvedSkill) !== buildClawHubSkillKey(previewSkill)
-        ) {
-          setPreviewSkill(resolvedSkill);
-        }
-        return getClawHubSkillDetail(resolvedSkill.slug, resolvedSkill.ownerHandle);
-      })
-      .then((detail) => {
+    void loadSkillStoreDetail(previewSkill)
+      .then((snapshot) => {
         if (!cancelled) {
-          setPreviewDetail(detail);
+          setPreviewDetail(snapshot.detail);
         }
       })
       .catch((err) => {
-        if (!cancelled) {
+        if (!cancelled && !cached) {
           const msg = err instanceof Error ? err.message : String(err);
           setPreviewError(msg || t("settings.skillsHubDetailLoadFailed"));
         }
@@ -214,9 +217,9 @@ export function SkillsStoreView(props: {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col gap-4 overflow-hidden">
-      <div className="hub-panel-enter flex items-center justify-start">
-        <div className="flex shrink-0 items-center gap-1.5">
+    <div className="flex h-full min-h-0 flex-1 flex-col gap-3 overflow-hidden" aria-busy={loading}>
+      <div className="hub-panel-enter relative flex items-center justify-start">
+        <div className="flex shrink-0 items-center">
           <ToggleGroup
             value={[sort]}
             onValueChange={(values) => {
@@ -224,7 +227,7 @@ export function SkillsStoreView(props: {
               if (nextSort) onSortChange(nextSort);
             }}
             aria-label={t("settings.skillsStoreSortMostDownloaded")}
-            className="flex max-w-full shrink-0 items-center gap-1 overflow-x-auto rounded-xl border border-border/70 bg-muted/35 p-1 shadow-xs"
+            className="flex max-w-full shrink-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
             {STORE_SORT_OPTIONS.map((option) => {
               return (
@@ -232,21 +235,26 @@ export function SkillsStoreView(props: {
                   key={option.value}
                   value={option.value}
                   disabled={searching}
-                  className="h-8 shrink-0 rounded-lg border border-transparent px-2.5 text-[11.5px] text-foreground/70 hover:bg-background/70 hover:text-foreground data-[pressed]:border-border/70 data-[pressed]:bg-card data-[pressed]:text-foreground data-[pressed]:shadow-xs disabled:cursor-not-allowed disabled:opacity-50"
+                  className="h-8 shrink-0 rounded-md px-2.5 text-xs text-muted-foreground hover:bg-muted/60 hover:text-foreground data-[pressed]:bg-muted data-[pressed]:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {t(option.labelKey)}
                 </ToggleGroupItem>
               );
             })}
           </ToggleGroup>
-          <Loader2
-            aria-hidden={!refreshing}
-            className={cn(
-              "h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground transition-opacity duration-200 motion-reduce:transition-none",
-              refreshing ? "opacity-100" : "opacity-0",
-            )}
-          />
         </div>
+        <div
+          aria-hidden
+          className={cn(
+            "pointer-events-none absolute inset-x-0 -bottom-1 h-px overflow-hidden rounded-full bg-transparent transition-opacity duration-200 motion-reduce:transition-none",
+            refreshing ? "opacity-100" : "opacity-0",
+          )}
+        >
+          <div className="hub-loading-progress h-full rounded-full bg-foreground/45" />
+        </div>
+        <span className="sr-only" aria-live="polite">
+          {refreshing ? t("settings.skillsStoreLoadingTitle") : ""}
+        </span>
       </div>
 
       <StoreCategoryChips
@@ -265,7 +273,7 @@ export function SkillsStoreView(props: {
       ) : null}
 
       <div className="min-h-0 flex-1 overflow-y-auto px-0.5 pb-4 pr-1 pt-1.5">
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3">
           {loading && items.length === 0 ? (
             <>
               <div className="hub-frost-hero hub-panel-enter px-4 py-3.5">
@@ -275,7 +283,7 @@ export function SkillsStoreView(props: {
                     <div className="text-[13px] font-medium tracking-tight text-foreground">
                       {t("settings.skillsStoreLoadingTitle")}
                     </div>
-                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground/80">
+                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
                       {t("settings.skillsStoreLoadingDesc")}
                     </div>
                   </div>
@@ -283,7 +291,7 @@ export function SkillsStoreView(props: {
                 <div className="hub-frost-track mt-3.5" />
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
                 {[1, 2, 3, 4, 5, 6].map((item) => (
                   <div key={item} className="hub-frost-skeleton skill-card-enter p-3.5">
                     <div className="space-y-3">
@@ -312,7 +320,7 @@ export function SkillsStoreView(props: {
                   <p className="text-sm font-medium text-muted-foreground">
                     {t("settings.skillsStoreEmptyTitle")}
                   </p>
-                  <p className="text-xs text-muted-foreground/70">
+                  <p className="text-xs text-muted-foreground">
                     {t("settings.skillsStoreEmptyDesc")}
                   </p>
                 </div>
@@ -321,12 +329,7 @@ export function SkillsStoreView(props: {
           ) : null}
 
           {items.length > 0 ? (
-            <div
-              className={cn(
-                "grid gap-3 transition-[opacity,filter] duration-300 ease-out motion-reduce:transition-none sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4",
-                refreshing && "pointer-events-none opacity-50 blur-[1px] saturate-50",
-              )}
-            >
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
               {filteredItems.map(({ skill, categories }) => {
                 const { done, installing, pending, job, progress } = getInstallState(skill);
                 const link = buildClawHubSkillUrl(skill);
@@ -347,27 +350,25 @@ export function SkillsStoreView(props: {
                       }
                     }}
                     className={cn(
-                      "skill-card-enter group flex h-full cursor-pointer flex-col rounded-2xl border p-3.5 text-left transition-all focus:outline-none focus:ring-2 focus:ring-foreground/10",
-                      done
-                        ? "border-emerald-500/40 bg-card shadow-sm dark:border-emerald-400/35"
-                        : "border-border/70 bg-card shadow-xs hover:-translate-y-0.5 hover:border-border hover:bg-accent/25 hover:shadow-md",
+                      "skill-card-enter flex min-h-48 cursor-pointer flex-col rounded-xl border border-border bg-card p-3.5 text-left shadow-xs focus:outline-none focus:ring-2 focus:ring-ring",
+                      done && "border-emerald-600/25",
                     )}
                   >
                     <div className="flex h-full flex-col gap-3">
                       <div className="flex items-start gap-3">
                         <div
                           className={cn(
-                            "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition-all",
+                            "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition-colors",
                             done
                               ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                              : "border-border/70 bg-muted/60 text-foreground/75 group-hover:bg-muted group-hover:text-foreground",
+                              : "border-border bg-muted text-foreground",
                           )}
                         >
                           <PrimaryCategoryIcon className="h-5 w-5" />
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex min-w-0 items-start gap-1.5">
-                            <span className="truncate text-[13px] font-semibold leading-tight text-foreground">
+                            <span className="truncate text-sm font-semibold leading-tight text-foreground">
                               {skill.displayName}
                             </span>
                             {link ? (
@@ -384,7 +385,7 @@ export function SkillsStoreView(props: {
                               </a>
                             ) : null}
                           </div>
-                          <div className="mt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                          <div className="mt-1 text-[11px] font-medium text-muted-foreground">
                             v{skill.latestVersion ?? t("settings.skillsStoreVersionLatest")}
                           </div>
                         </div>
@@ -397,12 +398,12 @@ export function SkillsStoreView(props: {
                       />
 
                       {skill.summary ? (
-                        <p className="line-clamp-3 text-[11.5px] leading-[1.45] text-muted-foreground">
+                        <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">
                           {skill.summary}
                         </p>
                       ) : null}
 
-                      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 border-t border-border/60 pt-2 text-[10.5px] text-muted-foreground">
+                      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-muted-foreground">
                         <span
                           className="inline-flex items-center gap-1"
                           title={t("settings.skillsStorePreviewDownloads")}
@@ -446,7 +447,7 @@ export function SkillsStoreView(props: {
                                     void cancelSkillInstallJob(job.jobId).catch(() => undefined);
                                   }}
                                   onKeyDown={(event) => event.stopPropagation()}
-                                  className="text-muted-foreground/70 transition-colors hover:text-foreground"
+                                  className="text-muted-foreground transition-colors hover:text-foreground"
                                 >
                                   <X className="h-3 w-3" />
                                 </button>
@@ -477,9 +478,8 @@ export function SkillsStoreView(props: {
                         variant={done ? "outline" : "default"}
                         size="sm"
                         className={cn(
-                          "mt-auto h-9 gap-1.5 rounded-xl",
-                          done &&
-                            "border-border/55 bg-background/75 text-foreground/85 backdrop-blur-md",
+                          "mt-auto h-8 w-fit self-end gap-1.5 px-3",
+                          done && "border-border bg-background text-foreground",
                         )}
                         disabled={done || installing}
                         aria-busy={installing}
@@ -538,13 +538,13 @@ export function SkillsStoreView(props: {
       </div>
       {previewSkill ? (
         <SkillsStorePreviewDrawer
-          skill={previewSkill}
+          skill={previewDetail ?? previewSkill}
           detail={previewDetail}
           loading={previewLoading}
           error={previewError}
-          installState={getInstallState(previewSkill)}
+          installState={getInstallState(previewDetail ?? previewSkill)}
           onClose={() => setPreviewSkill(null)}
-          onInstall={() => onInstall(previewSkill)}
+          onInstall={() => onInstall(previewDetail ?? previewSkill)}
         />
       ) : null}
     </div>
@@ -574,48 +574,20 @@ function SkillsStorePreviewDrawer(props: {
       ? t("settings.skillsStoreInstalled")
       : t("settings.skillsStoreInstall");
 
-  const [closing, setClosing] = useState(false);
-  const closeTimerRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (closeTimerRef.current !== null) {
-        window.clearTimeout(closeTimerRef.current);
-        closeTimerRef.current = null;
-      }
-    };
-  }, []);
-
-  const handleClose = useCallback(() => {
-    if (closing) return;
-    setClosing(true);
-    closeTimerRef.current = window.setTimeout(() => {
-      onClose();
-    }, 200);
-  }, [closing, onClose]);
-
-  return createPortal(
-    <div
-      className={cn(
-        "fixed inset-0 z-50 flex justify-end bg-background/55",
-        closing ? "skills-drawer-backdrop-closing" : "skills-drawer-backdrop",
-      )}
-      role="dialog"
-      aria-modal="true"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          handleClose();
-        }
+  return (
+    <Sheet
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
       }}
     >
-      <aside
-        className={cn(
-          "flex h-full w-full flex-col border-l border-border/45 bg-background shadow-[-18px_0_45px_-28px_rgba(15,23,42,0.45)] dark:border-white/[0.08] dark:bg-popover dark:shadow-[-18px_0_45px_-28px_rgba(0,0,0,0.7)] md:w-2/5 md:max-w-[34rem]",
-          closing ? "skills-drawer-panel-closing" : "skills-drawer-panel",
-        )}
+      <SheetContent
+        side="right"
+        closeLabel={t("settings.cronViewClose")}
+        className="w-full sm:max-w-[34rem]"
       >
-        <div className="flex items-start gap-3 border-b border-border/40 px-5 py-4">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-border/55 bg-background/80 text-foreground/85 shadow-[0_1px_0_rgba(255,255,255,0.55)_inset] dark:border-white/[0.09] dark:bg-white/[0.06] dark:shadow-[0_1px_0_rgba(255,255,255,0.06)_inset]">
+        <SheetHeader className="flex-row items-start gap-3 border-b border-border px-5 py-4 pr-14">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-muted text-foreground">
             {detail?.ownerImage ? (
               <img
                 src={detail.ownerImage}
@@ -628,30 +600,20 @@ function SkillsStorePreviewDrawer(props: {
             )}
           </div>
           <div className="min-w-0 flex-1">
-            <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/80">
+            <div className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
               {t("settings.skillsStorePreviewTitle")}
             </div>
-            <h2 className="mt-1 truncate text-base font-semibold tracking-tight text-foreground">
-              {data.displayName}
-            </h2>
+            <SheetTitle className="mt-1 truncate">{data.displayName}</SheetTitle>
             <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
               {owner ? <span className="truncate">@{owner}</span> : null}
               <span>v{version}</span>
               {data.updatedAt ? <span>{formatStoreDate(data.updatedAt)}</span> : null}
             </div>
           </div>
-          <button
-            type="button"
-            onClick={handleClose}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
-            title={t("settings.cronViewClose")}
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
+        </SheetHeader>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          <div className="flex flex-col gap-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+          <div className="flex flex-col gap-5">
             {data.summary ? (
               <p className="text-[13px] leading-6 text-muted-foreground">{data.summary}</p>
             ) : null}
@@ -672,8 +634,8 @@ function SkillsStorePreviewDrawer(props: {
             </div>
 
             {installState.installing && !installState.done ? (
-              <div className="rounded-2xl border border-border/50 bg-background/75 p-3 backdrop-blur-md">
-                <div className="flex items-center justify-between gap-3 text-[11px] text-foreground/85">
+              <div className="rounded-lg border border-border bg-muted p-3">
+                <div className="flex items-center justify-between gap-3 text-[11px] text-foreground">
                   <span>
                     {installPhaseLabel(installState.pending ? undefined : installState.job, t)}
                   </span>
@@ -681,12 +643,12 @@ function SkillsStorePreviewDrawer(props: {
                     <span>{formatInstallProgress(installState.job)}</span>
                   ) : null}
                 </div>
-                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-foreground/[0.08]">
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-background">
                   {installState.progress === null ? (
                     <div className="hub-loading-progress h-full rounded-full bg-foreground/55" />
                   ) : (
                     <div
-                      className="h-full rounded-full bg-foreground/65 transition-[width] duration-300"
+                      className="h-full rounded-full bg-primary transition-[width] duration-300"
                       style={{ width: `${installState.progress}%` }}
                     />
                   )}
@@ -698,15 +660,15 @@ function SkillsStorePreviewDrawer(props: {
             installState.job.error &&
             !installState.done &&
             !installState.pending ? (
-              <div className="rounded-2xl border border-destructive/25 bg-destructive/5 p-3 text-[12px] text-destructive">
+              <div className="rounded-lg border border-destructive/25 bg-destructive/10 p-3 text-xs text-destructive">
                 {installState.job.error}
               </div>
             ) : null}
 
             {error ? (
-              <div className="rounded-2xl border border-border/40 bg-muted/35 p-3">
-                <div className="flex items-start gap-2 text-[12px] text-muted-foreground">
-                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-foreground/65" />
+              <div className="rounded-lg border border-border bg-muted p-3">
+                <div className="flex items-start gap-2 text-xs text-muted-foreground">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-foreground" />
                   <span>{t("settings.skillsStorePreviewDetailUnavailable")}</span>
                 </div>
               </div>
@@ -716,11 +678,15 @@ function SkillsStorePreviewDrawer(props: {
               <StorePreviewSkeleton />
             ) : (
               <>
-                <div className="rounded-2xl border border-border/40 bg-background/60 p-3">
-                  <div className="mb-2 text-[12px] font-semibold text-foreground">
+                <Separator />
+                <section aria-labelledby="store-skill-metadata">
+                  <h3
+                    id="store-skill-metadata"
+                    className="mb-1 text-xs font-semibold text-foreground"
+                  >
                     {t("settings.skillsStorePreviewMetadata")}
-                  </div>
-                  <div className="divide-y divide-border/30">
+                  </h3>
+                  <div className="divide-y divide-border">
                     <StorePreviewField
                       label={t("settings.skillsStorePreviewSlug")}
                       value={data.slug}
@@ -766,30 +732,36 @@ function SkillsStorePreviewDrawer(props: {
                       value={detail?.moderationStatus}
                     />
                   </div>
-                </div>
+                </section>
 
                 {detail?.latestVersionChangelog ? (
-                  <div className="rounded-2xl border border-border/40 bg-background/60 p-3">
-                    <div className="mb-2 text-[12px] font-semibold text-foreground">
-                      {t("settings.skillsStorePreviewChangelog")}
-                    </div>
-                    <p className="whitespace-pre-wrap text-[12px] leading-5 text-muted-foreground">
-                      {detail.latestVersionChangelog}
-                    </p>
-                  </div>
+                  <>
+                    <Separator />
+                    <section aria-labelledby="store-skill-changelog">
+                      <h3
+                        id="store-skill-changelog"
+                        className="mb-2 text-xs font-semibold text-foreground"
+                      >
+                        {t("settings.skillsStorePreviewChangelog")}
+                      </h3>
+                      <p className="whitespace-pre-wrap text-xs leading-5 text-muted-foreground">
+                        {detail.latestVersionChangelog}
+                      </p>
+                    </section>
+                  </>
                 ) : null}
               </>
             )}
           </div>
         </div>
 
-        <div className="flex shrink-0 gap-2 border-t border-border/40 px-5 py-4">
+        <SheetFooter className="shrink-0 border-t border-border px-5 py-4">
           {link ? (
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="h-9 flex-1 gap-1.5 rounded-xl border-border/50 bg-background/70"
+              className="h-9 flex-1 gap-1.5"
               render={
                 <a href={link} target="_blank" rel="noreferrer">
                   <ExternalLink className="h-3.5 w-3.5" />
@@ -802,11 +774,7 @@ function SkillsStorePreviewDrawer(props: {
             type="button"
             variant={installState.done ? "outline" : "default"}
             size="sm"
-            className={cn(
-              "h-9 flex-1 gap-1.5 rounded-xl",
-              installState.done &&
-                "border-border/55 bg-background/75 text-foreground/85 backdrop-blur-md",
-            )}
+            className="h-9 flex-1 gap-1.5"
             disabled={installState.done || installState.installing}
             aria-busy={installState.installing}
             onClick={onInstall}
@@ -820,16 +788,15 @@ function SkillsStorePreviewDrawer(props: {
             )}
             {actionLabel}
           </Button>
-        </div>
-      </aside>
-    </div>,
-    document.body,
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   );
 }
 
 function StorePreviewMetric(props: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-border/35 bg-background/60 px-3 py-2.5">
+    <div className="rounded-lg border border-border bg-card px-3 py-2.5">
       <div className="text-[10.5px] text-muted-foreground">{props.label}</div>
       <div className="mt-1 text-sm font-semibold tabular-nums text-foreground">{props.value}</div>
     </div>
@@ -882,16 +849,6 @@ function StorePreviewField(props: { label: string; value?: string | null }) {
       <div className="min-w-0 break-words text-foreground">{props.value}</div>
     </div>
   );
-}
-
-export function dedupeStoreItems(items: ClawHubSkillCard[]) {
-  const seen = new Set<string>();
-  return items.filter((item) => {
-    const storeKey = buildClawHubSkillKey(item);
-    if (seen.has(storeKey)) return false;
-    seen.add(storeKey);
-    return true;
-  });
 }
 
 function buildClawHubSkillUrl(skill: ClawHubSkillCard) {

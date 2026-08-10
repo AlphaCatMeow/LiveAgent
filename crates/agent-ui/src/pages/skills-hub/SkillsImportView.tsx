@@ -3,13 +3,15 @@ import {
   Check,
   Download,
   Folder,
-  ListChecks,
   Loader2,
   RefreshCw,
   X,
 } from "@liveagent/app/components/icons";
 import { GlassPanel } from "@liveagent/ui/components/hub/HubChrome";
+import { Badge } from "@liveagent/ui/components/ui/badge";
 import { Button } from "@liveagent/ui/components/ui/button";
+import { Checkbox } from "@liveagent/ui/components/ui/checkbox";
+import { Tabs, TabsList, TabsTrigger } from "@liveagent/ui/components/ui/tabs";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { cn } from "@liveagent/ui/lib/shared/utils";
 import type { ExternalSkillEntry, ExternalToolScan } from "@liveagent/ui/lib/skills/index";
@@ -25,6 +27,7 @@ const EXTERNAL_TOOL_LABELS: Record<string, string> = {
 
 export function SkillsImportView(props: {
   scans: ExternalToolScan[];
+  initializing: boolean;
   loading: boolean;
   error: string | null;
   query: string;
@@ -44,6 +47,7 @@ export function SkillsImportView(props: {
 }) {
   const {
     scans,
+    initializing,
     loading,
     error,
     query,
@@ -63,6 +67,10 @@ export function SkillsImportView(props: {
   } = props;
   const { t } = useLocale();
   const bulkAnchorRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!bulkMode) bulkAnchorRef.current = null;
+  }, [bulkMode]);
 
   const normalizedQuery = query.trim().toLowerCase();
   const filteredScans = useMemo(
@@ -137,14 +145,15 @@ export function SkillsImportView(props: {
             <p className="min-w-0 flex-1 leading-relaxed text-amber-800 dark:text-amber-200">
               {importToast}
             </p>
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={onDismissImportToast}
-              className="mt-0.5 shrink-0 rounded p-0.5 opacity-50 transition-opacity hover:opacity-100"
+              className="mt-0.5 h-6 w-6 shrink-0 text-amber-800 hover:bg-amber-500/10 dark:text-amber-200"
               aria-label={t("settings.cancel")}
             >
               <X className="h-3.5 w-3.5" />
-            </button>
+            </Button>
           </div>
         </div>
       ) : null}
@@ -189,7 +198,7 @@ export function SkillsImportView(props: {
           </GlassPanel>
         ) : null}
 
-        {loading ? (
+        {initializing ? (
           <GlassPanel className="hub-panel-enter">
             <div className="flex items-center gap-3 py-4">
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -200,55 +209,48 @@ export function SkillsImportView(props: {
           </GlassPanel>
         ) : (
           <>
-            <div className="hub-panel-enter sticky top-0 z-30 -mx-0.5 flex flex-wrap items-center justify-between gap-3 bg-background/95 px-0.5 pb-2 pt-1.5 shadow-[0_14px_24px_-22px_rgba(15,23,42,0.45)] backdrop-blur-xl supports-[backdrop-filter]:bg-background/85 dark:shadow-[0_14px_24px_-22px_rgba(0,0,0,0.8)]">
-              <div className="inline-flex shrink-0 rounded-2xl border border-border/40 bg-background/60 p-1 backdrop-blur-xl shadow-[0_1px_0_rgba(255,255,255,0.5)_inset] dark:border-white/[0.06] dark:bg-white/[0.04] dark:shadow-[0_1px_0_rgba(255,255,255,0.04)_inset]">
-                {filteredScans.map((scan) => {
-                  const toolLabel = EXTERNAL_TOOL_LABELS[scan.tool] ?? scan.tool;
-                  const active = scan.tool === activeTool;
-                  return (
-                    <button
-                      key={scan.tool}
-                      type="button"
-                      onClick={() => {
-                        userChoseToolRef.current = true;
-                        setActiveTool(scan.tool);
-                      }}
-                      className={cn(
-                        "relative inline-flex h-9 items-center justify-center gap-2 rounded-xl px-4 text-[12.5px] font-medium transition-all",
-                        active
-                          ? "bg-background/85 text-foreground shadow-[0_1px_0_rgba(255,255,255,0.6)_inset,0_4px_12px_-8px_rgba(15,23,42,0.18)] ring-1 ring-border/45 dark:bg-white/[0.08] dark:ring-white/[0.09] dark:shadow-[0_1px_0_rgba(255,255,255,0.07)_inset,0_4px_12px_-8px_rgba(0,0,0,0.55)]"
-                          : "text-muted-foreground hover:bg-background/70 hover:text-foreground",
-                      )}
-                    >
-                      <Folder className="h-3.5 w-3.5" />
-                      <span>{toolLabel}</span>
-                      {scan.exists ? (
-                        <span
-                          className={cn(
-                            "ml-0.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full px-1 text-[10px] font-semibold tabular-nums",
-                            active
-                              ? "bg-foreground/[0.08] text-foreground/85"
-                              : "bg-muted/70 text-muted-foreground",
-                          )}
-                        >
-                          {scan.skills.length}
-                        </span>
-                      ) : (
-                        <span className="ml-0.5 text-[10px] text-muted-foreground/70">
-                          {t("settings.skillsImportNotDetected")}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+            <div className="hub-panel-enter sticky top-0 z-30 -mx-0.5 flex flex-wrap items-center justify-between gap-3 border-b border-border bg-background/95 px-0.5 pb-2 pt-1.5 backdrop-blur supports-[backdrop-filter]:bg-background/90">
+              <Tabs
+                value={activeTool}
+                onValueChange={(nextTool) => {
+                  userChoseToolRef.current = true;
+                  setActiveTool(String(nextTool));
+                }}
+                className="min-w-0 flex-1"
+              >
+                <TabsList className="h-9 max-w-full justify-start gap-1 overflow-x-auto rounded-none bg-transparent p-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  {filteredScans.map((scan) => {
+                    const toolLabel = EXTERNAL_TOOL_LABELS[scan.tool] ?? scan.tool;
+                    return (
+                      <TabsTrigger
+                        key={scan.tool}
+                        value={scan.tool}
+                        className="h-8 shrink-0 gap-1.5 px-2.5 text-xs data-[active]:bg-muted data-[active]:shadow-none"
+                      >
+                        <Folder className="h-3.5 w-3.5" />
+                        <span>{toolLabel}</span>
+                        {scan.exists ? (
+                          <Badge variant="muted" className="h-5 px-1.5 text-[10px]">
+                            {scan.skills.length}
+                          </Badge>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground">
+                            {t("settings.skillsImportNotDetected")}
+                          </span>
+                        )}
+                      </TabsTrigger>
+                    );
+                  })}
+                </TabsList>
+              </Tabs>
 
               <div className="flex shrink-0 items-center gap-2">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="gap-1.5 rounded-full"
+                  className="gap-1.5"
                   disabled={loading || importing}
+                  aria-busy={loading}
                   onClick={onRescan}
                 >
                   <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
@@ -257,8 +259,8 @@ export function SkillsImportView(props: {
                 {!bulkMode ? (
                   <Button
                     size="sm"
-                    className="gap-1.5 rounded-full"
-                    disabled={selected.size === 0 || importing || loading}
+                    className="gap-1.5"
+                    disabled={selected.size === 0 || importing}
                     onClick={() => onImport()}
                   >
                     {importing ? (
@@ -274,16 +276,9 @@ export function SkillsImportView(props: {
               </div>
             </div>
 
-            {bulkMode ? (
-              <div className="hub-panel-enter flex items-center gap-2 text-[11px] text-muted-foreground/80">
-                <ListChecks className="h-3.5 w-3.5 shrink-0" />
-                <span>{t("settings.skillsBulkImportHint")}</span>
-              </div>
-            ) : null}
-
             {activeScan ? (
               <div key={activeScan.tool} className="hub-panel-enter flex flex-col gap-3">
-                <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground/70">
+                <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
                   <span className="font-mono">{activeScan.rootDir}</span>
                   {activeScan.tool === "codebuddy" && activeScan.exists ? (
                     <>
@@ -332,29 +327,19 @@ export function SkillsImportView(props: {
                       <Button
                         variant="outline"
                         size="sm"
-                        className="gap-1.5 rounded-full"
+                        className="gap-1.5"
                         disabled={importing || selectableVisibleBaseDirs.length === 0}
                         onClick={() =>
                           onBatchToggle(selectableVisibleBaseDirs, !allVisibleSelected)
                         }
                       >
-                        <span
-                          className={cn(
-                            "flex h-3.5 w-3.5 items-center justify-center rounded border",
-                            allVisibleSelected
-                              ? "border-primary bg-primary text-primary-foreground"
-                              : "border-border/70 bg-background",
-                          )}
-                          aria-hidden="true"
-                        >
-                          {allVisibleSelected ? <Check className="h-2.5 w-2.5" /> : null}
-                        </span>
+                        <Checkbox checked={allVisibleSelected} className="pointer-events-none" />
                         {allVisibleSelected
                           ? t("settings.skillsImportDeselectAll")
                           : t("settings.skillsImportSelectAll")}
                       </Button>
                     </div>
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
                       {activeScan.skills.map((skill) => {
                         const alreadyInstalled = installedNames.has(skill.name);
                         const checked = !alreadyInstalled && selected.has(skill.baseDir);
@@ -405,46 +390,39 @@ export function SkillsImportView(props: {
                               event.currentTarget.click();
                             }}
                             className={cn(
-                              "skill-card-enter group flex h-full min-h-[13rem] w-full flex-col rounded-2xl border p-3.5 text-left transition-all focus:outline-none focus:ring-2 focus:ring-foreground/10",
+                              "skill-card-enter group flex min-h-48 w-full flex-col rounded-xl border border-border bg-card p-3.5 text-left shadow-xs transition-[border-color,box-shadow,background-color] focus:outline-none focus:ring-2 focus:ring-ring",
                               alreadyInstalled
-                                ? "border-emerald-500/40 bg-card shadow-sm dark:border-emerald-400/35"
+                                ? "border-emerald-600/25"
                                 : checked
-                                  ? "border-primary/60 bg-card shadow-sm ring-1 ring-primary/20"
-                                  : "border-border/70 bg-card shadow-xs hover:-translate-y-0.5 hover:border-border hover:bg-accent/25 hover:shadow-md",
+                                  ? "ring-2 ring-ring/40"
+                                  : "hover:border-foreground/20 hover:shadow-md",
                               importing && !alreadyInstalled ? "opacity-60" : null,
                             )}
                           >
                             <div className="flex h-full flex-col gap-3">
                               <div className="flex items-start gap-3">
-                                <span
-                                  className={cn(
-                                    "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-colors",
-                                    alreadyInstalled
-                                      ? "border-border/50 bg-muted/40 opacity-50"
-                                      : checked
-                                        ? "border-primary bg-primary text-primary-foreground"
-                                        : "border-border/70 bg-background",
-                                  )}
-                                >
-                                  {!alreadyInstalled && checked ? (
-                                    <Check className="h-3 w-3" />
-                                  ) : null}
-                                </span>
+                                <Checkbox
+                                  checked={checked}
+                                  disabled={locked}
+                                  className="mt-0.5"
+                                  onClick={(event) => event.stopPropagation()}
+                                  onCheckedChange={() => onToggle(skill.baseDir)}
+                                />
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-1.5">
                                     <span className="truncate text-[13px] font-semibold leading-tight text-foreground">
                                       {skill.name}
                                     </span>
                                     {alreadyInstalled ? (
-                                      <span className="shrink-0 rounded-full bg-muted/70 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                                      <Badge variant="success" className="h-5 px-1.5 text-[10px]">
                                         {t("settings.skillsImportInstalledBadge")}
-                                      </span>
+                                      </Badge>
                                     ) : null}
                                   </div>
                                 </div>
                               </div>
                               <p
-                                className="line-clamp-3 min-h-[3rem] text-[11.5px] leading-[1.45] text-muted-foreground"
+                                className="line-clamp-2 min-h-10 text-xs leading-5 text-muted-foreground"
                                 title={skill.description}
                               >
                                 {truncateLocalSkillCardDescription(skill.description)}
@@ -460,7 +438,7 @@ export function SkillsImportView(props: {
                                   type="button"
                                   variant={alreadyInstalled ? "outline" : "default"}
                                   size="sm"
-                                  className="h-10 w-full gap-1.5 rounded-xl"
+                                  className="h-8 w-fit self-end gap-1.5 px-3"
                                   disabled={locked}
                                   aria-busy={installing}
                                   onClick={(event) => {
@@ -500,7 +478,7 @@ export function SkillsImportView(props: {
           <div className="hub-panel-enter pointer-events-auto flex max-w-full flex-wrap items-center gap-2 rounded-full border border-border/50 bg-background/95 py-2 pl-4 pr-2 text-[12.5px] shadow-[0_8px_24px_-12px_rgba(15,23,42,0.35)] max-sm:justify-center max-sm:rounded-3xl max-sm:whitespace-nowrap dark:border-white/[0.1] dark:bg-popover/95">
             {importableSelectedCount > 0 || importing ? (
               <>
-                <span className="whitespace-nowrap text-foreground/85">
+                <span className="whitespace-nowrap text-foreground">
                   {t("settings.skillsBulkSelectedCount").replace(
                     "{count}",
                     String(importableSelectedCount),
@@ -509,10 +487,10 @@ export function SkillsImportView(props: {
                 <span className="hidden text-muted-foreground/50 sm:inline" aria-hidden="true">
                   │
                 </span>
-                <button
-                  type="button"
-                  disabled={importing || loading}
-                  className="inline-flex h-7 items-center rounded-full bg-foreground px-3 text-[12px] font-medium text-background transition-colors hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-40"
+                <Button
+                  size="sm"
+                  disabled={importing}
+                  className="h-7 px-3 text-xs"
                   onClick={() => onImport()}
                 >
                   {importing && importProgress ? (
@@ -523,7 +501,7 @@ export function SkillsImportView(props: {
                   ) : (
                     `${t("settings.skillsBulkImportAction")}${importableSelectedCount > 0 ? ` (${importableSelectedCount})` : ""}`
                   )}
-                </button>
+                </Button>
               </>
             ) : (
               <span className="text-muted-foreground">{t("settings.skillsBulkClickToSelect")}</span>

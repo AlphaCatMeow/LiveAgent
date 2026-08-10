@@ -41,8 +41,8 @@ import {
   Wrench,
   Zap,
 } from "@liveagent/app/components/icons";
+import { ResourceActivationSwitch } from "@liveagent/ui/components/resources/ResourceActivationSwitch";
 import { ConfirmDeletePopover } from "@liveagent/ui/components/ui/confirm-action-popover";
-import { Switch } from "@liveagent/ui/components/ui/switch";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { cn } from "@liveagent/ui/lib/shared/utils";
 import type { ClawHubCategorySlug } from "@liveagent/ui/lib/skills/clawHubCategories";
@@ -289,16 +289,12 @@ export const InstalledSkillCard = memo(function InstalledSkillCard(props: Instal
             >
               <span className="h-2 w-2 rounded-full border border-current opacity-40" />
             </button>
-            <Switch
-              tone="success"
+            <ResourceActivationSwitch
               checked={checked}
-              aria-label={`${t("skills.select")}: ${skill.name}`}
-              title={
-                checked ? t("settings.skillsHubToggleDisable") : t("settings.skillsHubToggleEnable")
-              }
+              compact
+              stopPropagation
+              label={`${t("skills.select")}: ${skill.name}`}
               onCheckedChange={(nextChecked) => onToggle(skill.name, nextChecked)}
-              onClick={(event) => event.stopPropagation()}
-              onKeyDown={(event) => event.stopPropagation()}
             />
           </div>
         )}

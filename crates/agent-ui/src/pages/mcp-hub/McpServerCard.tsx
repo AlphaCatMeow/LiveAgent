@@ -9,12 +9,13 @@ import {
 import {
   type AppSettings,
   type McpServerConfig,
+  removeWorkspaceResourceReferences,
   type ToolPolicy,
   updateMcp,
 } from "@liveagent/app/lib/settings/index";
 import { ToolPolicyToggle } from "@liveagent/ui/components/hub/ToolPolicyToggle";
+import { ResourceActivationSwitch } from "@liveagent/ui/components/resources/ResourceActivationSwitch";
 import { ConfirmDeletePopover } from "@liveagent/ui/components/ui/confirm-action-popover";
-import { Switch } from "@liveagent/ui/components/ui/switch";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { resolveMcpDocsHref } from "@liveagent/ui/lib/mcpServerMetadata";
 import { cn } from "@liveagent/ui/lib/shared/utils";
@@ -86,12 +87,11 @@ export const McpServerCard = memo(function McpServerCard(props: {
       )}
     >
       <div className="flex items-center gap-3 px-4 py-3">
-        <Switch
-          tone="success"
+        <ResourceActivationSwitch
           checked={enabled}
+          compact
+          label={`${server.id || `Server ${idx + 1}`}: ${enabled ? t("settings.disable") : t("settings.enable")}`}
           onCheckedChange={(checked) => patchServer({ enabled: checked })}
-          title={enabled ? t("settings.disable") : t("settings.enable")}
-          aria-label={`${server.id || `Server ${idx + 1}`}: ${enabled ? t("settings.disable") : t("settings.enable")}`}
         />
 
         <button
@@ -177,9 +177,12 @@ export const McpServerCard = memo(function McpServerCard(props: {
             name={server.id || `Server ${idx + 1}`}
             onConfirm={() =>
               setSettings((prev) =>
-                updateMcp(prev, {
-                  servers: prev.mcp.servers.filter((_, index) => index !== idx),
-                }),
+                removeWorkspaceResourceReferences(
+                  updateMcp(prev, {
+                    servers: prev.mcp.servers.filter((_, index) => index !== idx),
+                  }),
+                  { mcpServerIds: [server.id] },
+                ),
               )
             }
           >

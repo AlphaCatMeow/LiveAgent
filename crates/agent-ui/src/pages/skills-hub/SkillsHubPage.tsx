@@ -13,7 +13,11 @@ import {
   Trash2,
   X,
 } from "@liveagent/app/components/icons";
-import { type AppSettings, updateSkills } from "@liveagent/app/lib/settings";
+import {
+  type AppSettings,
+  removeWorkspaceResourceReferences,
+  updateSkills,
+} from "@liveagent/app/lib/settings";
 import { GlassPanel, HubBackdrop, HubHeader } from "@liveagent/ui/components/hub/HubChrome";
 import { Button } from "@liveagent/ui/components/ui/button";
 import { ConfirmActionPopover } from "@liveagent/ui/components/ui/confirm-action-popover";
@@ -870,9 +874,12 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
     try {
       await manageSkill({ action: "delete", name: skillName });
       setSettings((prev) =>
-        updateSkills(prev, {
-          selected: prev.skills.selected.filter((name) => name !== skillName),
-        }),
+        removeWorkspaceResourceReferences(
+          updateSkills(prev, {
+            selected: prev.skills.selected.filter((name) => name !== skillName),
+          }),
+          { skillNames: [skillName] },
+        ),
       );
       setSkills((prev) => prev.filter((item) => item.name !== skillName));
       setPreviewInstalledSkill((current) => (current?.name === skillName ? null : current));
@@ -1084,9 +1091,12 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
       try {
         await manageSkill({ action: "delete", name: skill.name });
         setSettings((prev) =>
-          updateSkills(prev, {
-            selected: prev.skills.selected.filter((name) => name !== skill.name),
-          }),
+          removeWorkspaceResourceReferences(
+            updateSkills(prev, {
+              selected: prev.skills.selected.filter((name) => name !== skill.name),
+            }),
+            { skillNames: [skill.name] },
+          ),
         );
         setSkills((prev) => prev.filter((item) => item.name !== skill.name));
         setPreviewInstalledSkill((current) => (current?.name === skill.name ? null : current));

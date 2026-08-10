@@ -1,14 +1,15 @@
 import { ApplicationView } from "@liveagent/ui/application/ApplicationView";
 import { AppErrorBoundary } from "@liveagent/ui/components/AppErrorBoundary";
+import { FileDropOverlay } from "@liveagent/ui/components/chat/FileDropOverlay";
 import type {
   MentionComposerDraft,
   MentionComposerHandle,
 } from "@liveagent/ui/components/chat/MentionComposer";
 import { type NotifyItem, NotifyToast } from "@liveagent/ui/components/chat/NotifyToast";
 import { SharedHistoryManagerModal } from "@liveagent/ui/components/chat/SharedHistoryManagerModal";
-import { TaskProgressIndicator } from "@liveagent/ui/components/chat/TaskProgressIndicator";
+import { TaskProgressBar } from "@liveagent/ui/components/chat/TaskProgressBar";
 import { ToolApprovalBar } from "@liveagent/ui/components/chat/ToolApprovalBar";
-import { useSequencedTaskProgress } from "@liveagent/ui/components/chat/useSequencedTaskProgress";
+import { WorkspaceResourceSettingsDrawer } from "@liveagent/ui/components/chat/WorkspaceResourceSettingsDrawer";
 import type {
   GitCommitContextPayload,
   GitFileContextPayload,
@@ -17,13 +18,13 @@ import { RightDockPanel } from "@liveagent/ui/components/project-tools/RightDock
 import { Button } from "@liveagent/ui/components/ui/button";
 import { useConfirmDialog } from "@liveagent/ui/components/ui/confirm-dialog";
 import { ScrollArea } from "@liveagent/ui/components/ui/scroll-area";
-import { type Locale, LocaleContext, t as translate } from "@liveagent/ui/i18n/index";
+import { WorkspaceOverlayHost } from "@liveagent/ui/components/workspace-editor/WorkspaceOverlayHost";
+import { LocaleContext, t as translate } from "@liveagent/ui/i18n/index";
+import type { ChatFileLink } from "@liveagent/ui/lib/chat/chatFileLinks";
 import { normalizeLogicalLineEndings } from "@liveagent/ui/lib/chat/composerText";
 import { openChatFileLink } from "@liveagent/ui/lib/chat/openChatFileLink";
-import {
-  selectTodoProgressUpdates,
-  type TodoProgressUpdate,
-} from "@liveagent/ui/lib/chat/taskProgress";
+import { queuedChatTurnHasContent } from "@liveagent/ui/lib/chat/queuedChatTurn";
+import { selectLatestTaskProgress } from "@liveagent/ui/lib/chat/taskProgress";
 import {
   readToolApprovalDeadlineAt,
   readToolApprovalPending,
@@ -32,6 +33,7 @@ import {
 import { memoryDeleteProject } from "@liveagent/ui/lib/memory/api";
 import { createUuid } from "@liveagent/ui/lib/shared/id";
 import { mergeAlwaysEnabledSkillNames } from "@liveagent/ui/lib/skills/index";
+import { useChatSkills } from "@liveagent/ui/lib/skills/useChatSkills";
 import { terminalSessionBelongsToProject } from "@liveagent/ui/lib/terminal/sessionStore";
 import type { TerminalSession } from "@liveagent/ui/lib/terminal/types";
 import {
@@ -51,7 +53,6 @@ import {
 } from "react";
 import { ChevronDown, PanelRightClose, PanelRightOpen, Terminal } from "@/components/icons";
 import { registerAskUserQuestionAnswerHandler } from "@/lib/chat/askUserQuestionBridge";
-import type { ChatFileLink } from "@/lib/chat/chatFileLinks";
 import type { ChatHistorySummary } from "@/lib/chat/chatHistory";
 import { buildModelOptions } from "@/lib/chat/chatPageHelpers";
 import type { HistoryMessageRef } from "@/lib/chat/conversationState";
@@ -123,8 +124,10 @@ import {
   type RightDockFileTreeStatePatch,
   type RightDockProjectState,
   removeRightDockProjectState,
+  resetWorkspaceResourceSettings,
   resolveEffectiveTheme,
   resolveWorkspaceProjects,
+  resolveWorkspaceResources,
   type SelectedModel,
   setSelectedModel,
   updateChatRuntimeControlsForProvider,
@@ -136,50 +139,14 @@ import {
   updateSkills,
   updateSshProjectHostIds,
   updateSystem,
+  updateWorkspaceResourceSettings,
   type WorkspaceProject,
   workspaceProjectPathKey,
 } from "@/lib/settings";
 import { createGatewayWorkspaceActivityClient } from "@/lib/workspace-activity/gatewayWorkspaceActivityClient";
-import { queuedChatTurnHasContent } from "@/pages/chat/queue/chatTurnQueue";
-import { useChatSkills } from "@/pages/chat/useChatSkills";
 import type { SectionId } from "@/pages/settings/types";
 
 const LOCAL_DRAFT_PREFIX = "__local_draft__:";
-
-function CurrentTaskProgress(props: {
-  updates: readonly TodoProgressUpdate[];
-  isConversationRunning: boolean;
-  locale: Locale;
-}) {
-  const { updates, isConversationRunning, locale } = props;
-  const snapshot = useSequencedTaskProgress(updates, isConversationRunning);
-  const labels = useMemo(() => {
-    if (!snapshot) return null;
-    return {
-      title: translate("chat.taskProgress.title", locale),
-      step: translate("chat.taskProgress.step", locale)
-        .replace("{current}", String(snapshot.currentStep))
-        .replace("{total}", String(snapshot.totalCount)),
-      completedCount: `${snapshot.completedCount}/${snapshot.totalCount} ${translate(
-        "chat.taskProgress.completedCount",
-        locale,
-      )}`,
-      running: translate("chat.taskProgress.running", locale),
-      pending: translate("chat.taskProgress.pending", locale),
-      paused: translate("chat.taskProgress.paused", locale),
-      completed: translate("chat.taskProgress.completed", locale),
-    };
-  }, [locale, snapshot]);
-
-  if (!snapshot || !labels) return null;
-  return (
-    <TaskProgressIndicator
-      snapshot={snapshot}
-      isConversationRunning={isConversationRunning}
-      labels={labels}
-    />
-  );
-}
 
 function createLocalDraftConversationId() {
   return `${LOCAL_DRAFT_PREFIX}${createUuid()}`;
@@ -260,7 +227,6 @@ import {
   SHARED_HISTORY_LIST_PAGE_SIZE,
   SKILLS_HUB_BROWSER_TITLE,
 } from "./constants";
-import { FileDropOverlay } from "./FileDropOverlay";
 import { HistorySwitchLoadingOverlay } from "./HistorySwitchLoadingOverlay";
 import {
   createWorkspaceProjectFromPath,
@@ -284,7 +250,6 @@ import {
 } from "./sidebar/gatewaySidebarAvailability";
 import type { ModelProviderSource, OverlayState, SendChatFn, SendChatOptions } from "./types";
 import { UserMenu } from "./UserMenu";
-import { WorkspaceOverlayHost } from "./WorkspaceOverlayHost";
 
 const STALE_HISTORY_RETRY_INITIAL_DELAY_MS = 1_000;
 const STALE_HISTORY_RETRY_MAX_DELAY_MS = 30_000;
@@ -395,6 +360,9 @@ export default function GatewayApp() {
   const [sharedHistoryItems, setSharedHistoryItems] = useState<ChatHistorySummary[]>([]);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [activeView, setActiveView] = useState<"chat" | "skills-hub" | "mcp-hub">("chat");
+  const [resourceSettingsProject, setResourceSettingsProject] = useState<WorkspaceProject | null>(
+    null,
+  );
   const [rightDockOpen, setRightDockOpen] = useState(false);
   const { confirm: requestConfirmDialog, dialog: confirmDialog } = useConfirmDialog();
   // Both elements arrive via callback refs → state so the scroll-follow hook
@@ -2812,7 +2780,10 @@ export default function GatewayApp() {
             getDefaultWorkspaceProjectPath(prev.system),
           ),
         };
-        return removeRightDockProjectState(nextSettings, pathKey);
+        return removeRightDockProjectState(
+          resetWorkspaceResourceSettings(nextSettings, pathKey),
+          pathKey,
+        );
       });
       setProjectRenamingId((current) => (current === project.id ? null : current));
       setProjectRenameDraft("");
@@ -3955,14 +3926,22 @@ export default function GatewayApp() {
     [displayedConversationId, setSettings],
   );
 
-  const skillsEnabled = settings.skills.enabled && isAgentMode;
+  const resourceWorkdir =
+    sidebarConversationsById.get(displayedConversationId)?.cwd?.trim() ||
+    conversationWorkdirsRef.current.get(displayedConversationId)?.trim() ||
+    (isAgentMode ? activeWorkspaceProjectPath || settings.system.workdir.trim() : "");
+  const workspaceResources = useMemo(
+    () => resolveWorkspaceResources(settings, resourceWorkdir),
+    [resourceWorkdir, settings],
+  );
+  const skillsEnabled = workspaceResources.skillsEnabled && isAgentMode;
   const selectedSkillNames = useMemo(
-    () => (skillsEnabled ? mergeAlwaysEnabledSkillNames(settings.skills.selected) : []),
-    [skillsEnabled, settings.skills.selected],
+    () => (skillsEnabled ? workspaceResources.skillNames : []),
+    [skillsEnabled, workspaceResources.skillNames],
   );
   const { availableSkills, skillsRootDir } = useChatSkills({
-    skillsEnabled,
-    selectedSkillNames,
+    skillsEnabled: settings.skills.enabled && isAgentMode,
+    selectedSkillNames: settings.skills.selected,
     setSettings,
   });
   const enabledComposerSkills = useMemo(() => {
@@ -4451,8 +4430,8 @@ export default function GatewayApp() {
     return item?.title ?? "";
   }, [selectedHistoryId, sidebarConversationsById]);
   const transcriptRows = displayedTranscript.rows;
-  const taskProgressUpdates = useMemo(
-    () => selectTodoProgressUpdates(transcriptRows),
+  const taskProgressSnapshot = useMemo(
+    () => selectLatestTaskProgress(transcriptRows),
     [transcriptRows],
   );
   // 当前会话的待审批工具:遍历渲染中的 transcript,筛出带 __toolApprovalPending 标记
@@ -4721,6 +4700,7 @@ export default function GatewayApp() {
               onSelectProject={handleSelectWorkspaceProject}
               onNewConversationForProject={handleNewConversationForProject}
               onBrowseProjectInFileTree={handleBrowseWorkspaceProjectInFileTree}
+              onConfigureProjectResources={setResourceSettingsProject}
               onStartRenamingProject={handleStartRenamingWorkspaceProject}
               onProjectRenameDraftChange={setProjectRenameDraft}
               onCommitProjectRename={handleCommitWorkspaceProjectRename}
@@ -5154,11 +5134,10 @@ export default function GatewayApp() {
                           onEditQueuedTurn={editQueuedTurn}
                           onRemoveQueuedTurn={removeQueuedTurn}
                           taskProgressBar={
-                            <CurrentTaskProgress
+                            <TaskProgressBar
                               key={displayedConversationId}
-                              updates={taskProgressUpdates}
+                              snapshot={taskProgressSnapshot}
                               isConversationRunning={transcriptBusy}
-                              locale={settings.locale}
                             />
                           }
                           approvalBar={approvalBar}
@@ -5250,6 +5229,21 @@ export default function GatewayApp() {
               onInsertCommitMention={handleRightDockInsertCommitMention}
               onInsertGitFileMention={handleRightDockInsertGitFileMention}
               onClose={handleRightDockClose}
+            />
+          ) : null}
+
+          {resourceSettingsProject ? (
+            <WorkspaceResourceSettingsDrawer
+              project={resourceSettingsProject}
+              settings={settings}
+              skills={availableSkills}
+              onClose={() => setResourceSettingsProject(null)}
+              onSave={(draft) => {
+                setSettings((prev) =>
+                  updateWorkspaceResourceSettings(prev, resourceSettingsProject.path, draft),
+                );
+                setResourceSettingsProject(null);
+              }}
             />
           ) : null}
 

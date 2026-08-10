@@ -1,3 +1,11 @@
+import {
+  AssistantAvatar,
+  AssistantBubble,
+  AssistantStatus,
+  CompactingText,
+  RetryDetailsBlock,
+  VibingText,
+} from "@liveagent/ui/components/chat/AssistantBubble";
 import { ChatEmptyState } from "@liveagent/ui/components/chat/ChatEmptyState";
 import { getUploadedFileTypeIcon } from "@liveagent/ui/components/chat/fileTypeIcons";
 import { ImagePreview, type ImagePreviewSlide } from "@liveagent/ui/components/chat/ImagePreview";
@@ -7,6 +15,7 @@ import {
 } from "@liveagent/ui/components/chat/TranscriptMessageActions";
 import { Markdown } from "@liveagent/ui/components/Markdown";
 import { useLocale } from "@liveagent/ui/i18n/LocaleContext";
+import type { ChatFileLink } from "@liveagent/ui/lib/chat/chatFileLinks";
 import {
   getUploadedImagePreviewCacheKey,
   loadUploadedImagePreview,
@@ -39,7 +48,6 @@ import {
   useRef,
   useState,
 } from "react";
-import type { ChatFileLink } from "@/lib/chat/chatFileLinks";
 import { normalizeLiveToolStatus, VIBING_STATUS } from "@/lib/chat/chatPageHelpers";
 import type { HistoryMessageRef } from "@/lib/chat/conversationState";
 import { getRoundText } from "@/lib/chat/uiMessages";
@@ -56,14 +64,6 @@ import {
 } from "@/lib/chat/userMessageContent";
 import { DEFAULT_CHAT_TRANSCRIPT_WIDTH } from "@/lib/settings";
 import { extractLiveRange } from "@/lib/transcript-virtual/liveRangeExtractor";
-import {
-  AssistantAvatar,
-  AssistantBubble,
-  AssistantStatus,
-  CompactingText,
-  RetryDetailsBlock,
-  VibingText,
-} from "@/pages/chat/AssistantBubble";
 import type { RetryAttemptRecord, TranscriptRow } from "../lib/chat/transcript/types";
 import type { SectionId } from "../pages/settings/types";
 import { CheckCircle2, ChevronDown, Loader2, X } from "./icons";

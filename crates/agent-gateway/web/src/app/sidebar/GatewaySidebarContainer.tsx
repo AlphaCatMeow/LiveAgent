@@ -106,6 +106,7 @@ export type GatewaySidebarContainerProps = {
   onSelectProject: (project: WorkspaceProject) => void;
   onNewConversationForProject: (project: WorkspaceProject) => void;
   onBrowseProjectInFileTree: (project: WorkspaceProject) => void;
+  onConfigureProjectResources: (project: WorkspaceProject) => void;
   onStartRenamingProject: (project: WorkspaceProject) => void;
   onProjectRenameDraftChange: (value: string) => void;
   onCommitProjectRename: () => void;
@@ -213,6 +214,27 @@ export function GatewaySidebarContainer(props: GatewaySidebarContainerProps) {
     clearMutationErrors();
     void store.setPinned(id, isPinned);
   });
+
+  const handleMoveToWorkspace = useStableCallback((id: string, cwd: string) => {
+    if (sectionsDisabled) {
+      return;
+    }
+    clearMutationErrors();
+    void store.setCwd(id, cwd);
+  });
+
+  const handleMoveConversationsToWorkspace = useStableCallback(
+    async (ids: readonly string[], cwd: string) => {
+      if (sectionsDisabled) {
+        return ids;
+      }
+      clearMutationErrors();
+      const results = await Promise.all(
+        ids.map(async (id) => ({ id, moved: await store.setCwd(id, cwd) })),
+      );
+      return results.filter((result) => !result.moved).map((result) => result.id);
+    },
+  );
 
   const handleDeleteConversation = useStableCallback((id: string) => {
     if (sectionsDisabled) {
@@ -353,6 +375,7 @@ export function GatewaySidebarContainer(props: GatewaySidebarContainerProps) {
       onSelectProject={props.onSelectProject}
       onNewConversationForProject={props.onNewConversationForProject}
       onBrowseProjectInFileTree={props.onBrowseProjectInFileTree}
+      onConfigureProjectResources={props.onConfigureProjectResources}
       onStartRenamingProject={props.onStartRenamingProject}
       onProjectRenameDraftChange={props.onProjectRenameDraftChange}
       onCommitProjectRename={props.onCommitProjectRename}
@@ -369,6 +392,8 @@ export function GatewaySidebarContainer(props: GatewaySidebarContainerProps) {
       onCommitRename={handleCommitRename}
       onCancelRename={handleCancelRename}
       onSetPinned={handleSetPinned}
+      onMoveToWorkspace={handleMoveToWorkspace}
+      onMoveConversationsToWorkspace={handleMoveConversationsToWorkspace}
       canShareConversations={props.canShareConversations}
       sharedConversationCount={props.sharedConversationCount}
       onShareConversation={props.onShareConversation}

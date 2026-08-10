@@ -291,7 +291,7 @@ test("terminal settlement removes the live tail before sending clears", () => {
   assert.equal(nextPending.rows[2].units.at(-1).mutable, true);
 });
 
-test("assistant rounds hide TodoWrite while preserving grouped top-level render units", () => {
+test("assistant rounds hide task tools while preserving grouped top-level render units", () => {
   const model = createTranscriptRowModel();
   const tool = (id, name = "Read") => ({
     kind: "tool",
@@ -304,7 +304,7 @@ test("assistant rounds hide TodoWrite while preserving grouped top-level render 
       blocks: [
         { kind: "text", id: "text-1", text: "answer" },
         { kind: "thinking", id: "thinking-1", text: "thought" },
-        tool("todo-1", "TodoWrite"),
+        tool("task-1", "TaskCreate"),
         tool("call-1"),
         tool("call-2"),
         { kind: "hostedSearch", item: { id: "search-1" } },

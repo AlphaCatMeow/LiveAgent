@@ -4,7 +4,7 @@ import {
   type UiRound,
   VIBING_STATUS,
 } from "@liveagent/app/lib/chat/assistantBubbleAdapter";
-import type { ChatFileLink } from "@liveagent/app/lib/chat/chatFileLinks";
+import type { ChatFileLink } from "@liveagent/ui/lib/chat/chatFileLinks";
 import {
   AssistantStatus,
   CompactingText,

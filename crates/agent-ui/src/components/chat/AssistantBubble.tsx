@@ -1,6 +1,6 @@
 import type { UiRound } from "@liveagent/app/lib/chat/assistantBubbleAdapter";
 import { collectChangedFiles } from "@liveagent/app/lib/chat/changedFilesAdapter";
-import type { ChatFileLink } from "@liveagent/app/lib/chat/chatFileLinks";
+import type { ChatFileLink } from "@liveagent/ui/lib/chat/chatFileLinks";
 import { memo, useMemo } from "react";
 import { AssistantAvatar } from "./AssistantAvatar";
 import { RoundContent } from "./assistant-bubble/RoundContent";

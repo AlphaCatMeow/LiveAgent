@@ -790,9 +790,11 @@ export const translations: Record<Locale, Record<string, string>> = {
     "git.branchSelector.forceDelete": "强制删除",
     "git.branchSelector.deleteWorktree": "删除 Worktree",
     "git.branchSelector.deleteWorktreeConfirmTitle": "删除 Worktree「{path}」？",
-    "git.branchSelector.deleteWorktreeConfirmDescription": "将移除 Worktree 目录，并尝试删除其分支「{branch}」。",
+    "git.branchSelector.deleteWorktreeConfirmDescription":
+      "将移除 Worktree 目录，并尝试删除其分支「{branch}」。",
     "git.branchSelector.deleteWorktreeForceTitle": "Worktree 包含未提交改动",
-    "git.branchSelector.deleteWorktreeForceDescription": "强制移除（--force）会丢弃 Worktree 中的未提交改动。",
+    "git.branchSelector.deleteWorktreeForceDescription":
+      "强制移除（--force）会丢弃 Worktree 中的未提交改动。",
     "git.branchSelector.forceRemoveWorktree": "强制移除",
     "git.branchSelector.moreActions": "更多操作",
     "git.branchSelector.stashPush": "暂存当前改动 (stash)",
@@ -3127,10 +3129,12 @@ export const translations: Record<Locale, Record<string, string>> = {
       "Force delete (-D) discards commits that only exist on this branch.",
     "git.branchSelector.forceDelete": "Force delete",
     "git.branchSelector.deleteWorktree": "Delete Worktree",
-    "git.branchSelector.deleteWorktreeConfirmTitle": "Delete worktree \"{path}\"?",
-    "git.branchSelector.deleteWorktreeConfirmDescription": "Removes the worktree directory and tries to delete its branch \"{branch}\".",
+    "git.branchSelector.deleteWorktreeConfirmTitle": 'Delete worktree "{path}"?',
+    "git.branchSelector.deleteWorktreeConfirmDescription":
+      'Removes the worktree directory and tries to delete its branch "{branch}".',
     "git.branchSelector.deleteWorktreeForceTitle": "Worktree contains uncommitted changes",
-    "git.branchSelector.deleteWorktreeForceDescription": "Force removal (--force) discards uncommitted changes in the worktree.",
+    "git.branchSelector.deleteWorktreeForceDescription":
+      "Force removal (--force) discards uncommitted changes in the worktree.",
     "git.branchSelector.forceRemoveWorktree": "Force remove",
     "git.branchSelector.moreActions": "More actions",
     "git.branchSelector.stashPush": "Stash changes",

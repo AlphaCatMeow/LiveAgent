@@ -378,7 +378,10 @@ export function assignWorkspaceProjectToGroup(
         : group.projectPaths.filter((path) => workspaceProjectPathKey(path) !== targetKey),
     };
   });
-  return touched ? next : next;
+  // 无变化时返回原引用，让调用方的 `next === prev` 短路生效，
+  // 避免幂等操作触发多余的 settings 写入/同步。参数虽声明 readonly，
+  // 实际调用方（settings 系统）传入的都是可变数组，原样返回满足契约。
+  return touched ? next : (groups as WorkspaceProjectGroup[]);
 }
 
 /**
@@ -470,19 +473,28 @@ export function buildWorkspaceProjectSections(
   return { grouped, ungrouped };
 }
 
-/** 折叠视图按区块切片（绝不拆开分组）；hiddenProjectCount 为被隐藏的成员数。 */
+/** 折叠视图按区块切片（绝不拆开分组）；hiddenProjectCount 为被隐藏的成员数。
+ * 上限是项目总数：分组整组纳入直到容量耗尽，剩余容量分给未分组项目，
+ * 保证未分组项目（常见场景）也受渲染上限约束。
+ */
 export function sliceWorkspaceProjectSections(
   sections: WorkspaceProjectSections,
   maxGrouped: number,
 ): { sections: WorkspaceProjectSections; hiddenProjectCount: number } {
-  const grouped = sections.grouped.slice(0, maxGrouped);
+  const grouped: WorkspaceProjectSection[] = [];
+  let usedMembers = 0;
+  for (const section of sections.grouped) {
+    if (usedMembers + section.projects.length > maxGrouped) break;
+    grouped.push(section);
+    usedMembers += section.projects.length;
+  }
+  const ungrouped = sections.ungrouped.slice(0, Math.max(0, maxGrouped - usedMembers));
   const totalMembers =
     sections.ungrouped.length +
     sections.grouped.reduce((sum, section) => sum + section.projects.length, 0);
-  const visibleMembers =
-    sections.ungrouped.length + grouped.reduce((sum, section) => sum + section.projects.length, 0);
+  const visibleMembers = usedMembers + ungrouped.length;
   return {
-    sections: { grouped, ungrouped: sections.ungrouped },
+    sections: { grouped, ungrouped },
     hiddenProjectCount: Math.max(0, totalMembers - visibleMembers),
   };
 }

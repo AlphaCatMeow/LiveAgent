@@ -1185,8 +1185,12 @@ pub(crate) fn git_branches_sync(workdir: String) -> Result<GitBranchesResponse, 
 
 /// 解析 `git worktree list --porcelain`：按空行分块，每块记录 worktree
 /// 路径与（可选）检出分支；detached worktree 的 branch 为空。
+/// 主工作树（第一个 block，path == repo_root）不是 linked worktree，必须
+/// 过滤：混入列表会让前端把主仓库检出的分支误判为被 worktree 检出。
 fn git_worktrees_sync(repo_root: &str) -> Result<Vec<GitWorktreeInfo>, String> {
     let output = git_success(repo_root, &["worktree", "list", "--porcelain"])?;
+    // 主仓库路径必然存在，canonicalize 安全；失败时退回原字符串兜底。
+    let main = fs::canonicalize(repo_root).unwrap_or_else(|_| PathBuf::from(repo_root));
     let mut worktrees = Vec::new();
     for block in output.stdout.split("\n\n") {
         let mut path = String::new();
@@ -1198,7 +1202,12 @@ fn git_worktrees_sync(repo_root: &str) -> Result<Vec<GitWorktreeInfo>, String> {
                 branch = rest.trim().to_string();
             }
         }
-        if !path.is_empty() {
+        // stale 登记（目录已删）的 canonicalize 会失败：不属于主工作树，保留。
+        if !path.is_empty()
+            && fs::canonicalize(&path)
+                .map(|path| path != main)
+                .unwrap_or(true)
+        {
             worktrees.push(GitWorktreeInfo { path, branch });
         }
     }
@@ -1756,15 +1765,15 @@ fn worktree_storage_base() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// 稳定且唯一的 repo id：`<sanitized-basename>-<fnv1a64 低 32 位 hex>`。
-/// 同一仓库根路径永远映射到同一 id，目录可读；32 位哈希碰撞概率低，但非绝对。
+/// 稳定且唯一的 repo id：`<sanitized-basename>-<fnv1a64 完整 64 位 hex>`。
+/// 同一仓库根路径永远映射到同一 id，目录可读；64 位哈希碰撞概率可忽略。
 fn repo_worktree_id(repo_root: &str) -> String {
     let basename = Path::new(repo_root)
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| repo_root.to_string());
     let sanitized = sanitize_repo_id_component(&basename);
-    format!("{sanitized}-{:08x}", fnv1a64(repo_root.as_bytes()) as u32)
+    format!("{sanitized}-{:016x}", fnv1a64(repo_root.as_bytes()))
 }
 
 fn sanitize_repo_id_component(input: &str) -> String {
@@ -4991,6 +5000,25 @@ mod tests {
             .find(|info| info.path == created.worktree_path)
             .expect("created worktree listed");
         assert_eq!(wt.branch, "wt-alpha");
+    }
+    #[test]
+    fn git_worktrees_excludes_main_worktree() {
+        let Some(repo) = init_temp_repo() else {
+            return;
+        };
+        let workdir = repo.path().to_string_lossy().to_string();
+        let state = git_status_sync(workdir.clone()).expect("status");
+        let worktrees = git_worktrees_sync(&state.repo_root).expect("worktree list");
+        let main = fs::canonicalize(&state.repo_root).expect("canonicalize main");
+        assert!(
+            !worktrees.iter().any(|info| {
+                fs::canonicalize(&info.path)
+                    .map(|path| path == main)
+                    .unwrap_or(false)
+            }),
+            "main worktree must not be listed as a linked worktree: {:#?}",
+            worktrees
+        );
     }
 
     #[test]

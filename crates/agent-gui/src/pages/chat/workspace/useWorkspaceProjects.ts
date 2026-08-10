@@ -1,9 +1,13 @@
+import { createUuid } from "@liveagent/ui/lib/shared/id";
 import { sidebarScopeKey } from "@liveagent/ui/lib/sidebar/scope";
 import type { SidebarStore } from "@liveagent/ui/lib/sidebar/store";
 import type { SidebarScope } from "@liveagent/ui/lib/sidebar/types";
 import { useSidebarSelector } from "@liveagent/ui/lib/sidebar/useSidebarSelector";
 import { invokeFs } from "@liveagent/ui/lib/tools/fsBackend";
 import {
+  assignWorkspaceProjectToGroup,
+  ensureWorktreeProjectGroup,
+  fallbackWorkspaceProjectName,
   findWorkspaceProject,
   mergeWorkspaceProjectsWithHistory,
 } from "@liveagent/ui/lib/workspaceProjects";
@@ -28,19 +32,6 @@ import {
   type WorkspaceProjectGroup,
   workspaceProjectPathKey,
 } from "../../../lib/settings";
-import { createUuid } from "@liveagent/ui/lib/shared/id";
-import { sidebarScopeKey } from "@liveagent/ui/lib/sidebar/scope";
-import type { SidebarStore } from "@liveagent/ui/lib/sidebar/store";
-import type { SidebarScope } from "@liveagent/ui/lib/sidebar/types";
-import { useSidebarSelector } from "@liveagent/ui/lib/sidebar/useSidebarSelector";
-import { invokeFs } from "@liveagent/ui/lib/tools/fsBackend";
-import {
-  assignWorkspaceProjectToGroup,
-  ensureWorktreeProjectGroup,
-  fallbackWorkspaceProjectName,
-  findWorkspaceProject,
-  mergeWorkspaceProjectsWithHistory,
-} from "@liveagent/ui/lib/workspaceProjects";
 import { asErrorMessage } from "../chatPageUtils";
 import { startWorkspaceCloneTask } from "./cloneTasks";
 import {

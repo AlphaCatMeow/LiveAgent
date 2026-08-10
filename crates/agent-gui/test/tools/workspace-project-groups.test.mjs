@@ -8,8 +8,7 @@ const {
   ensureWorktreeProjectGroup,
   buildWorkspaceProjectSections,
   sliceWorkspaceProjectSections,
-} = loader.loadModule("src/lib/workspaceProjects.ts");
-
+} = loader.loadModule("@liveagent/ui/lib/workspaceProjects.ts");
 function project(id, path, extra = {}) {
   return {
     id,
@@ -132,10 +131,44 @@ test("sliceWorkspaceProjectSections never splits a group", () => {
       group("g3", "b", ["/work/b"]),
     ],
   );
+  // g1 有 2 个成员，超出上限 1 时整组都放不下 → 整组隐藏，绝不拆开。
   const sliced = sliceWorkspaceProjectSections(sections, 1);
+  assert.equal(sliced.sections.grouped.length, 0);
+  assert.equal(sliced.sections.ungrouped.length, 0);
+  assert.equal(sliced.hiddenProjectCount, 4);
+});
+
+test("sliceWorkspaceProjectSections caps ungrouped projects", () => {
+  const projects = [0, 1, 2, 3, 4].map((index) =>
+    project(`p${index}`, `/work/p${index}`),
+  );
+  const sections = buildWorkspaceProjectSections(projects, []);
+  const sliced = sliceWorkspaceProjectSections(sections, 2);
+  assert.deepEqual(
+    sliced.sections.ungrouped.map((p) => p.id),
+    ["p0", "p1"],
+  );
+  assert.equal(sliced.hiddenProjectCount, 3);
+});
+
+test("sliceWorkspaceProjectSections fills remaining capacity with ungrouped", () => {
+  const repo = project("repo", "/work/repo");
+  const wt = project("wt", "/work/wt");
+  const a = project("a", "/work/a");
+  const b = project("b", "/work/b");
+  const sections = buildWorkspaceProjectSections(
+    [repo, wt, a, b],
+    [group("g1", "repo", ["/work/repo", "/work/wt"])],
+  );
+  // g1 占 2 个名额，上限 4 的剩余 2 个分给未分组项目。
+  const sliced = sliceWorkspaceProjectSections(sections, 4);
   assert.equal(sliced.sections.grouped.length, 1);
   assert.equal(sliced.sections.grouped[0].projects.length, 2);
-  assert.equal(sliced.hiddenProjectCount, 2);
+  assert.deepEqual(
+    sliced.sections.ungrouped.map((p) => p.id),
+    ["a", "b"],
+  );
+  assert.equal(sliced.hiddenProjectCount, 0);
 });
 
 test("single project belongs to exactly one group at a time", () => {

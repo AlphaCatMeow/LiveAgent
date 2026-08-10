@@ -1121,7 +1121,7 @@ mod tests {
         };
         let loaded = load_system(&conn).expect("load system");
 
-        assert_eq!(row_count, 10);
+        assert_eq!(row_count, 11);
         assert_eq!(
             keys,
             vec![
@@ -1294,8 +1294,6 @@ mod tests {
                     "updatedAt": now
                 }
             }))
-        );
-    }
         );
     }
 

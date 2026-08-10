@@ -27,7 +27,7 @@ import {
 } from "../../../agent-ui-adapters/sidebarChrome";
 import type { AppUpdateController } from "../../../lib/appUpdates";
 import { normalizeConversationTitle } from "../../../lib/chat/page/chatPageHelpers";
-import type { WorkspaceProject } from "../../../lib/settings";
+import type { WorkspaceProject, WorkspaceProjectGroup } from "../../../lib/settings";
 import {
   moveConversationsToWorkspace,
   moveConversationToWorkspace,

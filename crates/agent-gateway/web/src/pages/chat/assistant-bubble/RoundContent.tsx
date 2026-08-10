@@ -9,7 +9,7 @@ import { ThinkingActivity } from "@liveagent/ui/components/chat/ThinkingActivity
 import { UsagePanel } from "@liveagent/ui/components/chat/UsagePanel";
 import { Markdown } from "@liveagent/ui/components/Markdown";
 import { useLocale } from "@liveagent/ui/i18n/index";
-import { isTodoWriteToolBlock } from "@liveagent/ui/lib/chat/taskProgress";
+import { isTaskToolBlock } from "@liveagent/ui/lib/chat/taskProgress";
 import { memo, useMemo, useState } from "react";
 import { ChevronRight, RefreshCw } from "../../../components/icons";
 import type { ChatFileLink } from "../../../lib/chat/chatFileLinks";
@@ -90,7 +90,6 @@ export const RoundContent = memo(function RoundContent(props: {
   renderMode?: "streaming" | "static";
   readOnly?: boolean;
   redactToolContent?: boolean;
-  isAborted?: boolean;
   workdir?: string;
   onOpenFileLink?: (link: ChatFileLink) => void;
 }) {
@@ -108,13 +107,12 @@ export const RoundContent = memo(function RoundContent(props: {
     renderMode,
     readOnly = false,
     redactToolContent = false,
-    isAborted = false,
     workdir,
     onOpenFileLink,
   } = props;
   const groupedBlocks = useMemo(() => groupRoundBlocks(round.blocks), [round.blocks]);
   const visibleGroupedBlocks = useMemo(
-    () => groupedBlocks.filter((block) => !isTodoWriteToolBlock(block)),
+    () => groupedBlocks.filter((block) => !isTaskToolBlock(block)),
     [groupedBlocks],
   );
   const hasContent =
@@ -159,20 +157,7 @@ export const RoundContent = memo(function RoundContent(props: {
   if (!hasContent) return null;
 
   return (
-    <div
-      className={
-        isLive
-          ? "space-y-2"
-          : // Settled rounds freeze todo-card animations; the strike-through /
-            // dimming of incomplete items is reserved for aborted replies —
-            // a normally completed reply may legitimately leave todos open.
-            `space-y-2 [&_.todo-list-view_.animate-spin]:!animate-none [&_.todo-list-view_.shimmer]:!animate-none${
-              isAborted
-                ? " [&_.todo-list-view_[data-todo-incomplete]>span:last-child]:!text-muted-foreground/40 [&_.todo-list-view_[data-todo-incomplete]>span:last-child]:line-through"
-                : ""
-            }`
-      }
-    >
+    <div className="space-y-2">
       {isActive &&
       isLive &&
       normalizedToolStatus &&
@@ -229,7 +214,6 @@ export const RoundContent = memo(function RoundContent(props: {
             <MemoToolCallItem
               key={block.key}
               item={block.item}
-              isAborted={isAborted}
               isRunning={Boolean(
                 isLive &&
                   block.item.toolCall.id &&
@@ -246,7 +230,6 @@ export const RoundContent = memo(function RoundContent(props: {
             <ToolTraceGroup
               key={block.key}
               items={block.items}
-              isAborted={isAborted}
               runningToolCallIds={
                 isLive
                   ? (runningToolCallIds ?? EMPTY_RUNNING_TOOL_CALL_IDS)

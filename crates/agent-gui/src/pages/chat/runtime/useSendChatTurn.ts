@@ -24,8 +24,10 @@ import {
   appendMessagesToConversation,
   buildRequestContext,
   type ConversationViewState,
+  clearTaskListState,
   findHistoryMessageRefByMessageId,
   type HistoryMessageRef,
+  setTaskListState,
 } from "../../../lib/chat/conversation/conversationState";
 import {
   createConversationHookLifecycle,
@@ -71,6 +73,7 @@ import {
   type SubagentStoreManager,
 } from "../../../lib/subagents";
 import type { SkillAccessPolicy } from "../../../lib/tools/skillAccessPolicy";
+import type { TaskStateStore } from "../../../lib/tools/taskTools";
 import { appendManagedSkillSelections, asErrorMessage } from "../chatPageUtils";
 import {
   buildTextFromComposerDraft,
@@ -611,7 +614,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       providerId,
       model,
     });
-    const baseConversationState = runtimeEntry.state;
+    const baseConversationState = clearTaskListState(runtimeEntry.state);
     const isFirstTurn = baseConversationState.meta.totalMessageCount === 0;
     const existingHistoryItem =
       sidebarStore.peek(conversationId) ??
@@ -923,10 +926,14 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
 
     if (overrides?.editResendBaseMessageRef) {
       try {
-        nextConversationState = await replaceConversationAtMessage(
-          conversationId,
-          overrides.editResendBaseMessageRef,
-          pendingUserMessage,
+        // 重发同样是新用户消息开启新 Run:替换回来的历史 meta 可能带着上一
+        // Run 持久化的 taskList,必须与常规发送一样在 Run 边界清除。
+        nextConversationState = clearTaskListState(
+          await replaceConversationAtMessage(
+            conversationId,
+            overrides.editResendBaseMessageRef,
+            pendingUserMessage,
+          ),
         );
         initialUserTurnPersisted = true;
         const keepParentToolCallIds =
@@ -1432,6 +1439,33 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       resetLiveTranscript(transcriptStore);
     }
 
+    // Run 级任务清单存储:先落盘、成功后才应用到运行时状态,失败时状态从未
+    // 变更(无需回滚)。持久化走非终态通道——中途任务写盘失败只属于本次工具
+    // 调用(模型收到错误可重试),绝不能点亮 terminalHistoryPersistFailed 把
+    // 已成功收尾的 run 误报为 history_persist_failed。
+    const taskStateStore: TaskStateStore = {
+      runId: gatewayBridgeRequestId,
+      getState: () => nextConversationState.meta.taskList,
+      commitState: async (taskList) => {
+        const persisted = await persistConversationWithHistorySync({
+          conversationId,
+          sessionId,
+          providerId,
+          model,
+          selectedModel,
+          cwd: conversationCwd,
+          state: setTaskListState(nextConversationState, taskList),
+          fallbackTitle,
+          createdAt,
+          titlePromise,
+        }).catch(() => false);
+        if (!persisted) {
+          throw new Error("Failed to persist task state.");
+        }
+        applyConversationState(setTaskListState(nextConversationState, taskList));
+      },
+    };
+
     try {
       if (effectiveIsAgentMode) {
         await chatRuntimeHost.runTurn({
@@ -1493,6 +1527,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
               }
             },
             sessionId,
+            taskStateStore,
             conversationId,
             conversationCwd,
             fallbackTitle,

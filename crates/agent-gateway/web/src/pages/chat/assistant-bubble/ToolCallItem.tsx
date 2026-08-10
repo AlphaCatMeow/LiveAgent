@@ -2,7 +2,6 @@ import { AskUserQuestionCard } from "@liveagent/ui/components/chat/AskUserQuesti
 import { AssistantStatus } from "@liveagent/ui/components/chat/AssistantStatus";
 import { FileChangeBadge } from "@liveagent/ui/components/chat/FileChangeBadge";
 import { LazyCollapse } from "@liveagent/ui/components/chat/LazyCollapse";
-import { sanitizeTodoItems } from "@liveagent/ui/components/chat/TodoListView";
 import { ToolScrollablePre, ToolSection } from "@liveagent/ui/components/chat/ToolSurfaces";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import {
@@ -43,31 +42,16 @@ function ToolCallItem({
   isRunning,
   readOnly = false,
   redactToolContent = false,
-  isAborted = false,
 }: {
   item: ToolTraceItem;
   isRunning?: boolean;
   readOnly?: boolean;
   redactToolContent?: boolean;
-  isAborted?: boolean;
 }) {
   const { t } = useLocale();
   const result = item.toolResult;
   const builtinResultKind = getBuiltinResultKind(result);
   const isRedactedToolContent = redactToolContent && isBuiltinShareToolName(item.toolCall.name);
-  const isTodo = !isRedactedToolContent && item.toolCall.name === "TodoWrite";
-  const todoItems = isTodo
-    ? sanitizeTodoItems(
-        builtinResultKind === "todo_write"
-          ? (result?.details as { todos?: unknown } | undefined)?.todos
-          : item.toolCall.arguments?.todos,
-      )
-    : [];
-  const hasIncompleteTodo = todoItems.some((todo) => todo.status !== "completed");
-  const shouldKeepTodoOpen =
-    isTodo && (Boolean(isRunning) || !result || Boolean(result.isError) || hasIncompleteTodo);
-  const shouldCloseCompletedTodo =
-    isTodo && Boolean(result && !result.isError) && todoItems.length > 0 && !hasIncompleteTodo;
   const isAskUser = !isRedactedToolContent && item.toolCall.name === ASK_USER_QUESTION_TOOL_NAME;
   const askDetails = isAskUser ? parseAskUserQuestionResultDetails(result?.details) : null;
   // 参数生成完毕（桌面端仅在 onToolCall 后才发 tool_call 事件）才渲染卡片；
@@ -79,7 +63,7 @@ function ToolCallItem({
         ? askDetails.questions
         : sanitizeAskUserQuestionItems(item.toolCall.arguments?.questions)
       : [];
-  // 提问卡运行期强制展开等待作答；应答落定后自动收起（同 Todo 完成收起）。
+  // 提问卡运行期强制展开等待作答；应答落定后自动收起。
   const shouldKeepAskOpen = !readOnly && isAskUser && (Boolean(isRunning) || !result);
   const shouldCloseAnsweredAsk = isAskUser && Boolean(result);
   // 权威应答截止时间：桌面端在网关上报的工具参数上盖章，倒计时与桌面计时
@@ -105,10 +89,7 @@ function ToolCallItem({
     readToolApprovalPending(item.toolCall.arguments);
   const shouldAutoOpen =
     !isRedactedToolContent &&
-    (item.toolCall.name === "Image" ||
-      builtinResultKind === "display_image" ||
-      shouldKeepTodoOpen ||
-      shouldKeepAskOpen);
+    (item.toolCall.name === "Image" || builtinResultKind === "display_image" || shouldKeepAskOpen);
   const [open, setOpen] = useState(readOnly || isRedactedToolContent ? false : shouldAutoOpen);
   const isSubagentCard = isSubagentCardToolCall(item.toolCall);
   const hasArgs = Object.keys(item.toolCall.arguments || {}).length > 0;
@@ -117,7 +98,6 @@ function ToolCallItem({
     !isRedactedToolContent &&
     !isAskUser &&
     (!isSubagentCard || !result) &&
-    (item.toolCall.name !== "TodoWrite" || !result) &&
     (isStreamingFilePreviewTool ? !result : hasArgs);
   const isBash = item.toolCall.name === "Bash";
   const isManagedProcess = item.toolCall.name === "ManagedProcess";
@@ -145,31 +125,25 @@ function ToolCallItem({
   );
   const meta = getToolMeta(item.toolCall.name);
   const ToolIcon = meta.Icon;
-  const title =
-    item.toolCall.name === "TodoWrite"
-      ? { name: t("chat.tool.todoTitle"), action: "" }
-      : isAskUser
-        ? { name: t("chat.tool.askUserTitle"), action: "" }
-        : isRedactedToolContent
-          ? { name: getToolDisplayName(item.toolCall.name), action: "" }
-          : getToolDisplayTitle(item.toolCall);
+  const title = isAskUser
+    ? { name: t("chat.tool.askUserTitle"), action: "" }
+    : isRedactedToolContent
+      ? { name: getToolDisplayName(item.toolCall.name), action: "" }
+      : getToolDisplayTitle(item.toolCall);
 
-  const statusLabel =
-    isTodo && hasIncompleteTodo && isAborted
-      ? t("chat.tool.aborted")
-      : isApprovalPending
-        ? t("chat.toolApproval.waitingStatus")
-        : isRunning
-          ? isAskUser
-            ? askQuestions.length > 0
-              ? t("chat.askUser.waiting")
-              : t("chat.askUser.preparing")
-            : t("chat.tool.running")
-          : result
-            ? result.isError
-              ? t("chat.tool.failed")
-              : t("chat.tool.success")
-            : t("chat.tool.waiting");
+  const statusLabel = isApprovalPending
+    ? t("chat.toolApproval.waitingStatus")
+    : isRunning
+      ? isAskUser
+        ? askQuestions.length > 0
+          ? t("chat.askUser.waiting")
+          : t("chat.askUser.preparing")
+        : t("chat.tool.running")
+      : result
+        ? result.isError
+          ? t("chat.tool.failed")
+          : t("chat.tool.success")
+        : t("chat.tool.waiting");
 
   const statusTextClass = result?.isError
     ? "text-[hsl(var(--chat-error))]"
@@ -177,22 +151,14 @@ function ToolCallItem({
 
   useEffect(() => {
     if (readOnly || isRedactedToolContent) return;
-    if (shouldKeepTodoOpen || shouldKeepAskOpen) {
+    if (shouldKeepAskOpen) {
       setOpen(true);
-    } else if (shouldCloseCompletedTodo || shouldCloseAnsweredAsk) {
+    } else if (shouldCloseAnsweredAsk) {
       setOpen(false);
     } else if (shouldAutoOpen) {
       setOpen(true);
     }
-  }, [
-    isRedactedToolContent,
-    readOnly,
-    shouldAutoOpen,
-    shouldCloseAnsweredAsk,
-    shouldCloseCompletedTodo,
-    shouldKeepAskOpen,
-    shouldKeepTodoOpen,
-  ]);
+  }, [isRedactedToolContent, readOnly, shouldAutoOpen, shouldCloseAnsweredAsk, shouldKeepAskOpen]);
 
   const canExpand =
     !isRedactedToolContent &&
@@ -293,7 +259,7 @@ function ToolCallItem({
           {/* 提问卡自带应答态展示；仅参数校验失败（无 details）时回落默认错误区。 */}
           {result && (!isAskUser || !askDetails) ? (
             <ToolSection
-              label={isTodo ? undefined : t("chat.tool.return")}
+              label={t("chat.tool.return")}
               trailing={
                 result.isError ? (
                   <span className="text-[calc(11px*var(--zone-font-scale,1))] font-medium text-red-500">
@@ -417,6 +383,5 @@ export const MemoToolCallItem = memo(
     previousProps.isRunning === nextProps.isRunning &&
     previousProps.readOnly === nextProps.readOnly &&
     previousProps.redactToolContent === nextProps.redactToolContent &&
-    previousProps.isAborted === nextProps.isAborted &&
     areToolTraceItemsEqual(previousProps.item, nextProps.item),
 );

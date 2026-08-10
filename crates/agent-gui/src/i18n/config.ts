@@ -1,3 +1,5 @@
+import { TASK_TRANSLATIONS } from "@liveagent/ui/i18n/taskTranslations";
+
 /**
  * Simple i18n translation layer
  * Maps keys to localized strings for zh-CN and en-US
@@ -11,6 +13,7 @@ export const SUPPORTED_LOCALES = ["zh-CN", "en-US"] as const satisfies readonly 
 
 export const translations: Record<Locale, Record<string, string>> = {
   "zh-CN": {
+    ...TASK_TRANSLATIONS["zh-CN"],
     /* ── App / Global ── */
     "app.errorBoundaryCopy": "复制错误信息",
     "app.errorBoundaryDesc": "界面渲染发生错误，正在进行的任务不受影响。请重新加载页面。",
@@ -304,22 +307,12 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.tool.running": "运行中",
     "chat.tool.failed": "失败",
     "chat.tool.success": "已完成",
-    "chat.tool.aborted": "已中止",
     "chat.tool.waiting": "等待",
     "chat.tool.command": "命令",
     "chat.tool.args": "参数",
     "chat.tool.return": "返回",
     "chat.tool.error": "(错误)",
     "chat.tool.viewReturn": "查看返回内容",
-    "chat.tool.todoTitle": "任务清单",
-    "chat.tool.todoEmpty": "暂无任务",
-    "chat.taskProgress.title": "任务进度",
-    "chat.taskProgress.step": "第 {current} / {total} 步",
-    "chat.taskProgress.running": "运行中",
-    "chat.taskProgress.pending": "待处理",
-    "chat.taskProgress.paused": "已暂停或中断",
-    "chat.taskProgress.completed": "全部完成",
-    "chat.taskProgress.completedCount": "已完成",
     "chat.tool.askUserTitle": "向你提问",
     "chat.askUser.preparing": "正在准备问题",
     "chat.askUser.waiting": "等待你的选择",
@@ -1407,10 +1400,6 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.builtinTool.send_message.desc": "与子代理之间收发消息",
     "settings.builtinTool.send_message.detail":
       "在主对话与子代理之间传递消息，用于协调多代理协作。需要子代理运行时；仅在对话场景注册。",
-    "settings.builtinTool.todo_write.name": "任务清单",
-    "settings.builtinTool.todo_write.desc": "创建与更新当前会话的任务清单",
-    "settings.builtinTool.todo_write.detail":
-      "让模型在处理多步骤任务时列出任务清单并逐项推进状态，进度以清单卡片实时展示在对话中。清单仅保存在当前对话内，不跨对话保留；仅在对话场景注册。",
     "settings.builtinTool.ask_user_question.name": "用户提问",
     "settings.builtinTool.ask_user_question.desc": "以选项卡片向你提问并等待选择",
     "settings.builtinTool.ask_user_question.detail":
@@ -2296,6 +2285,7 @@ export const translations: Record<Locale, Record<string, string>> = {
   },
 
   "en-US": {
+    ...TASK_TRANSLATIONS["en-US"],
     /* ── App / Global ── */
     "app.errorBoundaryCopy": "Copy error details",
     "app.errorBoundaryDesc":
@@ -2610,22 +2600,12 @@ export const translations: Record<Locale, Record<string, string>> = {
     "chat.tool.running": "Running",
     "chat.tool.failed": "Failed",
     "chat.tool.success": "Completed",
-    "chat.tool.aborted": "Aborted",
     "chat.tool.waiting": "Waiting",
     "chat.tool.command": "Command",
     "chat.tool.args": "Args",
     "chat.tool.return": "Return",
     "chat.tool.error": "(Error)",
     "chat.tool.viewReturn": "View Return",
-    "chat.tool.todoTitle": "Task list",
-    "chat.tool.todoEmpty": "No tasks yet",
-    "chat.taskProgress.title": "Task progress",
-    "chat.taskProgress.step": "Step {current} of {total}",
-    "chat.taskProgress.running": "Running",
-    "chat.taskProgress.pending": "Pending",
-    "chat.taskProgress.paused": "Paused or interrupted",
-    "chat.taskProgress.completed": "All completed",
-    "chat.taskProgress.completedCount": "completed",
     "chat.tool.askUserTitle": "Question for you",
     "chat.askUser.preparing": "Preparing questions",
     "chat.askUser.waiting": "Waiting for your choice",
@@ -3758,10 +3738,6 @@ export const translations: Record<Locale, Record<string, string>> = {
     "settings.builtinTool.send_message.desc": "Exchange messages with subagents",
     "settings.builtinTool.send_message.detail":
       "Relays messages between the main conversation and subagents to coordinate multi-agent work. Requires the subagent runtime; chat sessions only.",
-    "settings.builtinTool.todo_write.name": "Task List",
-    "settings.builtinTool.todo_write.desc": "Create and update a task list for the current session",
-    "settings.builtinTool.todo_write.detail":
-      "Lets the model plan multi-step work as a task list and advance each item's status as it goes, shown as a live checklist card in the conversation. The list lives only in the current conversation and is not carried across conversations; chat sessions only.",
     "settings.builtinTool.ask_user_question.name": "Ask User",
     "settings.builtinTool.ask_user_question.desc":
       "Ask you multiple-choice questions in a card and wait for your selections",

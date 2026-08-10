@@ -1,4 +1,4 @@
-import { isTodoWriteToolBlock } from "@liveagent/ui/lib/chat/taskProgress";
+import { isTaskToolBlock } from "@liveagent/ui/lib/chat/taskProgress";
 import {
   CHECKPOINT_ROW_ESTIMATE_PX,
   estimateAssistantRowHeight,
@@ -88,7 +88,6 @@ export type AssistantUnitRow = {
   renderMode: "streaming" | "static";
   compacted: boolean;
   showAvatar: boolean;
-  isAborted: boolean;
   unit: AssistantRenderUnit;
 };
 
@@ -128,7 +127,7 @@ function isVisibleGroupedBlock(block: GroupedRoundBlock) {
   if (block.kind === "text" || block.kind === "thinking") {
     return block.text.trim().length > 0;
   }
-  return !isTodoWriteToolBlock(block);
+  return !isTaskToolBlock(block);
 }
 
 function hasRunningToolCall(blocks: GroupedRoundBlock[], runningToolCallIds: string[]) {
@@ -248,7 +247,6 @@ function canReuseLiveUnit(previous: AssistantUnitRow, next: AssistantUnitRow) {
     previous.renderMode !== next.renderMode ||
     previous.compacted !== next.compacted ||
     previous.showAvatar !== next.showAvatar ||
-    previous.isAborted !== next.isAborted ||
     previous.unit.kind !== "block" ||
     next.unit.kind !== "block"
   ) {
@@ -318,7 +316,6 @@ function buildAssistantUnits(input: BuildAssistantUnitsInput): AssistantUnitRow[
     anchorUserKey,
     liveUnitCache,
   } = input;
-  const isAborted = rounds.some((round) => round.meta?.stopReason === "aborted");
   const rows: AssistantUnitRow[] = [];
 
   rounds.forEach((round) => {
@@ -350,7 +347,6 @@ function buildAssistantUnits(input: BuildAssistantUnitsInput): AssistantUnitRow[
         renderMode,
         compacted,
         showAvatar: rows.length === 0,
-        isAborted,
         unit: {
           kind: "block",
           block,
@@ -388,7 +384,6 @@ function buildAssistantUnits(input: BuildAssistantUnitsInput): AssistantUnitRow[
       renderMode,
       compacted,
       showAvatar: rows.length === 0,
-      isAborted,
       unit: { kind: "status" },
     });
   } else {
@@ -414,7 +409,6 @@ function buildAssistantUnits(input: BuildAssistantUnitsInput): AssistantUnitRow[
       renderMode,
       compacted,
       showAvatar: rows.length === 0 && rounds.length > 0,
-      isAborted,
       unit: {
         kind: "footer",
         timestamp,

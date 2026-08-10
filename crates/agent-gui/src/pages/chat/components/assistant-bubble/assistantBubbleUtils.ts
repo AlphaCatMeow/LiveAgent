@@ -1,4 +1,5 @@
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
+import { isTaskToolName } from "@liveagent/ui/contracts/task";
 import type {
   SubagentCardDetails,
   SubagentReportDetails,
@@ -36,6 +37,9 @@ export function getToolMeta(name: string): {
   accent: string;
   category: string;
 } {
+  if (isTaskToolName(name)) {
+    return { Icon: ListChecks, accent: "var(--tool-list-accent)", category: "system" };
+  }
   switch (name) {
     case "Bash":
     case "ManagedProcess":
@@ -73,8 +77,6 @@ export function getToolMeta(name: string): {
       return { Icon: Search, accent: "var(--tool-search-accent)", category: "search" };
     case "List":
       return { Icon: FolderTree, accent: "var(--tool-list-accent)", category: "list" };
-    case "TodoWrite":
-      return { Icon: ListChecks, accent: "var(--tool-list-accent)", category: "system" };
     case "AskUserQuestion":
       return { Icon: CircleHelp, accent: "var(--tool-list-accent)", category: "system" };
     default:
@@ -306,7 +308,7 @@ export function groupRoundBlocks(blocks: UiRound["blocks"]): GroupedRoundBlock[]
       flushPendingSearches();
       if (
         block.item.toolCall.name === "Image" ||
-        block.item.toolCall.name === "TodoWrite" ||
+        isTaskToolName(block.item.toolCall.name) ||
         block.item.toolCall.name === "AskUserQuestion" ||
         isAgentToolName(block.item.toolCall.name)
       ) {

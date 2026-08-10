@@ -8,6 +8,7 @@
 - `src/pages/`：设置、Skills、MCP 等完整公共页面。
 - `src/components/`：聊天侧栏、输入框、项目工具、编辑器等公共 UI。
 - `src/contracts/`：定义共享 UI 的扩展注册表等公共契约。
+- `src/i18n/`：定义两端共同使用的翻译片段与本地化上下文。
 
 GUI 与 WebUI 应用只负责：
 

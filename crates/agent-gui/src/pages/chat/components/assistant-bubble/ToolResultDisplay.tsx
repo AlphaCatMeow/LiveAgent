@@ -1,6 +1,5 @@
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import { EditDiffView } from "@liveagent/ui/components/chat/EditDiffView";
-import { TodoListView } from "@liveagent/ui/components/chat/TodoListView";
 import { Markdown } from "@liveagent/ui/components/Markdown";
 import { cn } from "@liveagent/ui/lib/shared/utils";
 import type {
@@ -27,7 +26,6 @@ import type {
   ReadPdfResultDetails,
   ReadTextResultDetails,
   SkillsManagerResultDetails,
-  TodoWriteResultDetails,
   WriteResultDetails,
 } from "../../../../lib/tools/builtinTypes";
 import {
@@ -249,11 +247,6 @@ export function ToolResultDisplay({
         />
       </ToolSurface>
     );
-  }
-
-  if (kind === "todo_write") {
-    const details = result.details as TodoWriteResultDetails;
-    return <TodoListView todos={details.todos} />;
   }
 
   if (kind === "read_text") {

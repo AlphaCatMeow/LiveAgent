@@ -1,6 +1,5 @@
 import { EditDiffView } from "@liveagent/ui/components/chat/EditDiffView";
 import { FileToolArgsDisplay } from "@liveagent/ui/components/chat/FileToolArgs";
-import { sanitizeTodoItems, TodoListView } from "@liveagent/ui/components/chat/TodoListView";
 import {
   type MetaTag,
   MetaTags,
@@ -39,7 +38,6 @@ import type {
   ReadPdfResultDetails,
   ReadTextResultDetails,
   SkillsManagerResultDetails,
-  TodoWriteResultDetails,
   WriteResultDetails,
 } from "../../../lib/tools/builtinTypes";
 import {
@@ -227,12 +225,6 @@ export function ToolArgsDisplay({ item }: { item: ToolTraceItem }) {
   const filePreview = deriveFileToolPreview(toolCall);
   if (filePreview) {
     return <FileToolArgsDisplay preview={filePreview} />;
-  }
-
-  // TodoWrite args ARE the checklist — render them with the same view as the
-  // result instead of dumping raw JSON (shown only until the result lands).
-  if (toolCall.name === "TodoWrite") {
-    return <TodoListView todos={sanitizeTodoItems(toolCall.arguments?.todos)} />;
   }
 
   const display = getToolDisplay(toolCall);
@@ -449,11 +441,6 @@ export function ToolResultDisplay({
         />
       </ToolSurface>
     );
-  }
-
-  if (kind === "todo_write") {
-    const details = result.details as TodoWriteResultDetails;
-    return <TodoListView todos={details.todos} />;
   }
 
   if (kind === "read_text") {

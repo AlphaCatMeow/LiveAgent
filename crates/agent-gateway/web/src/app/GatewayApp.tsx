@@ -6,9 +6,8 @@ import type {
 } from "@liveagent/ui/components/chat/MentionComposer";
 import { type NotifyItem, NotifyToast } from "@liveagent/ui/components/chat/NotifyToast";
 import { SharedHistoryManagerModal } from "@liveagent/ui/components/chat/SharedHistoryManagerModal";
-import { TaskProgressIndicator } from "@liveagent/ui/components/chat/TaskProgressIndicator";
+import { TaskProgressBar } from "@liveagent/ui/components/chat/TaskProgressBar";
 import { ToolApprovalBar } from "@liveagent/ui/components/chat/ToolApprovalBar";
-import { useSequencedTaskProgress } from "@liveagent/ui/components/chat/useSequencedTaskProgress";
 import { WorkspaceResourceSettingsDrawer } from "@liveagent/ui/components/chat/WorkspaceResourceSettingsDrawer";
 import type {
   GitCommitContextPayload,
@@ -18,13 +17,10 @@ import { RightDockPanel } from "@liveagent/ui/components/project-tools/RightDock
 import { Button } from "@liveagent/ui/components/ui/button";
 import { useConfirmDialog } from "@liveagent/ui/components/ui/confirm-dialog";
 import { ScrollArea } from "@liveagent/ui/components/ui/scroll-area";
-import { type Locale, LocaleContext, t as translate } from "@liveagent/ui/i18n/index";
+import { LocaleContext, t as translate } from "@liveagent/ui/i18n/index";
 import { normalizeLogicalLineEndings } from "@liveagent/ui/lib/chat/composerText";
 import { openChatFileLink } from "@liveagent/ui/lib/chat/openChatFileLink";
-import {
-  selectTodoProgressUpdates,
-  type TodoProgressUpdate,
-} from "@liveagent/ui/lib/chat/taskProgress";
+import { selectLatestTaskProgress } from "@liveagent/ui/lib/chat/taskProgress";
 import {
   readToolApprovalDeadlineAt,
   readToolApprovalPending,
@@ -149,41 +145,6 @@ import { useChatSkills } from "@/pages/chat/useChatSkills";
 import type { SectionId } from "@/pages/settings/types";
 
 const LOCAL_DRAFT_PREFIX = "__local_draft__:";
-
-function CurrentTaskProgress(props: {
-  updates: readonly TodoProgressUpdate[];
-  isConversationRunning: boolean;
-  locale: Locale;
-}) {
-  const { updates, isConversationRunning, locale } = props;
-  const snapshot = useSequencedTaskProgress(updates, isConversationRunning);
-  const labels = useMemo(() => {
-    if (!snapshot) return null;
-    return {
-      title: translate("chat.taskProgress.title", locale),
-      step: translate("chat.taskProgress.step", locale)
-        .replace("{current}", String(snapshot.currentStep))
-        .replace("{total}", String(snapshot.totalCount)),
-      completedCount: `${snapshot.completedCount}/${snapshot.totalCount} ${translate(
-        "chat.taskProgress.completedCount",
-        locale,
-      )}`,
-      running: translate("chat.taskProgress.running", locale),
-      pending: translate("chat.taskProgress.pending", locale),
-      paused: translate("chat.taskProgress.paused", locale),
-      completed: translate("chat.taskProgress.completed", locale),
-    };
-  }, [locale, snapshot]);
-
-  if (!snapshot || !labels) return null;
-  return (
-    <TaskProgressIndicator
-      snapshot={snapshot}
-      isConversationRunning={isConversationRunning}
-      labels={labels}
-    />
-  );
-}
 
 function createLocalDraftConversationId() {
   return `${LOCAL_DRAFT_PREFIX}${createUuid()}`;
@@ -4469,8 +4430,8 @@ export default function GatewayApp() {
     return item?.title ?? "";
   }, [selectedHistoryId, sidebarConversationsById]);
   const transcriptRows = displayedTranscript.rows;
-  const taskProgressUpdates = useMemo(
-    () => selectTodoProgressUpdates(transcriptRows),
+  const taskProgressSnapshot = useMemo(
+    () => selectLatestTaskProgress(transcriptRows),
     [transcriptRows],
   );
   // 当前会话的待审批工具:遍历渲染中的 transcript,筛出带 __toolApprovalPending 标记
@@ -5173,11 +5134,10 @@ export default function GatewayApp() {
                           onEditQueuedTurn={editQueuedTurn}
                           onRemoveQueuedTurn={removeQueuedTurn}
                           taskProgressBar={
-                            <CurrentTaskProgress
+                            <TaskProgressBar
                               key={displayedConversationId}
-                              updates={taskProgressUpdates}
+                              snapshot={taskProgressSnapshot}
                               isConversationRunning={transcriptBusy}
-                              locale={settings.locale}
                             />
                           }
                           approvalBar={approvalBar}

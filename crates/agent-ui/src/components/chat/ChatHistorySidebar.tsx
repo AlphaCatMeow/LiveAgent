@@ -70,6 +70,7 @@ import {
 import type { SidebarConversation } from "../../lib/sidebar/types";
 import {
   buildWorkspaceProjectSections,
+  firstUnpinnedWorkspaceProjectIndex,
   sliceWorkspaceProjectSections,
 } from "../../lib/workspaceProjects";
 import type { WorkspaceProjectGroup } from "../../lib/workspaceProjectTypes";
@@ -2137,6 +2138,10 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
     if (renderedSections.ungrouped[0]?.isPinned === true) return -1;
     return renderedSections.grouped.length;
   }, [renderedSections]);
+  const firstUnpinnedUngroupedIndex =
+    renderedSections.grouped.length === 0
+      ? firstUnpinnedWorkspaceProjectIndex(renderedSections.ungrouped)
+      : -1;
   // Archiving must always leave at least one active workspace behind.
   const canArchiveProjects = Boolean(onArchiveProject) && activeProjects.length > 1;
   const [archivedGroupOpen, setArchivedGroupOpen] = useState(false);
@@ -2999,45 +3004,54 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
                           {t("chat.workspaceUngrouped")}
                         </div>
                       ) : null}
-                      {renderedSections.ungrouped.map((project) => {
+                      {renderedSections.ungrouped.map((project, projectIndex) => {
                         const pathKey = workspaceProjectPathKey(project.path);
                         return (
-                          <ProjectRow
-                            key={project.id}
-                            project={project}
-                            isActive={activeProjectId === project.id}
-                            isMissing={missingProjectPathKeys.has(pathKey)}
-                            isRunning={runningProjectPathKeys.has(pathKey)}
-                            isRenaming={projectRenamingId === project.id}
-                            isPendingRemove={pendingProjectRemoveId === project.id}
-                            isInteractionDisabled={sectionsDisabled}
-                            renameDraft={projectRenameDraft}
-                            onSelectProject={handleSelectProject}
-                            onBrowseProjectInFileTree={
-                              onBrowseProjectInFileTree ? handleBrowseProjectInFileTree : undefined
-                            }
-                            onBrowseProjectInSystemFileManager={
-                              onBrowseProjectInSystemFileManager
-                                ? handleBrowseProjectInSystemFileManager
-                                : undefined
-                            }
-                            onStartRenamingProject={handleStartRenamingProject}
-                            onConfigureProjectResources={handleConfigureProjectResources}
-                            onProjectRenameDraftChange={handleProjectRenameDraftChange}
-                            onCommitProjectRename={handleCommitProjectRename}
-                            onCancelProjectRename={handleCancelProjectRename}
-                            onSetProjectPinned={handleSetProjectPinned}
-                            onRemoveProject={handleRemoveProject}
-                            isArchived={false}
-                            canArchive={canArchiveProjects}
-                            onArchiveProject={handleArchiveProject}
-                            onUnarchiveProject={handleUnarchiveProject}
-                            onSetPendingRemove={setPendingProjectRemoveId}
-                            workspaceProjectGroups={workspaceProjectGroups}
-                            onMoveProjectToGroup={onMoveProjectToGroup}
-                            menuOpen={!sectionsDisabled && openProjectMenuId === project.id}
-                            onMenuOpenChange={handleProjectMenuOpenChange}
-                          />
+                          <Fragment key={project.id}>
+                            {projectIndex === firstUnpinnedUngroupedIndex ? (
+                              <div
+                                aria-hidden="true"
+                                className="mx-2 !my-1.5 h-px bg-gradient-to-r from-border/80 via-border/45 to-transparent"
+                              />
+                            ) : null}
+                            <ProjectRow
+                              project={project}
+                              isActive={activeProjectId === project.id}
+                              isMissing={missingProjectPathKeys.has(pathKey)}
+                              isRunning={runningProjectPathKeys.has(pathKey)}
+                              isRenaming={projectRenamingId === project.id}
+                              isPendingRemove={pendingProjectRemoveId === project.id}
+                              isInteractionDisabled={sectionsDisabled}
+                              renameDraft={projectRenameDraft}
+                              onSelectProject={handleSelectProject}
+                              onBrowseProjectInFileTree={
+                                onBrowseProjectInFileTree
+                                  ? handleBrowseProjectInFileTree
+                                  : undefined
+                              }
+                              onBrowseProjectInSystemFileManager={
+                                onBrowseProjectInSystemFileManager
+                                  ? handleBrowseProjectInSystemFileManager
+                                  : undefined
+                              }
+                              onStartRenamingProject={handleStartRenamingProject}
+                              onConfigureProjectResources={handleConfigureProjectResources}
+                              onProjectRenameDraftChange={handleProjectRenameDraftChange}
+                              onCommitProjectRename={handleCommitProjectRename}
+                              onCancelProjectRename={handleCancelProjectRename}
+                              onSetProjectPinned={handleSetProjectPinned}
+                              onRemoveProject={handleRemoveProject}
+                              isArchived={false}
+                              canArchive={canArchiveProjects}
+                              onArchiveProject={handleArchiveProject}
+                              onUnarchiveProject={handleUnarchiveProject}
+                              onSetPendingRemove={setPendingProjectRemoveId}
+                              workspaceProjectGroups={workspaceProjectGroups}
+                              onMoveProjectToGroup={onMoveProjectToGroup}
+                              menuOpen={!sectionsDisabled && openProjectMenuId === project.id}
+                              onMenuOpenChange={handleProjectMenuOpenChange}
+                            />
+                          </Fragment>
                         );
                       })}
                     </Fragment>

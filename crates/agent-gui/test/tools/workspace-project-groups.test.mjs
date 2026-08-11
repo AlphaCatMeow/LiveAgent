@@ -7,6 +7,7 @@ const {
   assignWorkspaceProjectToGroup,
   ensureWorktreeProjectGroup,
   buildWorkspaceProjectSections,
+  firstUnpinnedWorkspaceProjectIndex,
   sliceWorkspaceProjectSections,
 } = loader.loadModule("@liveagent/ui/lib/workspaceProjects.ts");
 function project(id, path, extra = {}) {
@@ -116,6 +117,14 @@ test("buildWorkspaceProjectSections ignores members missing from the list", () =
     [group("g1", "repo", ["/work/repo", "/gone/worktree"])],
   );
   assert.deepEqual(sections.grouped[0].projects.map((p) => p.id), ["repo"]);
+});
+
+test("firstUnpinnedWorkspaceProjectIndex marks the divider inside ungrouped projects", () => {
+  const pinned = project("pinned", "/work/pinned", { isPinned: true, pinnedAt: 2 });
+  const regular = project("regular", "/work/regular");
+  assert.equal(firstUnpinnedWorkspaceProjectIndex([pinned, regular]), 1);
+  assert.equal(firstUnpinnedWorkspaceProjectIndex([regular, pinned]), -1);
+  assert.equal(firstUnpinnedWorkspaceProjectIndex([pinned]), -1);
 });
 
 test("sliceWorkspaceProjectSections never splits a group", () => {

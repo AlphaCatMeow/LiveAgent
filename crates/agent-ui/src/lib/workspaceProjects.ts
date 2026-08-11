@@ -430,6 +430,13 @@ export type WorkspaceProjectSections = {
   ungrouped: WorkspaceProject[];
 };
 
+/** 返回未分组项目中 pinned 区块与普通区块之间的分隔位置。 */
+export function firstUnpinnedWorkspaceProjectIndex(projects: readonly WorkspaceProject[]) {
+  if (projects[0]?.isPinned !== true) return -1;
+  const index = projects.findIndex((project) => project.isPinned !== true);
+  return index >= 0 ? index : -1;
+}
+
 export function buildWorkspaceProjectSections(
   projects: readonly WorkspaceProject[],
   groups: readonly WorkspaceProjectGroup[],

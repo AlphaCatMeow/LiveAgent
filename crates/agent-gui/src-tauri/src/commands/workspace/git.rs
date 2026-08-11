@@ -3199,8 +3199,8 @@ pub(crate) fn git_remove_worktree_sync(
         Ok(_) => {
             // worktree 移除成功后，尝试删除其检出的分支；分支删除失败时
             // worktree 已不在（重试会提示未登记），错误信息必须说明这一点。
-            // force 同时传导到分支删除：`--force` 时用 `-D`，
-            // 让未合并提交的分支也能被清理。
+            // force 只用于丢弃 worktree 的未提交改动，分支仍用 `-d`，
+            // 让前端对未合并提交显示单独的确认。
             let branch = delete_branch.as_deref().map(str::trim).unwrap_or("");
             if branch.is_empty() {
                 Ok(GitOutput {
@@ -3208,8 +3208,7 @@ pub(crate) fn git_remove_worktree_sync(
                     stderr: String::new(),
                 })
             } else {
-                let delete_flag = if force == Some(true) { "-D" } else { "-d" };
-                match git_success(&state.repo_root, &["branch", delete_flag, branch]) {
+                match git_success(&state.repo_root, &["branch", "-d", branch]) {
                     Ok(output) => Ok(output),
                     Err(error) => Err(format!("Worktree 已移除，但分支删除失败：{error}")),
                 }
@@ -5127,7 +5126,7 @@ mod tests {
     }
 
     #[test]
-    fn git_remove_worktree_force_deletes_unmerged_branch() {
+    fn git_remove_worktree_force_preserves_unmerged_branch_for_confirmation() {
         let Some(repo) = init_temp_repo() else {
             return;
         };
@@ -5156,15 +5155,24 @@ mod tests {
         )
         .expect("force remove worktree");
 
-        assert!(result.ok, "force removal failed: {}", result.message);
+        assert!(
+            !result.ok,
+            "force removal must not delete an unmerged branch"
+        );
+        assert!(
+            result.message.contains("Worktree 已移除，但分支删除失败")
+                && result.message.contains("not fully merged"),
+            "unexpected force removal error: {}",
+            result.message
+        );
         assert!(!worktree_path.exists(), "worktree should be removed");
         let branches = git_branches_sync(workdir).expect("branches");
         assert!(
-            !branches
+            branches
                 .branches
                 .iter()
                 .any(|branch| branch.full_name == "wt-force-unmerged"),
-            "force removal should delete the unmerged branch"
+            "force removal should preserve the unmerged branch for confirmation"
         );
     }
 

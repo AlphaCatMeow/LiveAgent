@@ -1109,6 +1109,22 @@ export function GitBranchSelector(props: {
     }
   }, [branchAction, t]);
 
+  const confirmForceDeleteBranch = useCallback(
+    async (branch: GitBranchInfo) => {
+      if (!gitClient) return false;
+      const forced = await confirm({
+        title: t("git.branchSelector.deleteForceTitle"),
+        description: t("git.branchSelector.deleteForceDescription"),
+        confirmLabel: t("git.branchSelector.forceDelete"),
+        cancelLabel: t("chat.cancel"),
+        tone: "destructive",
+      });
+      if (!forced) return false;
+      return runSheetMutation(() => gitClient.deleteBranch(workdir, branch.fullName, true));
+    },
+    [confirm, gitClient, runSheetMutation, t, workdir],
+  );
+
   const deleteBranchFlow = useCallback(async () => {
     if (!branchAction || !gitClient) return;
     const { branch } = branchAction;
@@ -1128,19 +1144,18 @@ export function GitBranchSelector(props: {
       return;
     }
     if (!/not fully merged/i.test(actionErrorRef.current)) return;
-    const forced = await confirm({
-      title: t("git.branchSelector.deleteForceTitle"),
-      description: t("git.branchSelector.deleteForceDescription"),
-      confirmLabel: t("git.branchSelector.forceDelete"),
-      cancelLabel: t("chat.cancel"),
-      tone: "destructive",
-    });
-    if (!forced) return;
-    const forcedOk = await runSheetMutation(() =>
-      gitClient.deleteBranch(workdir, branch.fullName, true),
-    );
+    const forcedOk = await confirmForceDeleteBranch(branch);
     if (forcedOk) resetBranchAction();
-  }, [branchAction, confirm, gitClient, resetBranchAction, runSheetMutation, t, workdir]);
+  }, [
+    branchAction,
+    confirm,
+    confirmForceDeleteBranch,
+    gitClient,
+    resetBranchAction,
+    runSheetMutation,
+    t,
+    workdir,
+  ]);
 
   // 分支被 worktree 检出时，删除入口切换为删除 worktree（连带分支）。
   const checkedOutWorktreePath = branchAction
@@ -1178,17 +1193,7 @@ export function GitBranchSelector(props: {
     // worktree 已移除但分支未完全合并：不能重试 removeWorktree，直接对
     // 仍然存在的分支执行强制删除，并复用普通分支删除的确认文案。
     if (isGitWorktreeBranchNotFullyMergedError(actionErrorRef.current)) {
-      const forced = await confirm({
-        title: t("git.branchSelector.deleteForceTitle"),
-        description: t("git.branchSelector.deleteForceDescription"),
-        confirmLabel: t("git.branchSelector.forceDelete"),
-        cancelLabel: t("chat.cancel"),
-        tone: "destructive",
-      });
-      if (!forced) return;
-      const forcedOk = await runSheetMutation(() =>
-        gitClient.deleteBranch(workdir, branch.fullName, true),
-      );
+      const forcedOk = await confirmForceDeleteBranch(branch);
       if (forcedOk) resetBranchAction();
       return;
     }
@@ -1205,10 +1210,18 @@ export function GitBranchSelector(props: {
     const forcedOk = await runSheetMutation(() =>
       removeWorktree(workdir, worktreePath, true, branch.fullName),
     );
-    if (forcedOk) resetBranchAction();
+    if (forcedOk) {
+      resetBranchAction();
+      return;
+    }
+    if (isGitWorktreeBranchNotFullyMergedError(actionErrorRef.current)) {
+      const branchDeleted = await confirmForceDeleteBranch(branch);
+      if (branchDeleted) resetBranchAction();
+    }
   }, [
     branchAction,
     confirm,
+    confirmForceDeleteBranch,
     gitClient,
     resetBranchAction,
     runSheetMutation,

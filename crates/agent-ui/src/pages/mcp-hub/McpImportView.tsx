@@ -10,7 +10,9 @@ import {
 } from "@liveagent/app/components/icons";
 import { type AppSettings, type McpServerConfig, updateMcp } from "@liveagent/app/lib/settings";
 import { invoke } from "@liveagent/app/shims/tauriCore";
+import { SearchHighlight } from "@liveagent/ui/components/ui/search-highlight";
 import { useLocale } from "@liveagent/ui/i18n/index";
+import { rankFuzzySearchResults } from "@liveagent/ui/lib/shared/fuzzySearch";
 import {
   type ExternalMcpServerEntry,
   type ExternalMcpToolScan,
@@ -51,8 +53,9 @@ function toMcpServerConfig(entry: ExternalMcpServerEntry): McpServerConfig {
 export function McpImportView(props: {
   settings: AppSettings;
   setSettings: (updater: (prev: AppSettings) => AppSettings) => void;
+  query: string;
 }) {
-  const { settings, setSettings } = props;
+  const { settings, setSettings, query } = props;
   const { t } = useLocale();
 
   const [scans, setScans] = useState<ExternalMcpToolScan[] | null>(null);
@@ -64,7 +67,9 @@ export function McpImportView(props: {
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [importedCount, setImportedCount] = useState<number | null>(null);
   const [activeTool, setActiveTool] = useState<string>("claude-code");
+  const [rescanComplete, setRescanComplete] = useState(false);
   const userChoseToolRef = useRef(false);
+  const rescanFeedbackTimerRef = useRef<number | null>(null);
 
   const allScans = useMemo(
     () => (fileScan ? [...(scans ?? []), fileScan] : (scans ?? [])),
@@ -94,12 +99,38 @@ export function McpImportView(props: {
         );
         return next.size === prev.size ? prev : next;
       });
+      return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const handleRescan = useCallback(async () => {
+    if (rescanFeedbackTimerRef.current !== null) {
+      window.clearTimeout(rescanFeedbackTimerRef.current);
+      rescanFeedbackTimerRef.current = null;
+    }
+    setRescanComplete(false);
+    const succeeded = await rescan();
+    if (!succeeded) return;
+    setRescanComplete(true);
+    rescanFeedbackTimerRef.current = window.setTimeout(() => {
+      setRescanComplete(false);
+      rescanFeedbackTimerRef.current = null;
+    }, 2400);
+  }, [rescan]);
+
+  useEffect(
+    () => () => {
+      if (rescanFeedbackTimerRef.current !== null) {
+        window.clearTimeout(rescanFeedbackTimerRef.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (scans === null && !loading) {
@@ -146,12 +177,23 @@ export function McpImportView(props: {
   }, []);
 
   const activeScan = allScans.find((scan) => scan.tool === activeTool);
-  const importableInActive = useMemo(
+  const visibleServers = useMemo(
     () =>
-      (activeScan?.servers ?? []).filter(
-        (server) => !installedIds.has(server.id.trim().toLowerCase()),
-      ),
-    [activeScan, installedIds],
+      rankFuzzySearchResults(activeScan?.servers ?? [], query, (server) => [
+        server.id,
+        server.transport,
+        server.command,
+        server.url,
+        server.origin,
+        ...server.args,
+        ...Object.keys(server.env),
+        ...Object.keys(server.headers),
+      ]),
+    [activeScan, query],
+  );
+  const importableInActive = useMemo(
+    () => visibleServers.filter((server) => !installedIds.has(server.id.trim().toLowerCase())),
+    [installedIds, visibleServers],
   );
   const selectedInActive = importableInActive.filter((server) =>
     selected.has(externalServerKey(activeTool, server)),
@@ -283,12 +325,25 @@ export function McpImportView(props: {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="gap-1.5 rounded-full"
+                  className="min-w-[6.75rem] justify-center gap-1.5 rounded-full"
                   disabled={loading}
-                  onClick={() => void rescan()}
+                  aria-busy={loading}
+                  onClick={() => void handleRescan()}
                 >
-                  <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
-                  {t("mcpHub.importRescan")}
+                  {loading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : rescanComplete ? (
+                    <Check className="h-3.5 w-3.5 text-[hsl(var(--chat-success))]" />
+                  ) : (
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  )}
+                  <span aria-live="polite">
+                    {loading
+                      ? t("mcpHub.importScanning")
+                      : rescanComplete
+                        ? t("settings.skillsScanComplete")
+                        : t("mcpHub.importRescan")}
+                  </span>
                 </Button>
                 <Button
                   size="sm"
@@ -356,9 +411,15 @@ export function McpImportView(props: {
                       {t("mcpHub.importEmpty")}
                     </p>
                   </GlassPanel>
+                ) : visibleServers.length === 0 ? (
+                  <GlassPanel tone="muted">
+                    <p className="py-2 text-center text-xs text-muted-foreground">
+                      {t("mcpHub.importNoMatch")}
+                    </p>
+                  </GlassPanel>
                 ) : (
-                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    {activeScan.servers.map((server) => {
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {visibleServers.map((server) => {
                       const key = externalServerKey(activeScan.tool, server);
                       const alreadyImported = installedIds.has(server.id.trim().toLowerCase());
                       const checked = selected.has(key);
@@ -382,12 +443,12 @@ export function McpImportView(props: {
                           disabled={alreadyImported}
                           onClick={() => toggleServer(activeScan.tool, server)}
                           className={cn(
-                            "group flex items-start gap-2.5 rounded-xl border p-3 text-left transition-all",
+                            "group flex min-h-36 items-start gap-2.5 rounded-xl border p-3.5 text-left transition-[border-color,background-color,box-shadow]",
                             alreadyImported
                               ? "cursor-not-allowed border-border/70 bg-muted/50"
                               : checked
                                 ? "border-primary/60 bg-primary/10 shadow-xs"
-                                : "border-border/70 bg-card shadow-xs hover:border-border hover:bg-accent/30",
+                                : "border-border bg-card shadow-xs hover:border-foreground/20 hover:bg-muted/30",
                           )}
                         >
                           <span
@@ -403,7 +464,7 @@ export function McpImportView(props: {
                           <span className="min-w-0 flex-1">
                             <span className="flex flex-wrap items-center gap-1.5">
                               <span className="truncate text-[13px] font-medium text-foreground">
-                                {server.id}
+                                <SearchHighlight text={server.id} query={query} />
                               </span>
                               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/70 px-1.5 py-0.5 text-[10px] uppercase text-muted-foreground">
                                 {isStdio ? (
@@ -428,7 +489,7 @@ export function McpImportView(props: {
                               ) : null}
                             </span>
                             <span className="mt-1 block truncate font-mono text-[11px] text-muted-foreground">
-                              {preview}
+                              <SearchHighlight text={preview} query={query} />
                             </span>
                             {extras.length > 0 ? (
                               <span className="mt-1 flex flex-wrap gap-1">

@@ -45,6 +45,7 @@ import { Badge } from "@liveagent/ui/components/ui/badge";
 import { Button } from "@liveagent/ui/components/ui/button";
 import { Checkbox } from "@liveagent/ui/components/ui/checkbox";
 import { ConfirmDeletePopover } from "@liveagent/ui/components/ui/confirm-action-popover";
+import { SearchHighlight } from "@liveagent/ui/components/ui/search-highlight";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { cn } from "@liveagent/ui/lib/shared/utils";
 import type { ClawHubCategorySlug } from "@liveagent/ui/lib/skills/clawHubCategories";
@@ -154,10 +155,12 @@ type InstalledSkillCardProps = {
   primaryCategory: ClawHubCategorySlug;
   alwaysEnabled: boolean;
   checked: boolean;
+  skillsEnabled: boolean;
   bulkMode: boolean;
   bulkSelected: boolean;
   deleting: boolean;
   deleteDisabled: boolean;
+  searchQuery: string;
   onToggle: (name: string, on: boolean) => void;
   onEnterBulkMode: (name: string) => void;
   onToggleBulkSelection: (name: string) => void;
@@ -178,10 +181,12 @@ export const InstalledSkillCard = memo(function InstalledSkillCard(props: Instal
     primaryCategory,
     alwaysEnabled,
     checked,
+    skillsEnabled,
     bulkMode,
     bulkSelected,
     deleting,
     deleteDisabled,
+    searchQuery,
     onToggle,
     onEnterBulkMode,
     onToggleBulkSelection,
@@ -191,6 +196,7 @@ export const InstalledSkillCard = memo(function InstalledSkillCard(props: Instal
     onSelectCategory,
   } = props;
   const { t } = useLocale();
+  const effectivelyEnabled = skillsEnabled && checked;
   const cardIdentity = useMemo(
     () => (alwaysEnabled ? null : getInstalledSkillCardIdentity(skill.name, primaryCategory)),
     [alwaysEnabled, primaryCategory, skill.name],
@@ -258,34 +264,13 @@ export const InstalledSkillCard = memo(function InstalledSkillCard(props: Instal
                 <ListChecks className="h-3.5 w-3.5" />
               </Button>
               <ResourceActivationSwitch
-                checked={checked}
+                checked={effectivelyEnabled}
+                disabled={!skillsEnabled}
                 compact
                 stopPropagation
                 label={`${t("skills.select")}: ${skill.name}`}
                 onCheckedChange={(nextChecked) => onToggle(skill.name, nextChecked)}
               />
-              <ConfirmDeletePopover name={skill.name} onConfirm={() => onDelete(skill)}>
-                {(open) => (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-muted-foreground opacity-0 hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
-                    disabled={deleteDisabled}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      open();
-                    }}
-                    onKeyDown={(event) => event.stopPropagation()}
-                    title={t("settings.skillsHubDeleteSkill")}
-                  >
-                    {deleting ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-3.5 w-3.5" />
-                    )}
-                  </Button>
-                )}
-              </ConfirmDeletePopover>
             </>
           )}
         </div>
@@ -293,13 +278,17 @@ export const InstalledSkillCard = memo(function InstalledSkillCard(props: Instal
 
       <div className="mt-3 min-w-0 flex-1">
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          <span className="truncate text-sm font-semibold text-foreground">{skill.name}</span>
+          <SearchHighlight
+            text={skill.name}
+            query={searchQuery}
+            className="truncate text-sm font-semibold text-foreground"
+          />
           {alwaysEnabled ? (
             <Badge variant="muted" className="h-5 gap-1 px-1.5 text-[10px]">
               <Lock className="h-2.5 w-2.5" />
               {t("settings.skillsAlwaysOn")}
             </Badge>
-          ) : checked ? (
+          ) : effectivelyEnabled ? (
             <Badge variant="success" className="h-5 px-1.5 text-[10px]">
               {t("settings.skillsHubEnabledBadge")}
             </Badge>
@@ -307,18 +296,62 @@ export const InstalledSkillCard = memo(function InstalledSkillCard(props: Instal
         </div>
         {skill.description ? (
           <p className="mt-1.5 line-clamp-2 text-xs leading-5 text-muted-foreground">
-            {skill.description}
+            <SearchHighlight text={skill.description} query={searchQuery} />
           </p>
         ) : null}
       </div>
 
       {!alwaysEnabled ? (
-        <div className="mt-3 flex min-w-0 items-center justify-between gap-2 border-t border-border pt-2">
+        <div className="mt-3 flex min-w-0 items-center gap-2 border-t border-border pt-2">
           <InstalledSkillCategoryChip category={primaryCategory} onSelect={onSelectCategory} />
-          <span className="inline-flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground">
-            <MetadataIcon className="h-3 w-3 shrink-0" />
-            <span className="truncate">{metadataLabel}</span>
-          </span>
+          <div className="ml-auto grid min-w-0 items-center justify-items-end">
+            <span
+              className={cn(
+                "pointer-events-none col-start-1 row-start-1 inline-flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground transition-opacity",
+                !bulkMode &&
+                  "group-hover:opacity-0 group-focus-within:opacity-0 [@media(hover:none)]:opacity-0",
+              )}
+            >
+              <MetadataIcon className="h-3 w-3 shrink-0" />
+              <span className="truncate">{metadataLabel}</span>
+            </span>
+            {!bulkMode ? (
+              <div
+                data-card-delete-zone=""
+                role="toolbar"
+                aria-label={`${t("settings.skillsHubDeleteSkill")}: ${skill.name}`}
+                className="pointer-events-none relative z-10 col-start-1 row-start-1 flex opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:opacity-100"
+                onPointerDown={(event) => event.stopPropagation()}
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+                onKeyDown={(event) => event.stopPropagation()}
+              >
+                <ConfirmDeletePopover name={skill.name} onConfirm={() => onDelete(skill)}>
+                  {(open) => (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                      disabled={deleteDisabled}
+                      aria-label={`${t("settings.skillsHubDeleteSkill")}: ${skill.name}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        open();
+                      }}
+                      onKeyDown={(event) => event.stopPropagation()}
+                      title={t("settings.skillsHubDeleteSkill")}
+                    >
+                      {deleting ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5" />
+                      )}
+                    </Button>
+                  )}
+                </ConfirmDeletePopover>
+              </div>
+            ) : null}
+          </div>
         </div>
       ) : null}
     </>
@@ -329,9 +362,9 @@ export const InstalledSkillCard = memo(function InstalledSkillCard(props: Instal
     "[content-visibility:auto] [contain-intrinsic-size:auto_11rem]",
     bulkSelected
       ? "border-foreground bg-muted/30 shadow-sm"
-      : checked
+      : effectivelyEnabled
         ? "border-emerald-600/25"
-        : "hover:border-foreground/20 hover:shadow-md",
+        : cn("hover:border-foreground/20 hover:shadow-md", !skillsEnabled && "bg-muted/20"),
   );
 
   if (alwaysEnabled) {

@@ -50,7 +50,27 @@ test("manual rescans retain stale content and only mark the button busy", () => 
   assert.match(hubSource, /initializing=\{externalScans === null\}/);
   assert.match(importViewSource, /\{initializing \? \(/);
   assert.match(importViewSource, /aria-busy=\{loading\}/);
-  assert.match(importViewSource, /loading && "animate-spin"/);
+  assert.match(importViewSource, /loading \? \(\s*<Loader2[^>]*animate-spin/);
+  assert.match(importViewSource, /rescanComplete[\s\S]*settings\.skillsScanComplete/);
+  assert.match(importViewSource, /aria-live="polite"/);
   assert.doesNotMatch(importViewSource, /\{loading \? \(\s*<GlassPanel/);
   assert.doesNotMatch(importViewSource, /disabled=\{[^}]*importing \|\| loading/);
+});
+
+test("the local import shell and card padding stay stable during the initial scan", () => {
+  assert.match(importViewSource, /<SkillsImportSourceTabs[\s\S]*disabled=\{initializing\}/);
+  assert.match(importViewSource, /overflow-y-auto px-1\.5 pb-4 pt-1\.5/);
+  assert.match(importViewSource, /hub-frost-skeleton min-h-48 p-3\.5/);
+  assert.match(importViewSource, /group flex min-h-48[^\"]*p-3\.5/);
+  assert.match(importViewSource, /className="h-9 w-full gap-1\.5 rounded-xl"/);
+  assert.doesNotMatch(importViewSource, /w-fit self-end/);
+  assert.doesNotMatch(importViewSource, /skill-card-enter group flex min-h-48/);
+});
+
+test("the local import bulk toolbar is bottom-aligned with balanced empty-state spacing", () => {
+  assert.match(importViewSource, /pointer-events-none absolute inset-x-0 bottom-1/);
+  assert.match(importViewSource, /max-sm:bottom-\[calc\(0\.25rem\+env\(safe-area-inset-bottom\)\)\]/);
+  assert.match(importViewSource, /\? "py-2 pl-4 pr-2"\s*: "px-4 py-2\.5"/);
+  assert.match(importViewSource, /className="h-7 rounded-full px-3 text-xs"/);
+  assert.doesNotMatch(importViewSource, /pointer-events-none sticky bottom-3/);
 });

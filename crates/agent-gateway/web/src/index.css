@@ -797,20 +797,20 @@
     @apply font-semibold text-foreground;
   }
   .document-markdown [data-streamdown="heading-1"] {
-    @apply mb-3 mt-7 text-xl font-semibold leading-7 tracking-tight text-foreground;
+    @apply mb-3 mt-7 text-lg font-semibold leading-7 tracking-tight text-foreground;
   }
   .document-markdown [data-streamdown="heading-2"] {
-    @apply mb-2.5 mt-7 text-lg font-semibold leading-7 tracking-tight text-foreground;
+    @apply mb-2.5 mt-7 text-base font-semibold leading-6 tracking-tight text-foreground;
   }
   .document-markdown [data-streamdown="heading-3"] {
-    @apply mb-2 mt-6 text-base font-semibold leading-6 tracking-tight text-foreground;
+    @apply mb-2 mt-6 text-sm font-semibold leading-6 tracking-tight text-foreground;
   }
   .document-markdown [data-streamdown="heading-4"],
   .document-markdown [data-streamdown="heading-5"] {
-    @apply mb-1.5 mt-5 text-sm font-semibold leading-6 tracking-tight text-foreground;
+    @apply mb-1.5 mt-5 text-xs font-semibold leading-5 tracking-tight text-foreground;
   }
   .document-markdown [data-streamdown="heading-6"] {
-    @apply mb-1.5 mt-5 text-xs font-semibold leading-5 tracking-wide text-foreground/80;
+    @apply mb-1.5 mt-5 text-[11px] font-semibold leading-5 tracking-wide text-foreground/80;
   }
   .document-markdown [data-streamdown="unordered-list"],
   .document-markdown [data-streamdown="ordered-list"] {

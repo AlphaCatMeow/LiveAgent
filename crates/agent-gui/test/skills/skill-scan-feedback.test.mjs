@@ -56,3 +56,17 @@ test("manual Skill scans announce a persistent, dismissible result", () => {
   assert.match(source, /onClick=\{dismissScanFeedback\}/);
   assert.match(source, /summarizeSkillScan\(skillsSnapshotRef\.current, discovery\.skills\)/);
 });
+
+test("manual Skill scan button holds a completed state before returning to idle", () => {
+  const source = readFileSync(
+    new URL("../../../agent-ui/src/pages/skills-hub/SkillsHubPage.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /SCAN_BUTTON_COMPLETE_DURATION_MS = 2400/);
+  assert.match(source, /setScanButtonComplete\(true\)/);
+  assert.match(source, /showScanButtonComplete\(\)/);
+  assert.match(source, /disabled=\{loading \|\| scanButtonComplete \|\| lockedByChatMode\}/);
+  assert.match(source, /scanButtonComplete\s*\? t\("settings\.skillsScanComplete"\)/);
+  assert.match(source, /text-\[hsl\(var\(--chat-success\)\)\]/);
+});

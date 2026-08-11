@@ -38,5 +38,14 @@ test("document Markdown keeps its typography separate from chat Markdown in both
     assert.match(source, /\.document-markdown \[data-streamdown="heading-2"\]/);
     assert.match(source, /\.document-markdown \[data-streamdown="list-item"\] > p/);
     assert.match(source, /\.document-markdown \[data-streamdown="code-block-body"\]/);
+    assert.match(
+      source,
+      /\.document-markdown \[data-streamdown="heading-1"\] \{\s*@apply[^;]*text-lg/,
+    );
   }
+});
+
+test("Skill detail sections use whitespace instead of large divider lines", () => {
+  assert.doesNotMatch(skillDrawerSource, /<Separator/);
+  assert.doesNotMatch(skillDrawerSource, /SheetHeader[^>]*border-b/);
 });

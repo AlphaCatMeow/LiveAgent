@@ -2,8 +2,13 @@ import { AlertTriangle, BookOpen, Lock, SkillIcon } from "@liveagent/app/compone
 import { DocumentMarkdown } from "@liveagent/ui/components/markdown/DocumentMarkdown";
 import { Badge } from "@liveagent/ui/components/ui/badge";
 import { CopyButton } from "@liveagent/ui/components/ui/copy-button";
-import { Separator } from "@liveagent/ui/components/ui/separator";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@liveagent/ui/components/ui/sheet";
+import {
+  Sheet,
+  SheetHeader,
+  SheetPanel,
+  SheetPopup,
+  SheetTitle,
+} from "@liveagent/ui/components/ui/sheet";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { isAlwaysEnabledSkillName, type SkillSummary } from "@liveagent/ui/lib/skills/index";
 
@@ -210,12 +215,13 @@ export function InstalledSkillPreviewDrawer(props: {
         if (!open) onClose();
       }}
     >
-      <SheetContent
+      <SheetPopup
         side="right"
+        variant="inset"
         closeLabel={t("settings.cronViewClose")}
         className="w-full sm:max-w-xl"
       >
-        <SheetHeader className="flex-row items-start gap-3 border-b border-border px-5 py-4 pr-14">
+        <SheetHeader className="flex-row items-start gap-3 px-5 py-4 pr-14">
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border bg-muted text-foreground">
             {alwaysEnabled ? <Lock className="h-5 w-5" /> : <SkillIcon className="h-7 w-7" />}
           </div>
@@ -233,7 +239,7 @@ export function InstalledSkillPreviewDrawer(props: {
           </div>
         </SheetHeader>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+        <SheetPanel className="px-5 py-5">
           <div className="flex flex-col gap-5">
             <section aria-labelledby="installed-skill-description">
               <div className="flex items-center justify-between gap-3">
@@ -262,8 +268,6 @@ export function InstalledSkillPreviewDrawer(props: {
                 </div>
               </div>
             ) : null}
-
-            <Separator />
 
             <section aria-labelledby="installed-skill-details">
               <h3
@@ -301,8 +305,6 @@ export function InstalledSkillPreviewDrawer(props: {
                 />
               </div>
             </section>
-
-            <Separator />
 
             <section aria-labelledby="installed-skill-file-preview">
               <div className="mb-3 flex items-center justify-between gap-3">
@@ -366,8 +368,8 @@ export function InstalledSkillPreviewDrawer(props: {
               )}
             </section>
           </div>
-        </div>
-      </SheetContent>
+        </SheetPanel>
+      </SheetPopup>
     </Sheet>
   );
 }

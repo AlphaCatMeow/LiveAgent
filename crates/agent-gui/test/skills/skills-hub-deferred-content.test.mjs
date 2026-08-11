@@ -23,10 +23,9 @@ test("the shared Skills Hub defers the initial installed list behind a loading s
 test("the shared Skills Hub derives installed Skills from the deferred snapshot", () => {
     assert.match(
       source,
-      /(?:if \(!text\) return deferredSkills|const matchedSkills = !text\s*\? deferredSkills)/,
+      /rankFuzzySearchResults\(deferredSkills, deferredFilter/,
     );
-    assert.match(source, /(?:return|:) deferredSkills\.filter/);
-    assert.doesNotMatch(source, /if \(!text\) return skills/);
+    assert.doesNotMatch(source, /rankFuzzySearchResults\(skills, deferredFilter/);
 });
 
 test("the shared Skills Hub avoids discovery signatures during shell render", () => {

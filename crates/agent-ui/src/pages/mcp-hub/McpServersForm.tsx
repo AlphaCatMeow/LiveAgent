@@ -1,13 +1,9 @@
-import { Plug, Plus, Search, Server } from "@liveagent/app/components/icons";
-import {
-  type AppSettings,
-  type McpServerConfig,
-  updateSystem,
-} from "@liveagent/app/lib/settings/index";
+import { Plug, Plus, Server } from "@liveagent/app/components/icons";
+import { type AppSettings, type McpServerConfig, updateSystem } from "@liveagent/app/lib/settings/index";
 import { Button } from "@liveagent/ui/components/ui/button";
-import { Input } from "@liveagent/ui/components/ui/input";
 import { useLocale } from "@liveagent/ui/i18n/index";
-import { useMemo, useState } from "react";
+import { rankFuzzySearchResults } from "@liveagent/ui/lib/shared/fuzzySearch";
+import { useMemo } from "react";
 import { McpServerCard } from "./McpServerCard";
 
 export { McpServerEditModal } from "./McpServerEditModal";
@@ -23,53 +19,38 @@ type SetMcpSettingsFn = (updater: (prev: AppSettings) => AppSettings) => void;
 type McpServersFormProps = {
   settings: AppSettings;
   setSettings: SetMcpSettingsFn;
+  query: string;
   onAddServer?: () => void;
   onEditServer?: (server: McpServerConfig, idx: number) => void;
 };
 
 export function McpServersForm(props: McpServersFormProps) {
-  const { settings, setSettings, onAddServer, onEditServer } = props;
+  const { settings, setSettings, query, onAddServer, onEditServer } = props;
   const { t } = useLocale();
-  const [filter, setFilter] = useState("");
   const servers = settings.mcp.servers;
   const serverCount = servers.length;
 
   const filtered = useMemo(() => {
-    const text = filter.trim().toLowerCase();
-    if (!text) return servers.map((server, idx) => ({ server, idx }));
-    return servers
-      .map((server, idx) => ({ server, idx }))
-      .filter(({ server }) =>
-        [
-          server.id,
-          server.description,
-          server.docsUrl,
-          server.command,
-          server.url,
-          server.transport ?? "",
-        ]
-          .join("\n")
-          .toLowerCase()
-          .includes(text),
-      );
-  }, [filter, servers]);
+    return rankFuzzySearchResults(
+      servers.map((server, idx) => ({ server, idx })),
+      query,
+      ({ server }) => [
+        server.id,
+        server.description,
+        server.docsUrl,
+        server.command,
+        server.url,
+        server.transport,
+        ...(server.args ?? []),
+        ...Object.keys(server.env ?? {}),
+        ...Object.keys(server.headers ?? {}),
+      ],
+    );
+  }, [query, servers]);
 
   return (
-    <div className="h-full min-h-0 overflow-y-auto px-1 pb-4 pt-2">
+    <div className="h-full min-h-0 overflow-y-auto px-0.5 pb-4 pr-1 pt-1.5">
       <div className="flex flex-col gap-4">
-        {serverCount > 4 ? (
-          <div className="hub-panel-enter relative max-w-md">
-            <Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              type="search"
-              value={filter}
-              onChange={(event) => setFilter(event.currentTarget.value)}
-              placeholder={t("mcpHub.searchInstalled")}
-              className="h-10 rounded-xl border-border/70 bg-card pl-9 text-[13px] shadow-xs placeholder:text-muted-foreground"
-            />
-          </div>
-        ) : null}
-
         {serverCount === 0 ? (
           <div className="hub-panel-enter rounded-2xl border border-dashed border-border/70 bg-card px-6 py-12 text-center shadow-xs">
             <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-border/70 bg-background text-foreground shadow-xs">
@@ -86,7 +67,7 @@ export function McpServersForm(props: McpServersFormProps) {
           </div>
         ) : null}
 
-        {filter.trim() && filtered.length === 0 && serverCount > 0 ? (
+        {query.trim() && filtered.length === 0 && serverCount > 0 ? (
           <div className="hub-panel-enter rounded-2xl border border-border/70 bg-card px-6 py-8 text-center shadow-xs">
             <Plug className="mx-auto h-5 w-5 text-muted-foreground" />
             <p className="mt-3 text-sm text-muted-foreground">{t("mcpHub.noMatchInstalled")}</p>
@@ -94,12 +75,13 @@ export function McpServersForm(props: McpServersFormProps) {
         ) : null}
 
         {filtered.length > 0 ? (
-          <div className="flex flex-col gap-2.5">
+          <div className="hub-panel-enter divide-y divide-border/70 overflow-hidden rounded-xl border border-border bg-card shadow-xs">
             {filtered.map(({ server, idx }) => (
               <McpServerCard
                 key={`${server.id}:${idx}`}
                 server={server}
                 idx={idx}
+                searchQuery={query}
                 setSettings={setSettings}
                 onEdit={() => onEditServer?.(server, idx)}
                 policy={settings.system.toolPolicies?.[serverPolicyKey(server.id)] ?? "allow"}

@@ -2,7 +2,6 @@ import {
   AlertTriangle,
   Check,
   Download,
-  Folder,
   Loader2,
   RefreshCw,
   X,
@@ -11,19 +10,14 @@ import { GlassPanel } from "@liveagent/ui/components/hub/HubChrome";
 import { Badge } from "@liveagent/ui/components/ui/badge";
 import { Button } from "@liveagent/ui/components/ui/button";
 import { Checkbox } from "@liveagent/ui/components/ui/checkbox";
-import { Tabs, TabsList, TabsTrigger } from "@liveagent/ui/components/ui/tabs";
+import { SearchHighlight } from "@liveagent/ui/components/ui/search-highlight";
 import { useLocale } from "@liveagent/ui/i18n/index";
+import { rankFuzzySearchResults } from "@liveagent/ui/lib/shared/fuzzySearch";
 import { cn } from "@liveagent/ui/lib/shared/utils";
 import type { ExternalSkillEntry, ExternalToolScan } from "@liveagent/ui/lib/skills/index";
 import { truncateLocalSkillCardDescription } from "@liveagent/ui/lib/skills/skillCardMetadata";
 import { useEffect, useMemo, useRef, useState } from "react";
-
-const EXTERNAL_TOOL_LABELS: Record<string, string> = {
-  "claude-code": "Claude Code",
-  codex: "Codex",
-  codebuddy: "CodeBuddy",
-  agents: "Agent Skills",
-};
+import { SkillsImportSourceTabs } from "./SkillsImportSourceTabs";
 
 export function SkillsImportView(props: {
   scans: ExternalToolScan[];
@@ -42,7 +36,7 @@ export function SkillsImportView(props: {
   bulkMode: boolean;
   onToggle: (baseDir: string) => void;
   onBatchToggle: (baseDirs: string[], on: boolean) => void;
-  onRescan: () => void;
+  onRescan: () => Promise<boolean>;
   onImport: (skill?: ExternalSkillEntry) => void;
 }) {
   const {
@@ -67,25 +61,34 @@ export function SkillsImportView(props: {
   } = props;
   const { t } = useLocale();
   const bulkAnchorRef = useRef<string | null>(null);
+  const rescanFeedbackTimerRef = useRef<number | null>(null);
+  const [rescanComplete, setRescanComplete] = useState(false);
 
   useEffect(() => {
     if (!bulkMode) bulkAnchorRef.current = null;
   }, [bulkMode]);
 
-  const normalizedQuery = query.trim().toLowerCase();
+  useEffect(
+    () => () => {
+      if (rescanFeedbackTimerRef.current !== null) {
+        window.clearTimeout(rescanFeedbackTimerRef.current);
+      }
+    },
+    [],
+  );
+
   const filteredScans = useMemo(
     () =>
       scans.map((scan) => ({
         ...scan,
-        skills: normalizedQuery
-          ? scan.skills.filter(
-              (skill) =>
-                skill.name.toLowerCase().includes(normalizedQuery) ||
-                skill.description.toLowerCase().includes(normalizedQuery),
-            )
-          : scan.skills,
+        skills: rankFuzzySearchResults(scan.skills, query, (skill) => [
+          skill.name,
+          skill.description,
+          skill.baseDir,
+          skill.skillFile,
+        ]),
       })),
-    [scans, normalizedQuery],
+    [query, scans],
   );
   const importing = importProgress !== null;
   const importableSelectedCount = useMemo(() => {
@@ -131,351 +134,375 @@ export function SkillsImportView(props: {
     selectableVisibleBaseDirs.length > 0 &&
     selectedSelectableVisibleCount === selectableVisibleBaseDirs.length;
 
-  return (
-    <div
-      className={cn(
-        "relative h-full min-h-0 overflow-y-auto px-0.5 pr-1 pt-1.5",
-        bulkMode ? "pb-[calc(8rem+env(safe-area-inset-bottom))] sm:pb-24" : "pb-4",
-      )}
-    >
-      {importToast ? (
-        <div className="pointer-events-none sticky top-2 z-[80] flex justify-end px-1">
-          <div className="notify-toast-enter pointer-events-auto flex max-w-sm items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-50 px-3 py-2.5 text-sm shadow-lg dark:border-amber-500/25 dark:bg-amber-950">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-            <p className="min-w-0 flex-1 leading-relaxed text-amber-800 dark:text-amber-200">
-              {importToast}
-            </p>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onDismissImportToast}
-              className="mt-0.5 h-6 w-6 shrink-0 text-amber-800 hover:bg-amber-500/10 dark:text-amber-200"
-              aria-label={t("settings.cancel")}
-            >
-              <X className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        </div>
-      ) : null}
-      <div className="flex flex-col gap-4">
-        {error ? (
-          <GlassPanel tone="error" className="hub-panel-enter">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
-              <span className="text-xs text-destructive">
-                {t("settings.skillsImportScanFailed")}: {error}
-              </span>
-            </div>
-          </GlassPanel>
-        ) : null}
+  async function handleRescan() {
+    if (rescanFeedbackTimerRef.current !== null) {
+      window.clearTimeout(rescanFeedbackTimerRef.current);
+      rescanFeedbackTimerRef.current = null;
+    }
+    setRescanComplete(false);
+    const succeeded = await onRescan();
+    if (!succeeded) return;
+    setRescanComplete(true);
+    rescanFeedbackTimerRef.current = window.setTimeout(() => {
+      setRescanComplete(false);
+      rescanFeedbackTimerRef.current = null;
+    }, 2400);
+  }
 
-        {importErrors.length > 0 ? (
-          <GlassPanel tone="error" className="hub-panel-enter">
-            <div className="space-y-1.5">
+  return (
+    <div className="relative h-full min-h-0">
+      <div
+        className={cn(
+          "h-full min-h-0 overflow-y-auto px-1.5 pb-4 pt-1.5",
+          bulkMode ? "pb-[calc(5rem+env(safe-area-inset-bottom))] sm:pb-20" : null,
+        )}
+      >
+        {importToast ? (
+          <div className="pointer-events-none sticky top-2 z-[80] flex justify-end px-1">
+            <div className="notify-toast-enter pointer-events-auto flex max-w-sm items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-50 px-3 py-2.5 text-sm shadow-lg dark:border-amber-500/25 dark:bg-amber-950">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <p className="min-w-0 flex-1 leading-relaxed text-amber-800 dark:text-amber-200">
+                {importToast}
+              </p>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onDismissImportToast}
+                className="mt-0.5 h-6 w-6 shrink-0 text-amber-800 hover:bg-amber-500/10 dark:text-amber-200"
+                aria-label={t("settings.cancel")}
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          </div>
+        ) : null}
+        <div className="flex flex-col gap-3">
+          {error ? (
+            <GlassPanel tone="error" className="hub-panel-enter">
               <div className="flex items-center gap-2">
                 <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
-                <span className="text-xs font-medium text-destructive">
-                  {t("settings.skillsImportFailed")}
+                <span className="text-xs text-destructive">
+                  {t("settings.skillsImportScanFailed")}: {error}
                 </span>
               </div>
-              {importErrors.map((failure) => (
-                <div key={failure.baseDir} className="pl-6 text-[11px] text-destructive/90">
-                  {failure.name}: {failure.message}
+            </GlassPanel>
+          ) : null}
+
+          {importErrors.length > 0 ? (
+            <GlassPanel tone="error" className="hub-panel-enter">
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
+                  <span className="text-xs font-medium text-destructive">
+                    {t("settings.skillsImportFailed")}
+                  </span>
                 </div>
-              ))}
-            </div>
-          </GlassPanel>
-        ) : null}
+                {importErrors.map((failure) => (
+                  <div key={failure.baseDir} className="pl-6 text-[11px] text-destructive/90">
+                    {failure.name}: {failure.message}
+                  </div>
+                ))}
+              </div>
+            </GlassPanel>
+          ) : null}
 
-        {importedCount !== null && importedCount > 0 ? (
-          <GlassPanel tone="muted" className="hub-panel-enter">
-            <div className="flex items-center gap-2">
-              <Check className="h-4 w-4 shrink-0 text-[hsl(var(--chat-success))]" />
-              <span className="text-xs text-muted-foreground">
-                {t("settings.skillsImportDone")} ({importedCount})
-              </span>
-            </div>
-          </GlassPanel>
-        ) : null}
+          {importedCount !== null && importedCount > 0 ? (
+            <GlassPanel tone="muted" className="hub-panel-enter">
+              <div className="flex items-center gap-2">
+                <Check className="h-4 w-4 shrink-0 text-[hsl(var(--chat-success))]" />
+                <span className="text-xs text-muted-foreground">
+                  {t("settings.skillsImportDone")} ({importedCount})
+                </span>
+              </div>
+            </GlassPanel>
+          ) : null}
 
-        {initializing ? (
-          <GlassPanel className="hub-panel-enter">
-            <div className="flex items-center gap-3 py-4">
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-              <span className="text-xs text-muted-foreground">
-                {t("settings.skillsImportScanning")}
-              </span>
-            </div>
-          </GlassPanel>
-        ) : (
-          <>
-            <div className="hub-panel-enter sticky top-0 z-30 -mx-0.5 flex flex-wrap items-center justify-between gap-3 border-b border-border bg-background/95 px-0.5 pb-2 pt-1.5 backdrop-blur supports-[backdrop-filter]:bg-background/90">
-              <Tabs
-                value={activeTool}
-                onValueChange={(nextTool) => {
-                  userChoseToolRef.current = true;
-                  setActiveTool(String(nextTool));
-                }}
-                className="min-w-0 flex-1"
+          <div className="hub-panel-enter sticky top-0 z-30 -mx-0.5 flex flex-wrap items-center justify-between gap-3 bg-background/95 px-0.5 backdrop-blur supports-[backdrop-filter]:bg-background/90">
+            <SkillsImportSourceTabs
+              scans={filteredScans}
+              value={activeTool}
+              disabled={initializing}
+              onChange={(nextTool) => {
+                userChoseToolRef.current = true;
+                setActiveTool(nextTool);
+              }}
+            />
+
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="min-w-[6.75rem] justify-center gap-1.5"
+                disabled={loading || importing || initializing}
+                aria-busy={loading}
+                onClick={() => void handleRescan()}
               >
-                <TabsList className="h-9 max-w-full justify-start gap-1 overflow-x-auto rounded-none bg-transparent p-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-                  {filteredScans.map((scan) => {
-                    const toolLabel = EXTERNAL_TOOL_LABELS[scan.tool] ?? scan.tool;
-                    return (
-                      <TabsTrigger
-                        key={scan.tool}
-                        value={scan.tool}
-                        className="h-8 shrink-0 gap-1.5 px-2.5 text-xs data-[active]:bg-muted data-[active]:shadow-none"
-                      >
-                        <Folder className="h-3.5 w-3.5" />
-                        <span>{toolLabel}</span>
-                        {scan.exists ? (
-                          <Badge variant="muted" className="h-5 px-1.5 text-[10px]">
-                            {scan.skills.length}
-                          </Badge>
-                        ) : (
-                          <span className="text-[10px] text-muted-foreground">
-                            {t("settings.skillsImportNotDetected")}
-                          </span>
-                        )}
-                      </TabsTrigger>
-                    );
-                  })}
-                </TabsList>
-              </Tabs>
-
-              <div className="flex shrink-0 items-center gap-2">
+                {loading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : rescanComplete ? (
+                  <Check className="h-3.5 w-3.5 text-[hsl(var(--chat-success))]" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5" />
+                )}
+                <span aria-live="polite">
+                  {loading
+                    ? t("settings.skillsImportScanning")
+                    : rescanComplete
+                      ? t("settings.skillsScanComplete")
+                      : t("settings.skillsImportRescan")}
+                </span>
+              </Button>
+              {!bulkMode ? (
                 <Button
-                  variant="outline"
                   size="sm"
                   className="gap-1.5"
-                  disabled={loading || importing}
-                  aria-busy={loading}
-                  onClick={onRescan}
+                  disabled={selected.size === 0 || importing || initializing}
+                  onClick={() => onImport()}
                 >
-                  <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
-                  {t("settings.skillsImportRescan")}
+                  {importing ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Download className="h-3.5 w-3.5" />
+                  )}
+                  {importing && importProgress
+                    ? `${t("settings.skillsImportProgress")} ${importProgress.done + 1}/${importProgress.total}`
+                    : `${t("settings.skillsImportButton")}${importableSelectedCount > 0 ? ` (${importableSelectedCount})` : ""}`}
                 </Button>
-                {!bulkMode ? (
-                  <Button
-                    size="sm"
-                    className="gap-1.5"
-                    disabled={selected.size === 0 || importing}
-                    onClick={() => onImport()}
-                  >
-                    {importing ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Download className="h-3.5 w-3.5" />
-                    )}
-                    {importing && importProgress
-                      ? `${t("settings.skillsImportProgress")} ${importProgress.done + 1}/${importProgress.total}`
-                      : `${t("settings.skillsImportButton")}${importableSelectedCount > 0 ? ` (${importableSelectedCount})` : ""}`}
-                  </Button>
-                ) : null}
-              </div>
+              ) : null}
             </div>
+          </div>
 
-            {activeScan ? (
-              <div key={activeScan.tool} className="hub-panel-enter flex flex-col gap-3">
-                <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-                  <span className="font-mono">{activeScan.rootDir}</span>
-                  {activeScan.tool === "codebuddy" && activeScan.exists ? (
-                    <>
-                      <span aria-hidden="true">·</span>
-                      <span>{t("settings.skillsImportCodebuddyHint")}</span>
-                    </>
-                  ) : null}
-                  {activeScan.errors.length > 0 ? (
-                    <>
-                      <span aria-hidden="true">·</span>
-                      <span>
-                        {t("settings.skillsImportUnparsable").replace(
-                          "{count}",
-                          String(activeScan.errors.length),
-                        )}
-                      </span>
-                    </>
-                  ) : null}
-                  {activeScan.exists && activeScan.skills.length > 0 ? (
-                    <>
-                      <span aria-hidden="true">·</span>
-                      <span>{t("settings.skillsImportOverwriteHint")}</span>
-                    </>
-                  ) : null}
-                </p>
-
-                {!activeScan.exists ? (
-                  <GlassPanel tone="muted">
-                    <p className="py-2 text-center text-xs text-muted-foreground">
-                      {t("settings.skillsImportNotDetected")} · {activeScan.rootDir}
-                    </p>
-                  </GlassPanel>
-                ) : activeScan.skills.length === 0 ? (
-                  <GlassPanel tone="muted">
-                    <p className="py-2 text-center text-xs text-muted-foreground">
-                      {t("settings.skillsImportEmpty")}
-                    </p>
-                  </GlassPanel>
-                ) : (
-                  <>
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="text-xs text-muted-foreground">
-                        {t("settings.skillsHubSelectedShort")} {selectedSelectableVisibleCount} /{" "}
-                        {selectableVisibleBaseDirs.length}
-                      </div>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="gap-1.5"
-                        disabled={importing || selectableVisibleBaseDirs.length === 0}
-                        onClick={() =>
-                          onBatchToggle(selectableVisibleBaseDirs, !allVisibleSelected)
-                        }
-                      >
-                        <Checkbox checked={allVisibleSelected} className="pointer-events-none" />
-                        {allVisibleSelected
-                          ? t("settings.skillsImportDeselectAll")
-                          : t("settings.skillsImportSelectAll")}
-                      </Button>
+          {initializing ? (
+            <div
+              className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5"
+              role="status"
+              aria-live="polite"
+              aria-busy="true"
+            >
+              {[1, 2, 3, 4].map((item) => (
+                <div key={item} className="hub-frost-skeleton min-h-48 p-3.5">
+                  <div className="flex h-full flex-col gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="skills-skeleton-shimmer h-5 w-5 shrink-0 rounded" />
+                      <div className="skills-skeleton-shimmer h-3.5 w-28 rounded" />
                     </div>
-                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-                      {activeScan.skills.map((skill) => {
-                        const alreadyInstalled = installedNames.has(skill.name);
-                        const checked = !alreadyInstalled && selected.has(skill.baseDir);
-                        const locked = alreadyInstalled || importing;
-                        const installing = importing && skill.baseDir === importingExternalBaseDir;
-                        return (
-                          // biome-ignore lint/a11y/useSemanticElements: The card contains a separate import control.
-                          <div
-                            key={skill.baseDir}
-                            role="button"
-                            tabIndex={locked ? -1 : 0}
-                            aria-disabled={locked}
-                            aria-pressed={checked}
-                            onMouseDown={(event) => {
-                              if (bulkMode && event.shiftKey) event.preventDefault();
-                            }}
-                            onClick={(event) => {
-                              if (locked) return;
-                              const orderedBaseDirs = activeScan.skills
-                                .filter((item) => !installedNames.has(item.name))
-                                .map((item) => item.baseDir);
-                              if (
-                                bulkMode &&
-                                event.shiftKey &&
-                                bulkAnchorRef.current &&
-                                bulkAnchorRef.current !== skill.baseDir
-                              ) {
-                                const from = orderedBaseDirs.indexOf(bulkAnchorRef.current);
-                                const to = orderedBaseDirs.indexOf(skill.baseDir);
-                                if (from !== -1 && to !== -1) {
-                                  const [lo, hi] = from < to ? [from, to] : [to, from];
-                                  onBatchToggle(orderedBaseDirs.slice(lo, hi + 1), !checked);
-                                  bulkAnchorRef.current = skill.baseDir;
-                                  return;
-                                }
-                              }
-                              onToggle(skill.baseDir);
-                              bulkAnchorRef.current = skill.baseDir;
-                            }}
-                            onKeyDown={(event) => {
-                              if (
-                                event.target !== event.currentTarget ||
-                                (event.key !== "Enter" && event.key !== " ")
-                              ) {
+                    <div className="space-y-2">
+                      <div className="skills-skeleton-shimmer h-3 w-full rounded" />
+                      <div className="skills-skeleton-shimmer h-3 w-4/5 rounded" />
+                    </div>
+                    <div className="skills-skeleton-shimmer mt-auto h-8 w-20 rounded-md" />
+                  </div>
+                </div>
+              ))}
+              <span className="sr-only">{t("settings.skillsImportScanning")}</span>
+            </div>
+          ) : activeScan ? (
+            <div key={activeScan.tool} className="hub-panel-enter flex flex-col gap-3">
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+                <span className="font-mono">{activeScan.rootDir}</span>
+                {activeScan.tool === "codebuddy" && activeScan.exists ? (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span>{t("settings.skillsImportCodebuddyHint")}</span>
+                  </>
+                ) : null}
+                {activeScan.errors.length > 0 ? (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span>
+                      {t("settings.skillsImportUnparsable").replace(
+                        "{count}",
+                        String(activeScan.errors.length),
+                      )}
+                    </span>
+                  </>
+                ) : null}
+                {activeScan.exists && activeScan.skills.length > 0 ? (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span>{t("settings.skillsImportOverwriteHint")}</span>
+                  </>
+                ) : null}
+              </p>
+
+              {!activeScan.exists ? (
+                <GlassPanel tone="muted">
+                  <p className="py-2 text-center text-xs text-muted-foreground">
+                    {t("settings.skillsImportNotDetected")} · {activeScan.rootDir}
+                  </p>
+                </GlassPanel>
+              ) : activeScan.skills.length === 0 ? (
+                <GlassPanel tone="muted">
+                  <p className="py-2 text-center text-xs text-muted-foreground">
+                    {t("settings.skillsImportEmpty")}
+                  </p>
+                </GlassPanel>
+              ) : (
+                <>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-xs text-muted-foreground">
+                      {t("settings.skillsHubSelectedShort")} {selectedSelectableVisibleCount} /{" "}
+                      {selectableVisibleBaseDirs.length}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      disabled={importing || selectableVisibleBaseDirs.length === 0}
+                      onClick={() => onBatchToggle(selectableVisibleBaseDirs, !allVisibleSelected)}
+                    >
+                      <Checkbox checked={allVisibleSelected} className="pointer-events-none" />
+                      {allVisibleSelected
+                        ? t("settings.skillsImportDeselectAll")
+                        : t("settings.skillsImportSelectAll")}
+                    </Button>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
+                    {activeScan.skills.map((skill) => {
+                      const alreadyInstalled = installedNames.has(skill.name);
+                      const checked = !alreadyInstalled && selected.has(skill.baseDir);
+                      const locked = alreadyInstalled || importing;
+                      const installing = importing && skill.baseDir === importingExternalBaseDir;
+                      return (
+                        // biome-ignore lint/a11y/useSemanticElements: The card contains a separate import control.
+                        <div
+                          key={skill.baseDir}
+                          role="button"
+                          tabIndex={locked ? -1 : 0}
+                          aria-disabled={locked}
+                          aria-pressed={checked}
+                          onMouseDown={(event) => {
+                            if (bulkMode && event.shiftKey) event.preventDefault();
+                          }}
+                          onClick={(event) => {
+                            if (locked) return;
+                            const orderedBaseDirs = activeScan.skills
+                              .filter((item) => !installedNames.has(item.name))
+                              .map((item) => item.baseDir);
+                            if (
+                              bulkMode &&
+                              event.shiftKey &&
+                              bulkAnchorRef.current &&
+                              bulkAnchorRef.current !== skill.baseDir
+                            ) {
+                              const from = orderedBaseDirs.indexOf(bulkAnchorRef.current);
+                              const to = orderedBaseDirs.indexOf(skill.baseDir);
+                              if (from !== -1 && to !== -1) {
+                                const [lo, hi] = from < to ? [from, to] : [to, from];
+                                onBatchToggle(orderedBaseDirs.slice(lo, hi + 1), !checked);
+                                bulkAnchorRef.current = skill.baseDir;
                                 return;
                               }
-                              event.preventDefault();
-                              event.currentTarget.click();
-                            }}
-                            className={cn(
-                              "skill-card-enter group flex min-h-48 w-full flex-col rounded-xl border border-border bg-card p-3.5 text-left shadow-xs transition-[border-color,box-shadow,background-color] focus:outline-none focus:ring-2 focus:ring-ring",
-                              alreadyInstalled
-                                ? "border-emerald-600/25"
-                                : checked
-                                  ? "ring-2 ring-ring/40"
-                                  : "hover:border-foreground/20 hover:shadow-md",
-                              importing && !alreadyInstalled ? "opacity-60" : null,
-                            )}
-                          >
-                            <div className="flex h-full flex-col gap-3">
-                              <div className="flex items-start gap-3">
-                                <Checkbox
-                                  checked={checked}
-                                  disabled={locked}
-                                  className="mt-0.5"
-                                  onClick={(event) => event.stopPropagation()}
-                                  onCheckedChange={() => onToggle(skill.baseDir)}
-                                />
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="truncate text-[13px] font-semibold leading-tight text-foreground">
-                                      {skill.name}
-                                    </span>
-                                    {alreadyInstalled ? (
-                                      <Badge variant="success" className="h-5 px-1.5 text-[10px]">
-                                        {t("settings.skillsImportInstalledBadge")}
-                                      </Badge>
-                                    ) : null}
-                                  </div>
+                            }
+                            onToggle(skill.baseDir);
+                            bulkAnchorRef.current = skill.baseDir;
+                          }}
+                          onKeyDown={(event) => {
+                            if (
+                              event.target !== event.currentTarget ||
+                              (event.key !== "Enter" && event.key !== " ")
+                            ) {
+                              return;
+                            }
+                            event.preventDefault();
+                            event.currentTarget.click();
+                          }}
+                          className={cn(
+                            "group flex min-h-48 w-full flex-col rounded-xl border border-border bg-card p-3.5 text-left shadow-xs transition-[border-color,background-color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                            alreadyInstalled
+                              ? "border-emerald-600/25"
+                              : checked
+                                ? "border-foreground bg-muted/30 shadow-sm"
+                                : "hover:border-foreground/20",
+                            importing && !alreadyInstalled ? "opacity-60" : null,
+                          )}
+                        >
+                          <div className="flex h-full flex-col gap-3">
+                            <div className="flex items-start gap-3">
+                              <Checkbox
+                                checked={checked}
+                                disabled={locked}
+                                className="mt-0.5"
+                                onClick={(event) => event.stopPropagation()}
+                                onCheckedChange={() => onToggle(skill.baseDir)}
+                              />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <SearchHighlight
+                                    text={skill.name}
+                                    query={query}
+                                    className="truncate text-[13px] font-semibold leading-tight text-foreground"
+                                  />
+                                  {alreadyInstalled ? (
+                                    <Badge variant="success" className="h-5 px-1.5 text-[10px]">
+                                      {t("settings.skillsImportInstalledBadge")}
+                                    </Badge>
+                                  ) : null}
                                 </div>
                               </div>
-                              <p
-                                className="line-clamp-2 min-h-10 text-xs leading-5 text-muted-foreground"
-                                title={skill.description}
+                            </div>
+                            <p
+                              className="line-clamp-2 min-h-10 text-xs leading-5 text-muted-foreground"
+                              title={skill.description}
+                            >
+                              <SearchHighlight
+                                text={truncateLocalSkillCardDescription(skill.description)}
+                                query={query}
+                              />
+                            </p>
+                            <div className="mt-auto space-y-2.5">
+                              <span
+                                className="block truncate px-0.5 text-[10.5px] text-muted-foreground"
+                                title={skill.baseDir}
                               >
-                                {truncateLocalSkillCardDescription(skill.description)}
-                              </p>
-                              <div className="mt-auto space-y-2.5">
-                                <span
-                                  className="block truncate px-0.5 text-[10.5px] text-muted-foreground"
-                                  title={skill.baseDir}
-                                >
-                                  {skill.baseDir}
-                                </span>
-                                <Button
-                                  type="button"
-                                  variant={alreadyInstalled ? "outline" : "default"}
-                                  size="sm"
-                                  className="h-8 w-fit self-end gap-1.5 px-3"
-                                  disabled={locked}
-                                  aria-busy={installing}
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    onImport(skill);
-                                  }}
-                                >
-                                  {installing ? (
-                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                  ) : alreadyInstalled ? (
-                                    <Check className="h-3.5 w-3.5" />
-                                  ) : (
-                                    <Download className="h-3.5 w-3.5" />
-                                  )}
-                                  {installing
-                                    ? t("settings.skillsImportProgress")
-                                    : alreadyInstalled
-                                      ? t("settings.skillsImportInstalledBadge")
-                                      : t("settings.skillsBulkImportAction")}
-                                </Button>
-                              </div>
+                                <SearchHighlight text={skill.baseDir} query={query} />
+                              </span>
+                              <Button
+                                type="button"
+                                variant={alreadyInstalled ? "outline" : "default"}
+                                size="sm"
+                                className="h-9 w-full gap-1.5 rounded-xl"
+                                disabled={locked}
+                                aria-busy={installing}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  onImport(skill);
+                                }}
+                              >
+                                {installing ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : alreadyInstalled ? (
+                                  <Check className="h-3.5 w-3.5" />
+                                ) : (
+                                  <Download className="h-3.5 w-3.5" />
+                                )}
+                                {installing
+                                  ? t("settings.skillsImportProgress")
+                                  : alreadyInstalled
+                                    ? t("settings.skillsImportInstalledBadge")
+                                    : t("settings.skillsBulkImportAction")}
+                              </Button>
                             </div>
                           </div>
-                        );
-                      })}
-                    </div>
-                  </>
-                )}
-              </div>
-            ) : null}
-          </>
-        )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+          ) : null}
+        </div>
       </div>
 
       {bulkMode ? (
-        <div className="pointer-events-none sticky bottom-3 z-20 flex justify-center px-1 pt-2 max-sm:bottom-[calc(0.75rem+env(safe-area-inset-bottom))]">
-          <div className="hub-panel-enter pointer-events-auto flex max-w-full flex-wrap items-center gap-2 rounded-full border border-border/50 bg-background/95 py-2 pl-4 pr-2 text-[12.5px] shadow-[0_8px_24px_-12px_rgba(15,23,42,0.35)] max-sm:justify-center max-sm:rounded-3xl max-sm:whitespace-nowrap dark:border-white/[0.1] dark:bg-popover/95">
+        <div className="pointer-events-none absolute inset-x-0 bottom-1 z-40 flex justify-center px-2 max-sm:bottom-[calc(0.25rem+env(safe-area-inset-bottom))]">
+          <div
+            className={cn(
+              "hub-panel-enter pointer-events-auto flex max-w-full flex-wrap items-center gap-2 rounded-full border border-border/50 bg-background/95 text-[12.5px] shadow-[0_8px_24px_-12px_rgba(15,23,42,0.35)] max-sm:justify-center max-sm:rounded-3xl max-sm:whitespace-nowrap dark:border-white/[0.1] dark:bg-popover/95",
+              importableSelectedCount > 0 || importing ? "py-2 pl-4 pr-2" : "px-4 py-2.5",
+            )}
+          >
             {importableSelectedCount > 0 || importing ? (
               <>
                 <span className="whitespace-nowrap text-foreground">
@@ -490,7 +517,7 @@ export function SkillsImportView(props: {
                 <Button
                   size="sm"
                   disabled={importing}
-                  className="h-7 px-3 text-xs"
+                  className="h-7 rounded-full px-3 text-xs"
                   onClick={() => onImport()}
                 >
                   {importing && importProgress ? (

@@ -17,6 +17,7 @@ import {
 } from "@liveagent/app/components/icons";
 import { Badge } from "@liveagent/ui/components/ui/badge";
 import { Button } from "@liveagent/ui/components/ui/button";
+import { SearchHighlight } from "@liveagent/ui/components/ui/search-highlight";
 import { Tabs, TabsList, TabsTrigger } from "@liveagent/ui/components/ui/tabs";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { cn } from "@liveagent/ui/lib/shared/utils";
@@ -148,6 +149,7 @@ export function InstalledSkillCategoryChip(props: {
 export function SkillCategoryBadges(props: {
   categories: ClawHubCategorySlug[];
   topics?: string[];
+  searchQuery?: string;
   onSelect: (category: ClawHubCategorySlug) => void;
 }) {
   const { t } = useLocale();
@@ -177,7 +179,7 @@ export function SkillCategoryBadges(props: {
           key={topic}
           className="shrink-0 rounded-md bg-muted px-1.5 py-1 text-[10px] text-muted-foreground"
         >
-          {topic}
+          <SearchHighlight text={topic} query={props.searchQuery ?? ""} />
         </span>
       ))}
     </div>

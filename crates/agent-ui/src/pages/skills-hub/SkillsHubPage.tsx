@@ -18,6 +18,7 @@ import {
   updateSkills,
 } from "@liveagent/app/lib/settings";
 import { GlassPanel, HubHeader } from "@liveagent/ui/components/hub/HubChrome";
+import { ResourceTabsList } from "@liveagent/ui/components/resources/ResourceTabsList";
 import { Badge } from "@liveagent/ui/components/ui/badge";
 import { Button } from "@liveagent/ui/components/ui/button";
 import { ConfirmActionPopover } from "@liveagent/ui/components/ui/confirm-action-popover";
@@ -30,8 +31,9 @@ import {
   SelectValue,
 } from "@liveagent/ui/components/ui/select";
 import { Switch } from "@liveagent/ui/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@liveagent/ui/components/ui/tabs";
+import { Tabs, TabsContent } from "@liveagent/ui/components/ui/tabs";
 import { useLocale } from "@liveagent/ui/i18n/index";
+import { rankFuzzySearchResults } from "@liveagent/ui/lib/shared/fuzzySearch";
 import { cn } from "@liveagent/ui/lib/shared/utils";
 import {
   buildClawHubDownloadUrl,
@@ -108,6 +110,7 @@ function isSkillsHubView(value: unknown): value is SkillsHubView {
 const STORE_PAGE_LIMIT = 24;
 const EMPTY_SKILLS: SkillSummary[] = [];
 const SCAN_FEEDBACK_DURATION_MS = 6500;
+const SCAN_BUTTON_COMPLETE_DURATION_MS = 2400;
 
 type SkillScanFeedback =
   | { status: "success"; total: number; added: number; updated: number; removed: number }
@@ -153,6 +156,8 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [scanFeedback, setScanFeedback] = useState<SkillScanFeedback | null>(null);
   const scanFeedbackTimerRef = useRef<number | null>(null);
+  const [scanButtonComplete, setScanButtonComplete] = useState(false);
+  const scanButtonCompleteTimerRef = useRef<number | null>(null);
   const [filter, setFilter] = useState("");
   const [installedCategory, setInstalledCategory] = useState<StoreCategoryValue>("all");
   const [installedSort, setInstalledSort] = useState<InstalledSkillSort>(
@@ -224,10 +229,32 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
     }, SCAN_FEEDBACK_DURATION_MS);
   }, []);
 
+  const resetScanButtonComplete = useCallback(() => {
+    if (scanButtonCompleteTimerRef.current !== null) {
+      window.clearTimeout(scanButtonCompleteTimerRef.current);
+      scanButtonCompleteTimerRef.current = null;
+    }
+    setScanButtonComplete(false);
+  }, []);
+
+  const showScanButtonComplete = useCallback(() => {
+    if (scanButtonCompleteTimerRef.current !== null) {
+      window.clearTimeout(scanButtonCompleteTimerRef.current);
+    }
+    setScanButtonComplete(true);
+    scanButtonCompleteTimerRef.current = window.setTimeout(() => {
+      setScanButtonComplete(false);
+      scanButtonCompleteTimerRef.current = null;
+    }, SCAN_BUTTON_COMPLETE_DURATION_MS);
+  }, []);
+
   useEffect(
     () => () => {
       if (scanFeedbackTimerRef.current !== null) {
         window.clearTimeout(scanFeedbackTimerRef.current);
+      }
+      if (scanButtonCompleteTimerRef.current !== null) {
+        window.clearTimeout(scanButtonCompleteTimerRef.current);
       }
     },
     [],
@@ -260,6 +287,9 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
       }
       const silent = options?.silent === true;
       const announce = options?.announce === true;
+      if (announce) {
+        resetScanButtonComplete();
+      }
       if (!silent) {
         setLoading(true);
       }
@@ -273,6 +303,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
         }
         if (announce) {
           showScanFeedback({ status: "success", ...summary });
+          showScanButtonComplete();
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -287,7 +318,14 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
         }
       }
     },
-    [applyDiscovery, lockedByChatMode, showScanFeedback, t],
+    [
+      applyDiscovery,
+      lockedByChatMode,
+      resetScanButtonComplete,
+      showScanButtonComplete,
+      showScanFeedback,
+      t,
+    ],
   );
 
   useEffect(() => {
@@ -349,12 +387,14 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
   // 渲染中执行，输入框本身保持即时响应（输入框与空态提示仍绑同步 filter）。
   const deferredFilter = useDeferredValue(filter);
   const textFilteredInstalled = useMemo(() => {
-    const text = deferredFilter.trim().toLowerCase();
-    if (!text) return deferredSkills;
-    return deferredSkills.filter(
-      (skill) =>
-        skill.name.toLowerCase().includes(text) || skill.description.toLowerCase().includes(text),
-    );
+    return rankFuzzySearchResults(deferredSkills, deferredFilter, (skill) => [
+      skill.name,
+      skill.description,
+      skill.baseDir,
+      skill.skillFile,
+      skill.source?.ownerHandle,
+      skill.source?.slug,
+    ]);
   }, [deferredFilter, deferredSkills]);
 
   // 已安装技能同样按 ClawHub 分区分类，让两个页签体验一致。始终启用（内置）
@@ -416,11 +456,13 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
         const next = new Set([...prev].filter((baseDir) => validBaseDirs.has(baseDir)));
         return next.size === prev.size ? prev : next;
       });
+      return true;
     } catch (err) {
       // Keep stale scan results visible during a failed manual refresh. On the
       // initial scan, mark the request as completed so the error can be shown.
       setExternalScans((previous) => previous ?? []);
       setExternalError(err instanceof Error ? err.message : String(err));
+      return false;
     } finally {
       setExternalLoading(false);
     }
@@ -1428,14 +1470,36 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 gap-1.5 px-3"
+                className="h-8 min-w-[6.5rem] justify-center gap-1.5 px-3"
                 onClick={() => void refresh({ announce: true })}
-                disabled={loading || lockedByChatMode}
-                title={loading ? t("settings.skillsHubScanning") : t("settings.skillsScanHint")}
+                disabled={loading || scanButtonComplete || lockedByChatMode}
+                aria-busy={loading}
+                title={
+                  loading
+                    ? t("settings.skillsHubScanning")
+                    : scanButtonComplete
+                      ? t("settings.skillsScanComplete")
+                      : t("settings.skillsScanHint")
+                }
               >
-                <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
-                <span className="hidden items-center whitespace-nowrap sm:inline-flex">
-                  <span>{loading ? t("settings.skillsScanning") : t("settings.skillsScan")}</span>
+                {loading ? (
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                ) : scanButtonComplete ? (
+                  <Check className="h-3.5 w-3.5 text-[hsl(var(--chat-success))]" />
+                ) : (
+                  <RefreshCw className="h-3.5 w-3.5" />
+                )}
+                <span
+                  className="hidden items-center whitespace-nowrap sm:inline-flex"
+                  aria-live="polite"
+                >
+                  <span>
+                    {loading
+                      ? t("settings.skillsScanning")
+                      : scanButtonComplete
+                        ? t("settings.skillsScanComplete")
+                        : t("settings.skillsScan")}
+                  </span>
                   {loading ? <ScanActivityDots /> : null}
                 </span>
               </Button>
@@ -1475,58 +1539,37 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                           ? t("settings.skillsStoreSearch")
                           : t("settings.skillsImportSearchPlaceholder")
                     }
-                    className="h-11 rounded-full border-border bg-background pl-11 pr-4 text-sm shadow-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20"
+                    className="h-11 rounded-full border-border bg-background pl-11 pr-4 text-sm shadow-none placeholder:text-muted-foreground"
                   />
                 </div>
               ) : null}
 
-              <div className="hub-panel-enter flex min-h-11 items-center justify-between gap-3 border-b border-border max-sm:flex-col max-sm:items-stretch max-sm:pb-2">
-                <TabsList className="h-10 shrink-0 justify-start gap-1 rounded-none bg-transparent p-0 text-muted-foreground max-sm:max-w-full max-sm:overflow-x-auto max-sm:[scrollbar-width:none] max-sm:[&::-webkit-scrollbar]:hidden">
-                  {[
+              <div className="hub-panel-enter flex min-h-11 items-center justify-between gap-3 max-sm:flex-col max-sm:items-stretch max-sm:pb-2">
+                <ResourceTabsList
+                  value={view}
+                  items={[
                     {
                       value: "installed" as const,
                       label: t("settings.skillsHubInstalledTab"),
                       icon: Server,
-                      count: selectableSkills.length,
+                      countLabel:
+                        selectableSkills.length > 0
+                          ? `${selectedCount}/${selectableSkills.length}`
+                          : null,
                     },
                     {
                       value: "store" as const,
                       label: t("settings.skillsHubStoreTab"),
                       icon: Cloud,
-                      count: null,
                     },
                     {
                       value: "import" as const,
                       label: t("settings.skillsHubImportTab"),
                       icon: Download,
-                      count: null,
                     },
-                  ].map((item) => {
-                    const Icon = item.icon;
-                    const active = view === item.value;
-                    return (
-                      <TabsTrigger
-                        key={item.value}
-                        value={item.value}
-                        className={cn(
-                          "relative h-8 gap-1.5 rounded-md px-3 text-[13px] data-[active]:bg-muted data-[active]:shadow-none max-sm:shrink-0",
-                          !active && "hover:bg-muted/60 hover:text-foreground",
-                        )}
-                      >
-                        <Icon className="h-3.5 w-3.5" />
-                        <span>{item.label}</span>
-                        {item.count !== null && item.count > 0 ? (
-                          <Badge
-                            variant={active ? "secondary" : "muted"}
-                            className="ml-0.5 h-5 px-1.5 text-[10px] tabular-nums"
-                          >
-                            {`${selectedCount}/${item.count}`}
-                          </Badge>
-                        ) : null}
-                      </TabsTrigger>
-                    );
-                  })}
-                </TabsList>
+                  ]}
+                  ariaLabel={t("settings.skillsHubTitle")}
+                />
 
                 {!lockedByChatMode ? (
                   <div className="flex w-full min-w-0 items-center justify-end gap-2">
@@ -1609,21 +1652,19 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                       <div
                         aria-busy={loading || showInitialInstalledContentLoading}
                         className={cn(
-                          "h-full min-h-0 overflow-y-auto px-0.5 pr-1 pt-1.5 [overflow-anchor:none]",
+                          "h-full min-h-0 overflow-y-auto px-0.5 pr-1 [overflow-anchor:none]",
                           bulkMode
                             ? "pb-[calc(10rem+env(safe-area-inset-bottom))] sm:pb-24"
                             : "pb-4",
                         )}
                       >
-                        <div className="flex flex-col gap-4">
+                        <div className="flex flex-col gap-3">
                           {skills.length > 0 ? (
                             <StoreCategoryChips
                               value={installedCategory}
                               counts={installedCategoryCounts}
                               onChange={setInstalledCategory}
-                              appearance="outlined"
-                              showIcons={false}
-                              className="sticky top-0 z-30 -mx-0.5 -mt-1.5 border-b border-border bg-background/95 px-0.5 pb-1.5 pt-1.5 backdrop-blur supports-[backdrop-filter]:bg-background/90"
+                              className="sticky top-0 z-30 -mx-0.5 bg-background/95 px-0.5 backdrop-blur supports-[backdrop-filter]:bg-background/90"
                             />
                           ) : null}
 
@@ -1702,10 +1743,12 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                                     primaryCategory={categories[0] ?? "other"}
                                     alwaysEnabled={alwaysEnabled}
                                     checked={alwaysEnabled || selected.has(skill.name)}
+                                    skillsEnabled={skillsEnabled}
                                     bulkMode={bulkMode}
                                     bulkSelected={bulkSelection.has(skill.name)}
                                     deleting={deletingSkillName === skill.name}
                                     deleteDisabled={deletingSkillName !== null}
+                                    searchQuery={deferredFilter}
                                     onToggle={handleCardToggle}
                                     onEnterBulkMode={enterBulkMode}
                                     onToggleBulkSelection={toggleBulkSelectionName}
@@ -1776,7 +1819,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
                         bulkMode={bulkMode}
                         onToggle={toggleExternalSkill}
                         onBatchToggle={batchToggleExternalSkills}
-                        onRescan={() => void rescanExternalSkills()}
+                        onRescan={rescanExternalSkills}
                         onImport={(skill) => void importSelectedExternalSkills(skill)}
                       />
                     </TabsContent>

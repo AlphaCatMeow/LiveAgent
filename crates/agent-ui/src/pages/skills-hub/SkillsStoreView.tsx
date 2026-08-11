@@ -10,16 +10,19 @@ import {
 } from "@liveagent/app/components/icons";
 import { GlassPanel } from "@liveagent/ui/components/hub/HubChrome";
 import { Button } from "@liveagent/ui/components/ui/button";
+import { SearchHighlight } from "@liveagent/ui/components/ui/search-highlight";
 import { Separator } from "@liveagent/ui/components/ui/separator";
 import {
   Sheet,
-  SheetContent,
   SheetFooter,
   SheetHeader,
+  SheetPanel,
+  SheetPopup,
   SheetTitle,
 } from "@liveagent/ui/components/ui/sheet";
 import { ToggleGroup, ToggleGroupItem } from "@liveagent/ui/components/ui/toggle-group";
 import { useLocale } from "@liveagent/ui/i18n/index";
+import { rankFuzzySearchResults } from "@liveagent/ui/lib/shared/fuzzySearch";
 import { cn } from "@liveagent/ui/lib/shared/utils";
 import {
   buildClawHubSkillKey,
@@ -121,13 +124,31 @@ export function SkillsStoreView(props: {
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [storeCategory, setStoreCategory] = useState<StoreCategoryValue>("all");
 
+  const rankedItems = useMemo(
+    () =>
+      rankFuzzySearchResults(
+        items,
+        query,
+        (skill) => [
+          skill.displayName,
+          skill.slug,
+          skill.summary,
+          skill.ownerHandle,
+          skill.latestVersion,
+          ...skill.topics,
+        ],
+        { includeUnmatched: true },
+      ),
+    [items, query],
+  );
+
   const categorizedItems = useMemo(
     () =>
-      items.map((skill) => ({
+      rankedItems.map((skill) => ({
         skill,
         categories: classifyClawHubSkill(skill),
       })),
-    [items],
+    [rankedItems],
   );
 
   const categoryCounts = useMemo(() => {
@@ -350,27 +371,31 @@ export function SkillsStoreView(props: {
                       }
                     }}
                     className={cn(
-                      "skill-card-enter flex min-h-48 cursor-pointer flex-col rounded-xl border border-border bg-card p-3.5 text-left shadow-xs focus:outline-none focus:ring-2 focus:ring-ring",
-                      done && "border-emerald-600/25",
+                      "skill-card-enter flex h-full cursor-pointer flex-col rounded-2xl border bg-card p-3.5 text-left shadow-xs focus:outline-none focus:ring-2 focus:ring-ring",
+                      done
+                        ? "border-emerald-500/40 dark:border-emerald-400/35"
+                        : "border-border/70",
                     )}
                   >
                     <div className="flex h-full flex-col gap-3">
                       <div className="flex items-start gap-3">
                         <div
                           className={cn(
-                            "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition-colors",
+                            "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border",
                             done
                               ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-                              : "border-border bg-muted text-foreground",
+                              : "border-border/70 bg-muted/60 text-foreground/75",
                           )}
                         >
                           <PrimaryCategoryIcon className="h-5 w-5" />
                         </div>
                         <div className="min-w-0 flex-1">
                           <div className="flex min-w-0 items-start gap-1.5">
-                            <span className="truncate text-sm font-semibold leading-tight text-foreground">
-                              {skill.displayName}
-                            </span>
+                            <SearchHighlight
+                              text={skill.displayName}
+                              query={query}
+                              className="truncate text-[13px] font-semibold leading-tight text-foreground"
+                            />
                             {link ? (
                               <a
                                 href={link}
@@ -385,7 +410,7 @@ export function SkillsStoreView(props: {
                               </a>
                             ) : null}
                           </div>
-                          <div className="mt-1 text-[11px] font-medium text-muted-foreground">
+                          <div className="mt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                             v{skill.latestVersion ?? t("settings.skillsStoreVersionLatest")}
                           </div>
                         </div>
@@ -394,16 +419,17 @@ export function SkillsStoreView(props: {
                       <SkillCategoryBadges
                         categories={categories}
                         topics={skill.topics}
+                        searchQuery={query}
                         onSelect={setStoreCategory}
                       />
 
                       {skill.summary ? (
-                        <p className="line-clamp-2 text-xs leading-5 text-muted-foreground">
-                          {skill.summary}
+                        <p className="line-clamp-3 text-[11.5px] leading-[1.45] text-muted-foreground">
+                          <SearchHighlight text={skill.summary} query={query} />
                         </p>
                       ) : null}
 
-                      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[11px] text-muted-foreground">
+                      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 border-t border-border/60 pt-2 text-[10.5px] text-muted-foreground">
                         <span
                           className="inline-flex items-center gap-1"
                           title={t("settings.skillsStorePreviewDownloads")}
@@ -478,8 +504,9 @@ export function SkillsStoreView(props: {
                         variant={done ? "outline" : "default"}
                         size="sm"
                         className={cn(
-                          "mt-auto h-8 w-fit self-end gap-1.5 px-3",
-                          done && "border-border bg-background text-foreground",
+                          "mt-auto h-9 w-full gap-1.5 rounded-xl",
+                          done &&
+                            "border-border/55 bg-background/75 text-foreground/85 backdrop-blur-md",
                         )}
                         disabled={done || installing}
                         aria-busy={installing}
@@ -581,8 +608,9 @@ function SkillsStorePreviewDrawer(props: {
         if (!open) onClose();
       }}
     >
-      <SheetContent
+      <SheetPopup
         side="right"
+        variant="inset"
         closeLabel={t("settings.cronViewClose")}
         className="w-full sm:max-w-[34rem]"
       >
@@ -612,7 +640,7 @@ function SkillsStorePreviewDrawer(props: {
           </div>
         </SheetHeader>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+        <SheetPanel className="px-5 py-5">
           <div className="flex flex-col gap-5">
             {data.summary ? (
               <p className="text-[13px] leading-6 text-muted-foreground">{data.summary}</p>
@@ -753,7 +781,7 @@ function SkillsStorePreviewDrawer(props: {
               </>
             )}
           </div>
-        </div>
+        </SheetPanel>
 
         <SheetFooter className="shrink-0 border-t border-border px-5 py-4">
           {link ? (
@@ -789,7 +817,7 @@ function SkillsStorePreviewDrawer(props: {
             {actionLabel}
           </Button>
         </SheetFooter>
-      </SheetContent>
+      </SheetPopup>
     </Sheet>
   );
 }

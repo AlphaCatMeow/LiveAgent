@@ -161,19 +161,24 @@ for (const { label, loader, sources } of implementations) {
     assert.match(source, /from "@liveagent\/ui\/components\/ui\/select"/);
     assert.match(
       source,
-      /hub-panel-enter flex min-h-11 items-center justify-between gap-3 border-b border-border/,
+      /hub-panel-enter flex min-h-11 items-center justify-between gap-3 max-sm:flex-col/,
     );
-    assert.match(source, /max-sm:max-w-full[^"]*max-sm:overflow-x-auto[^"]*max-sm:\[scrollbar-width:none\] max-sm:\[&::-webkit-scrollbar\]:hidden/);
+    assert.match(
+      source,
+      /max-w-full[^"]*overflow-x-auto[^"]*\[scrollbar-width:none\] \[&::-webkit-scrollbar\]:hidden/,
+    );
     assert.match(source, /max-sm:max-w-\[8rem\]/);
     assert.match(source, /hub-panel-enter relative mb-5/);
-    assert.equal(source.match(/2xl:grid-cols-5/g)?.length, 4);
+    assert.equal(source.match(/2xl:grid-cols-5/g)?.length, 5);
     assert.match(source, /pb-\[calc\(10rem\+env\(safe-area-inset-bottom\)\)\] sm:pb-24/);
     assert.equal(
       source.match(/max-sm:bottom-\[calc\(1rem\+env\(safe-area-inset-bottom\)\)\]/g)?.length,
       2,
     );
-    assert.match(source, /max-sm:bottom-\[calc\(0\.75rem\+env\(safe-area-inset-bottom\)\)\]/);
-    assert.equal(source.match(/<SheetContent/g)?.length, 2);
+    assert.match(source, /max-sm:bottom-\[calc\(0\.25rem\+env\(safe-area-inset-bottom\)\)\]/);
+    assert.equal(source.match(/<SheetPopup/g)?.length, 2);
+    assert.equal(source.match(/variant="inset"/g)?.length, 2);
+    assert.equal(source.match(/<SheetPanel/g)?.length, 2);
     assert.match(source, /from "@liveagent\/ui\/components\/ui\/sheet"/);
     assert.doesNotMatch(source, /createPortal/);
     assert.equal(

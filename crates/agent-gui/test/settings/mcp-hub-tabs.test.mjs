@@ -112,11 +112,11 @@ test("installed MCP resources use a compact settings list while Store keeps its 
   assert.match(serverCardSource, /label=\{t\("mcpHub\.previewArgs"\)\}/);
   assert.match(serverCardSource, /label=\{t\("mcpHub\.previewEnv"\)\}/);
   assert.match(serverCardSource, /label=\{t\("mcpHub\.previewHeaders"\)\}/);
-  assert.match(serverCardSource, /grid-cols-\[auto_2rem_2rem_2rem\]/);
+  assert.match(serverCardSource, /grid-cols-\[auto_2rem_2rem\]/);
   assert.match(serverCardSource, /aria-hidden="true"/);
   assert.ok(
     serverCardSource.indexOf("<ResourceActivationSwitch") <
-      serverCardSource.indexOf('<button\n        type="button"\n        onClick={onEdit}'),
+      serverCardSource.indexOf("onClick={onEdit}"),
   );
   assert.ok(
     serverCardSource.lastIndexOf("<ConfirmDeletePopover") >

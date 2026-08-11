@@ -6,6 +6,7 @@ import {
   type ToolPolicy,
   updateMcp,
 } from "@liveagent/app/lib/settings/index";
+import { openUrl } from "@liveagent/app/shims/tauriOpener";
 import { ToolPolicyToggle } from "@liveagent/ui/components/hub/ToolPolicyToggle";
 import { getMcpTransportMeta } from "@liveagent/ui/components/resources/McpTransportMeta";
 import { ResourceActivationSwitch } from "@liveagent/ui/components/resources/ResourceActivationSwitch";
@@ -97,17 +98,16 @@ export const McpServerCard = memo(function McpServerCard(props: {
           </button>
           {docsLink ? (
             <Button
+              type="button"
               variant="ghost"
               size="icon"
               className="h-5 w-5 shrink-0 text-muted-foreground"
               title={t("mcpHub.storeOpenExternal")}
               aria-label={t("mcpHub.storeOpenExternal")}
-              render={
-                <a href={docsLink} target="_blank" rel="noreferrer">
-                  <ExternalLink className="h-3 w-3" />
-                </a>
-              }
-            />
+              onClick={() => void openUrl(docsLink)}
+            >
+              <ExternalLink aria-hidden="true" className="h-3 w-3" />
+            </Button>
           ) : null}
           <Badge variant="muted" className="h-5 px-1.5 text-[10px] uppercase tracking-wide">
             <SearchHighlight text={transportLabel} query={searchQuery} />

@@ -48,6 +48,7 @@ function createMarkdownModule(expanded) {
         X: "X",
       },
       "./ui/button": { Button: "Button" },
+      "./ui/copy-button": { CopyButton: "CopyButton" },
     },
   });
   return loader.loadModule("@liveagent/ui/components/Markdown.tsx");

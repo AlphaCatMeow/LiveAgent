@@ -1,4 +1,3 @@
-import { Tooltip } from "@base-ui/react";
 import {
   ChevronDown,
   ChevronUp,
@@ -24,6 +23,7 @@ import {
   type ReasoningLevel,
 } from "@liveagent/app/lib/settings";
 import { ComposerAttachmentCard } from "@liveagent/ui/components/chat/ComposerAttachmentCard";
+import { ContextUsageRing } from "@liveagent/ui/components/chat/ContextUsageRing";
 import { getUploadedFileTypeIcon } from "@liveagent/ui/components/chat/fileTypeIcons";
 import {
   MentionComposer,
@@ -32,6 +32,7 @@ import {
 } from "@liveagent/ui/components/chat/MentionComposer";
 import { GitBranchSelector } from "@liveagent/ui/components/git/GitBranchSelector";
 import { Button } from "@liveagent/ui/components/ui/button";
+import { LabelTooltip as RuntimeControlTooltip } from "@liveagent/ui/components/ui/label-tooltip";
 import {
   Select,
   SelectContent,
@@ -53,6 +54,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import {
   getUploadedImagePreviewCacheKey,
@@ -74,31 +76,6 @@ const REASONING_I18N_KEYS: Record<ReasoningLevel, string> = {
 
 function isReasoningLevel(value: unknown): value is ReasoningLevel {
   return typeof value === "string" && Object.hasOwn(REASONING_I18N_KEYS, value);
-}
-
-function RuntimeControlTooltip(props: { label: string; children: ReactNode }) {
-  return (
-    <Tooltip.Root>
-      <Tooltip.Trigger
-        delay={0}
-        closeOnClick
-        render={<span className="inline-flex shrink-0">{props.children}</span>}
-      />
-      <Tooltip.Portal>
-        <Tooltip.Positioner
-          side="top"
-          align="center"
-          sideOffset={6}
-          collisionPadding={8}
-          className="z-[9999]"
-        >
-          <Tooltip.Popup className="max-w-64 rounded-xl border border-border/60 bg-popover px-3 py-2 text-xs font-medium leading-4 text-popover-foreground shadow-lg outline-hidden data-[open]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[open]:fade-in-0 data-[closed]:zoom-out-95 data-[open]:zoom-in-95">
-            {props.label}
-          </Tooltip.Popup>
-        </Tooltip.Positioner>
-      </Tooltip.Portal>
-    </Tooltip.Root>
-  );
 }
 
 function useComposerUploadedImagePreview(
@@ -211,6 +188,40 @@ const DEFAULT_QUEUE_SCROLLBAR_STATE: QueueScrollbarState = {
 const COMPOSER_EXPAND_ANIMATION_MS = 280;
 const COMPOSER_EXPAND_EASING = "cubic-bezier(0.32, 0.72, 0.22, 1)";
 
+/** 用量环实时读数订阅源（getContextUsageTokens 必须对同一底层状态返回稳定值）。 */
+export type ContextUsageTokensSource = {
+  subscribe: (listener: () => void) => () => void;
+  getContextUsageTokens: () => number | undefined;
+};
+
+const noopSubscribe = () => () => {};
+
+// 环的实时读数在独立小组件里订阅：流式期间每帧的读数变化只重渲染这枚
+// SVG 环，不触发 ChatComposerBar/整页回流。
+function ComposerContextUsageRing(props: {
+  source?: ContextUsageTokensSource;
+  totalTokens?: number;
+  contextWindow?: number;
+  disabled?: boolean;
+  onConfirm?: (() => void) | (() => Promise<unknown>);
+}) {
+  const { source, totalTokens, contextWindow, disabled, onConfirm } = props;
+  const readStatic = useCallback(() => totalTokens, [totalTokens]);
+  const liveTokens = useSyncExternalStore(
+    source?.subscribe ?? noopSubscribe,
+    source?.getContextUsageTokens ?? readStatic,
+    source?.getContextUsageTokens ?? readStatic,
+  );
+  return (
+    <ContextUsageRing
+      totalTokens={source ? liveTokens : totalTokens}
+      contextWindow={contextWindow}
+      disabled={disabled}
+      onConfirm={onConfirm}
+    />
+  );
+}
+
 function prefersReducedMotion() {
   return (
     typeof window.matchMedia === "function" &&
@@ -234,6 +245,19 @@ export type ChatComposerBarProps = {
   gitClient?: GitClient | null;
   gitWriteEnabled?: boolean;
   gitDisabledMessage?: string;
+  /** 当前会话上下文占用 token；与 contextWindow 齐备时显示用量环。 */
+  contextUsageTokens?: number;
+  /**
+   * 可选的用量环实时订阅源：流式期间读数每帧都在变，经此订阅只重渲染环
+   * 本身而不回流整页（GUI 用；WebUI 传静态 contextUsageTokens 即可）。
+   * 提供时优先于 contextUsageTokens。
+   */
+  contextUsageTokensSource?: ContextUsageTokensSource;
+  contextWindow?: number;
+  /** 用量环确认后触发手动压缩；缺省时环为纯展示。 */
+  onManualCompactConfirm?: (() => void) | (() => Promise<unknown>);
+  /** 压缩进行中/请求在途时禁点用量环。 */
+  manualCompactBlocked?: boolean;
   workspaceActivityClient?: WorkspaceActivityClient | null;
   onSend: () => void;
   onStop: () => void;
@@ -276,6 +300,11 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
     gitClient,
     gitWriteEnabled = true,
     gitDisabledMessage,
+    contextUsageTokens,
+    contextUsageTokensSource,
+    contextWindow,
+    onManualCompactConfirm,
+    manualCompactBlocked,
     workspaceActivityClient,
     onSend,
     onStop,
@@ -893,6 +922,17 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
               <Maximize2 className="h-4 w-4" />
             )}
           </button>
+
+          {/* 用量环位于卡片右侧控制列的垂直中心，保持在展开与发送按钮之间。 */}
+          <div className="absolute right-3 top-1/2 z-20 -translate-y-1/2">
+            <ComposerContextUsageRing
+              source={contextUsageTokensSource}
+              totalTokens={contextUsageTokens}
+              contextWindow={contextWindow}
+              disabled={controlsDisabled || isSending || manualCompactBlocked}
+              onConfirm={onManualCompactConfirm}
+            />
+          </div>
 
           {/* 常驻 flex-1：动画把卡片钳在中间高度时由本区吸收伸缩，工具栏才能
               全程贴住卡片底边。min-h-0 只在展开态加——折叠态靠自动最小高度

@@ -18,6 +18,8 @@ import {
   sidebarShallowEqual,
 } from "@liveagent/ui/lib/sidebar/selectors";
 import type { SidebarSnapshot, SidebarStore } from "@liveagent/ui/lib/sidebar/store";
+import type { TransientSidebarRunningConversation } from "@liveagent/ui/lib/sidebar/transientActivity";
+import { mergeTransientSidebarRunningActivity } from "@liveagent/ui/lib/sidebar/transientActivity";
 import type { SidebarErrorCode } from "@liveagent/ui/lib/sidebar/types";
 import { useSidebarSelector } from "@liveagent/ui/lib/sidebar/useSidebarSelector";
 import { sortWorkspaceProjectsByActivity } from "@liveagent/ui/lib/workspaceProjects";
@@ -77,6 +79,8 @@ function useStableCallback<Args extends unknown[], Return>(
 
 export type GatewaySidebarContainerProps = {
   store: SidebarStore;
+  // 手动压缩 pending 已按会话 id 键化，多个会话可同时“转圈”（issue #359 缺陷 #3）。
+  transientRunningConversations?: readonly TransientSidebarRunningConversation[];
   currentConversationId: string;
   isOpen: boolean;
   fontScale?: number;
@@ -165,6 +169,19 @@ export function GatewaySidebarContainer(props: GatewaySidebarContainerProps) {
     sidebarShallowEqual,
   );
   const conversationIndex = useSidebarSelector(store, selectConversationIndex);
+  const effectiveRunningActivity = useMemo(
+    () =>
+      mergeTransientSidebarRunningActivity(
+        runningConversationIds,
+        projectActivityInputs.runningWorkdirPathKeys,
+        props.transientRunningConversations,
+      ),
+    [
+      projectActivityInputs.runningWorkdirPathKeys,
+      props.transientRunningConversations,
+      runningConversationIds,
+    ],
+  );
 
   // --- Rename UI state (moved out of GatewayApp) ---------------------------
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -346,9 +363,13 @@ export function GatewaySidebarContainer(props: GatewaySidebarContainerProps) {
     () =>
       sortWorkspaceProjectsByActivity(projects, {
         projectActivityUpdatedAts: projectActivityInputs.workdirActivity,
-        runningProjectPathKeys: projectActivityInputs.runningWorkdirPathKeys,
+        runningProjectPathKeys: effectiveRunningActivity.runningProjectPathKeys,
       }),
-    [projectActivityInputs.runningWorkdirPathKeys, projectActivityInputs.workdirActivity, projects],
+    [
+      effectiveRunningActivity.runningProjectPathKeys,
+      projectActivityInputs.workdirActivity,
+      projects,
+    ],
   );
 
   return (
@@ -356,7 +377,7 @@ export function GatewaySidebarContainer(props: GatewaySidebarContainerProps) {
       items={items}
       currentConversationId={props.currentConversationId}
       busyConversationIds={mutations}
-      runningConversationIds={runningConversationIds}
+      runningConversationIds={effectiveRunningActivity.runningConversationIds}
       listStatus={listState.status}
       scopeKey={scopeKey}
       totalItems={listState.totalCount}
@@ -375,7 +396,7 @@ export function GatewaySidebarContainer(props: GatewaySidebarContainerProps) {
       workspaceProjectGroups={props.workspaceProjectGroups}
       activeProjectId={props.activeProjectId}
       missingProjectPathKeys={props.missingProjectPathKeys}
-      runningProjectPathKeys={projectActivityInputs.runningWorkdirPathKeys}
+      runningProjectPathKeys={effectiveRunningActivity.runningProjectPathKeys}
       projectRenamingId={props.projectRenamingId}
       projectRenameDraft={props.projectRenameDraft}
       projectsCollapsed={props.projectsCollapsed}

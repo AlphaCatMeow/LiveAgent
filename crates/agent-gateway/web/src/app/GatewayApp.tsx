@@ -4973,7 +4973,6 @@ export default function GatewayApp() {
                 updatingIds={sharedManagerUpdatingIds}
                 errors={sharedManagerErrors}
                 listError={sharedHistoryListError}
-                shareOrigin={settings.remote.gatewayUrl}
                 onRefresh={handleRefreshSharedHistoryStatuses}
                 onLoadStatus={handleLoadSharedHistoryStatus}
                 onDisableShare={handleDisableSharedHistory}

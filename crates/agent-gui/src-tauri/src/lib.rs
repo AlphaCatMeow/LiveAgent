@@ -217,6 +217,8 @@ macro_rules! app_invoke_handler {
             commands::git::git_list_remote_branches,
             commands::git::git_switch_branch,
             commands::git::git_create_branch,
+            commands::git::git_create_worktree,
+            commands::git::git_remove_worktree,
             commands::git::git_diff,
             commands::git::git_log,
             commands::git::git_commit_details,

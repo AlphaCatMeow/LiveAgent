@@ -3,7 +3,10 @@
 // list updates, per-row mutations) re-render this subtree only — never
 // GatewayApp. Renders the per-end <ChatHistorySidebar/> view.
 
-import { ChatHistorySidebar } from "@liveagent/ui/components/chat/ChatHistorySidebar";
+import {
+  ChatHistorySidebar,
+  type WorkspaceProjectRemoveOptions,
+} from "@liveagent/ui/components/chat/ChatHistorySidebar";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import type { SidebarBatchDeleteOptions } from "@liveagent/ui/lib/sidebar/batchDelete";
 import { deleteSidebarConversations } from "@liveagent/ui/lib/sidebar/batchDelete";
@@ -20,6 +23,7 @@ import { mergeTransientSidebarRunningActivity } from "@liveagent/ui/lib/sidebar/
 import type { SidebarErrorCode } from "@liveagent/ui/lib/sidebar/types";
 import { useSidebarSelector } from "@liveagent/ui/lib/sidebar/useSidebarSelector";
 import { sortWorkspaceProjectsByActivity } from "@liveagent/ui/lib/workspaceProjects";
+import type { WorkspaceProjectGroup } from "@liveagent/ui/lib/workspaceProjectTypes";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatHistorySummary } from "@/lib/chat/chatHistory";
 import type { WorkspaceProject } from "@/lib/settings";
@@ -86,6 +90,7 @@ export type GatewaySidebarContainerProps = {
   // the store's activity snapshot so project reordering never re-renders
   // GatewayApp.
   projects: WorkspaceProject[];
+  workspaceProjectGroups?: WorkspaceProjectGroup[];
   activeProjectId?: string;
   missingProjectPathKeys: ReadonlySet<string>;
   projectRenamingId: string | null;
@@ -107,6 +112,11 @@ export type GatewaySidebarContainerProps = {
   onProjectsCollapsedChange: (collapsed: boolean) => void;
   onRecentCollapsedChange: (collapsed: boolean) => void;
   onCreateProject: () => void;
+  onCreateWorkspaceGroup?: (name: string) => void;
+  onRenameWorkspaceGroup?: (groupId: string, name: string) => void;
+  onDeleteWorkspaceGroup?: (groupId: string) => void;
+  onMoveProjectToGroup?: (projectPath: string, groupId: string | null) => void;
+  onToggleWorkspaceGroupCollapsed?: (groupId: string) => void;
   onSelectProject: (project: WorkspaceProject) => void;
   onNewConversationForProject: (project: WorkspaceProject) => void;
   onBrowseProjectInFileTree: (project: WorkspaceProject) => void;
@@ -116,7 +126,7 @@ export type GatewaySidebarContainerProps = {
   onCommitProjectRename: () => void;
   onCancelProjectRename: () => void;
   onSetProjectPinned: (project: WorkspaceProject, isPinned: boolean) => void;
-  onRemoveProject: (project: WorkspaceProject) => void;
+  onRemoveProject: (project: WorkspaceProject, options?: WorkspaceProjectRemoveOptions) => void;
   onArchiveProject: (project: WorkspaceProject) => void;
   onUnarchiveProject: (project: WorkspaceProject) => void;
   archivedProjectPathKeys?: ReadonlySet<string>;
@@ -383,6 +393,7 @@ export function GatewaySidebarContainer(props: GatewaySidebarContainerProps) {
       activeView={props.activeView}
       showProjects={props.showProjects}
       projects={sortedProjects}
+      workspaceProjectGroups={props.workspaceProjectGroups}
       activeProjectId={props.activeProjectId}
       missingProjectPathKeys={props.missingProjectPathKeys}
       runningProjectPathKeys={effectiveRunningActivity.runningProjectPathKeys}
@@ -393,6 +404,11 @@ export function GatewaySidebarContainer(props: GatewaySidebarContainerProps) {
       onProjectsCollapsedChange={props.onProjectsCollapsedChange}
       onRecentCollapsedChange={props.onRecentCollapsedChange}
       onCreateProject={props.onCreateProject}
+      onCreateWorkspaceGroup={props.onCreateWorkspaceGroup}
+      onRenameWorkspaceGroup={props.onRenameWorkspaceGroup}
+      onDeleteWorkspaceGroup={props.onDeleteWorkspaceGroup}
+      onMoveProjectToGroup={props.onMoveProjectToGroup}
+      onToggleWorkspaceGroupCollapsed={props.onToggleWorkspaceGroupCollapsed}
       onSelectProject={props.onSelectProject}
       onNewConversationForProject={props.onNewConversationForProject}
       onBrowseProjectInFileTree={props.onBrowseProjectInFileTree}

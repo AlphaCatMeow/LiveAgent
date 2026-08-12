@@ -259,6 +259,17 @@ export type ChatComposerBarProps = {
   /** 压缩进行中/请求在途时禁点用量环。 */
   manualCompactBlocked?: boolean;
   workspaceActivityClient?: WorkspaceActivityClient | null;
+  /** 创建 worktree 成功后，把后端返回的路径与仓库身份加入侧边栏。 */
+  onOpenWorktree?: (worktree: {
+    path: string;
+    repositoryPath: string;
+    branch: string;
+  }) => void;
+  onWorktreeRemoved?: (worktree: {
+    path: string;
+    repositoryPath: string;
+    branch: string;
+  }) => void;
   onSend: () => void;
   onStop: () => void;
   onPrepareChatRuntime?: () => void;
@@ -306,6 +317,8 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
     onManualCompactConfirm,
     manualCompactBlocked,
     workspaceActivityClient,
+    onOpenWorktree,
+    onWorktreeRemoved,
     onSend,
     onStop,
     onPrepareChatRuntime,
@@ -1136,6 +1149,8 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
                 disabled={controlsDisabled}
                 canWrite={gitWriteEnabled}
                 disabledMessage={gitDisabledMessage}
+                onOpenWorktree={onOpenWorktree}
+                onWorktreeRemoved={onWorktreeRemoved}
               />
             </div>
 

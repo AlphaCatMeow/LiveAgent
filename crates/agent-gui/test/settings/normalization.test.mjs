@@ -490,7 +490,8 @@ test("chat runtime controls default and follow provider model reasoning support"
     }),
     ["minimal", "low", "medium", "high"],
   );
-  // gemini-3-pro-image：目录只有两档 low/high。
+  // gemini-3-pro-image：目录只有两档 low/high（gemini-3-pro-preview 已随
+  // #425 上游目录刷新移除，改用同为两档的模型覆盖该路径）。
   assert.deepEqual(
     settings.getChatRuntimeReasoningLevelsForProvider({
       providerId: "gemini",

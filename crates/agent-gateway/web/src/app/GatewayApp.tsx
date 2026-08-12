@@ -1,7 +1,7 @@
 import { ApplicationView } from "@liveagent/ui/application/ApplicationView";
 import { AppErrorBoundary } from "@liveagent/ui/components/AppErrorBoundary";
-import { FileDropOverlay } from "@liveagent/ui/components/chat/FileDropOverlay";
 import type { WorkspaceProjectRemoveOptions } from "@liveagent/ui/components/chat/ChatHistorySidebar";
+import { FileDropOverlay } from "@liveagent/ui/components/chat/FileDropOverlay";
 import type {
   MentionComposerDraft,
   MentionComposerHandle,
@@ -1245,7 +1245,8 @@ export default function GatewayApp() {
       if (!pathKey) return;
       const normalizedPathKey = workspaceProjectPathKey(pathKey);
       const matchedProject = workspaceProjects.find(
-        (item) => workspaceProjectPathKey(item.path) === normalizedPathKey || item.id === project.id,
+        (item) =>
+          workspaceProjectPathKey(item.path) === normalizedPathKey || item.id === project.id,
       );
       const targetProject = matchedProject
         ? {

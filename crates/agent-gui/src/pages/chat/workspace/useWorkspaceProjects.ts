@@ -191,7 +191,8 @@ export function useWorkspaceProjects(params: UseWorkspaceProjectsParams) {
       if (!pathKey) return;
       const normalizedPathKey = workspaceProjectPathKey(pathKey);
       const matchedProject = workspaceProjects.find(
-        (item) => workspaceProjectPathKey(item.path) === normalizedPathKey || item.id === project.id,
+        (item) =>
+          workspaceProjectPathKey(item.path) === normalizedPathKey || item.id === project.id,
       );
       const targetProject = matchedProject
         ? {
@@ -406,8 +407,7 @@ export function useWorkspaceProjects(params: UseWorkspaceProjectsParams) {
       activateWorkspaceProject(nextProject);
       setSettings((prev) => {
         const sourceProject = prev.system.workspaceProjects.find(
-          (item) =>
-            workspaceProjectPathKey(item.path) === workspaceProjectPathKey(repositoryPath),
+          (item) => workspaceProjectPathKey(item.path) === workspaceProjectPathKey(repositoryPath),
         );
         const ensured = ensureWorktreeProjectGroup(prev.system.workspaceProjectGroups, {
           name: sourceProject?.name || fallbackWorkspaceProjectName(repositoryPath),

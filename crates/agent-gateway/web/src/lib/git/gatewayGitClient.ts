@@ -5,6 +5,7 @@ import {
   normalizeGitDiffResponse,
   normalizeGitLogResponse,
   normalizeGitOperationResponse,
+  normalizeGitRemoveWorktreeResponse,
   normalizeGitRepositoryDiscovery,
   normalizeGitRepositoryState,
   normalizeGitWorktreeResponse,
@@ -47,9 +48,14 @@ export function createGatewayGitClient(api: GatewayWebSocketClientLike): GitClie
         workdir,
       );
     },
-    async createWorktree(workdir, name, startPoint) {
+    async createWorktree(workdir, options) {
       return normalizeGitWorktreeResponse(
-        await api.gitRequest("create_worktree", workdir, { name, startPoint }),
+        await api.gitRequest("create_worktree", workdir, {
+          branch: options.branch,
+          directoryName: options.directoryName,
+          parentDirectory: options.parentDirectory,
+          startPoint: options.startPoint,
+        }),
         workdir,
       );
     },
@@ -144,12 +150,12 @@ export function createGatewayGitClient(api: GatewayWebSocketClientLike): GitClie
         workdir,
       );
     },
-    async removeWorktree(workdir, worktreePath, force, deleteBranch) {
-      return normalizeGitOperationResponse(
+    async removeWorktree(workdir, worktreePath, options = {}) {
+      return normalizeGitRemoveWorktreeResponse(
         await api.gitRequest("remove_worktree", workdir, {
           worktreePath,
-          force,
-          deleteBranch,
+          force: options.force,
+          deleteBranch: options.deleteBranch,
         }),
         workdir,
       );

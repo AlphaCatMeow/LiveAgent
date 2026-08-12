@@ -1,14 +1,12 @@
+import type { WorkspaceProjectRemoveOptions } from "@liveagent/ui/components/chat/ChatHistorySidebar";
 import type { ConfirmDialogOptions } from "@liveagent/ui/components/ui/confirm-dialog";
-import { memoryDeleteProject } from "@liveagent/ui/lib/memory/api";
 import type { SidebarStore } from "@liveagent/ui/lib/sidebar/store";
 import { terminalSessionBelongsToProject } from "@liveagent/ui/lib/terminal/sessionStore";
 import type { TerminalSession } from "@liveagent/ui/lib/terminal/types";
+import { removeWorkspaceProjectFromGroups } from "@liveagent/ui/lib/workspaceProjects";
 import { type Dispatch, type MutableRefObject, type SetStateAction, useCallback } from "react";
 import { Terminal } from "../../../components/icons";
-import {
-  type ConversationPersistenceCursor,
-  deleteChatHistory,
-} from "../../../lib/chat/history/chatHistory";
+import { tauriGitClient } from "../../../lib/git/tauriGitClient";
 import {
   type AppSettings,
   DEFAULT_WORKSPACE_PROJECT_ID,
@@ -20,11 +18,7 @@ import {
 } from "../../../lib/settings";
 import { tauriTerminalClient } from "../../../lib/terminal/tauriTerminalClient";
 import { asErrorMessage } from "../chatPageUtils";
-import type { ConversationRuntimeEntry } from "../runtime/chatPageRuntime";
-import {
-  getDefaultWorkspaceProjectPath,
-  listChatHistoryIdsForProjectPath,
-} from "./workspaceProjectsModel";
+import { getDefaultWorkspaceProjectPath } from "./workspaceProjectsModel";
 
 type UseWorkspaceProjectRemovalParams = {
   settings: AppSettings;
@@ -43,14 +37,6 @@ type UseWorkspaceProjectRemovalParams = {
   setActiveWorkspaceProjectId: Dispatch<SetStateAction<string>>;
   setProjectRenamingId: Dispatch<SetStateAction<string | null>>;
   setProjectRenameDraft: Dispatch<SetStateAction<string>>;
-  isConversationRunning: (conversationId: string) => boolean;
-  currentConversationIdRef: MutableRefObject<string>;
-  conversationRuntimeCacheRef: MutableRefObject<Map<string, ConversationRuntimeEntry>>;
-  conversationPersistenceCursorRef: MutableRefObject<Map<string, ConversationPersistenceCursor>>;
-  locallySyncedHistoryUpdatedAtRef: MutableRefObject<Map<string, number>>;
-  deleteConversationLocalCaches: (conversationId: string) => void;
-  disposeSubagentsForConversation: (conversationId: string) => void;
-  removeSharedHistoryItems: (ids: Iterable<string>) => void;
   terminalProjectPathKey: string;
   setTerminalSessions: Dispatch<SetStateAction<TerminalSession[]>>;
   setRightDockOpen: Dispatch<SetStateAction<boolean>>;
@@ -59,10 +45,9 @@ type UseWorkspaceProjectRemovalParams = {
 };
 
 /**
- * Destructive workspace-project actions: full removal (conversations,
- * terminals, memory, settings) plus archive/unarchive. Split from
- * useWorkspaceProjects because removal needs the conversation/terminal cache
- * plumbing that only exists later in ChatPage's wiring order.
+ * Workspace-project lifecycle actions. Removing an entry only updates settings;
+ * deleting a registered Worktree additionally invokes Git and closes terminals
+ * that would otherwise keep using the deleted directory.
  */
 export function useWorkspaceProjectRemoval(params: UseWorkspaceProjectRemovalParams) {
   const {
@@ -79,14 +64,6 @@ export function useWorkspaceProjectRemoval(params: UseWorkspaceProjectRemovalPar
     setActiveWorkspaceProjectId,
     setProjectRenamingId,
     setProjectRenameDraft,
-    isConversationRunning,
-    currentConversationIdRef,
-    conversationRuntimeCacheRef,
-    conversationPersistenceCursorRef,
-    locallySyncedHistoryUpdatedAtRef,
-    deleteConversationLocalCaches,
-    disposeSubagentsForConversation,
-    removeSharedHistoryItems,
     terminalProjectPathKey,
     setTerminalSessions,
     setRightDockOpen,
@@ -136,6 +113,10 @@ export function useWorkspaceProjectRemoval(params: UseWorkspaceProjectRemovalPar
               workspaceProjects: prev.system.workspaceProjects.filter(
                 (item) => item.id !== project.id && workspaceProjectPathKey(item.path) !== pathKey,
               ),
+              workspaceProjectGroups: removeWorkspaceProjectFromGroups(
+                prev.system.workspaceProjectGroups,
+                path,
+              ),
               hiddenWorkspaceProjectPaths: nextHidden,
               missingWorkspaceProjectPaths: prev.system.missingWorkspaceProjectPaths.filter(
                 (item) => workspaceProjectPathKey(item) !== pathKey,
@@ -166,38 +147,45 @@ export function useWorkspaceProjectRemoval(params: UseWorkspaceProjectRemovalPar
   );
 
   const handleRemoveWorkspaceProject = useCallback(
-    (project: WorkspaceProject) => {
+    (project: WorkspaceProject, options: WorkspaceProjectRemoveOptions = {}) => {
       if (project.id === DEFAULT_WORKSPACE_PROJECT_ID) return;
 
+      const path = project.path.trim();
+      const pathKey = workspaceProjectPathKey(path);
+      if (pathKey && sidebarStore.getSnapshot().runningWorkdirPathKeys.has(pathKey)) {
+        setErrorMessage(t("chat.workspaceRemoveRunning"));
+        return;
+      }
+
+      if (options.deleteWorktree !== true) {
+        setErrorMessage(null);
+        removeWorkspaceProjectFromSettings(project);
+        return;
+      }
+
       void (async () => {
-        const path = project.path.trim();
-        const pathKey = workspaceProjectPathKey(path);
-        const runningMessage = "项目中仍有后台任务运行，暂时不能删除该项目。";
-        if (pathKey && sidebarStore.getSnapshot().runningWorkdirPathKeys.has(pathKey)) {
-          setErrorMessage(runningMessage);
+        const repositoryPath = project.worktree?.repositoryPath.trim() || "";
+        if (!path || !pathKey || !repositoryPath) {
+          setErrorMessage(t("chat.workspaceDeleteWorktreeMetadataMissing"));
+          return;
+        }
+        // GitClient 上 removeWorktree 是可选能力；Tauri 端恒有实现，
+        // 这里仅为类型收窄并兜底提示。
+        const removeWorktree = tauriGitClient.removeWorktree;
+        if (!removeWorktree) {
+          setErrorMessage(t("chat.workspaceDeleteWorktreeUnavailable"));
           return;
         }
 
         setErrorMessage(null);
 
         try {
-          const conversationIds = await listChatHistoryIdsForProjectPath(path);
-          const sidebarRunningIds = sidebarStore.getSnapshot().runningConversationIds;
-          const runningConversationIdsInProject = conversationIds.filter((id) => {
-            const key = id.trim();
-            return key ? isConversationRunning(key) || sidebarRunningIds.has(key) : false;
-          });
-          if (runningConversationIdsInProject.length > 0) {
-            setErrorMessage(runningMessage);
-            return;
-          }
-
-          const terminalSessions = pathKey ? await tauriTerminalClient.list(pathKey) : [];
+          const terminalSessions = await tauriTerminalClient.list(pathKey);
           const runningTerminalCount = terminalSessions.filter((session) => session.running).length;
           if (runningTerminalCount > 0) {
             const confirmed = await requestConfirmDialog({
-              title: t("chat.workspaceRemoveConfirm").replace("{name}", project.name),
-              subtitle: t("chat.workspaceRemoveDescription"),
+              title: t("chat.workspaceDeleteWorktreeConfirm").replace("{name}", project.name),
+              subtitle: t("chat.workspaceDeleteWorktreeDescription"),
               description: (
                 <div className="flex items-start gap-3">
                   <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300">
@@ -213,80 +201,68 @@ export function useWorkspaceProjectRemoval(params: UseWorkspaceProjectRemovalPar
                       </span>
                     </div>
                     <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
-                      {t("chat.workspaceRemoveTerminalDescription")}
+                      {t("chat.workspaceDeleteWorktreeTerminalDescription")}
                     </p>
                   </div>
                 </div>
               ),
-              confirmLabel: t("chat.workspaceRemoveConfirmContinue"),
+              confirmLabel: t("chat.workspaceDeleteWorktree"),
               cancelLabel: t("chat.cancel"),
-              closeLabel: t("chat.workspaceRemoveConfirmClose"),
+              closeLabel: t("chat.workspaceDeleteWorktreeConfirmClose"),
               tone: "warning",
             });
             if (!confirmed) return;
-          }
-
-          for (const conversationId of conversationIds) {
-            await deleteChatHistory(conversationId);
-          }
-
-          const deletedConversationIds = new Set(conversationIds);
-          if (deletedConversationIds.size > 0) {
-            for (const conversationId of deletedConversationIds) {
-              sidebarStore.removeLocal(conversationId);
-            }
-            removeSharedHistoryItems(deletedConversationIds);
-            for (const conversationId of deletedConversationIds) {
-              conversationPersistenceCursorRef.current.delete(conversationId);
-              conversationRuntimeCacheRef.current.delete(conversationId);
-              locallySyncedHistoryUpdatedAtRef.current.delete(conversationId);
-              deleteConversationLocalCaches(conversationId);
-              disposeSubagentsForConversation(conversationId);
-            }
-          }
-          if (terminalSessions.length > 0) {
             await tauriTerminalClient.closeProject(pathKey);
             setTerminalSessions((current) =>
               current.filter((session) => !terminalSessionBelongsToProject(session, pathKey)),
             );
           }
-          if (pathKey && terminalProjectPathKey === pathKey) {
+
+          const response = await removeWorktree(repositoryPath, path, {
+            deleteBranch: options.deleteBranch === true,
+          });
+          if (!response.worktreeRemoved) {
+            setErrorMessage(response.message || response.stderr || t("chat.workspaceDeleteFailed"));
+            return;
+          }
+
+          if (terminalSessions.length > 0 && runningTerminalCount === 0) {
+            await tauriTerminalClient.closeProject(pathKey);
+            setTerminalSessions((current) =>
+              current.filter((session) => !terminalSessionBelongsToProject(session, pathKey)),
+            );
+          }
+          if (terminalProjectPathKey === pathKey) {
             setRightDockOpen(false);
             setTerminalSessions((current) =>
               current.filter((session) => !terminalSessionBelongsToProject(session, pathKey)),
             );
           }
 
-          const visibleConversationId = currentConversationIdRef.current;
           const shouldResetVisibleConversation =
-            Boolean(visibleConversationId && deletedConversationIds.has(visibleConversationId)) ||
-            Boolean(pathKey && workspaceProjectPathKey(displayedConversationWorkdir) === pathKey);
-
-          if (path) {
-            await memoryDeleteProject({
-              workdir: path,
-              actor: "tool",
-              reason: "workspace project removed",
-            });
-          }
+            workspaceProjectPathKey(displayedConversationWorkdir) === pathKey;
           removeWorkspaceProjectFromSettings(project);
           if (shouldResetVisibleConversation) {
             startNewConversationActionRef.current({
               workdir: getDefaultWorkspaceProjectPath(settings.system) || undefined,
             });
           }
+          if (!response.ok) {
+            setErrorMessage(response.message || response.stderr || t("chat.workspaceDeleteFailed"));
+          }
         } catch (error) {
-          setErrorMessage(asErrorMessage(error, "删除项目失败"));
+          setErrorMessage(asErrorMessage(error, t("chat.workspaceDeleteFailed")));
         }
       })();
     },
     [
-      deleteConversationLocalCaches,
       displayedConversationWorkdir,
-      isConversationRunning,
       removeWorkspaceProjectFromSettings,
+      requestConfirmDialog,
       settings.system,
       sidebarStore,
+      startNewConversationActionRef,
+      t,
       terminalProjectPathKey,
     ],
   );
@@ -360,6 +336,7 @@ export function useWorkspaceProjectRemoval(params: UseWorkspaceProjectRemovalPar
   );
 
   return {
+    removeWorkspaceProjectFromSettings,
     handleRemoveWorkspaceProject,
     handleArchiveWorkspaceProject,
     handleUnarchiveWorkspaceProject,

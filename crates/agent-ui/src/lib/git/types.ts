@@ -52,6 +52,8 @@ export type GitBranchesResponse = {
 export type GitWorktreeInfo = {
   path: string;
   branch: string;
+  mainWorktreePath: string;
+  isCurrent: boolean;
 };
 
 export type GitDiffResponse = {
@@ -131,6 +133,23 @@ export type GitWorktreeResponse = {
   ok: boolean;
   state: GitRepositoryState;
   worktreePath: string;
+  branch: string;
+  directoryName: string;
+  mainWorktreePath: string;
+  stdout: string;
+  stderr: string;
+  message: string;
+};
+
+export type GitRemoveWorktreeResponse = {
+  ok: boolean;
+  state: GitRepositoryState;
+  worktreePath: string;
+  mainWorktreePath: string;
+  branch: string;
+  worktreeRemoved: boolean;
+  branchDeleteRequested: boolean;
+  branchDeleted: boolean;
   stdout: string;
   stderr: string;
   message: string;
@@ -140,6 +159,18 @@ export type GitInitOptions = {
   branch?: string;
   userName?: string;
   userEmail?: string;
+};
+
+export type GitCreateWorktreeOptions = {
+  branch: string;
+  directoryName: string;
+  parentDirectory?: string;
+  startPoint?: string;
+};
+
+export type GitRemoveWorktreeOptions = {
+  force?: boolean;
+  deleteBranch?: boolean;
 };
 
 export type GitLogOptions = {
@@ -202,13 +233,15 @@ export type GitClient = {
   push(workdir: string): Promise<GitOperationResponse>;
   deleteBranch(workdir: string, branch: string, force?: boolean): Promise<GitOperationResponse>;
   renameBranch(workdir: string, branch: string, newBranch: string): Promise<GitOperationResponse>;
-  createWorktree?(workdir: string, name: string, startPoint?: string): Promise<GitWorktreeResponse>;
+  createWorktree?(
+    workdir: string,
+    options: GitCreateWorktreeOptions,
+  ): Promise<GitWorktreeResponse>;
   removeWorktree?(
     workdir: string,
     worktreePath: string,
-    force?: boolean,
-    deleteBranch?: string,
-  ): Promise<GitOperationResponse>;
+    options?: GitRemoveWorktreeOptions,
+  ): Promise<GitRemoveWorktreeResponse>;
   stashPush(workdir: string, message?: string): Promise<GitOperationResponse>;
   stashPop(workdir: string): Promise<GitOperationResponse>;
 };
@@ -336,6 +369,8 @@ export function normalizeGitWorktreeInfo(input: unknown): GitWorktreeInfo {
   return {
     path: asString(source.path),
     branch: asString(source.branch),
+    mainWorktreePath: asString(source.mainWorktreePath ?? source.main_worktree_path),
+    isCurrent: asBoolean(source.isCurrent ?? source.is_current),
   };
 }
 
@@ -456,6 +491,31 @@ export function normalizeGitWorktreeResponse(input: unknown, workdir = ""): GitW
     ok: asBoolean(source.ok),
     state: normalizeGitRepositoryState(source.state, workdir),
     worktreePath: asString(source.worktreePath ?? source.worktree_path),
+    branch: asString(source.branch),
+    directoryName: asString(source.directoryName ?? source.directory_name),
+    mainWorktreePath: asString(source.mainWorktreePath ?? source.main_worktree_path),
+    stdout: asString(source.stdout),
+    stderr: asString(source.stderr),
+    message: asString(source.message),
+  };
+}
+
+export function normalizeGitRemoveWorktreeResponse(
+  input: unknown,
+  workdir = "",
+): GitRemoveWorktreeResponse {
+  const source = asObject(input);
+  return {
+    ok: asBoolean(source.ok),
+    state: normalizeGitRepositoryState(source.state, workdir),
+    worktreePath: asString(source.worktreePath ?? source.worktree_path),
+    mainWorktreePath: asString(source.mainWorktreePath ?? source.main_worktree_path),
+    branch: asString(source.branch),
+    worktreeRemoved: asBoolean(source.worktreeRemoved ?? source.worktree_removed),
+    branchDeleteRequested: asBoolean(
+      source.branchDeleteRequested ?? source.branch_delete_requested,
+    ),
+    branchDeleted: asBoolean(source.branchDeleted ?? source.branch_deleted),
     stdout: asString(source.stdout),
     stderr: asString(source.stderr),
     message: asString(source.message),

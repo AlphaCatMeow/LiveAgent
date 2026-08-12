@@ -1135,6 +1135,7 @@ export function ChatPage(props: ChatPageProps) {
   cleanupDeletedConversationActionRef.current = cleanupDeletedConversation;
 
   const {
+    removeWorkspaceProjectFromSettings,
     handleRemoveWorkspaceProject,
     handleArchiveWorkspaceProject,
     handleUnarchiveWorkspaceProject,
@@ -1152,22 +1153,24 @@ export function ChatPage(props: ChatPageProps) {
     setActiveWorkspaceProjectId,
     setProjectRenamingId,
     setProjectRenameDraft,
-    isConversationRunning,
-    currentConversationIdRef,
-    conversationRuntimeCacheRef,
-    conversationPersistenceCursorRef,
-    locallySyncedHistoryUpdatedAtRef,
-    deleteConversationLocalCaches,
-    disposeSubagentsForConversation: (conversationId) => {
-      subagentStoresRef.current.dispose(conversationId);
-    },
-    removeSharedHistoryItems,
     terminalProjectPathKey,
     setTerminalSessions,
     setRightDockOpen,
     displayedConversationWorkdir,
     startNewConversationActionRef,
   });
+
+  const handleWorktreeRemoved = useCallback(
+    (worktree: { path: string }) => {
+      const pathKey = workspaceProjectPathKey(worktree.path);
+      if (!pathKey) return;
+      const project = workspaceProjects.find(
+        (item) => workspaceProjectPathKey(item.path) === pathKey,
+      );
+      if (project) removeWorkspaceProjectFromSettings(project);
+    },
+    [removeWorkspaceProjectFromSettings, workspaceProjects],
+  );
 
   useEffect(() => {
     const nextWorkdir = activeWorkspaceProjectPath.trim();
@@ -2079,6 +2082,7 @@ export function ChatPage(props: ChatPageProps) {
                   gitClient={tauriGitClient}
                   workspaceActivityClient={tauriWorkspaceActivityClient}
                   onOpenWorktree={handleOpenWorktree}
+                  onWorktreeRemoved={handleWorktreeRemoved}
                   onSend={handleSend}
                   onStop={handleStopSending}
                   onComposerBusyChange={handleComposerBusyChange}

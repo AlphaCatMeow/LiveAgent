@@ -190,11 +190,15 @@ export function useWorkspaceProjects(params: UseWorkspaceProjectsParams) {
       const pathKey = project.path.trim();
       if (!pathKey) return;
       const normalizedPathKey = workspaceProjectPathKey(pathKey);
-      const targetProject =
-        workspaceProjects.find(
-          (item) =>
-            workspaceProjectPathKey(item.path) === normalizedPathKey || item.id === project.id,
-        ) ?? project;
+      const matchedProject = workspaceProjects.find(
+        (item) => workspaceProjectPathKey(item.path) === normalizedPathKey || item.id === project.id,
+      );
+      const targetProject = matchedProject
+        ? {
+            ...matchedProject,
+            ...(project.worktree ? { worktree: project.worktree } : {}),
+          }
+        : project;
       // 目标工作区已完全激活时提前返回，避免流式进行中触发无谓的 settings 写入与重渲染
       if (
         !options?.startConversation &&
@@ -219,7 +223,7 @@ export function useWorkspaceProjects(params: UseWorkspaceProjectsParams) {
           (item) =>
             workspaceProjectPathKey(item.path) === normalizedPathKey || item.id === project.id,
         );
-        const nextProject = existing ?? targetProject;
+        const nextProject = existing ? { ...targetProject, id: existing.id } : targetProject;
         const workspaceProjects = existing
           ? prev.system.workspaceProjects.map((item) =>
               item.id === existing.id
@@ -233,6 +237,7 @@ export function useWorkspaceProjects(params: UseWorkspaceProjectsParams) {
                         : nextProject.kind === "history"
                           ? item.kind
                           : nextProject.kind,
+                    worktree: nextProject.worktree ?? item.worktree,
                     updatedAt: item.updatedAt,
                     lastConversationAt:
                       Math.max(item.lastConversationAt ?? 0, nextProject.lastConversationAt ?? 0) ||
@@ -382,46 +387,46 @@ export function useWorkspaceProjects(params: UseWorkspaceProjectsParams) {
     [activateWorkspaceProject],
   );
 
-  // Git worktree 派生工作区：添加并激活后，自动归入以原始仓库项目命名
-  // 的自动分组（原项目与 worktree 同组）。从 worktree 再创建 worktree 时，
-  // 通过当前自动分组的 sourceProjectPath 追溯原始仓库。
-  const activeProjectPathKey = activeWorkspaceProject
-    ? workspaceProjectPathKey(activeWorkspaceProject.path)
-    : "";
+  // 后端返回主工作树作为稳定仓库身份；即使从 linked worktree 再创建，
+  // 新项目也会归到同一个源仓库分组并持久化真实关联分支。
   const handleOpenWorktree = useCallback(
-    (path: string) => {
-      const trimmed = path.trim();
-      const worktreeKey = workspaceProjectPathKey(trimmed);
-      if (!trimmed || !worktreeKey || !activeWorkspaceProject) return;
-      const nextProject = createWorkspaceProjectFromPath(trimmed, "managed");
+    (worktree: { path: string; repositoryPath: string; branch: string }) => {
+      const path = worktree.path.trim();
+      const repositoryPath = worktree.repositoryPath.trim();
+      const worktreeKey = workspaceProjectPathKey(path);
+      if (!path || !repositoryPath || !worktreeKey || !activeWorkspaceProject) return;
+      const branch = worktree.branch.trim();
+      const nextProject: WorkspaceProject = {
+        ...createWorkspaceProjectFromPath(path, "managed"),
+        worktree: {
+          repositoryPath,
+          ...(branch ? { branch } : {}),
+        },
+      };
       activateWorkspaceProject(nextProject);
       setSettings((prev) => {
-        // 当前项目是否位于某个自动分组 → 溯源到原始仓库路径
-        const autoGroup = prev.system.workspaceProjectGroups.find(
-          (group) =>
-            group.sourceProjectPath &&
-            group.projectPaths.some(
-              (memberPath) => workspaceProjectPathKey(memberPath) === activeProjectPathKey,
-            ),
-        );
-        const sourcePath = autoGroup?.sourceProjectPath ?? activeWorkspaceProject.path;
         const sourceProject = prev.system.workspaceProjects.find(
-          (item) => workspaceProjectPathKey(item.path) === workspaceProjectPathKey(sourcePath),
+          (item) =>
+            workspaceProjectPathKey(item.path) === workspaceProjectPathKey(repositoryPath),
         );
-        const groupName = sourceProject?.name || fallbackWorkspaceProjectName(sourcePath);
         const ensured = ensureWorktreeProjectGroup(prev.system.workspaceProjectGroups, {
-          name: groupName,
-          sourceProjectPath: sourcePath,
+          name: sourceProject?.name || fallbackWorkspaceProjectName(repositoryPath),
+          sourceProjectPath: repositoryPath,
         });
         let workspaceProjectGroups = assignWorkspaceProjectToGroup(
           ensured.groups,
           ensured.groupId,
-          sourcePath,
+          repositoryPath,
         );
         workspaceProjectGroups = assignWorkspaceProjectToGroup(
           workspaceProjectGroups,
           ensured.groupId,
-          trimmed,
+          activeWorkspaceProject.path,
+        );
+        workspaceProjectGroups = assignWorkspaceProjectToGroup(
+          workspaceProjectGroups,
+          ensured.groupId,
+          path,
         );
         return {
           ...prev,
@@ -432,7 +437,7 @@ export function useWorkspaceProjects(params: UseWorkspaceProjectsParams) {
         };
       });
     },
-    [activateWorkspaceProject, activeProjectPathKey, activeWorkspaceProject, setSettings],
+    [activateWorkspaceProject, activeWorkspaceProject, setSettings],
   );
 
   const handleLoadWorkspaceRemoteBranches = useCallback(

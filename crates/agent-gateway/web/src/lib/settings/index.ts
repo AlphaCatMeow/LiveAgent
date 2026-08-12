@@ -284,6 +284,10 @@ export type WorkspaceProject = {
   name: string;
   path: string;
   kind: WorkspaceProjectKind;
+  worktree?: {
+    repositoryPath: string;
+    branch?: string;
+  };
   createdAt: number;
   updatedAt: number;
   lastConversationAt?: number;
@@ -803,6 +807,20 @@ function normalizeWorkspaceProjectKind(input: unknown): WorkspaceProjectKind {
   }
 }
 
+function normalizeWorkspaceProjectWorktree(
+  input: unknown,
+): WorkspaceProject["worktree"] | undefined {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return undefined;
+  const obj = input as Record<string, unknown>;
+  const repositoryPath = normalizeWorkspaceProjectPath(obj.repositoryPath);
+  if (!repositoryPath) return undefined;
+  const branch = typeof obj.branch === "string" ? obj.branch.trim() : "";
+  return {
+    repositoryPath,
+    ...(branch ? { branch } : {}),
+  };
+}
+
 function normalizeWorkspaceProject(input: unknown): WorkspaceProject | null {
   const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
   const path = normalizeWorkspaceProjectPath(obj.path);
@@ -834,11 +852,13 @@ function normalizeWorkspaceProject(input: unknown): WorkspaceProject | null {
     typeof obj.pinnedAt === "number" && Number.isFinite(obj.pinnedAt) && obj.pinnedAt > 0
       ? obj.pinnedAt
       : undefined;
+  const worktree = normalizeWorkspaceProjectWorktree(obj.worktree);
   return {
     id,
     name,
     path,
     kind: normalizeWorkspaceProjectKind(obj.kind),
+    ...(worktree ? { worktree } : {}),
     createdAt,
     updatedAt,
     ...(lastConversationAt ? { lastConversationAt } : {}),
@@ -966,6 +986,7 @@ export function resolveWorkspaceProjects(
     kind: "managed",
     createdAt: defaultExisting?.createdAt ?? now,
     updatedAt: defaultExisting?.updatedAt ?? now,
+    ...(defaultExisting?.worktree ? { worktree: defaultExisting.worktree } : {}),
     ...(defaultExisting?.lastConversationAt
       ? { lastConversationAt: defaultExisting.lastConversationAt }
       : {}),

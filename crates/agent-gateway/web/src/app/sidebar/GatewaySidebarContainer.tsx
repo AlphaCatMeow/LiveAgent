@@ -3,7 +3,10 @@
 // list updates, per-row mutations) re-render this subtree only — never
 // GatewayApp. Renders the per-end <ChatHistorySidebar/> view.
 
-import { ChatHistorySidebar } from "@liveagent/ui/components/chat/ChatHistorySidebar";
+import {
+  ChatHistorySidebar,
+  type WorkspaceProjectRemoveOptions,
+} from "@liveagent/ui/components/chat/ChatHistorySidebar";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import type { SidebarBatchDeleteOptions } from "@liveagent/ui/lib/sidebar/batchDelete";
 import { deleteSidebarConversations } from "@liveagent/ui/lib/sidebar/batchDelete";
@@ -119,7 +122,7 @@ export type GatewaySidebarContainerProps = {
   onCommitProjectRename: () => void;
   onCancelProjectRename: () => void;
   onSetProjectPinned: (project: WorkspaceProject, isPinned: boolean) => void;
-  onRemoveProject: (project: WorkspaceProject) => void;
+  onRemoveProject: (project: WorkspaceProject, options?: WorkspaceProjectRemoveOptions) => void;
   onArchiveProject: (project: WorkspaceProject) => void;
   onUnarchiveProject: (project: WorkspaceProject) => void;
   archivedProjectPathKeys?: ReadonlySet<string>;

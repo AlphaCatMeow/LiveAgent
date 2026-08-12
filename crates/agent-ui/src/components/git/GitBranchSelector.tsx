@@ -1,3 +1,4 @@
+import { useDirectoryPicker } from "@liveagent/adapters/directoryPicker";
 import {
   Check,
   ChevronRight,
@@ -5,6 +6,7 @@ import {
   Copy,
   Download,
   Folder,
+  FolderOpen,
   FolderTree,
   GitBranch,
   Github,
@@ -33,6 +35,13 @@ import {
 } from "@liveagent/ui/components/ui/dropdown-menu";
 import { Input } from "@liveagent/ui/components/ui/input";
 import { Label } from "@liveagent/ui/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@liveagent/ui/components/ui/select";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { cn } from "@liveagent/ui/lib/shared/utils";
 import type { WorkspaceActivityClient } from "@liveagent/ui/lib/workspace-activity/types";
@@ -43,6 +52,8 @@ import type {
   GitBranch as GitBranchInfo,
   GitClient,
   GitDiscoveredRepository,
+  GitRemoveWorktreeOptions,
+  GitRemoveWorktreeResponse,
   GitRepositoryState,
   GitWorktreeInfo,
 } from "../../lib/git/types";
@@ -65,6 +76,10 @@ function assertGitOperationResult(value: unknown, fallbackMessage: string) {
           : fallbackMessage;
     throw new Error(message);
   }
+}
+
+function worktreeDirectoryNameFromBranch(branch: string) {
+  return branch.trim().replace(/[\\/:]+/g, "-").replace(/\s+/g, "-");
 }
 
 // Legacy fallback for environments where the async clipboard API is missing
@@ -267,137 +282,252 @@ function GitInitModal(props: {
   );
 }
 
-// Worktree 创建弹窗：从分支选择器的“更多操作”菜单打开。名称同时作为
-// 目录名与分支名，落盘在 ~/.liveagent/worktree/<repo_id>/<name>。
+// Worktree 创建弹窗：分支名、目录名与可选父目录分别传递，避免把 Git
+// 引用命名规则与文件系统目录规则混为一谈。
 function WorktreeCreateModal(props: {
   open: boolean;
   repoRoot: string;
   startPoint: string;
-  draft: string;
+  startPointOptions: string[];
+  branch: string;
+  directoryName: string;
+  parentDirectory: string;
   loading: boolean;
   error: string;
-  onDraftChange: (value: string) => void;
+  onStartPointChange: (value: string) => void;
+  onBranchChange: (value: string) => void;
+  onDirectoryNameChange: (value: string) => void;
+  onParentDirectoryChange: (value: string) => void;
+  onError: (value: string) => void;
   onClose: () => void;
   onSubmit: () => void;
 }) {
-  const { open, repoRoot, startPoint, draft, loading, error, onDraftChange, onClose, onSubmit } =
-    props;
+  const {
+    open,
+    repoRoot,
+    startPoint,
+    startPointOptions,
+    branch,
+    directoryName,
+    parentDirectory,
+    loading,
+    error,
+    onStartPointChange,
+    onBranchChange,
+    onDirectoryNameChange,
+    onParentDirectoryChange,
+    onError,
+    onClose,
+    onSubmit,
+  } = props;
   const { t } = useLocale();
+  const { pickDirectory, directoryPickerElement } = useDirectoryPicker();
   const titleId = useId();
-  const inputId = useId();
+  const branchInputId = useId();
+  const directoryInputId = useId();
+  const parentInputId = useId();
 
-  if (!open) return null;
+  if (!open) return directoryPickerElement;
 
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[110] flex items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby={titleId}
-    >
-      <div
-        className="absolute inset-0 bg-black/55 backdrop-blur-sm"
-        onClick={loading ? undefined : onClose}
-      />
-      <form
-        className="relative z-10 w-full max-w-sm overflow-hidden rounded-2xl border border-border/70 bg-background shadow-2xl"
-        onSubmit={(event) => {
-          event.preventDefault();
-          onSubmit();
-        }}
-      >
-        <div className="flex items-start justify-between gap-4 border-b border-border/60 px-5 py-4">
-          <div className="flex min-w-0 items-start gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300">
-              <FolderTree className="h-5 w-5" />
-            </div>
-            <div className="min-w-0">
-              <div id={titleId} className="text-sm font-semibold text-foreground">
-                {t("git.branchSelector.createWorktreeTitle")}
-              </div>
-              <div className="mt-1 text-xs leading-5 text-muted-foreground">
-                {t("git.branchSelector.worktreeDescription")}
-              </div>
-            </div>
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={onClose}
-            disabled={loading}
-            className="h-8 w-8 shrink-0 rounded-xl text-muted-foreground hover:text-foreground"
-            title={t("window.close")}
-            aria-label={t("window.close")}
+  async function chooseParentDirectory() {
+    try {
+      const selected = await pickDirectory(parentDirectory || repoRoot);
+      const path = selected?.trim();
+      if (path) onParentDirectoryChange(path);
+    } catch (reason) {
+      onError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }
+
+  return (
+    <>
+      {createPortal(
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+        >
+          <div
+            className="absolute inset-0 bg-black/55 backdrop-blur-sm"
+            onClick={loading ? undefined : onClose}
+          />
+          <form
+            className="relative z-10 w-full max-w-md overflow-hidden rounded-2xl border border-border/70 bg-background shadow-2xl"
+            onSubmit={(event) => {
+              event.preventDefault();
+              onSubmit();
+            }}
           >
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
-        <div className="space-y-4 px-5 py-4">
-          <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground">
-              {t("git.branchSelector.repositoryLabel")}
-            </Label>
-            <div
-              className="truncate rounded-lg border border-border/70 bg-muted/35 px-3 py-2 text-xs text-foreground"
-              title={repoRoot}
-            >
-              {repoRoot}
+            <div className="flex items-start justify-between gap-4 border-b border-border/60 px-5 py-4">
+              <div className="flex min-w-0 items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300">
+                  <FolderTree className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <div id={titleId} className="text-sm font-semibold text-foreground">
+                    {t("git.branchSelector.createWorktreeTitle")}
+                  </div>
+                  <div className="mt-1 text-xs leading-5 text-muted-foreground">
+                    {t("git.branchSelector.worktreeDescription")}
+                  </div>
+                </div>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={onClose}
+                disabled={loading}
+                className="h-8 w-8 shrink-0 rounded-xl text-muted-foreground hover:text-foreground"
+                title={t("window.close")}
+                aria-label={t("window.close")}
+              >
+                <X className="h-4 w-4" />
+              </Button>
             </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground">
-              {t("git.branchSelector.worktreeStartPoint")}
-            </Label>
-            <div
-              className="truncate rounded-lg border border-border/70 bg-muted/35 px-3 py-2 text-xs text-foreground"
-              title={startPoint}
-            >
-              {startPoint || "HEAD"}
+            <div className="space-y-4 px-5 py-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">
+                  {t("git.branchSelector.repositoryLabel")}
+                </Label>
+                <div
+                  className="truncate rounded-lg border border-border/70 bg-muted/35 px-3 py-2 text-xs text-foreground"
+                  title={repoRoot}
+                >
+                  {repoRoot}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">
+                  {t("git.branchSelector.worktreeStartPoint")}
+                </Label>
+                <Select
+                  value={startPoint || null}
+                  onValueChange={onStartPointChange}
+                  disabled={loading || startPointOptions.length === 0}
+                >
+                  <SelectTrigger type="button" className="h-9 text-xs">
+                    <SelectValue placeholder="HEAD" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-60">
+                    {startPointOptions.map((option) => (
+                      <SelectItem key={option} value={option} className="text-xs">
+                        {option}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor={branchInputId} className="text-xs text-muted-foreground">
+                    {t("git.branchSelector.worktreeBranch")}
+                  </Label>
+                  <Input
+                    id={branchInputId}
+                    value={branch}
+                    onChange={(event) => onBranchChange(event.target.value)}
+                    className="h-9 text-sm"
+                    placeholder={t("git.branchSelector.worktreeBranchPlaceholder")}
+                    autoFocus
+                    disabled={loading}
+                    spellCheck={false}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={directoryInputId} className="text-xs text-muted-foreground">
+                    {t("git.branchSelector.worktreeDirectoryName")}
+                  </Label>
+                  <Input
+                    id={directoryInputId}
+                    value={directoryName}
+                    onChange={(event) => onDirectoryNameChange(event.target.value)}
+                    className="h-9 text-sm"
+                    placeholder={t("git.branchSelector.worktreeDirectoryPlaceholder")}
+                    disabled={loading}
+                    spellCheck={false}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor={parentInputId} className="text-xs text-muted-foreground">
+                  {t("git.branchSelector.worktreeParentDirectory")}
+                </Label>
+                <div className="flex gap-2">
+                  <Input
+                    id={parentInputId}
+                    value={parentDirectory}
+                    readOnly
+                    className="h-9 min-w-0 flex-1 text-xs"
+                    placeholder={t("git.branchSelector.worktreeDefaultLocation")}
+                    disabled={loading}
+                    title={parentDirectory}
+                  />
+                  {parentDirectory ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="h-9 w-9 shrink-0"
+                      onClick={() => onParentDirectoryChange("")}
+                      disabled={loading}
+                      title={t("git.branchSelector.worktreeUseDefaultLocation")}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  ) : null}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-9 shrink-0"
+                    onClick={() => void chooseParentDirectory()}
+                    disabled={loading}
+                  >
+                    <FolderOpen className="h-3.5 w-3.5" />
+                    {t("git.branchSelector.worktreeChooseParent")}
+                  </Button>
+                </div>
+              </div>
+              <div className="rounded-lg bg-muted/40 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                {parentDirectory
+                  ? t("git.branchSelector.worktreeCustomLocationHint")
+                  : t("git.branchSelector.worktreeLocationHint")}
+              </div>
+              {error ? (
+                <div className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                  {error}
+                </div>
+              ) : null}
             </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor={inputId} className="text-xs text-muted-foreground">
-              {t("git.branchSelector.worktreeName")}
-            </Label>
-            <Input
-              id={inputId}
-              value={draft}
-              onChange={(event) => onDraftChange(event.target.value)}
-              className="h-9 text-sm"
-              placeholder={t("git.branchSelector.worktreeNamePlaceholder")}
-              autoFocus
-              disabled={loading}
-              spellCheck={false}
-              autoCapitalize="none"
-              autoCorrect="off"
-            />
-          </div>
-          <div className="rounded-lg bg-muted/40 px-3 py-2 text-xs leading-5 text-muted-foreground">
-            {t("git.branchSelector.worktreeLocationHint")}
-          </div>
-          {error ? (
-            <div className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              {error}
+            <div className="flex items-center justify-end gap-2 border-t border-border/60 px-5 py-4">
+              <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={loading}>
+                {t("chat.cancel")}
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={loading || !branch.trim() || !directoryName.trim()}
+              >
+                {loading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <FolderTree className="h-3.5 w-3.5" />
+                )}
+                {t("git.branchSelector.createWorktree")}
+              </Button>
             </div>
-          ) : null}
-        </div>
-        <div className="flex items-center justify-end gap-2 border-t border-border/60 px-5 py-4">
-          <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={loading}>
-            {t("chat.cancel")}
-          </Button>
-          <Button type="submit" size="sm" disabled={loading || !draft.trim()}>
-            {loading ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <FolderTree className="h-3.5 w-3.5" />
-            )}
-            {t("git.branchSelector.createWorktree")}
-          </Button>
-        </div>
-      </form>
-    </div>,
-    document.body,
+          </form>
+        </div>,
+        document.body,
+      )}
+      {directoryPickerElement}
+    </>
   );
 }
 
@@ -669,8 +799,18 @@ export function GitBranchSelector(props: {
   canWrite?: boolean;
   disabledMessage?: string;
   onStateChange?: (state: GitRepositoryState) => void;
-  /** 创建 worktree 成功后，用返回的绝对路径把工作区加入侧边栏。 */
-  onOpenWorktree?: (path: string) => void;
+  /** 创建 worktree 成功后，用后端返回的仓库身份与路径把工作区加入侧边栏。 */
+  onOpenWorktree?: (worktree: {
+    path: string;
+    repositoryPath: string;
+    branch: string;
+  }) => void;
+  /** Worktree 删除成功后，让宿主清理对应的工作空间登记。 */
+  onWorktreeRemoved?: (worktree: {
+    path: string;
+    repositoryPath: string;
+    branch: string;
+  }) => void;
 }) {
   const {
     workdir: workspaceCwd,
@@ -681,6 +821,7 @@ export function GitBranchSelector(props: {
     disabledMessage,
     onStateChange,
     onOpenWorktree,
+    onWorktreeRemoved,
   } = props;
   const { t } = useLocale();
   // Subdirectory repository support: when the workspace folder is not itself
@@ -727,7 +868,9 @@ export function GitBranchSelector(props: {
   const [copiedName, setCopiedName] = useState(false);
   const [initModalOpen, setInitModalOpen] = useState(false);
   const [worktreeModalOpen, setWorktreeModalOpen] = useState(false);
-  const [worktreeDraft, setWorktreeDraft] = useState("");
+  const [worktreeBranchDraft, setWorktreeBranchDraft] = useState("");
+  const [worktreeDirectoryDraft, setWorktreeDirectoryDraft] = useState("");
+  const [worktreeParentDirectory, setWorktreeParentDirectory] = useState("");
   const [worktreeBusy, setWorktreeBusy] = useState(false);
   const [worktreeError, setWorktreeError] = useState("");
   const [initBranch, setInitBranch] = useState("main");
@@ -1125,6 +1268,39 @@ export function GitBranchSelector(props: {
     [confirm, gitClient, runSheetMutation, t, workdir],
   );
 
+  const confirmForceDeleteBranchAfterWorktreeRemoval = useCallback(
+    async (branch: GitBranchInfo, controlWorkdir: string) => {
+      if (!gitClient || actionBusy) return false;
+      const forced = await confirm({
+        title: t("git.branchSelector.deleteForceTitle"),
+        description: t("git.branchSelector.deleteForceDescription"),
+        confirmLabel: t("git.branchSelector.forceDelete"),
+        cancelLabel: t("chat.cancel"),
+        tone: "destructive",
+      });
+      if (!forced) return false;
+      setActionBusy(true);
+      setActionError("");
+      actionErrorRef.current = "";
+      try {
+        const result = await gitClient.deleteBranch(controlWorkdir, branch.fullName, true);
+        assertGitOperationResult(result, t("git.branchSelector.operationFailed"));
+        setBranches((current) => current.filter((item) => item.fullName !== branch.fullName));
+        setState(result.state);
+        onStateChange?.(result.state);
+        return true;
+      } catch (reason) {
+        const message = reason instanceof Error ? reason.message : String(reason);
+        actionErrorRef.current = message;
+        setActionError(message);
+        return false;
+      } finally {
+        setActionBusy(false);
+      }
+    },
+    [actionBusy, confirm, gitClient, onStateChange, t],
+  );
+
   const deleteBranchFlow = useCallback(async () => {
     if (!branchAction || !gitClient) return;
     const { branch } = branchAction;
@@ -1157,77 +1333,138 @@ export function GitBranchSelector(props: {
     workdir,
   ]);
 
-  // 分支被 worktree 检出时，删除入口切换为删除 worktree（连带分支）。
-  const checkedOutWorktreePath = branchAction
+  // 分支被 linked worktree 检出时，删除入口切换为真实 Worktree 删除。
+  const checkedOutWorktree = branchAction
     ? gitClient?.removeWorktree
-      ? worktrees.find((worktree) => worktree.branch === branchAction.branch.fullName)?.path
+      ? worktrees.find((worktree) => worktree.branch === branchAction.branch.fullName)
       : undefined
     : undefined;
+  const checkedOutWorktreePath = checkedOutWorktree?.path;
+
+  const runWorktreeRemoval = useCallback(
+    async (
+      worktreePath: string,
+      options: GitRemoveWorktreeOptions,
+      refreshAfterRemoval: boolean,
+    ): Promise<GitRemoveWorktreeResponse | null> => {
+      if (!gitClient?.removeWorktree || !workdir.trim() || actionBusy) return null;
+      if (!canWrite) {
+        const message = disabledMessage || t("git.branchSelector.writeDisabled");
+        actionErrorRef.current = message;
+        setActionError(message);
+        return null;
+      }
+      setActionBusy(true);
+      setActionError("");
+      actionErrorRef.current = "";
+      try {
+        const result = await gitClient.removeWorktree(workdir, worktreePath, options);
+        if (result.worktreeRemoved) {
+          setWorktrees((current) => current.filter((item) => item.path !== result.worktreePath));
+          setState(result.state);
+          onStateChange?.(result.state);
+          if (refreshAfterRemoval) void refresh({ force: true });
+        }
+        if (!result.ok) {
+          actionErrorRef.current = result.message || result.stderr;
+          setActionError(result.message || result.stderr);
+        }
+        return result;
+      } catch (reason) {
+        const message = reason instanceof Error ? reason.message : String(reason);
+        actionErrorRef.current = message;
+        setActionError(message);
+        return null;
+      } finally {
+        setActionBusy(false);
+      }
+    },
+    [actionBusy, canWrite, disabledMessage, gitClient, onStateChange, refresh, t, workdir],
+  );
+
   const deleteWorktreeFlow = useCallback(async () => {
-    if (!branchAction || !gitClient?.removeWorktree) return;
-    const removeWorktree = gitClient.removeWorktree;
+    if (!branchAction || !gitClient?.removeWorktree || !checkedOutWorktree) return;
     const { branch } = branchAction;
-    const worktreePath = worktrees.find((worktree) => worktree.branch === branch.fullName)?.path;
-    if (!worktreePath) return;
+    const worktreePath = checkedOutWorktree.path;
     const confirmed = await confirm({
       title: t("git.branchSelector.deleteWorktreeConfirmTitle").replace(
         "{path}",
         () => worktreePath,
       ),
-      description: t("git.branchSelector.deleteWorktreeConfirmDescription").replace(
-        "{branch}",
-        () => branch.name,
-      ),
+      description: t("git.branchSelector.deleteWorktreeConfirmDescription"),
       confirmLabel: t("git.branchSelector.deleteWorktree"),
       cancelLabel: t("chat.cancel"),
       tone: "destructive",
     });
     if (!confirmed) return;
-    const ok = await runSheetMutation(() =>
-      removeWorktree(workdir, worktreePath, false, branch.fullName),
-    );
-    if (ok) {
-      resetBranchAction();
-      return;
-    }
-    // worktree 已移除但分支未完全合并：不能重试 removeWorktree，直接对
-    // 仍然存在的分支执行强制删除，并复用普通分支删除的确认文案。
-    if (isGitWorktreeBranchNotFullyMergedError(actionErrorRef.current)) {
-      const forcedOk = await confirmForceDeleteBranch(branch);
-      if (forcedOk) resetBranchAction();
-      return;
-    }
-    // Worktree 含未提交改动时 git 拒绝移除 → 提供强制移除的二次确认。
-    if (!/contains modified or untracked files/i.test(actionErrorRef.current)) return;
-    const forced = await confirm({
-      title: t("git.branchSelector.deleteWorktreeForceTitle"),
-      description: t("git.branchSelector.deleteWorktreeForceDescription"),
-      confirmLabel: t("git.branchSelector.forceRemoveWorktree"),
-      cancelLabel: t("chat.cancel"),
-      tone: "destructive",
+
+    const deleteBranch = await confirm({
+      title: t("git.branchSelector.deleteWorktreeBranchTitle").replace(
+        "{branch}",
+        () => branch.name,
+      ),
+      description: t("git.branchSelector.deleteWorktreeBranchDescription"),
+      confirmLabel: t("git.branchSelector.deleteWorktreeAndBranch"),
+      cancelLabel: t("git.branchSelector.keepWorktreeBranch"),
+      tone: "warning",
     });
-    if (!forced) return;
-    const forcedOk = await runSheetMutation(() =>
-      removeWorktree(workdir, worktreePath, true, branch.fullName),
-    );
-    if (forcedOk) {
-      resetBranchAction();
-      return;
+
+    const refreshAfterRemoval = !checkedOutWorktree.isCurrent;
+    let result = await runWorktreeRemoval(worktreePath, { deleteBranch }, refreshAfterRemoval);
+    if (!result) return;
+    if (!result.worktreeRemoved && /contains modified or untracked files/i.test(result.message)) {
+      const forced = await confirm({
+        title: t("git.branchSelector.deleteWorktreeForceTitle"),
+        description: t("git.branchSelector.deleteWorktreeForceDescription"),
+        confirmLabel: t("git.branchSelector.forceRemoveWorktree"),
+        cancelLabel: t("chat.cancel"),
+        tone: "destructive",
+      });
+      if (!forced) return;
+      result = await runWorktreeRemoval(
+        worktreePath,
+        { force: true, deleteBranch },
+        refreshAfterRemoval,
+      );
+      if (!result) return;
     }
-    if (isGitWorktreeBranchNotFullyMergedError(actionErrorRef.current)) {
-      const branchDeleted = await confirmForceDeleteBranch(branch);
-      if (branchDeleted) resetBranchAction();
+    if (!result.worktreeRemoved) return;
+
+    if (
+      result.branchDeleteRequested &&
+      result.branch &&
+      !result.branchDeleted &&
+      isGitWorktreeBranchNotFullyMergedError(result.message)
+    ) {
+      const actualBranch = {
+        ...branch,
+        name: result.branch,
+        fullName: result.branch,
+      };
+      const branchDeleted = await confirmForceDeleteBranchAfterWorktreeRemoval(
+        actualBranch,
+        result.state.repoRoot || result.mainWorktreePath,
+      );
+      if (!branchDeleted) setError(result.message);
+    } else if (!result.ok) {
+      setError(result.message || result.stderr);
     }
+    onWorktreeRemoved?.({
+      path: result.worktreePath,
+      repositoryPath: result.mainWorktreePath,
+      branch: result.branch,
+    });
+    resetBranchAction();
   }, [
     branchAction,
+    checkedOutWorktree,
     confirm,
-    confirmForceDeleteBranch,
+    confirmForceDeleteBranchAfterWorktreeRemoval,
     gitClient,
+    onWorktreeRemoved,
     resetBranchAction,
-    runSheetMutation,
+    runWorktreeRemoval,
     t,
-    workdir,
-    worktrees,
   ]);
 
   const openInitModal = useCallback(() => {
@@ -1288,13 +1525,46 @@ export function GitBranchSelector(props: {
     workdir,
   ]);
 
+  // Worktree 起点：默认当前分支，可切换为任意本地/远程分支
+  // （后端 validate_start_point 接受任意可 rev-parse 的 ref）。
+  const defaultWorktreeStartPoint =
+    state.head && state.head !== "(detached)" ? state.head : "HEAD";
+  const [worktreeStartPoint, setWorktreeStartPoint] = useState("");
+  const worktreeStartPointOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const options: string[] = [];
+    for (const branch of [...localBranches, ...remoteBranches]) {
+      if (seen.has(branch.fullName)) continue;
+      seen.add(branch.fullName);
+      options.push(branch.fullName);
+    }
+    if (!seen.has(defaultWorktreeStartPoint)) options.unshift(defaultWorktreeStartPoint);
+    return options;
+  }, [defaultWorktreeStartPoint, localBranches, remoteBranches]);
+
+  const handleWorktreeBranchChange = useCallback(
+    (value: string) => {
+      const previousAutomaticName = worktreeDirectoryNameFromBranch(worktreeBranchDraft);
+      setWorktreeDirectoryDraft((current) =>
+        !current || current === previousAutomaticName
+          ? worktreeDirectoryNameFromBranch(value)
+          : current,
+      );
+      setWorktreeBranchDraft(value);
+    },
+    [worktreeBranchDraft],
+  );
+
   const openWorktreeModal = useCallback(() => {
     if (!gitClient?.createWorktree) return;
-    setWorktreeDraft("");
+    setWorktreeBranchDraft("");
+    setWorktreeDirectoryDraft("");
+    setWorktreeParentDirectory("");
     setWorktreeError("");
+    setWorktreeStartPoint(defaultWorktreeStartPoint);
     setWorktreeModalOpen(true);
     handleMenuOpenChange(false);
-  }, [gitClient, handleMenuOpenChange]);
+  }, [defaultWorktreeStartPoint, gitClient, handleMenuOpenChange]);
 
   const closeWorktreeModal = useCallback(() => {
     if (worktreeBusy) return;
@@ -1302,11 +1572,18 @@ export function GitBranchSelector(props: {
     setWorktreeError("");
   }, [worktreeBusy]);
 
-  const worktreeStartPoint = state.head && state.head !== "(detached)" ? state.head : "HEAD";
-
   const createWorktree = useCallback(() => {
-    const name = worktreeDraft.trim();
-    if (!name || !gitClient?.createWorktree || !workdir.trim() || worktreeBusy) return;
+    const branch = worktreeBranchDraft.trim();
+    const directoryName = worktreeDirectoryDraft.trim();
+    if (
+      !branch ||
+      !directoryName ||
+      !gitClient?.createWorktree ||
+      !workdir.trim() ||
+      worktreeBusy
+    ) {
+      return;
+    }
     const createWorktreeRequest = gitClient.createWorktree;
     if (!canWrite) {
       setWorktreeError(disabledMessage || t("git.branchSelector.writeDisabled"));
@@ -1314,7 +1591,12 @@ export function GitBranchSelector(props: {
     }
     setWorktreeBusy(true);
     setWorktreeError("");
-    void createWorktreeRequest(workdir, name, worktreeStartPoint)
+    void createWorktreeRequest(workdir, {
+      branch,
+      directoryName,
+      parentDirectory: worktreeParentDirectory.trim() || undefined,
+      startPoint: worktreeStartPoint,
+    })
       .then((response) => {
         if (!response.ok) {
           setWorktreeError(
@@ -1323,7 +1605,11 @@ export function GitBranchSelector(props: {
           return;
         }
         setWorktreeModalOpen(false);
-        onOpenWorktree?.(response.worktreePath);
+        onOpenWorktree?.({
+          path: response.worktreePath,
+          repositoryPath: response.mainWorktreePath,
+          branch: response.branch,
+        });
         void refresh({ force: true });
       })
       .catch((error) => {
@@ -1338,8 +1624,10 @@ export function GitBranchSelector(props: {
     refresh,
     t,
     workdir,
+    worktreeBranchDraft,
     worktreeBusy,
-    worktreeDraft,
+    worktreeDirectoryDraft,
+    worktreeParentDirectory,
     worktreeStartPoint,
   ]);
 
@@ -1792,10 +2080,17 @@ export function GitBranchSelector(props: {
           open={worktreeModalOpen}
           repoRoot={state.repoRoot}
           startPoint={worktreeStartPoint}
-          draft={worktreeDraft}
+          startPointOptions={worktreeStartPointOptions}
+          branch={worktreeBranchDraft}
+          directoryName={worktreeDirectoryDraft}
+          parentDirectory={worktreeParentDirectory}
           loading={worktreeBusy}
           error={worktreeError}
-          onDraftChange={setWorktreeDraft}
+          onStartPointChange={setWorktreeStartPoint}
+          onBranchChange={handleWorktreeBranchChange}
+          onDirectoryNameChange={setWorktreeDirectoryDraft}
+          onParentDirectoryChange={setWorktreeParentDirectory}
+          onError={setWorktreeError}
           onClose={closeWorktreeModal}
           onSubmit={createWorktree}
         />

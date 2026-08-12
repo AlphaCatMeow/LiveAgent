@@ -8,6 +8,7 @@ const {
   ensureWorktreeProjectGroup,
   buildWorkspaceProjectSections,
   firstUnpinnedWorkspaceProjectIndex,
+  removeWorkspaceProjectFromGroups,
   sliceWorkspaceProjectSections,
 } = loader.loadModule("@liveagent/ui/lib/workspaceProjects.ts");
 function project(id, path, extra = {}) {
@@ -52,6 +53,26 @@ test("assignWorkspaceProjectToGroup is idempotent for the target group", () => {
   const groups = [group("g1", "Alpha", ["/work/a"])];
   const next = assignWorkspaceProjectToGroup(groups, "g1", "/work/a");
   assert.deepEqual(next.map((g) => [g.id, g.projectPaths]), [["g1", ["/work/a"]]]);
+});
+
+test("removeWorkspaceProjectFromGroups removes normalized paths from every group", () => {
+  const groups = [
+    group("g1", "Alpha", ["/work/a/", "/work/b"]),
+    group("g2", "Beta", ["/work/a"]),
+  ];
+  const next = removeWorkspaceProjectFromGroups(groups, "/work/a");
+  assert.deepEqual(
+    next.map((item) => [item.id, item.projectPaths]),
+    [
+      ["g1", ["/work/b"]],
+      ["g2", []],
+    ],
+  );
+});
+
+test("removeWorkspaceProjectFromGroups preserves identity when no group contains the path", () => {
+  const groups = [group("g1", "Alpha", ["/work/a"])];
+  assert.equal(removeWorkspaceProjectFromGroups(groups, "/work/b"), groups);
 });
 
 test("ensureWorktreeProjectGroup reuses the group by sourceProjectPath after rename", () => {

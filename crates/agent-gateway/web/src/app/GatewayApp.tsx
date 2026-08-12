@@ -1,6 +1,7 @@
 import { ApplicationView } from "@liveagent/ui/application/ApplicationView";
 import { AppErrorBoundary } from "@liveagent/ui/components/AppErrorBoundary";
 import { FileDropOverlay } from "@liveagent/ui/components/chat/FileDropOverlay";
+import type { WorkspaceProjectRemoveOptions } from "@liveagent/ui/components/chat/ChatHistorySidebar";
 import type {
   MentionComposerDraft,
   MentionComposerHandle,
@@ -30,7 +31,6 @@ import {
   readToolApprovalPending,
   readToolApprovalSummary,
 } from "@liveagent/ui/lib/chat/toolApprovalArgs";
-import { memoryDeleteProject } from "@liveagent/ui/lib/memory/api";
 import { createUuid } from "@liveagent/ui/lib/shared/id";
 import { mergeAlwaysEnabledSkillNames } from "@liveagent/ui/lib/skills/index";
 import { useChatSkills } from "@liveagent/ui/lib/skills/useChatSkills";
@@ -225,7 +225,6 @@ import {
   MAX_UPLOAD_FILES,
   MCP_HUB_BROWSER_TITLE,
   NEW_CONVERSATION_BROWSER_TITLE,
-  PROJECT_HISTORY_DELETE_PAGE_SIZE,
   PROTECTED_DRAFT_CONVERSATION,
   SHARED_HISTORY_BROWSER_TITLE,
   SHARED_HISTORY_LIST_PAGE_SIZE,
@@ -1206,18 +1205,22 @@ export default function GatewayApp() {
       const pathKey = project.path.trim();
       if (!pathKey) return;
       const normalizedPathKey = workspaceProjectPathKey(pathKey);
-      const targetProject =
-        workspaceProjects.find(
-          (item) =>
-            workspaceProjectPathKey(item.path) === normalizedPathKey || item.id === project.id,
-        ) ?? project;
+      const matchedProject = workspaceProjects.find(
+        (item) => workspaceProjectPathKey(item.path) === normalizedPathKey || item.id === project.id,
+      );
+      const targetProject = matchedProject
+        ? {
+            ...matchedProject,
+            ...(project.worktree ? { worktree: project.worktree } : {}),
+          }
+        : project;
       setActiveWorkspaceProjectId(targetProject.id);
       setSettings((prev) => {
         const existing = prev.system.workspaceProjects.find(
           (item) =>
             workspaceProjectPathKey(item.path) === normalizedPathKey || item.id === project.id,
         );
-        const nextProject = existing ?? targetProject;
+        const nextProject = existing ? { ...targetProject, id: existing.id } : targetProject;
         const workspaceProjects = existing
           ? prev.system.workspaceProjects.map((item) =>
               item.id === existing.id
@@ -1231,6 +1234,7 @@ export default function GatewayApp() {
                         : nextProject.kind === "history"
                           ? item.kind
                           : nextProject.kind,
+                    worktree: nextProject.worktree ?? item.worktree,
                     updatedAt: item.updatedAt,
                     lastConversationAt:
                       Math.max(item.lastConversationAt ?? 0, nextProject.lastConversationAt ?? 0) ||
@@ -1435,39 +1439,46 @@ export default function GatewayApp() {
   );
 
   const handleOpenWorktree = useCallback(
-    (path: string) => {
-      const trimmed = path.trim();
-      const worktreeKey = workspaceProjectPathKey(trimmed);
-      const sourceProjectPath = displayedConversationWorkdirRef.current.trim();
-      if (!trimmed || !worktreeKey || !sourceProjectPath) return;
-      activateWorkspaceProject(createWorkspaceProjectFromPath(trimmed, "managed"));
+    (worktree: { path: string; repositoryPath: string; branch: string }) => {
+      const path = worktree.path.trim();
+      const repositoryPath = worktree.repositoryPath.trim();
+      const worktreeKey = workspaceProjectPathKey(path);
+      const currentProjectPath = displayedConversationWorkdirRef.current.trim();
+      if (!path || !repositoryPath || !worktreeKey) return;
+      const branch = worktree.branch.trim();
+      const nextProject: WorkspaceProject = {
+        ...createWorkspaceProjectFromPath(path, "managed"),
+        worktree: {
+          repositoryPath,
+          ...(branch ? { branch } : {}),
+        },
+      };
+      activateWorkspaceProject(nextProject);
       setSettings((prev) => {
-        const autoGroup = prev.system.workspaceProjectGroups.find(
-          (group) =>
-            group.sourceProjectPath &&
-            group.projectPaths.some(
-              (memberPath) =>
-                workspaceProjectPathKey(memberPath) === workspaceProjectPathKey(sourceProjectPath),
-            ),
-        );
-        const sourcePath = autoGroup?.sourceProjectPath ?? sourceProjectPath;
         const sourceProject = prev.system.workspaceProjects.find(
           (project) =>
-            workspaceProjectPathKey(project.path) === workspaceProjectPathKey(sourcePath),
+            workspaceProjectPathKey(project.path) === workspaceProjectPathKey(repositoryPath),
         );
         const ensured = ensureWorktreeProjectGroup(prev.system.workspaceProjectGroups, {
-          name: sourceProject?.name || fallbackWorkspaceProjectName(sourcePath),
-          sourceProjectPath: sourcePath,
+          name: sourceProject?.name || fallbackWorkspaceProjectName(repositoryPath),
+          sourceProjectPath: repositoryPath,
         });
         let workspaceProjectGroups = assignWorkspaceProjectToGroup(
           ensured.groups,
           ensured.groupId,
-          sourcePath,
+          repositoryPath,
         );
+        if (currentProjectPath) {
+          workspaceProjectGroups = assignWorkspaceProjectToGroup(
+            workspaceProjectGroups,
+            ensured.groupId,
+            currentProjectPath,
+          );
+        }
         workspaceProjectGroups = assignWorkspaceProjectToGroup(
           workspaceProjectGroups,
           ensured.groupId,
-          trimmed,
+          path,
         );
         return { ...prev, system: { ...prev.system, workspaceProjectGroups } };
       });
@@ -2915,76 +2926,72 @@ export default function GatewayApp() {
     [archivedWorkspaceProjectPathKeys, setSettings, workspaceProjects],
   );
 
+  // 分支选择器里删除 worktree 成功后，同步清理对应的工作空间登记
+  // （与 GUI 端 ChatPage.handleWorktreeRemoved 保持镜像）。
+  const handleWorktreeRemoved = useCallback(
+    (worktree: { path: string }) => {
+      const pathKey = workspaceProjectPathKey(worktree.path);
+      if (!pathKey) return;
+      const project = workspaceProjects.find(
+        (item) => workspaceProjectPathKey(item.path) === pathKey,
+      );
+      if (project) removeWorkspaceProjectFromSettings(project);
+    },
+    [removeWorkspaceProjectFromSettings, workspaceProjects],
+  );
+
   const handleRemoveWorkspaceProject = useCallback(
-    (project: WorkspaceProject) => {
+    (project: WorkspaceProject, options: WorkspaceProjectRemoveOptions = {}) => {
       if (project.id === DEFAULT_WORKSPACE_PROJECT_ID) return;
 
+      const path = project.path.trim();
+      const pathKey = workspaceProjectPathKey(path);
+      const projectHasRunningConversation = () => {
+        if (!pathKey) return false;
+        if (sidebarStore.getSnapshot().runningWorkdirPathKeys.has(pathKey)) {
+          return true;
+        }
+        for (const [conversationId, activity] of activityStore.getSnapshot().activities) {
+          const runtimeWorkdir =
+            activity.workdir?.trim() ||
+            conversationWorkdirsRef.current.get(conversationId)?.trim() ||
+            "";
+          const persistedWorkdir = sidebarStore.peek(conversationId)?.cwd?.trim() || "";
+          if (workspaceProjectPathKey(runtimeWorkdir || persistedWorkdir) === pathKey) {
+            return true;
+          }
+        }
+        return false;
+      };
+
+      if (projectHasRunningConversation()) {
+        setSidebarActionError(translate("chat.workspaceRemoveRunning", settings.locale));
+        return;
+      }
+
+      if (options.deleteWorktree !== true) {
+        setSidebarActionError(null);
+        removeWorkspaceProjectFromSettings(project);
+        return;
+      }
+
       void (async () => {
-        const currentApi = api;
-        if (!currentApi) {
-          setSidebarActionError("Gateway 未连接，暂时不能删除项目会话。");
+        const repositoryPath = project.worktree?.repositoryPath.trim() || "";
+        if (!path || !pathKey || !repositoryPath) {
+          setSidebarActionError(
+            translate("chat.workspaceDeleteWorktreeMetadataMissing", settings.locale),
+          );
           return;
         }
-
-        const path = project.path.trim();
-        const pathKey = workspaceProjectPathKey(path);
-        const runningMessage = "项目中仍有后台任务运行，暂时不能删除该项目。";
-        const projectHasRunningConversation = () => {
-          if (!pathKey) return false;
-          for (const [conversationId, activity] of activityStore.getSnapshot().activities) {
-            const runtimeWorkdir =
-              activity.workdir?.trim() ||
-              conversationWorkdirsRef.current.get(conversationId)?.trim() ||
-              "";
-            const persistedWorkdir = sidebarStore.peek(conversationId)?.cwd?.trim() || "";
-            if (workspaceProjectPathKey(runtimeWorkdir || persistedWorkdir) === pathKey) {
-              return true;
-            }
-          }
-          return false;
-        };
-
-        if (projectHasRunningConversation()) {
-          setSidebarActionError(runningMessage);
+        if (!gitClient?.removeWorktree) {
+          setSidebarActionError(
+            translate("chat.workspaceDeleteWorktreeUnavailable", settings.locale),
+          );
           return;
         }
 
         setSidebarActionError(null);
         try {
-          const conversationIds: string[] = [];
-          const seenConversationIds = new Set<string>();
-          if (path) {
-            for (let pageNumber = 1; ; pageNumber += 1) {
-              const page = await currentApi.listHistory(
-                pageNumber,
-                PROJECT_HISTORY_DELETE_PAGE_SIZE,
-                { cwd: path },
-              );
-              for (const item of page.conversations) {
-                const id = item.id.trim();
-                if (!id || seenConversationIds.has(id)) continue;
-                seenConversationIds.add(id);
-                conversationIds.push(id);
-              }
-
-              if (
-                page.conversations.length === 0 ||
-                conversationIds.length >= page.total_count ||
-                page.conversations.length < PROJECT_HISTORY_DELETE_PAGE_SIZE
-              ) {
-                break;
-              }
-            }
-          }
-
-          const runningConversationIdsInProject = conversationIds.filter((id) =>
-            isConversationBusy(id),
-          );
-          if (runningConversationIdsInProject.length > 0 || projectHasRunningConversation()) {
-            setSidebarActionError(runningMessage);
-            return;
-          }
-
           let terminalSessionsToClose: TerminalSession[] = [];
           const pruneProjectTerminalSessions = () => {
             terminalSessionsVersionRef.current += 1;
@@ -2994,141 +3001,111 @@ export default function GatewayApp() {
           };
           if (
             terminalClient &&
-            (settings.remote.enableWebTerminal || settings.remote.enableWebSshTerminal) &&
-            pathKey
+            (settings.remote.enableWebTerminal || settings.remote.enableWebSshTerminal)
           ) {
             terminalSessionsToClose = await terminalClient.list(pathKey);
-            const runningTerminalCount = terminalSessionsToClose.filter(
-              (session) => session.running,
-            ).length;
-            if (runningTerminalCount > 0) {
-              const confirmed = await requestConfirmDialog({
-                title: translate("chat.workspaceRemoveConfirm", settings.locale).replace(
-                  "{name}",
-                  project.name,
-                ),
-                subtitle: translate("chat.workspaceRemoveDescription", settings.locale),
-                description: (
-                  <div className="flex items-start gap-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300">
-                      <Terminal className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex min-w-0 flex-wrap items-center gap-2">
-                        <span className="text-sm font-semibold text-foreground">
-                          {translate("chat.exitConfirmRunningLabel", settings.locale)}
-                        </span>
-                        <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500/15 px-1.5 text-[calc(11px*var(--zone-font-scale,1))] font-semibold text-amber-700 dark:text-amber-300">
-                          {runningTerminalCount}
-                        </span>
-                      </div>
-                      <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
-                        {translate("chat.workspaceRemoveTerminalDescription", settings.locale)}
-                      </p>
-                    </div>
+          }
+          const runningTerminalCount = terminalSessionsToClose.filter(
+            (session) => session.running,
+          ).length;
+          if (runningTerminalCount > 0) {
+            const confirmed = await requestConfirmDialog({
+              title: translate("chat.workspaceDeleteWorktreeConfirm", settings.locale).replace(
+                "{name}",
+                project.name,
+              ),
+              subtitle: translate("chat.workspaceDeleteWorktreeDescription", settings.locale),
+              description: (
+                <div className="flex items-start gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300">
+                    <Terminal className="h-4 w-4" />
                   </div>
-                ),
-                confirmLabel: translate("chat.workspaceRemoveConfirmContinue", settings.locale),
-                cancelLabel: translate("chat.cancel", settings.locale),
-                closeLabel: translate("chat.workspaceRemoveConfirmClose", settings.locale),
-                tone: "warning",
-              });
-              if (!confirmed) {
-                return;
-              }
+                  <div className="min-w-0 flex-1">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <span className="text-sm font-semibold text-foreground">
+                        {translate("chat.exitConfirmRunningLabel", settings.locale)}
+                      </span>
+                      <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500/15 px-1.5 text-[calc(11px*var(--zone-font-scale,1))] font-semibold text-amber-700 dark:text-amber-300">
+                        {runningTerminalCount}
+                      </span>
+                    </div>
+                    <p className="mt-1.5 text-xs leading-5 text-muted-foreground">
+                      {translate(
+                        "chat.workspaceDeleteWorktreeTerminalDescription",
+                        settings.locale,
+                      )}
+                    </p>
+                  </div>
+                </div>
+              ),
+              confirmLabel: translate("chat.workspaceDeleteWorktree", settings.locale),
+              cancelLabel: translate("chat.cancel", settings.locale),
+              closeLabel: translate("chat.workspaceDeleteWorktreeConfirmClose", settings.locale),
+              tone: "warning",
+            });
+            if (!confirmed) {
+              return;
             }
-          }
-
-          const visibleConversationId = resolveVisibleConversationId(
-            selectedHistoryIdRef.current,
-            conversationIdRef.current,
-          );
-          const visibleRuntimeWorkdir =
-            conversationWorkdirsRef.current.get(visibleConversationId)?.trim() || "";
-          const visiblePersistedWorkdir =
-            sidebarStore.peek(visibleConversationId)?.cwd?.trim() || "";
-          const visibleWorkdir =
-            visiblePersistedWorkdir ||
-            visibleRuntimeWorkdir ||
-            (isAgentMode ? activeWorkspaceProjectPath || settings.system.workdir.trim() : "");
-
-          for (const conversationId of conversationIds) {
-            await currentApi.deleteHistory(conversationId);
-          }
-
-          const deletedConversationIds = new Set(conversationIds);
-          if (deletedConversationIds.size > 0) {
-            const nextSharedItems = sharedHistoryItemsRef.current.filter(
-              (item) => !deletedConversationIds.has(item.id),
-            );
-            sharedHistoryItemsRef.current = nextSharedItems;
-            setSharedHistoryItems(nextSharedItems);
-
-            for (const conversationId of deletedConversationIds) {
-              // Immediate local echo; the gateway delete events confirm.
-              sidebarStore.removeLocal(conversationId);
-              transcriptStoreRegistry.remove(conversationId);
-              historyWindowStatesRef.current.delete(conversationId);
-              conversationWorkdirsRef.current.delete(conversationId);
-              clearCachedComposerDraft(conversationId);
-              setPendingUploadsForConversation(conversationId, []);
-            }
-          }
-          if (terminalSessionsToClose.length > 0 && terminalClient) {
-            await terminalClient.closeProject(pathKey);
-            pruneProjectTerminalSessions();
-          }
-          if (pathKey && workspaceProjectPathKey(activeWorkspaceProjectPath) === pathKey) {
-            setRightDockOpen(false);
-            if (terminalSessionsToClose.length === 0) {
+            if (terminalClient) {
+              await terminalClient.closeProject(pathKey);
               pruneProjectTerminalSessions();
             }
           }
 
-          const shouldResetVisibleConversation =
-            Boolean(visibleConversationId && deletedConversationIds.has(visibleConversationId)) ||
-            Boolean(pathKey && workspaceProjectPathKey(visibleWorkdir) === pathKey);
-
-          if (path) {
-            await memoryDeleteProject({
-              workdir: path,
-              actor: "tool",
-              reason: "workspace project removed",
-            });
+          const response = await gitClient.removeWorktree(repositoryPath, path, {
+            deleteBranch: options.deleteBranch === true,
+          });
+          if (!response.worktreeRemoved) {
+            setSidebarActionError(
+              response.message ||
+                response.stderr ||
+                translate("chat.workspaceDeleteFailed", settings.locale),
+            );
+            return;
           }
+
+          if (terminalSessionsToClose.length > 0 && runningTerminalCount === 0 && terminalClient) {
+            await terminalClient.closeProject(pathKey);
+            pruneProjectTerminalSessions();
+          }
+          if (workspaceProjectPathKey(activeWorkspaceProjectPath) === pathKey) {
+            setRightDockOpen(false);
+          }
+
+          const shouldResetVisibleConversation =
+            workspaceProjectPathKey(displayedConversationWorkdirRef.current) === pathKey;
           removeWorkspaceProjectFromSettings(project);
-          // The conversation-removal watcher may already have migrated the
-          // selection; only reset when the same conversation is still shown.
-          if (
-            shouldResetVisibleConversation &&
-            getDisplayedConversationId() === visibleConversationId.trim()
-          ) {
+          if (shouldResetVisibleConversation) {
             startNewConversation({
               workdir: getDefaultWorkspaceProjectPath(settings.system) || undefined,
             });
           }
           void sidebarStore.refreshWorkdirs("delete");
+          if (!response.ok) {
+            setSidebarActionError(
+              response.message ||
+                response.stderr ||
+                translate("chat.workspaceDeleteFailed", settings.locale),
+            );
+          }
         } catch (error) {
-          setSidebarActionError(asErrorMessage(error, "删除项目失败"));
+          setSidebarActionError(
+            asErrorMessage(error, translate("chat.workspaceDeleteFailed", settings.locale)),
+          );
         }
       })();
     },
     [
       activeWorkspaceProjectPath,
       activityStore,
-      api,
-      clearCachedComposerDraft,
-      isAgentMode,
-      isConversationBusy,
+      gitClient,
       removeWorkspaceProjectFromSettings,
       requestConfirmDialog,
+      settings.locale,
       settings.remote.enableWebSshTerminal,
       settings.remote.enableWebTerminal,
-      settings.locale,
       settings.system,
-      setPendingUploadsForConversation,
       sidebarStore,
-      startNewConversation,
       terminalClient,
     ],
   );
@@ -5140,6 +5117,7 @@ export default function GatewayApp() {
                           thinkingAlwaysOn={chatRuntimeThinkingAlwaysOn}
                           gitClient={gitClient}
                           onOpenWorktree={handleOpenWorktree}
+                          onWorktreeRemoved={handleWorktreeRemoved}
                           gitWriteEnabled={settings.remote.enableWebGit}
                           gitDisabledMessage={gitDisabledMessage}
                           workspaceActivityClient={workspaceActivityClient}

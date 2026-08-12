@@ -384,6 +384,30 @@ export function assignWorkspaceProjectToGroup(
   return touched ? next : (groups as WorkspaceProjectGroup[]);
 }
 
+/** 从所有分组移除项目路径，避免删除工作空间后留下不可见的陈旧成员。 */
+export function removeWorkspaceProjectFromGroups(
+  groups: readonly WorkspaceProjectGroup[],
+  projectPath: string,
+): WorkspaceProjectGroup[] {
+  const targetKey = workspaceProjectPathKey(projectPath);
+  if (!targetKey) return groups as WorkspaceProjectGroup[];
+  let touched = false;
+  const updatedAt = Date.now();
+  const next = groups.map((group) => {
+    const projectPaths = group.projectPaths.filter(
+      (path) => workspaceProjectPathKey(path) !== targetKey,
+    );
+    if (projectPaths.length === group.projectPaths.length) return group;
+    touched = true;
+    return {
+      ...group,
+      projectPaths,
+      updatedAt,
+    };
+  });
+  return touched ? next : (groups as WorkspaceProjectGroup[]);
+}
+
 /**
  * 为 worktree 派生工作区创建/复用自动分组：按 `sourceProjectPath` 匹配
  * （而非名称），用户重命名分组后仍能复用同一个组。

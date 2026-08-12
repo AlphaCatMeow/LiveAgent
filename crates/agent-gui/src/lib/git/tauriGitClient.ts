@@ -5,6 +5,7 @@ import {
   normalizeGitDiffResponse,
   normalizeGitLogResponse,
   normalizeGitOperationResponse,
+  normalizeGitRemoveWorktreeResponse,
   normalizeGitRepositoryDiscovery,
   normalizeGitRepositoryState,
   normalizeGitWorktreeResponse,
@@ -133,19 +134,25 @@ export const tauriGitClient: GitClient = {
       workdir,
     );
   },
-  async createWorktree(workdir, name, startPoint) {
+  async createWorktree(workdir, options) {
     return normalizeGitWorktreeResponse(
-      await invoke("git_create_worktree", { workdir, name, start_point: startPoint }),
+      await invoke("git_create_worktree", {
+        workdir,
+        branch: options.branch,
+        directory_name: options.directoryName,
+        parent_directory: options.parentDirectory,
+        start_point: options.startPoint,
+      }),
       workdir,
     );
   },
-  async removeWorktree(workdir, worktreePath, force, deleteBranch) {
-    return normalizeGitOperationResponse(
+  async removeWorktree(workdir, worktreePath, options = {}) {
+    return normalizeGitRemoveWorktreeResponse(
       await invoke("git_remove_worktree", {
         workdir,
         worktree_path: worktreePath,
-        force,
-        delete_branch: deleteBranch,
+        force: options.force,
+        delete_branch: options.deleteBranch,
       }),
       workdir,
     );

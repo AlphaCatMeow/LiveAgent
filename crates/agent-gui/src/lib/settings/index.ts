@@ -313,12 +313,16 @@ export type SelectedModel = {
   model: string;
 };
 
+export type PromptCacheHintMode = "auto" | "openai-key" | "openrouter-session" | "none";
+
 export type ProviderModelConfig = {
   id: string;
   /** /models 元数据；缺失时保持旧设置格式兼容。 */
   ownedBy?: string;
   contextWindow: number;
   maxOutputToken: number;
+  /** OpenAI 兼容端点的缓存提示协议；缺失时继承供应商设置。 */
+  promptCacheHintMode?: PromptCacheHintMode;
 };
 
 export type ChatRuntimeControls = {
@@ -448,6 +452,10 @@ export type CustomProvider = {
   name: string;
   type: ProviderId;
   baseUrl: string;
+  /** 将 baseUrl 作为最终请求地址，本地反代不再追加协议端点路径。 */
+  isFullUrl: boolean;
+  /** 可选的模型列表完整地址；留空时从 baseUrl 自动推导。 */
+  modelsUrl?: string;
   apiKey: string;
   apiKeyConfigured?: boolean;
   customHeaders?: { key: string; value: string }[];
@@ -457,6 +465,8 @@ export type CustomProvider = {
   requestFormat?: CodexRequestFormat;
   reasoning: ReasoningLevel;
   promptCachingEnabled: boolean;
+  /** OpenAI 兼容端点的缓存提示协议；旧配置由 promptCachingEnabled 迁移。 */
+  promptCacheHintMode?: PromptCacheHintMode;
   /** 仅 Anthropic：ephemeral 缓存保留档位；long 在官方 API 上映射为 1h TTL。 */
   promptCacheRetention?: "short" | "long";
   nativeWebSearchEnabled: boolean;
@@ -515,6 +525,13 @@ export const CODEX_REQUEST_FORMAT_LABELS: Record<CodexRequestFormat, string> = {
   "openai-responses": "Responses API",
 };
 
+export const PROMPT_CACHE_HINT_MODES = [
+  "auto",
+  "openai-key",
+  "openrouter-session",
+  "none",
+] as const satisfies readonly PromptCacheHintMode[];
+
 const CODEX_RESPONSES_SUFFIX = "/responses";
 const CODEX_RESPONSE_SUFFIX = "/response";
 const CODEX_CHAT_COMPLETIONS_SUFFIX = "/chat/completions";
@@ -545,9 +562,14 @@ function normalizeCodexRequestFormat(input: unknown): CodexRequestFormat | undef
   }
 }
 
+function normalizePromptCacheHintMode(input: unknown): PromptCacheHintMode | undefined {
+  return PROMPT_CACHE_HINT_MODES.find((mode) => mode === input);
+}
+
 function normalizeCodexRouting(
   baseUrlInput: unknown,
   requestFormatInput: unknown,
+  isFullUrl = false,
 ): {
   baseUrl: string;
   requestFormat: CodexRequestFormat;
@@ -555,15 +577,23 @@ function normalizeCodexRouting(
   let baseUrl = normalizeBaseUrl(typeof baseUrlInput === "string" ? baseUrlInput : "");
   let requestFormat = normalizeCodexRequestFormat(requestFormatInput);
   const lower = baseUrl.toLowerCase();
+  let routePath = lower;
+  if (isFullUrl) {
+    try {
+      routePath = new URL(baseUrl).pathname.replace(/\/+$/, "").toLowerCase();
+    } catch {
+      // URL validation is handled by the request proxy; keep legacy suffix inference here.
+    }
+  }
 
-  if (lower.endsWith(CODEX_CHAT_COMPLETIONS_SUFFIX)) {
-    baseUrl = baseUrl.slice(0, -CODEX_CHAT_COMPLETIONS_SUFFIX.length);
+  if (routePath.endsWith(CODEX_CHAT_COMPLETIONS_SUFFIX)) {
+    if (!isFullUrl) baseUrl = baseUrl.slice(0, -CODEX_CHAT_COMPLETIONS_SUFFIX.length);
     requestFormat ??= "openai-completions";
-  } else if (lower.endsWith(CODEX_RESPONSES_SUFFIX)) {
-    baseUrl = baseUrl.slice(0, -CODEX_RESPONSES_SUFFIX.length);
+  } else if (routePath.endsWith(CODEX_RESPONSES_SUFFIX)) {
+    if (!isFullUrl) baseUrl = baseUrl.slice(0, -CODEX_RESPONSES_SUFFIX.length);
     requestFormat ??= "openai-responses";
-  } else if (lower.endsWith(CODEX_RESPONSE_SUFFIX)) {
-    baseUrl = baseUrl.slice(0, -CODEX_RESPONSE_SUFFIX.length);
+  } else if (routePath.endsWith(CODEX_RESPONSE_SUFFIX)) {
+    if (!isFullUrl) baseUrl = baseUrl.slice(0, -CODEX_RESPONSE_SUFFIX.length);
     requestFormat ??= "openai-responses";
   }
 
@@ -580,6 +610,7 @@ export function getBuiltinCustomProviders(): CustomProvider[] {
       name: "Anthropic",
       type: "claude_code",
       baseUrl: "https://api.anthropic.com/v1",
+      isFullUrl: false,
       apiKey: "",
       customHeaders: [],
       models: [],
@@ -595,6 +626,7 @@ export function getBuiltinCustomProviders(): CustomProvider[] {
       name: "OpenAI",
       type: "codex",
       baseUrl: "https://api.openai.com/v1",
+      isFullUrl: false,
       apiKey: "",
       customHeaders: [],
       models: [],
@@ -602,6 +634,7 @@ export function getBuiltinCustomProviders(): CustomProvider[] {
       requestFormat: "openai-responses",
       reasoning: "off",
       promptCachingEnabled: true,
+      promptCacheHintMode: "auto",
       nativeWebSearchEnabled: true,
       useSystemProxy: false,
       usageQuery: getDefaultUsageQueryConfig(),
@@ -611,6 +644,7 @@ export function getBuiltinCustomProviders(): CustomProvider[] {
       name: "Gemini",
       type: "gemini",
       baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+      isFullUrl: false,
       apiKey: "",
       customHeaders: [],
       models: [],
@@ -626,6 +660,7 @@ export function getBuiltinCustomProviders(): CustomProvider[] {
       name: "Grok",
       type: "xai",
       baseUrl: "https://api.x.ai/v1",
+      isFullUrl: false,
       apiKey: "",
       customHeaders: [],
       models: [],
@@ -1386,11 +1421,14 @@ export function normalizeProviderModelConfig(
   // 跨供应商回查上线前落库的别家模型吃过本供应商兜底值，同样读侧修复，
   // 不需要用户删除重加（识别与替换规则见 repairStaleCrossProviderLimits）。
   const limits = repairStaleCrossProviderLimits(providerId, id, normalizeModelLimits(storedLimits));
+  const promptCacheHintMode =
+    providerId === "codex" ? normalizePromptCacheHintMode(obj.promptCacheHintMode) : undefined;
   return {
     id,
     ...(ownedBy ? { ownedBy } : {}),
     contextWindow: limits.contextWindow,
     maxOutputToken: limits.maxOutputToken,
+    ...(promptCacheHintMode ? { promptCacheHintMode } : {}),
   };
 }
 export function normalizeProviderModelConfigs(
@@ -1570,12 +1608,14 @@ function normalizeUsageQueryConfig(input: unknown): UsageQueryConfig {
 export function normalizeCustomProvider(input: unknown): CustomProvider {
   const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
   const type = normalizeProviderId(obj.type);
+  const isFullUrl = obj.isFullUrl === true;
   const codexRouting =
     type === "codex" || type === "xai"
       ? normalizeCodexRouting(
           obj.baseUrl,
           // xAI / Grok 固定走 Responses；忽略历史配置中的 completions。
           type === "xai" ? "openai-responses" : obj.requestFormat,
+          isFullUrl,
         )
       : undefined;
   const models = normalizeProviderModelConfigs(obj.models, type);
@@ -1583,6 +1623,11 @@ export function normalizeCustomProvider(input: unknown): CustomProvider {
   const validModelIds = new Set(models.map((model) => model.id));
   const apiKey = normalizeApiKey(typeof obj.apiKey === "string" ? obj.apiKey : "");
   const id = typeof obj.id === "string" && obj.id.trim() ? obj.id.trim() : createUuid();
+  const promptCacheHintMode =
+    type === "codex"
+      ? (normalizePromptCacheHintMode(obj.promptCacheHintMode) ??
+        (obj.promptCachingEnabled === false ? "none" : "auto"))
+      : undefined;
 
   return {
     id,
@@ -1591,6 +1636,10 @@ export function normalizeCustomProvider(input: unknown): CustomProvider {
     baseUrl: codexRouting
       ? codexRouting.baseUrl
       : normalizeBaseUrl(typeof obj.baseUrl === "string" ? obj.baseUrl : ""),
+    isFullUrl,
+    ...(type !== "gemini" && typeof obj.modelsUrl === "string" && obj.modelsUrl.trim()
+      ? { modelsUrl: obj.modelsUrl.trim() }
+      : {}),
     apiKey,
     apiKeyConfigured: apiKey.length > 0 || obj.apiKeyConfigured === true,
     customHeaders: normalizeCustomHeaders(obj.customHeaders),
@@ -1601,10 +1650,15 @@ export function normalizeCustomProvider(input: unknown): CustomProvider {
     ),
     requestFormat: type === "xai" ? "openai-responses" : codexRouting?.requestFormat,
     reasoning: normalizeReasoningLevel(obj.reasoning),
-    // Anthropic/OpenAI 默认开启提示词缓存（OpenAI 侧体现为稳定的
-    // prompt_cache_key 路由提示）；Gemini / xAI 不使用 OpenAI 风格 prompt cache。
+    // Anthropic 默认开启显式缓存；Codex 的布尔值仅保留旧设置兼容，实际 wire
+    // 行为由 promptCacheHintMode 决定。Gemini / xAI 不使用这里的缓存控制。
     promptCachingEnabled:
-      type === "gemini" || type === "xai" ? false : obj.promptCachingEnabled !== false,
+      type === "codex"
+        ? promptCacheHintMode !== "none"
+        : type === "gemini" || type === "xai"
+          ? false
+          : obj.promptCachingEnabled !== false,
+    ...(promptCacheHintMode ? { promptCacheHintMode } : {}),
     ...(type === "claude_code" && obj.promptCacheRetention === "long"
       ? { promptCacheRetention: "long" as const }
       : {}),

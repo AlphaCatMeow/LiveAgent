@@ -22,6 +22,7 @@ import { WorkspaceOverlayHost } from "@liveagent/ui/components/workspace-editor/
 import { LocaleContext, t as translate } from "@liveagent/ui/i18n/index";
 import type { ChatFileLink } from "@liveagent/ui/lib/chat/chatFileLinks";
 import { normalizeLogicalLineEndings } from "@liveagent/ui/lib/chat/composerText";
+import { deriveContextUsageTokens } from "@liveagent/ui/lib/chat/contextUsage";
 import { openChatFileLink } from "@liveagent/ui/lib/chat/openChatFileLink";
 import { queuedChatTurnHasContent } from "@liveagent/ui/lib/chat/queuedChatTurn";
 import { selectLatestTaskProgress } from "@liveagent/ui/lib/chat/taskProgress";
@@ -39,6 +40,7 @@ import type { TerminalSession } from "@liveagent/ui/lib/terminal/types";
 import {
   ChatComposerBar,
   type ChatQueueTurnPreview,
+  type ContextUsageTokensSource,
 } from "@liveagent/ui/pages/chat/ChatComposerBar";
 import { SettingsPage } from "@liveagent/ui/pages/settings/SettingsPage";
 import {
@@ -253,6 +255,14 @@ import { UserMenu } from "./UserMenu";
 
 const STALE_HISTORY_RETRY_INITIAL_DELAY_MS = 1_000;
 const STALE_HISTORY_RETRY_MAX_DELAY_MS = 30_000;
+const MANUAL_COMPACTION_TIMEOUT_MS = 5 * 60_000;
+
+type ManualCompactPendingRequest = {
+  conversationId: string;
+  operationId: string;
+  workdir: string;
+  startedAt: number;
+};
 
 export default function GatewayApp() {
   const historyShareToken = useMemo(() => parseHistoryShareToken(), []);
@@ -287,6 +297,35 @@ export default function GatewayApp() {
     ReadonlyMap<string, SelectedModel>
   >(new Map());
   const [chatError, setChatError] = useState<string | null>(null);
+  // 用量环手动压缩：以 operationId 关联桌面终态，避免 accepted 被误当作完成。
+  // 按会话 id 键化（issue #359 缺陷 #3）：不同会话各自独立 pending，一个会话压缩
+  // 期间绝不静默屏蔽另一个会话的压缩请求。state 与 ref 经唯一 setter/clearer 同步
+  // 写以保证两者一致。
+  const [manualCompactPendingByConversation, setManualCompactPendingState] = useState<
+    ReadonlyMap<string, ManualCompactPendingRequest>
+  >(() => new Map());
+  const manualCompactPendingRef = useRef<ReadonlyMap<string, ManualCompactPendingRequest>>(
+    manualCompactPendingByConversation,
+  );
+  const setManualCompactPendingRequest = useCallback((request: ManualCompactPendingRequest) => {
+    const next = new Map(manualCompactPendingRef.current);
+    next.set(request.conversationId, request);
+    manualCompactPendingRef.current = next;
+    setManualCompactPendingState(next);
+  }, []);
+  const clearManualCompactPendingRequest = useCallback(
+    (conversationId: string, operationId: string) => {
+      const current = manualCompactPendingRef.current;
+      const pending = current.get(conversationId);
+      if (!pending || pending.operationId !== operationId) return false;
+      const next = new Map(current);
+      next.delete(conversationId);
+      manualCompactPendingRef.current = next;
+      setManualCompactPendingState(next);
+      return true;
+    },
+    [],
+  );
   // Top-right toast stack for upload/attachment feedback — mirrors the GUI's
   // NotifyToast usage so upload failures never render as conversation output.
   const [notifyItems, setNotifyItems] = useState<NotifyItem[]>([]);
@@ -1726,6 +1765,36 @@ export default function GatewayApp() {
     };
   }, [activityStore, api, chatCommandPipeline]);
 
+  const settleManualCompactionResult = useCallback(
+    (
+      targetConversationId: string,
+      result: {
+        operationId: string;
+        status: "compacted" | "failed" | "busy" | "skipped";
+        message?: string;
+      },
+    ) => {
+      const pending = manualCompactPendingRef.current.get(targetConversationId);
+      if (!pending || pending.operationId !== result.operationId) {
+        return;
+      }
+      if (!clearManualCompactPendingRequest(targetConversationId, result.operationId)) return;
+      if (result.status === "compacted") {
+        return;
+      }
+      const fallbackKey =
+        result.status === "skipped"
+          ? "chat.manualCompactBelowThreshold"
+          : result.status === "failed"
+            ? "chat.manualCompactFailed"
+            : "chat.manualCompactRejected";
+      // 缺陷 #4：无论目标会话是否正被显示都提示——用户切走后压缩失败/跳过也要
+      // 看到结果。message 本身已说明这是压缩结果，故不再以 isDisplayedConversation 门控。
+      setChatError(result.message || translate(fallbackKey, settings.locale));
+    },
+    [clearManualCompactPendingRequest, settings.locale],
+  );
+
   // App-level observation of the displayed conversation's stream: titles,
   // pipeline settlement, queue refreshes, tunnel side effects, and the one
   // scroll-compensated fold commit at run_started.
@@ -1741,6 +1810,10 @@ export default function GatewayApp() {
           ? ((event as { client_request_id: string }).client_request_id ?? "").trim()
           : "";
       switch (event.type) {
+        case "manual_compaction_result": {
+          settleManualCompactionResult(targetConversationId, event);
+          return;
+        }
         case "run_started": {
           // The fold this event triggers in the store is a pure data
           // transition of the single row list (identical row keys, same DOM
@@ -1800,6 +1873,7 @@ export default function GatewayApp() {
       chatCommandPipeline,
       handleTunnelManagerChatEvent,
       refreshChatQueueSnapshot,
+      settleManualCompactionResult,
     ],
   );
 
@@ -1844,6 +1918,15 @@ export default function GatewayApp() {
   // regardless of running state, which is what makes GUI queue auto-sends
   // race-free: the next run's events simply flow in).
   const displayedConversationId = resolveVisibleConversationId(selectedHistoryId, conversationId);
+  // composer 的用量环禁点：仅当显示会话自身有 pending（缺陷 #3：不再被其他会话的
+  // pending 静默屏蔽）。
+  const manualCompactPending = manualCompactPendingByConversation.has(displayedConversationId);
+  // sidebar 瞬态“转圈”：所有 pending 会话（可多个）——ManualCompactPendingRequest
+  // 结构上兼容 TransientSidebarRunningConversation（conversationId + workdir）。
+  const manualCompactTransientConversations = useMemo(
+    () => Array.from(manualCompactPendingByConversation.values()),
+    [manualCompactPendingByConversation],
+  );
 
   // 会话生效模型：本地 override > sidebar 行携带的持久化选择 > 全局默认。
   const selectionForConversation = useCallback(
@@ -1897,6 +1980,79 @@ export default function GatewayApp() {
     pendingRevision: pendingCommandRevision,
   });
   displayedConversationBusyRef.current = displayedConversationBusy;
+
+  // 后台订阅接线经 ref 稳定化（缺陷 #5）：handleConversationStreamEvent/Sync 的
+  // useCallback 身份随 locale/pipeline 回调变化，若入 effect 依赖会在 pending 期间
+  // 反复退订/重订并重放全量 sync。改用 ref 读取最新实现，effect 只依赖
+  // (api, pending 键集, displayedConversationId)。
+  const handleConversationStreamEventRef = useRef(handleConversationStreamEvent);
+  handleConversationStreamEventRef.current = handleConversationStreamEvent;
+  const handleConversationStreamSyncRef = useRef(handleConversationStreamSync);
+  handleConversationStreamSyncRef.current = handleConversationStreamSync;
+
+  // store settle：对每个 pending 会话订阅其 store，终态到达即结算（缺陷 #3：按
+  // 会话独立，一个 effect 内循环收集 cleanup）。
+  useEffect(() => {
+    if (manualCompactPendingByConversation.size === 0) return;
+    const cleanups: Array<() => void> = [];
+    for (const pending of manualCompactPendingByConversation.values()) {
+      const store = transcriptStoreRegistry.get(pending.conversationId);
+      const settleFromStore = () => {
+        const result = store.getSnapshot().manualCompactionResult;
+        if (result?.operationId === pending.operationId) {
+          settleManualCompactionResult(pending.conversationId, result);
+        }
+      };
+      settleFromStore();
+      cleanups.push(store.subscribe(settleFromStore));
+    }
+    return () => {
+      for (const cleanup of cleanups) cleanup();
+    };
+  }, [manualCompactPendingByConversation, settleManualCompactionResult, transcriptStoreRegistry]);
+
+  // 5 分钟超时：每个 pending 各自计时（缺陷 #4：超时也无论是否显示都提示）。
+  useEffect(() => {
+    if (manualCompactPendingByConversation.size === 0) return;
+    const timeoutIds: number[] = [];
+    for (const pending of manualCompactPendingByConversation.values()) {
+      const remaining = Math.max(0, pending.startedAt + MANUAL_COMPACTION_TIMEOUT_MS - Date.now());
+      const timeoutId = window.setTimeout(() => {
+        if (clearManualCompactPendingRequest(pending.conversationId, pending.operationId)) {
+          setChatError(translate("chat.manualCompactTimedOut", settings.locale));
+        }
+      }, remaining);
+      timeoutIds.push(timeoutId);
+    }
+    return () => {
+      for (const id of timeoutIds) window.clearTimeout(id);
+    };
+  }, [clearManualCompactPendingRequest, manualCompactPendingByConversation, settings.locale]);
+
+  // 后台会话订阅：显示会话已由 useConversationChat 订阅，这里补齐其余 pending 会话
+  // 的流，使其 store 收到 manual_compaction_result 终态（缺陷 #3 多会话、缺陷 #5 稳定）。
+  useEffect(() => {
+    if (!api || manualCompactPendingByConversation.size === 0) return;
+    const cleanups: Array<() => void> = [];
+    for (const pending of manualCompactPendingByConversation.values()) {
+      if (pending.conversationId === displayedConversationId) continue;
+      const store = transcriptStoreRegistry.get(pending.conversationId);
+      const cleanup = api.subscribeConversationStream(pending.conversationId, {
+        onSync: (result) => {
+          store.applySync(result);
+          handleConversationStreamSyncRef.current(pending.conversationId, result);
+        },
+        onEvent: (event) => {
+          store.applyEvent(event);
+          handleConversationStreamEventRef.current(pending.conversationId, event);
+        },
+      });
+      cleanups.push(cleanup);
+    }
+    return () => {
+      for (const cleanup of cleanups) cleanup();
+    };
+  }, [api, displayedConversationId, manualCompactPendingByConversation, transcriptStoreRegistry]);
 
   // Open in flight (history-window fetch, before the replace apply paints).
   const historyDetailLoading = conversationOpenState.phase === "opening";
@@ -4434,6 +4590,35 @@ export default function GatewayApp() {
     () => selectLatestTaskProgress(transcriptRows),
     [transcriptRows],
   );
+  // 用量环读数（缺陷 #6）：最近 assistant 轮次的真实 usage；压缩后回退检查点估算。
+  // 不再以逐帧变化的标量 prop 传入 memo 化的 ChatComposerBar（那会让整枚 composer
+  // 流式期间每帧重渲染、打字卡顿），而是构造订阅隔离的 source：订阅显示会话的
+  // transcript store，getContextUsageTokens 惰性 derive 并按 store revision 缓存，
+  // revision 未变直接复用——只有环自身经 useSyncExternalStore 重渲染。
+  // 本 memo 是 contextUsageTokens 的唯一消费者迁移点：迁移后 GatewayApp 不再持有
+  // 标量读数（无 mobile header 等其他消费者）。
+  const contextUsageTokensSource = useMemo<ContextUsageTokensSource>(() => {
+    const store = displayedConversationId
+      ? transcriptStoreRegistry.get(displayedConversationId)
+      : null;
+    if (!store) {
+      return { subscribe: () => () => {}, getContextUsageTokens: () => undefined };
+    }
+    let cache: { revision: number; value: number | undefined } | null = null;
+    return {
+      // store 的 subscribe/getSnapshot 是闭包属性，可安全解绑传递。
+      subscribe: store.subscribe,
+      getContextUsageTokens: () => {
+        const snapshot = store.getSnapshot();
+        if (cache && cache.revision === snapshot.revision) {
+          return cache.value;
+        }
+        const value = deriveContextUsageTokens(snapshot.rows);
+        cache = { revision: snapshot.revision, value };
+        return value;
+      },
+    };
+  }, [displayedConversationId, transcriptStoreRegistry]);
   // 当前会话的待审批工具:遍历渲染中的 transcript,筛出带 __toolApprovalPending 标记
   // 且尚无结果的 tool call(与 ToolCallItem 判定同源)。用于输入框上方的集中审批栏,
   // 取代埋在各折叠项里的分散卡片。快照 revision 变化时经 useConversationChat 重渲染,
@@ -4514,6 +4699,50 @@ export default function GatewayApp() {
   const composerIsSending = transcriptBusy;
   const transcriptError = displayedTranscriptRowCount === 0 ? null : chatError;
   const composerCompactionBlocked = transcriptToolStatusIsCompaction;
+  // 手动压缩：受理回包只表示桌面开始处理；按钮保持 pending，直到同一
+  // operationId 的 manual_compaction_result 终态到达。探针拒绝（低于阈值/无内容/忙）
+  // 时桌面同步回 accepted:false + message，走 !accepted 分支即时清 pending。
+  const handleManualCompact = useCallback(async () => {
+    const conversationIdValue = getDisplayedConversationId();
+    // 缺陷 #3：只在“同会话”已有 pending 时拒绝（静默 return 即可，UI 已 blocked）；
+    // 其他会话的 pending 不再屏蔽本会话的压缩请求。
+    if (!api || !conversationIdValue || manualCompactPendingRef.current.has(conversationIdValue)) {
+      return;
+    }
+    const operationId = createUuid();
+    const pendingRequest: ManualCompactPendingRequest = {
+      conversationId: conversationIdValue,
+      operationId,
+      workdir: displayedConversationWorkdir,
+      startedAt: Date.now(),
+    };
+    setManualCompactPendingRequest(pendingRequest);
+    try {
+      const response = await api.chatQueueCompactNow(conversationIdValue, operationId);
+      if (
+        !response.accepted &&
+        clearManualCompactPendingRequest(conversationIdValue, operationId) &&
+        isDisplayedConversation(conversationIdValue)
+      ) {
+        setChatError(response.message || translate("chat.manualCompactRejected", settings.locale));
+      }
+    } catch (error) {
+      if (
+        clearManualCompactPendingRequest(conversationIdValue, operationId) &&
+        isDisplayedConversation(conversationIdValue)
+      ) {
+        setChatError(
+          asErrorMessage(error, translate("chat.manualCompactRejected", settings.locale)),
+        );
+      }
+    }
+  }, [
+    api,
+    clearManualCompactPendingRequest,
+    displayedConversationWorkdir,
+    setManualCompactPendingRequest,
+    settings.locale,
+  ]);
   const chatProtocolIncompatible = isChatRuntimeProtocolIncompatible(status);
   const chatProtocolIncompatibleMessage = chatProtocolIncompatible
     ? translate("chat.runtime.protocolIncompatible", settings.locale)
@@ -4676,6 +4905,7 @@ export default function GatewayApp() {
           <div className="gateway-editor-host">
             <GatewaySidebarContainer
               store={sidebarStore}
+              transientRunningConversations={manualCompactTransientConversations}
               currentConversationId={displayedConversationId}
               isOpen={sidebarOpen}
               fontScale={settings.customSettings.fontScale.sidebar}
@@ -4743,7 +4973,6 @@ export default function GatewayApp() {
                 updatingIds={sharedManagerUpdatingIds}
                 errors={sharedManagerErrors}
                 listError={sharedHistoryListError}
-                shareOrigin={settings.remote.gatewayUrl}
                 onRefresh={handleRefreshSharedHistoryStatuses}
                 onLoadStatus={handleLoadSharedHistoryStatus}
                 onDisableShare={handleDisableSharedHistory}
@@ -4940,7 +5169,6 @@ export default function GatewayApp() {
                                 onLoadEarlierHistory={
                                   selectedHistoryHasMore ? handleLoadEarlierHistory : undefined
                                 }
-                                isAgentMode={isAgentMode}
                                 showUsage={isAgentDevExecutionMode}
                                 usageContextWindow={currentModelContextWindow}
                                 workspaceRoot={displayedConversationWorkdir}
@@ -5008,6 +5236,10 @@ export default function GatewayApp() {
                           chatRuntimeControls={chatRuntimeControlsForCurrentProvider}
                           reasoningOptions={chatRuntimeReasoningOptions}
                           thinkingAlwaysOn={chatRuntimeThinkingAlwaysOn}
+                          contextUsageTokensSource={contextUsageTokensSource}
+                          contextWindow={currentModelContextWindow}
+                          onManualCompactConfirm={handleManualCompact}
+                          manualCompactBlocked={manualCompactPending || composerCompactionBlocked}
                           gitClient={gitClient}
                           gitWriteEnabled={settings.remote.enableWebGit}
                           gitDisabledMessage={gitDisabledMessage}

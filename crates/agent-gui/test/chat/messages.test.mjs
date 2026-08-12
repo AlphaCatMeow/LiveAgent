@@ -3,6 +3,7 @@ import test from "node:test";
 import { createTsModuleLoader } from "../helpers/load-ts-module.mjs";
 
 const loader = createTsModuleLoader();
+const assistantStatus = loader.loadModule("@liveagent/ui/lib/chat/assistantStatus.ts");
 const uploadedFiles = loader.loadModule("src/lib/chat/messages/uploadedFiles.ts");
 const conversationState = loader.loadModule("src/lib/chat/conversation/conversationState.ts");
 const uiMessages = loader.loadModule("src/lib/chat/messages/uiMessages.ts");
@@ -374,6 +375,7 @@ test("UI message builder groups assistant rounds and attaches matching tool resu
       api: "openai-responses",
       stopReason: "stop",
       usage: { totalTokens: 42 },
+      liveAgentContextUsage: { totalTokens: 84, fixedTokens: 20 },
       timestamp: 4,
     },
   ];
@@ -387,6 +389,7 @@ test("UI message builder groups assistant rounds and attaches matching tool resu
   assert.equal(uiMessages.getRoundThinkingText(ui[1].rounds[0]), "checking");
   assert.equal(uiMessages.getRoundToolTrace(ui[1].rounds[0])[0].toolResult.content[0].text, "file contents");
   assert.equal(ui[1].rounds[1].meta.usageTotalTokens, 42);
+  assert.equal(ui[1].rounds[1].meta.contextUsageTokens, 84);
 });
 
 test("UI message builder preserves provider hosted search blocks", () => {
@@ -2326,8 +2329,11 @@ test("chat page helpers keep model options stable and normalize status/title edg
   assert.match(chatHelpers.buildConversationTitlePrompt("hello", "zh-CN"), /简体中文标题/);
   assert.match(chatHelpers.buildConversationTitlePrompt("hello", "en-US"), /within 10 words/i);
   assert.equal(chatHelpers.buildFallbackConversationTitle("x".repeat(60)), `${"x".repeat(48)}...`);
-  assert.equal(chatHelpers.normalizeLiveToolStatus("第 2 轮：模型生成中..."), chatHelpers.VIBING_STATUS);
-  assert.equal(chatHelpers.normalizeLiveToolStatus("Running"), "Running");
+  assert.equal(
+    assistantStatus.normalizeLiveToolStatus("第 2 轮：模型生成中..."),
+    assistantStatus.VIBING_STATUS,
+  );
+  assert.equal(assistantStatus.normalizeLiveToolStatus("Running"), "Running");
   assert.equal(chatHelpers.isAbortLikeError(new Error("AbortError: aborted")), true);
   assert.equal(chatHelpers.isAbortLikeError("network failed"), false);
 });

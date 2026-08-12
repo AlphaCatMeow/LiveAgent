@@ -1,5 +1,13 @@
 import {
-  findCatalogModel,
+  ANTHROPIC_LONG_CONTEXT_WINDOW,
+  ANTHROPIC_STANDARD_CONTEXT_WINDOW,
+  hasAnthropicLongContextSuffix,
+  isAnthropicAdaptiveModelId,
+  resolveAnthropicContextWindow,
+  resolveAnthropicKnownModelLimits,
+  shouldSendAnthropicLongContextHeader,
+} from "@liveagent/ui/lib/models/anthropicContext";
+import {
   getProviderFallbackLimits,
   normalizeModelLimits,
   repairStaleCrossProviderLimits,
@@ -8,7 +16,6 @@ import {
 } from "@liveagent/ui/lib/models/modelCatalog";
 import {
   clampThinkingLevelToList,
-  isAnthropicAdaptiveModelId,
   resolveModelThinking,
   type ThinkingLevel,
 } from "@liveagent/ui/lib/models/modelThinking";
@@ -294,12 +301,16 @@ export type SelectedModel = {
   model: string;
 };
 
+export type PromptCacheHintMode = "auto" | "openai-key" | "openrouter-session" | "none";
+
 export type ProviderModelConfig = {
   id: string;
   /** /models 元数据；缺失时保持旧设置格式兼容。 */
   ownedBy?: string;
   contextWindow: number;
   maxOutputToken: number;
+  /** OpenAI 兼容端点的缓存提示协议；缺失时继承供应商设置。 */
+  promptCacheHintMode?: PromptCacheHintMode;
 };
 
 export type ChatRuntimeControls = {
@@ -429,6 +440,10 @@ export type CustomProvider = {
   name: string;
   type: ProviderId;
   baseUrl: string;
+  /** 将 baseUrl 作为最终请求地址，本地反代不再追加协议端点路径。 */
+  isFullUrl: boolean;
+  /** 可选的模型列表完整地址；Gemini 始终使用自动端点发现。 */
+  modelsUrl?: string;
   apiKey: string;
   apiKeyConfigured?: boolean;
   customHeaders?: { key: string; value: string }[];
@@ -438,6 +453,8 @@ export type CustomProvider = {
   requestFormat?: CodexRequestFormat;
   reasoning: ReasoningLevel;
   promptCachingEnabled: boolean;
+  /** OpenAI 兼容端点的缓存提示协议；旧配置由 promptCachingEnabled 迁移。 */
+  promptCacheHintMode?: PromptCacheHintMode;
   /** 仅 Anthropic：ephemeral 缓存保留档位；long 在官方 API 上映射为 1h TTL。 */
   promptCacheRetention?: "short" | "long";
   nativeWebSearchEnabled: boolean;
@@ -488,6 +505,13 @@ export const CODEX_REQUEST_FORMAT_LABELS: Record<CodexRequestFormat, string> = {
   "openai-responses": "Responses API",
 };
 
+export const PROMPT_CACHE_HINT_MODES = [
+  "auto",
+  "openai-key",
+  "openrouter-session",
+  "none",
+] as const satisfies readonly PromptCacheHintMode[];
+
 const CODEX_RESPONSES_SUFFIX = "/responses";
 const CODEX_RESPONSE_SUFFIX = "/response";
 const CODEX_CHAT_COMPLETIONS_SUFFIX = "/chat/completions";
@@ -518,9 +542,14 @@ function normalizeCodexRequestFormat(input: unknown): CodexRequestFormat | undef
   }
 }
 
+function normalizePromptCacheHintMode(input: unknown): PromptCacheHintMode | undefined {
+  return PROMPT_CACHE_HINT_MODES.find((mode) => mode === input);
+}
+
 function normalizeCodexRouting(
   baseUrlInput: unknown,
   requestFormatInput: unknown,
+  isFullUrl = false,
 ): {
   baseUrl: string;
   requestFormat: CodexRequestFormat;
@@ -528,15 +557,23 @@ function normalizeCodexRouting(
   let baseUrl = normalizeBaseUrl(typeof baseUrlInput === "string" ? baseUrlInput : "");
   let requestFormat = normalizeCodexRequestFormat(requestFormatInput);
   const lower = baseUrl.toLowerCase();
+  let routePath = lower;
+  if (isFullUrl) {
+    try {
+      routePath = new URL(baseUrl).pathname.replace(/\/+$/, "").toLowerCase();
+    } catch {
+      // URL validation is handled by the desktop request proxy.
+    }
+  }
 
-  if (lower.endsWith(CODEX_CHAT_COMPLETIONS_SUFFIX)) {
-    baseUrl = baseUrl.slice(0, -CODEX_CHAT_COMPLETIONS_SUFFIX.length);
+  if (routePath.endsWith(CODEX_CHAT_COMPLETIONS_SUFFIX)) {
+    if (!isFullUrl) baseUrl = baseUrl.slice(0, -CODEX_CHAT_COMPLETIONS_SUFFIX.length);
     requestFormat ??= "openai-completions";
-  } else if (lower.endsWith(CODEX_RESPONSES_SUFFIX)) {
-    baseUrl = baseUrl.slice(0, -CODEX_RESPONSES_SUFFIX.length);
+  } else if (routePath.endsWith(CODEX_RESPONSES_SUFFIX)) {
+    if (!isFullUrl) baseUrl = baseUrl.slice(0, -CODEX_RESPONSES_SUFFIX.length);
     requestFormat ??= "openai-responses";
-  } else if (lower.endsWith(CODEX_RESPONSE_SUFFIX)) {
-    baseUrl = baseUrl.slice(0, -CODEX_RESPONSE_SUFFIX.length);
+  } else if (routePath.endsWith(CODEX_RESPONSE_SUFFIX)) {
+    if (!isFullUrl) baseUrl = baseUrl.slice(0, -CODEX_RESPONSE_SUFFIX.length);
     requestFormat ??= "openai-responses";
   }
 
@@ -553,6 +590,7 @@ export function getBuiltinCustomProviders(): CustomProvider[] {
       name: "Anthropic",
       type: "claude_code",
       baseUrl: "https://api.anthropic.com/v1",
+      isFullUrl: false,
       apiKey: "",
       customHeaders: [],
       models: [],
@@ -568,6 +606,7 @@ export function getBuiltinCustomProviders(): CustomProvider[] {
       name: "OpenAI",
       type: "codex",
       baseUrl: "https://api.openai.com/v1",
+      isFullUrl: false,
       apiKey: "",
       customHeaders: [],
       models: [],
@@ -575,6 +614,7 @@ export function getBuiltinCustomProviders(): CustomProvider[] {
       requestFormat: "openai-responses",
       reasoning: "off",
       promptCachingEnabled: true,
+      promptCacheHintMode: "auto",
       nativeWebSearchEnabled: true,
       useSystemProxy: false,
       usageQuery: getDefaultUsageQueryConfig(),
@@ -584,6 +624,7 @@ export function getBuiltinCustomProviders(): CustomProvider[] {
       name: "Gemini",
       type: "gemini",
       baseUrl: "https://generativelanguage.googleapis.com/v1beta",
+      isFullUrl: false,
       apiKey: "",
       customHeaders: [],
       models: [],
@@ -599,6 +640,7 @@ export function getBuiltinCustomProviders(): CustomProvider[] {
       name: "Grok",
       type: "xai",
       baseUrl: "https://api.x.ai/v1",
+      isFullUrl: false,
       apiKey: "",
       customHeaders: [],
       models: [],
@@ -1268,29 +1310,6 @@ export function normalizeRemoteSettings(input: unknown): RemoteSettings {
   };
 }
 
-// 旧世代默认按 200K 处理；显式 [1m] 变体表示中转端能力，adaptive 世代
-// （isAnthropicAdaptiveModelId，来自镜像模块 lib/models/modelThinking）则是
-// 1M GA 世代。与桌面端 anthropicModels.ts 的有效窗口规则手动保持同步。
-const ANTHROPIC_STANDARD_CONTEXT_WINDOW = 200_000;
-const ANTHROPIC_LONG_CONTEXT_WINDOW = 1_000_000;
-
-function shouldSendAnthropicLongContextHeader(baseUrl: string | undefined): boolean {
-  if (!baseUrl?.trim()) return false;
-  try {
-    const host = new URL(baseUrl).hostname.toLowerCase();
-    return !(
-      host === "api.anthropic.com" ||
-      host.includes("aiplatform.googleapis.com") ||
-      host.includes("vertexai.googleapis.com") ||
-      host.endsWith(".deepseek.com") ||
-      host === "deepseek.com" ||
-      host.endsWith(".amazonaws.com")
-    );
-  } catch {
-    return false;
-  }
-}
-
 function getKnownModelLimits(
   providerId: ProviderId,
   modelId: string | undefined,
@@ -1298,19 +1317,8 @@ function getKnownModelLimits(
 ): Pick<ProviderModelConfig, "contextWindow" | "maxOutputToken"> | undefined {
   const trimmedId = modelId?.trim();
   if (!trimmedId) return undefined;
-  // Anthropic 的有效窗口叠加 1M beta/adaptive 世代策略（与桌面端
-  // anthropicModels.ts 手动同步）；其余供应商直接读生成目录（数据已在
-  // 生成期过统一语义规则）。
   if (providerId === "claude_code") {
-    const known = findCatalogModel("claude_code", trimmedId);
-    if (!known) return undefined;
-    const contextWindow = isAnthropicAdaptiveModelId(trimmedId)
-      ? known.contextWindow
-      : /\[1m\]$/i.test(trimmedId) &&
-          (baseUrl === undefined || shouldSendAnthropicLongContextHeader(baseUrl))
-        ? Math.max(known.contextWindow, ANTHROPIC_LONG_CONTEXT_WINDOW)
-        : Math.min(known.contextWindow, ANTHROPIC_STANDARD_CONTEXT_WINDOW);
-    return { contextWindow, maxOutputToken: known.maxOutputToken };
+    return resolveAnthropicKnownModelLimits(trimmedId, baseUrl);
   }
   return resolveModelLimits(providerId, trimmedId);
 }
@@ -1346,11 +1354,13 @@ export function getProviderModelDefaults(
   if (
     providerId === "claude_code" &&
     modelId &&
-    (/\[1m\]$/i.test(modelId.trim()) || isAnthropicAdaptiveModelId(modelId))
+    (hasAnthropicLongContextSuffix(modelId) || isAnthropicAdaptiveModelId(modelId))
   ) {
     return {
       contextWindow:
-        /\[1m\]$/i.test(modelId.trim()) && baseUrl && !shouldSendAnthropicLongContextHeader(baseUrl)
+        hasAnthropicLongContextSuffix(modelId) &&
+        baseUrl &&
+        !shouldSendAnthropicLongContextHeader(baseUrl)
           ? ANTHROPIC_STANDARD_CONTEXT_WINDOW
           : ANTHROPIC_LONG_CONTEXT_WINDOW,
       maxOutputToken: getProviderFallbackLimits(providerId).maxOutputToken,
@@ -1413,11 +1423,14 @@ export function normalizeProviderModelConfig(
   // 跨供应商回查上线前落库的别家模型吃过本供应商兜底值，同样读侧修复，
   // 不需要用户删除重加（识别与替换规则见 repairStaleCrossProviderLimits）。
   const limits = repairStaleCrossProviderLimits(providerId, id, normalizeModelLimits(storedLimits));
+  const promptCacheHintMode =
+    providerId === "codex" ? normalizePromptCacheHintMode(obj.promptCacheHintMode) : undefined;
   return {
     id,
     ...(ownedBy ? { ownedBy } : {}),
     contextWindow: limits.contextWindow,
     maxOutputToken: limits.maxOutputToken,
+    ...(promptCacheHintMode ? { promptCacheHintMode } : {}),
   };
 }
 export function normalizeProviderModelConfigs(
@@ -1454,26 +1467,13 @@ export function findProviderModelConfig(
     };
   }
   if (provider.type !== "claude_code") return matched;
-  const defaults = getProviderModelDefaults(provider.type, normalizedId, provider.baseUrl);
-  const known = findCatalogModel("claude_code", normalizedId);
-  const isAdaptive = isAnthropicAdaptiveModelId(normalizedId);
-  const hasLongContextSuffix = /\[1m\]$/i.test(normalizedId);
-  const contextWindow = isAdaptive
-    ? Math.max(matched.contextWindow, defaults.contextWindow)
-    : hasLongContextSuffix
-      ? shouldSendAnthropicLongContextHeader(provider.baseUrl)
-        ? Math.max(matched.contextWindow, defaults.contextWindow)
-        : defaults.contextWindow
-      : known &&
-          !shouldSendAnthropicLongContextHeader(provider.baseUrl) &&
-          known.contextWindow > ANTHROPIC_STANDARD_CONTEXT_WINDOW
-        ? defaults.contextWindow
-        : matched.contextWindow === ANTHROPIC_STANDARD_CONTEXT_WINDOW
-          ? defaults.contextWindow
-          : matched.contextWindow;
   return {
     ...matched,
-    contextWindow,
+    contextWindow: resolveAnthropicContextWindow(
+      normalizedId,
+      matched.contextWindow,
+      provider.baseUrl,
+    ),
   };
 }
 
@@ -1610,15 +1610,25 @@ function normalizeUsageQueryConfig(input: unknown): UsageQueryConfig {
 export function normalizeCustomProvider(input: unknown): CustomProvider {
   const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
   const type = normalizeProviderId(obj.type);
+  const isFullUrl = obj.isFullUrl === true;
   const codexRouting =
     type === "codex" || type === "xai"
-      ? normalizeCodexRouting(obj.baseUrl, type === "xai" ? "openai-responses" : obj.requestFormat)
+      ? normalizeCodexRouting(
+          obj.baseUrl,
+          type === "xai" ? "openai-responses" : obj.requestFormat,
+          isFullUrl,
+        )
       : undefined;
   const models = normalizeProviderModelConfigs(obj.models, type);
   const modelOrder = normalizeProviderModelOrder(obj.modelOrder, models);
   const validModelIds = new Set(models.map((model) => model.id));
   const apiKey = normalizeApiKey(typeof obj.apiKey === "string" ? obj.apiKey : "");
   const id = typeof obj.id === "string" && obj.id.trim() ? obj.id.trim() : createUuid();
+  const promptCacheHintMode =
+    type === "codex"
+      ? (normalizePromptCacheHintMode(obj.promptCacheHintMode) ??
+        (obj.promptCachingEnabled === false ? "none" : "auto"))
+      : undefined;
 
   return {
     id,
@@ -1627,6 +1637,10 @@ export function normalizeCustomProvider(input: unknown): CustomProvider {
     baseUrl: codexRouting
       ? codexRouting.baseUrl
       : normalizeBaseUrl(typeof obj.baseUrl === "string" ? obj.baseUrl : ""),
+    isFullUrl,
+    ...(type !== "gemini" && typeof obj.modelsUrl === "string" && obj.modelsUrl.trim()
+      ? { modelsUrl: obj.modelsUrl.trim() }
+      : {}),
     apiKey,
     apiKeyConfigured: apiKey.length > 0 || obj.apiKeyConfigured === true,
     customHeaders: normalizeCustomHeaders(obj.customHeaders),
@@ -1637,10 +1651,15 @@ export function normalizeCustomProvider(input: unknown): CustomProvider {
     ),
     requestFormat: type === "xai" ? "openai-responses" : codexRouting?.requestFormat,
     reasoning: normalizeReasoningLevel(obj.reasoning),
-    // Anthropic/OpenAI 默认开启提示词缓存（OpenAI 侧体现为稳定的
-    // prompt_cache_key 路由提示）；Gemini / xAI 不使用 OpenAI 风格 prompt cache。
+    // Anthropic 默认开启显式缓存；Codex 的布尔值仅保留旧设置兼容，实际 wire
+    // 行为由 promptCacheHintMode 决定。Gemini / xAI 不使用这里的缓存控制。
     promptCachingEnabled:
-      type === "gemini" || type === "xai" ? false : obj.promptCachingEnabled !== false,
+      type === "codex"
+        ? promptCacheHintMode !== "none"
+        : type === "gemini" || type === "xai"
+          ? false
+          : obj.promptCachingEnabled !== false,
+    ...(promptCacheHintMode ? { promptCacheHintMode } : {}),
     ...(type === "claude_code" && obj.promptCacheRetention === "long"
       ? { promptCacheRetention: "long" as const }
       : {}),

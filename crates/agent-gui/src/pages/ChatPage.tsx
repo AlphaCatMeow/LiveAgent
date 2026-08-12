@@ -26,6 +26,10 @@ import { WorkspaceOverlayHost } from "@liveagent/ui/components/workspace-editor/
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { getAutomationState, useAutomation } from "@liveagent/ui/lib/automation/index";
 import type { ChatFileLink } from "@liveagent/ui/lib/chat/chatFileLinks";
+import {
+  buildContextUsageScanItems,
+  deriveContextUsageTokens,
+} from "@liveagent/ui/lib/chat/contextUsage";
 import { openChatFileLink } from "@liveagent/ui/lib/chat/openChatFileLink";
 import { selectLatestTaskProgress } from "@liveagent/ui/lib/chat/taskProgress";
 import type { ScrollFollowHandle } from "@liveagent/ui/lib/chat-scroll/useScrollFollow";
@@ -41,6 +45,7 @@ import {
 } from "@liveagent/ui/lib/sidebar/selectors";
 import { createSidebarStore } from "@liveagent/ui/lib/sidebar/store";
 import { useSidebarSelector } from "@liveagent/ui/lib/sidebar/useSidebarSelector";
+import { buildSkillsSystemPrompt, type SkillSummary } from "@liveagent/ui/lib/skills/index";
 import { terminalSessionBelongsToProject } from "@liveagent/ui/lib/terminal/sessionStore";
 import type { LocalTunnelClient } from "@liveagent/ui/lib/tunnels/constants";
 import { listen } from "@tauri-apps/api/event";
@@ -77,6 +82,7 @@ import {
   getFirstUserMessageText,
 } from "../lib/chat/page/chatPageHelpers";
 import { tauriGitClient } from "../lib/git/tauriGitClient";
+import { buildMemoryOverviewSection } from "../lib/memory/prompts/injection";
 import {
   type AppSettings,
   getRightDockFileTreeState,
@@ -152,6 +158,11 @@ import {
 import { useChatTurnQueue } from "./chat/queue/useChatTurnQueue";
 import { syncMovedConversationRuntimeWorkdir } from "./chat/runtime/chatPageRuntime";
 import { useChatModelSelection } from "./chat/runtime/useChatModelSelection";
+import {
+  type ManualCompactionRequest,
+  type ManualCompactionResult,
+  useManualCompaction,
+} from "./chat/runtime/useManualCompaction";
 import { useSendChatTurn } from "./chat/runtime/useSendChatTurn";
 import { ChatSidebarContainer } from "./chat/sidebar/ChatSidebarContainer";
 import { useProjectTerminals } from "./chat/workspace/useProjectTerminals";
@@ -172,6 +183,7 @@ type ChatPageProps = {
   onOpenSettings: (section?: SectionId, providerId?: string) => void;
   onToggleTheme: () => void;
   appUpdate?: AppUpdateController;
+  onRunningConversationCountChange?: (count: number) => void;
 };
 
 function CurrentTaskProgress(props: {
@@ -207,6 +219,7 @@ export function ChatPage(props: ChatPageProps) {
     onOpenSettings,
     onToggleTheme,
     appUpdate,
+    onRunningConversationCountChange,
   } = props;
   // Monaco reads NLS globals while the lazy editor module imports monaco-editor.
   setPreferredMonacoNlsLocale(settings.locale);
@@ -350,6 +363,7 @@ export function ChatPage(props: ChatPageProps) {
     sharedManagerErrors,
     sharedManagerGatewayUrlLoading,
     sharedManagerShareOrigin,
+    sharedManagerShareOriginPort,
     sharedHistoryItems,
     removeSharedHistoryItems,
     handleLoadSharedHistoryStatus,
@@ -428,6 +442,10 @@ export function ChatPage(props: ChatPageProps) {
     [],
   );
   const sendActionRef = useRef<SendChatAction>(async () => false);
+  // WebUI 经 chat_queue compact_now 中继的手动压缩入口(useChatTurnQueue 消费)。
+  const manualCompactActionRef = useRef<
+    (request?: ManualCompactionRequest) => Promise<ManualCompactionResult>
+  >(async () => ({ status: "skipped" }));
   const ensureGatewayBridgeConversationReadyRef = useRef<
     (id: string, options?: EnsureGatewayBridgeConversationReadyOptions) => Promise<string>
   >(async (id) => id.trim());
@@ -469,6 +487,60 @@ export function ChatPage(props: ChatPageProps) {
     registerGatewayRunMirror,
     finishGatewayRunMirror,
   } = useGatewayRunMirrorCoordinator();
+
+  // 用量环读数：与 WebUI 同一把共享扫描器（deriveContextUsageTokens），
+  // 历史项 + 流式实时轮次（live store 每帧批量提交）联合倒扫。经订阅源
+  // 直达环组件，流式读数逐帧更新而不回流 ChatPage。
+  const contextUsageRingRunning = isSending || compactionStatus.phase === "running";
+  const contextUsageTokensSource = useMemo(() => {
+    let cache: {
+      rounds: unknown;
+      draft: string;
+      runtimeValue: number | undefined;
+      value: number | undefined;
+    } | null = null;
+    return {
+      subscribe: liveTranscriptStore.subscribe,
+      getContextUsageTokens: () => {
+        const live = liveTranscriptStore.getSnapshot();
+        // 与 TranscriptList 的 live tail 同一门槛：只有当前会话在跑（发送或
+        // 压缩中）才把流式尾部计入（后台会话的 live store 内容不属于本会话）。
+        const includeLive = contextUsageRingRunning && !live.isSettled;
+        const rounds = includeLive ? live.liveRounds : null;
+        const draft = includeLive ? live.draftAssistantText : "";
+        const runtimeValue = getCompactionController(currentConversationId).contextUsageTokens;
+        if (
+          cache &&
+          cache.rounds === rounds &&
+          cache.draft === draft &&
+          cache.runtimeValue === runtimeValue
+        ) {
+          return cache.value;
+        }
+        // 优先级：运行中（发送/压缩）转录尾部滞后于账本，账本读数优先；空闲时
+        // 转录含权威锚点（edit-resend 截断历史后账本仍冻结在压缩前读数），转录
+        // 扫描才准。惰性求值：命中账本优先项即跳过全量转录扫描（流式期每帧对
+        // 大工具结果 JSON.stringify 后丢弃的开销）。
+        let value: number | undefined;
+        if (contextUsageRingRunning && runtimeValue !== undefined) {
+          value = runtimeValue;
+        } else {
+          const transcriptValue = deriveContextUsageTokens(
+            buildContextUsageScanItems(transcriptItems, includeLive ? live : null),
+          );
+          value = transcriptValue ?? runtimeValue;
+        }
+        cache = { rounds, draft, runtimeValue, value };
+        return value;
+      },
+    };
+  }, [
+    contextUsageRingRunning,
+    currentConversationId,
+    getCompactionController,
+    liveTranscriptStore,
+    transcriptItems,
+  ]);
   const {
     currentConversationIdRef,
     conversationRuntimeCacheRef,
@@ -483,6 +555,7 @@ export function ChatPage(props: ChatPageProps) {
     getConversationStopRequestVersion,
     isConversationStopRequested,
     consumeConversationStop,
+    setConversationRunningState,
     setConversationStopHandler,
     clearConversationStopHandler,
     requestActiveConversationStop,
@@ -994,6 +1067,7 @@ export function ChatPage(props: ChatPageProps) {
     clearCachedComposerDraft,
     displayedConversationWorkdir,
     sendActionRef,
+    manualCompactActionRef,
   });
 
   // Queue snapshots publish on queue mutation only; after a gateway
@@ -1482,6 +1556,73 @@ export function ChatPage(props: ChatPageProps) {
   sendActionRef.current = send;
   stopSendingActionRef.current = stopSending;
 
+  // 手动压缩的同源提示词构建：当前会话据其工作区解析 skills/memory 提示词，
+  // 与发送链路的 buildPreparedContext 同源（activeAgentPrompt 单独直传）。手动
+  // 压缩无触发消息，skills 的 explicit 提及为空。跨会话中继的后台会话在此层拿
+  // 不到工作区上下文，返回空提示词（当前会话必须同源，后台保持现状）。
+  const resolveManualCompactionPromptInputs = useCallback(
+    async (input: { isCurrentConversation: boolean; workdir?: string }) => {
+      if (!input.isCurrentConversation) {
+        return { skillsPrompt: "", memoryPrompt: "" };
+      }
+      const promptWorkdir = input.workdir?.trim() ?? "";
+      const resources = resolveWorkspaceResources(settings, promptWorkdir);
+      let skillsPrompt = "";
+      if (resources.skillsEnabled && isAgentMode && resources.skillNames.length > 0) {
+        const byName = new Map(availableSkills.map((skill) => [skill.name, skill]));
+        const selectedSkills = resources.skillNames
+          .map((name) => byName.get(name))
+          .filter((skill): skill is SkillSummary => Boolean(skill));
+        if (selectedSkills.length > 0) {
+          skillsPrompt = buildSkillsSystemPrompt({
+            rootDir: skillsRootDir,
+            selected: selectedSkills,
+          });
+        }
+      }
+      let memoryPrompt = "";
+      if (promptWorkdir) {
+        try {
+          memoryPrompt = await buildMemoryOverviewSection(promptWorkdir);
+        } catch (error) {
+          console.warn("Failed to build manual compaction memory prompt", error);
+          memoryPrompt = "";
+        }
+      }
+      return { skillsPrompt, memoryPrompt };
+    },
+    [availableSkills, isAgentMode, settings, skillsRootDir],
+  );
+
+  const handleManualCompact = useManualCompaction({
+    settings,
+    t,
+    currentConversationIdRef,
+    isConversationRunning,
+    setConversationRunningState,
+    setConversationAbortController,
+    setConversationStopHandler,
+    clearConversationStopHandler,
+    consumeConversationStop,
+    buildRuntimeEntryFromVisibleState,
+    conversationRuntimeCacheRef,
+    ensureConversationReady: ensureGatewayBridgeConversationReady,
+    getCompactionController,
+    getConversationLiveTranscriptStore,
+    updateConversationRuntimeEntry,
+    resetLiveTranscript,
+    updateToolStatus,
+    queueGatewayBridgeEventForRequest,
+    flushGatewayBridgeEventsForRequest,
+    registerGatewayRunMirror,
+    finishGatewayRunMirror,
+    persistConversation,
+    setErrorMessage,
+    activeAgentPrompt,
+    resolveManualCompactionPromptInputs,
+  });
+  manualCompactActionRef.current = handleManualCompact;
+
   const handleOpenSidebar = useCallback(() => {
     setSidebarOpen(true);
   }, []);
@@ -1529,6 +1670,15 @@ export function ChatPage(props: ChatPageProps) {
   const sidebarRunningConversationIds = useSidebarSelector(
     sidebarStore,
     selectRunningConversationIds,
+  );
+  useEffect(() => {
+    onRunningConversationCountChange?.(sidebarRunningConversationIds.size);
+  }, [onRunningConversationCountChange, sidebarRunningConversationIds.size]);
+  useEffect(
+    () => () => {
+      onRunningConversationCountChange?.(0);
+    },
+    [onRunningConversationCountChange],
   );
   const appActionParamsRef = useRef({
     handleSelectConversation,
@@ -1919,6 +2069,7 @@ export function ChatPage(props: ChatPageProps) {
             isUpdating={shareUpdating}
             errorMessage={shareError}
             shareOrigin={sharedManagerShareOrigin}
+            shareOriginPort={sharedManagerShareOriginPort}
             shareOriginLoading={sharedManagerGatewayUrlLoading}
             onToggle={handleToggleHistoryShare}
             onRedactToolContentChange={handleSetShareRedactToolContent}
@@ -1934,6 +2085,7 @@ export function ChatPage(props: ChatPageProps) {
             updatingIds={sharedManagerUpdatingIds}
             errors={sharedManagerErrors}
             shareOrigin={sharedManagerShareOrigin}
+            shareOriginPort={sharedManagerShareOriginPort}
             shareOriginLoading={sharedManagerGatewayUrlLoading}
             onRefresh={handleRefreshSharedHistoryStatuses}
             onLoadStatus={handleLoadSharedHistoryStatus}
@@ -2063,6 +2215,10 @@ export function ChatPage(props: ChatPageProps) {
                   chatRuntimeControls={chatRuntimeControlsForCurrentProvider}
                   reasoningOptions={chatRuntimeReasoningOptions}
                   thinkingAlwaysOn={chatRuntimeThinkingAlwaysOn}
+                  contextUsageTokensSource={contextUsageTokensSource}
+                  contextWindow={currentModelContextWindow}
+                  onManualCompactConfirm={handleManualCompact}
+                  manualCompactBlocked={isCompactionRunning}
                   gitClient={tauriGitClient}
                   workspaceActivityClient={tauriWorkspaceActivityClient}
                   onSend={handleSend}

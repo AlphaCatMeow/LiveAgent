@@ -389,6 +389,7 @@ pub async fn handle_provider_models(
         request.base_url.trim(),
         request.api_key.trim(),
         request.use_system_proxy,
+        Some(request.models_url.trim()).filter(|value| !value.is_empty()),
     )
     .await?;
     Ok(proto::ProviderModelsResponse { models_json })
@@ -1400,6 +1401,7 @@ fn sanitize_provider_summary(provider: &Value) -> Result<Value, String> {
         "requestFormat",
         "reasoning",
         "promptCachingEnabled",
+        "promptCacheHintMode",
         "nativeWebSearchEnabled",
     ] {
         if let Some(value) = source.get(key) {
@@ -1475,12 +1477,14 @@ mod tests {
                 "apiKey": "secret-key",
                 "models": [],
                 "activeModels": [],
+                "promptCacheHintMode": "openrouter-session",
                 "nativeWebSearchEnabled": false
             }
         ])))
         .expect("sanitize provider summaries");
 
         assert_eq!(result[0]["id"], "provider-a");
+        assert_eq!(result[0]["promptCacheHintMode"], "openrouter-session");
         assert_eq!(result[0]["nativeWebSearchEnabled"], false);
         assert_eq!(result[0]["apiKey"], Value::Null);
         assert_eq!(result[0]["baseUrl"], Value::Null);

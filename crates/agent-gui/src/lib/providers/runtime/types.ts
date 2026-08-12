@@ -2,6 +2,7 @@ import type { SimpleStreamOptions } from "@earendil-works/pi-ai";
 import type {
   CodexRequestFormat,
   CustomProvider,
+  PromptCacheHintMode,
   ProviderId,
   ProviderModelConfig,
   ReasoningLevel,
@@ -31,11 +32,13 @@ declare const PROVIDER_RUNTIME_CONFIG_BRAND: unique symbol;
 export type ProviderRuntimeConfig = {
   readonly [PROVIDER_RUNTIME_CONFIG_BRAND]: true;
   baseUrl: string;
+  isFullUrl: boolean;
   apiKey: string;
   customHeaders?: CustomProvider["customHeaders"];
   requestFormat?: CodexRequestFormat;
   reasoning?: ReasoningLevel;
   promptCachingEnabled?: boolean;
+  promptCacheHintMode?: PromptCacheHintMode;
   promptCacheRetention?: "short" | "long";
   nativeWebSearchEnabled?: boolean;
   useSystemProxy?: boolean;

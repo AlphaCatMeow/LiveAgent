@@ -1757,6 +1757,20 @@ export class GatewayWebSocketClient {
     );
   }
 
+  // 用量环触发的手动压缩：中继到桌面端执行（受理即回包，进度与带
+  // operationId 的终态分别经聊天流回传）。
+  async chatQueueCompactNow(
+    conversationId: string,
+    operationId: string,
+  ): Promise<ChatQueueResponse> {
+    return normalizeChatQueueResponse(
+      await this.requestWithRecovery<RawChatQueueResponse>("chat_queue.compact_now", {
+        conversation_id: conversationId,
+        request_json: JSON.stringify({ operationId }),
+      }),
+    );
+  }
+
   async chatQueueMove(
     conversationId: string,
     itemId: string,
@@ -2746,12 +2760,14 @@ export class GatewayWebSocketClient {
     baseUrl: string,
     apiKey: string,
     useSystemProxy = false,
+    modelsUrl = "",
   ): Promise<unknown> {
     return this.requestWithRecovery("provider.models", {
       type,
       base_url: baseUrl,
       api_key: apiKey,
       use_system_proxy: useSystemProxy,
+      models_url: modelsUrl,
     });
   }
 
@@ -3667,6 +3683,7 @@ export type GatewayWebSocketClientLike = {
   chatQueueGet(conversationId: string): Promise<ChatQueueResponse>;
   chatQueueGetItem(conversationId: string, itemId: string): Promise<ChatQueueResponse>;
   chatQueueRunNow(conversationId: string, itemId: string): Promise<ChatQueueResponse>;
+  chatQueueCompactNow(conversationId: string, operationId: string): Promise<ChatQueueResponse>;
   chatQueueMove(
     conversationId: string,
     itemId: string,
@@ -3888,6 +3905,7 @@ export type GatewayWebSocketClientLike = {
     baseUrl: string,
     apiKey: string,
     useSystemProxy?: boolean,
+    modelsUrl?: string,
   ): Promise<unknown>;
   providerUsageQuery<T = unknown>(providerId: string, refresh: boolean): Promise<T>;
   providerUsageTest<T = unknown>(providerId: string, configJson: string): Promise<T>;

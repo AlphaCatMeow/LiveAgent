@@ -598,6 +598,57 @@ test("Anthropic settings keep 1M context parity for adaptive and explicit relay 
     ).contextWindow,
     200_000,
   );
+  assert.equal(
+    settings.findProviderModelConfig(
+      {
+        models: [
+          {
+            id: "custom-context-model[1m]",
+            contextWindow: 2_000_000,
+            maxOutputToken: 64_000,
+          },
+        ],
+        type: "claude_code",
+      },
+      "custom-context-model[1m]",
+    ).contextWindow,
+    2_000_000,
+  );
+});
+
+test("desktop model context-window edits replace stale WebUI provider values", () => {
+  const current = settings.normalizeSettings({
+    customProviders: [
+      {
+        id: "context-provider",
+        name: "Context Provider",
+        type: "codex",
+        models: [
+          {
+            id: "context-model",
+            contextWindow: 128_000,
+            maxOutputToken: 16_000,
+          },
+        ],
+        activeModels: ["context-model"],
+      },
+    ],
+  });
+  const desktop = settings.normalizeSettings({
+    ...current,
+    customProviders: current.customProviders.map((provider) => ({
+      ...provider,
+      models: provider.models.map((model) => ({ ...model, contextWindow: 512_000 })),
+    })),
+  });
+  const synced = settingsSync.applyGatewaySettingsSyncPayload(
+    current,
+    settingsSync.buildGatewaySettingsSyncPayload(desktop),
+  );
+  const provider = synced.customProviders.find((item) => item.id === "context-provider");
+
+  assert.ok(provider);
+  assert.equal(settings.findProviderModelConfig(provider, "context-model").contextWindow, 512_000);
 });
 
 test("loadWebSettings forces current gateway URL/token over stale persisted remote settings", () => {
@@ -1527,6 +1578,40 @@ test("web provider normalization keeps native web search toggle", () => {
     nativeWebSearchEnabled: false,
   });
   assert.equal(disabled.nativeWebSearchEnabled, false);
+});
+
+test("web provider normalization preserves codex cache hint policy", () => {
+  const defaults = settings.normalizeCustomProvider({ id: "codex-default", type: "codex" });
+  assert.equal(defaults.promptCacheHintMode, "auto");
+  assert.equal(defaults.promptCachingEnabled, true);
+
+  const legacyDisabled = settings.normalizeCustomProvider({
+    id: "codex-legacy-disabled",
+    type: "codex",
+    promptCachingEnabled: false,
+  });
+  assert.equal(legacyDisabled.promptCacheHintMode, "none");
+  assert.equal(legacyDisabled.promptCachingEnabled, false);
+
+  const overridden = settings.normalizeCustomProvider({
+    id: "codex-overridden",
+    type: "codex",
+    promptCacheHintMode: "openrouter-session",
+    models: [
+      { id: "openai-model", promptCacheHintMode: "openai-key" },
+      { id: "invalid-model", promptCacheHintMode: "invalid" },
+    ],
+  });
+  assert.equal(overridden.promptCacheHintMode, "openrouter-session");
+  assert.equal(overridden.models[0].promptCacheHintMode, "openai-key");
+  assert.equal(overridden.models[1].promptCacheHintMode, undefined);
+
+  const invalid = settings.normalizeCustomProvider({
+    id: "codex-invalid",
+    type: "codex",
+    promptCacheHintMode: "invalid",
+  });
+  assert.equal(invalid.promptCacheHintMode, "auto");
 });
 
 test("web right dock normalize keeps unknown session ids and unresolved active tab", () => {

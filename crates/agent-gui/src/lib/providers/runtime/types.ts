@@ -2,6 +2,7 @@ import type { SimpleStreamOptions } from "@earendil-works/pi-ai";
 import type {
   CodexRequestFormat,
   CustomProvider,
+  PromptCacheHintMode,
   ProviderId,
   ProviderModelConfig,
   ReasoningLevel,
@@ -37,6 +38,7 @@ export type ProviderRuntimeConfig = {
   requestFormat?: CodexRequestFormat;
   reasoning?: ReasoningLevel;
   promptCachingEnabled?: boolean;
+  promptCacheHintMode?: PromptCacheHintMode;
   promptCacheRetention?: "short" | "long";
   nativeWebSearchEnabled?: boolean;
   useSystemProxy?: boolean;

@@ -35,6 +35,7 @@ export function createProviderRuntimeConfig(
         : "off"
       : undefined,
     promptCachingEnabled: provider.promptCachingEnabled,
+    promptCacheHintMode: provider.promptCacheHintMode,
     promptCacheRetention: provider.promptCacheRetention,
     nativeWebSearchEnabled: controls.nativeWebSearchEnabled,
     useSystemProxy: provider.useSystemProxy,

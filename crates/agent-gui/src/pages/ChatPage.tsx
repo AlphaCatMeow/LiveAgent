@@ -628,6 +628,19 @@ export function ChatPage(props: ChatPageProps) {
 
   const projectToolTextGenerationClient = useMemo<ProjectToolTextGenerationClient>(
     () => ({
+      status: () => {
+        try {
+          resolveEffectiveChatModelSelection({
+            settings,
+            conversationSelectedModel: conversationRuntimeCacheRef.current.get(
+              currentConversationIdRef.current,
+            )?.selectedModel,
+          });
+          return "ready";
+        } catch {
+          return "unconfigured";
+        }
+      },
       generate: async (request) => {
         const selected = resolveEffectiveChatModelSelection({
           settings,

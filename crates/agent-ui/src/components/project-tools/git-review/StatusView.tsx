@@ -1,5 +1,6 @@
-// GitReview status view: staged/unstaged change lists, the commit bar, the
-// working-tree/branch diff pane and the change context menus.
+// GitReview status view: staged/unstaged change lists, the commit composer
+// pinned under the change list, the working-tree/branch diff pane and the
+// change context menus.
 //
 // Shared implementation owned by @liveagent/ui. Host-specific Git operations
 // and optional platform capabilities enter through the shared contracts.
@@ -12,10 +13,8 @@ import {
   FilePenLine,
   FolderTree,
   GitCommitHorizontal,
-  Loader2,
   MoreHorizontal,
   RefreshCw,
-  Sparkles,
   Trash2,
 } from "@liveagent/app/components/icons";
 import { useLocale } from "@liveagent/ui/i18n/index";
@@ -33,15 +32,9 @@ import {
 import { cn } from "../../../lib/shared/utils";
 import { getFileTypeIcon } from "../../chat/fileTypeIcons";
 import { Button } from "../../ui/button";
-import { Textarea } from "../../ui/textarea";
 import { useRightDockToolContext } from "../RightDockContext";
+import { GitCommitComposer } from "./CommitComposer";
 import { DiffReviewCard } from "./DiffView";
-import {
-  buildGitCommitMessagePrompt,
-  buildGitCommitMessageSystemPrompt,
-  generateDetailedCommitMessage,
-  parseGeneratedCommitMessage,
-} from "./generateCommitMessage";
 import {
   basename,
   CHANGE_CONTEXT_MENU_ITEM_CLASS,
@@ -68,7 +61,6 @@ import { GIT_REVIEW_TRANSIENT_SCROLLBAR_CLASS, useOverlayScrollbar } from "./use
 
 const INITIAL_CHANGE_ENTRY_RENDER_COUNT = 160;
 const CHANGE_ENTRY_RENDER_BATCH_SIZE = 160;
-const MAX_COMMIT_MESSAGE_PATCH_CHARS = 64_000;
 
 export function GitReviewStatusView(props: {
   activeDiffView: DiffViewKind;
@@ -117,9 +109,8 @@ export function GitReviewStatusView(props: {
     worktreeDiff,
   } = data;
   const context = useRightDockToolContext();
-  const textGenerationClient = context.clients.textGeneration;
   const onRevealInFileTree = context.fileTree.onRevealInFileTree;
-  const { locale, t } = useLocale();
+  const { t } = useLocale();
 
   const handleOverlayScroll = useOverlayScrollbar();
   const [changeContextMenu, setChangeContextMenu] = useState<ChangeContextMenuState | null>(null);
@@ -127,17 +118,8 @@ export function GitReviewStatusView(props: {
   const [discardConfirm, setDiscardConfirm] = useState<GitDiscardConfirmState | null>(null);
   const listPaneRef = useRef<HTMLElement | null>(null);
   const detailPaneRef = useRef<HTMLElement | null>(null);
-  const commitInputRef = useRef<HTMLTextAreaElement | null>(null);
-  const commitMessageValueRef = useRef(commitMessage);
-  const generationAbortRef = useRef<AbortController | null>(null);
-  const generationRequestRef = useRef(0);
   const changeContextMenuRef = useRef<HTMLDivElement | null>(null);
   const changesMenuRef = useRef<HTMLDivElement | null>(null);
-  const [generatingCommitMessage, setGeneratingCommitMessage] = useState(false);
-
-  useEffect(() => {
-    commitMessageValueRef.current = commitMessage;
-  }, [commitMessage]);
 
   // Clamp the menus against their measured size after they render (no
   // hard-coded menu dimensions); useLayoutEffect corrects the position before
@@ -193,27 +175,7 @@ export function GitReviewStatusView(props: {
 
   const entries = state.entries;
   const stagedEntries = useMemo(() => entries.filter(canUnstageEntry), [entries]);
-  const stagedGenerationKey = useMemo(
-    () =>
-      stagedEntries
-        .map((entry) => `${entry.indexStatus}\u0000${entry.oldPath ?? ""}\u0000${entry.path}`)
-        .join("\u0001"),
-    [stagedEntries],
-  );
   const workingEntries = useMemo(() => entries.filter(canStageEntry), [entries]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: cancel in-flight generation when the repo or staged index changes.
-  useEffect(() => {
-    generationAbortRef.current?.abort();
-    generationAbortRef.current = null;
-    generationRequestRef.current += 1;
-    setGeneratingCommitMessage(false);
-    return () => {
-      generationAbortRef.current?.abort();
-      generationAbortRef.current = null;
-      generationRequestRef.current += 1;
-    };
-  }, [cwd, stagedGenerationKey]);
   const [visibleStagedEntryCount, setVisibleStagedEntryCount] = useState(
     INITIAL_CHANGE_ENTRY_RENDER_COUNT,
   );
@@ -234,7 +196,6 @@ export function GitReviewStatusView(props: {
   );
   const hiddenStagedEntryCount = Math.max(0, stagedEntries.length - visibleStagedEntries.length);
   const hiddenWorkingEntryCount = Math.max(0, workingEntries.length - visibleWorkingEntries.length);
-  const operationBusy = busy !== "";
   const hasStageableChanges = state.dirtyCounts.unstaged > 0 || state.dirtyCounts.untracked > 0;
   const hasStagedChanges = state.dirtyCounts.staged > 0;
   const hasDiscardableChanges = entries.length > 0;
@@ -446,73 +407,6 @@ export function GitReviewStatusView(props: {
     [cwd, gitClient, setError],
   );
 
-  const handleGenerateCommitMessage = useCallback(async () => {
-    if (writeDisabled || operationBusy || generatingCommitMessage || stagedEntries.length === 0) {
-      return;
-    }
-
-    const requestId = generationRequestRef.current + 1;
-    generationRequestRef.current = requestId;
-    generationAbortRef.current?.abort();
-    const controller = new AbortController();
-    generationAbortRef.current = controller;
-    const commitMessageBeforeGeneration = commitMessageValueRef.current;
-    setGeneratingCommitMessage(true);
-    setError("");
-
-    try {
-      let generatedMessage = generateDetailedCommitMessage(stagedEntries, locale);
-      if (textGenerationClient && gitClient) {
-        try {
-          const stagedDiff = await gitClient.diff(cwd, "staged");
-          const patchWasTrimmed = stagedDiff.patch.length > MAX_COMMIT_MESSAGE_PATCH_CHARS;
-          const response = await textGenerationClient.generate({
-            systemPrompt: buildGitCommitMessageSystemPrompt(locale),
-            userPrompt: buildGitCommitMessagePrompt({
-              patch: stagedDiff.patch.slice(0, MAX_COMMIT_MESSAGE_PATCH_CHARS),
-              files: stagedEntries,
-              truncated: stagedDiff.truncated || patchWasTrimmed,
-            }),
-            output: "json",
-            signal: controller.signal,
-          });
-          generatedMessage = parseGeneratedCommitMessage(response, stagedEntries);
-        } catch (err) {
-          if (controller.signal.aborted) return;
-          setError(err instanceof Error ? err.message : String(err));
-        }
-      }
-
-      if (
-        controller.signal.aborted ||
-        generationRequestRef.current !== requestId ||
-        commitMessageValueRef.current !== commitMessageBeforeGeneration
-      ) {
-        return;
-      }
-      onCommitMessageChange(
-        generatedMessage.trim() || generateDetailedCommitMessage(stagedEntries, locale),
-      );
-      commitInputRef.current?.focus();
-    } finally {
-      if (generationRequestRef.current === requestId) {
-        generationAbortRef.current = null;
-        setGeneratingCommitMessage(false);
-      }
-    }
-  }, [
-    cwd,
-    generatingCommitMessage,
-    gitClient,
-    locale,
-    onCommitMessageChange,
-    operationBusy,
-    setError,
-    stagedEntries,
-    textGenerationClient,
-    writeDisabled,
-  ]);
-
   const renderChangeEntry = (entry: GitStatusEntry, section: ChangeListSection) => {
     const selected = entry.path === selectedPath;
     const contextMenuOpen =
@@ -723,6 +617,13 @@ export function GitReviewStatusView(props: {
               </>
             )}
           </div>
+          <GitCommitComposer
+            commitMessage={commitMessage}
+            data={data}
+            onCommitMessageChange={onCommitMessageChange}
+            stagedEntries={stagedEntries}
+            writeDisabled={writeDisabled}
+          />
         </aside>
         <main
           ref={detailPaneRef}
@@ -732,57 +633,6 @@ export function GitReviewStatusView(props: {
             !useSplitReviewLayout && "flex-1",
           )}
         >
-          <div className="mb-3 flex shrink-0 items-start gap-2">
-            <GitCommitHorizontal className="mt-2 h-4 w-4 text-muted-foreground" />
-            <div className="relative min-w-0 flex-1">
-              <Textarea
-                ref={commitInputRef}
-                rows={1}
-                value={commitMessage}
-                onChange={(event) => onCommitMessageChange(event.target.value)}
-                placeholder={t("projectTools.gitReview.commitMessagePlaceholder")}
-                disabled={writeDisabled || operationBusy}
-                className="min-h-8 max-h-32 resize-y py-1.5 pr-9 text-[calc(11px*var(--zone-font-scale,1))] leading-4 placeholder:text-[calc(11px*var(--zone-font-scale,1))] focus-visible:ring-1 focus-visible:ring-border/40"
-              />
-              {stagedEntries.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => void handleGenerateCommitMessage()}
-                  disabled={writeDisabled || operationBusy || generatingCommitMessage}
-                  className="absolute right-2 top-1 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-                  aria-label={t("projectTools.gitReview.generateCommitMessage")}
-                  title={t("projectTools.gitReview.generateCommitMessage")}
-                >
-                  {generatingCommitMessage ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Sparkles className="h-3.5 w-3.5" />
-                  )}
-                </button>
-              )}
-            </div>
-            <Button
-              size="sm"
-              disabled={
-                writeDisabled || operationBusy || generatingCommitMessage || !commitMessage.trim()
-              }
-              onClick={() => {
-                void runOperation(
-                  "commit",
-                  () => gitClient!.commit(cwd, commitMessage),
-                  "commit",
-                ).then((ok) => {
-                  if (ok) onCommitMessageChange("");
-                });
-              }}
-            >
-              {busy === "commit" ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                t("projectTools.gitReview.commit")
-              )}
-            </Button>
-          </div>
           {selectedEntry ? (
             <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
               <div className="flex shrink-0 items-center gap-2 rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-xs">

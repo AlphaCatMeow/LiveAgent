@@ -12,7 +12,8 @@ import {
 } from "react";
 import type { Components, ExtraProps } from "streamdown";
 import { invokeFs } from "../../lib/tools/fsBackend";
-import { ExternalLinkModal, Markdown } from "../Markdown";
+import { ExternalLinkModal } from "../Markdown";
+import { DocumentMarkdown } from "../markdown/DocumentMarkdown";
 import {
   classifyWorkspaceMarkdownTarget,
   workspaceMarkdownHeadingSlug,
@@ -285,7 +286,7 @@ export const WorkspaceMarkdownPreview = memo(function WorkspaceMarkdownPreview(
   return (
     <div data-workspace-markdown-preview="" className="select-text">
       <WorkspaceMarkdownPreviewContext.Provider value={contextValue}>
-        <Markdown
+        <DocumentMarkdown
           content={content}
           className={className}
           readOnly

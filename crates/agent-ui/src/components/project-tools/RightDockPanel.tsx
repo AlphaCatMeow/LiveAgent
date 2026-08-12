@@ -25,6 +25,7 @@ import {
   useRef,
   useState,
 } from "react";
+import type { ProjectToolTextGenerationClient } from "../../lib/ai/projectToolTextGeneration";
 import { ensureManagedProcessInit, useManagedProcesses } from "../../lib/managed-process/store";
 import { cn } from "../../lib/shared/utils";
 import type { TerminalClient, TerminalSession } from "../../lib/terminal/types";
@@ -72,6 +73,7 @@ type RightDockPanelProps = {
   gitClient?: GitClient | null;
   gitWriteEnabled?: boolean;
   gitDisabledMessage?: string;
+  textGenerationClient?: ProjectToolTextGenerationClient | null;
   tunnelClient?: LocalTunnelClient | null;
   tunnelEnabled?: boolean;
   tunnelDisabledMessage?: string;
@@ -353,6 +355,7 @@ export const RightDockPanel = memo(function RightDockPanel(props: RightDockPanel
     gitClient,
     gitWriteEnabled = true,
     gitDisabledMessage,
+    textGenerationClient,
     tunnelClient,
     tunnelEnabled = true,
     tunnelDisabledMessage,
@@ -643,6 +646,7 @@ export const RightDockPanel = memo(function RightDockPanel(props: RightDockPanel
       clients: {
         terminal: client,
         git: gitClient,
+        textGeneration: textGenerationClient,
         tunnel: tunnelClient,
         workspaceActivity: workspaceActivityClient,
       },
@@ -717,6 +721,7 @@ export const RightDockPanel = memo(function RightDockPanel(props: RightDockPanel
       sshSessions,
       terminalDisabledMessage,
       terminalReady,
+      textGenerationClient,
       theme,
       tunnelClient,
       tunnelDisabledMessage,

@@ -24,6 +24,7 @@ import { Button } from "@liveagent/ui/components/ui/button";
 import { useConfirmDialog } from "@liveagent/ui/components/ui/confirm-dialog";
 import { WorkspaceOverlayHost } from "@liveagent/ui/components/workspace-editor/WorkspaceOverlayHost";
 import { useLocale } from "@liveagent/ui/i18n/index";
+import type { ProjectToolTextGenerationClient } from "@liveagent/ui/lib/ai/projectToolTextGeneration";
 import { getAutomationState, useAutomation } from "@liveagent/ui/lib/automation/index";
 import type { ChatFileLink } from "@liveagent/ui/lib/chat/chatFileLinks";
 import {
@@ -83,6 +84,11 @@ import {
 } from "../lib/chat/page/chatPageHelpers";
 import { tauriGitClient } from "../lib/git/tauriGitClient";
 import { buildMemoryOverviewSection } from "../lib/memory/prompts/injection";
+import {
+  assistantMessageToText,
+  completeAssistantMessage,
+  createProviderRuntimeConfig,
+} from "../lib/providers/llm";
 import {
   type AppSettings,
   getRightDockFileTreeState,
@@ -157,6 +163,7 @@ import {
 } from "./chat/queue/chatTurnQueue";
 import { useChatTurnQueue } from "./chat/queue/useChatTurnQueue";
 import { syncMovedConversationRuntimeWorkdir } from "./chat/runtime/chatPageRuntime";
+import { resolveEffectiveChatModelSelection } from "./chat/runtime/modelSelection";
 import { useChatModelSelection } from "./chat/runtime/useChatModelSelection";
 import {
   type ManualCompactionRequest,
@@ -618,6 +625,50 @@ export function ChatPage(props: ChatPageProps) {
     conversationRuntimeCacheRef,
     updateConversationRuntimeEntry,
   });
+
+  const projectToolTextGenerationClient = useMemo<ProjectToolTextGenerationClient>(
+    () => ({
+      generate: async (request) => {
+        const selected = resolveEffectiveChatModelSelection({
+          settings,
+          conversationSelectedModel: conversationRuntimeCacheRef.current.get(
+            currentConversationIdRef.current,
+          )?.selectedModel,
+        });
+        const runtime = {
+          ...createProviderRuntimeConfig(
+            selected.provider,
+            selected.model,
+            settings.chatRuntimeControls,
+          ),
+          reasoning: "off" as const,
+          promptCachingEnabled: false,
+          nativeWebSearchEnabled: false,
+        };
+        const assistant = await completeAssistantMessage({
+          providerId: selected.providerId,
+          model: selected.model,
+          runtime,
+          context: {
+            systemPrompt: request.systemPrompt,
+            messages: [
+              {
+                role: "user",
+                content: request.userPrompt,
+                timestamp: Date.now(),
+              },
+            ],
+          },
+          sessionId: currentConversationSessionId,
+          cacheRetention: "none",
+          signal: request.signal,
+          allowJsonOutput: request.output === "json",
+        });
+        return assistantMessageToText(assistant);
+      },
+    }),
+    [conversationRuntimeCacheRef, currentConversationIdRef, currentConversationSessionId, settings],
+  );
 
   function cancelConversationLoad() {
     conversationLoadSequenceRef.current += 1;
@@ -2337,6 +2388,7 @@ export function ChatPage(props: ChatPageProps) {
         client={tauriTerminalClient}
         gitClient={tauriGitClient}
         gitWriteEnabled
+        textGenerationClient={projectToolTextGenerationClient}
         tunnelClient={isAgentMode ? tauriTunnelClient : null}
         tunnelEnabled={tunnelEnabled}
         tunnelDisabledMessage={tunnelDisabledMessage}

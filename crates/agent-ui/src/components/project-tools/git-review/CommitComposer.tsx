@@ -6,7 +6,7 @@
 // Shared implementation owned by @liveagent/ui. Host-specific Git operations
 // and optional platform capabilities enter through the shared contracts.
 
-import { Loader2, WandSparkles } from "@liveagent/ui/components/IconSet";
+import { Loader2, Undo2, WandSparkles } from "@liveagent/ui/components/IconSet";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import type { GitStatusEntry } from "@liveagent/ui/lib/git/types";
 import {
@@ -32,7 +32,15 @@ import type { GitReviewData } from "./useGitReviewData";
 const MAX_COMMIT_MESSAGE_PATCH_CHARS = 64_000;
 
 // Larger hit targets on touch devices without inflating the desktop dock.
-const COARSE_POINTER_BUTTON_CLASS = "[@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:w-9";
+const COARSE_POINTER_BUTTON_CLASS = "[@media(pointer:coarse)]:h-9";
+
+// Keyboard hint for the commit shortcut; the handler accepts both Cmd and
+// Ctrl, the hint only mirrors the platform's conventional modifier.
+const COMMIT_SHORTCUT_HINT = /Mac|iPhone|iPad|iPod/i.test(
+  typeof navigator === "undefined" ? "" : `${navigator.userAgent} ${navigator.platform}`,
+)
+  ? "⌘↩"
+  : "Ctrl+↩";
 
 export function GitCommitComposer(props: {
   commitMessage: string;
@@ -170,8 +178,14 @@ export function GitCommitComposer(props: {
     writeDisabled,
   ]);
 
+  // The backend rejects commits with an empty index, so surface that state as
+  // a disabled button plus the idle hint instead of a post-click error toast.
   const canCommit =
-    !writeDisabled && !operationBusy && !generating && commitMessage.trim().length > 0;
+    !writeDisabled &&
+    !operationBusy &&
+    !generating &&
+    stagedEntries.length > 0 &&
+    commitMessage.trim().length > 0;
 
   const handleCommit = useCallback(() => {
     if (!canCommit || !gitClient) return;
@@ -226,8 +240,15 @@ export function GitCommitComposer(props: {
         : t("projectTools.gitReview.generateCommitMessage");
 
   return (
-    <div className="shrink-0 border-t border-border/60 p-2">
-      <div className="rounded-lg border border-border/70 bg-background focus-within:ring-1 focus-within:ring-border/40">
+    <div className="@container shrink-0 border-t border-border/60 p-2">
+      <div
+        className={cn(
+          "relative overflow-hidden rounded-xl border border-border/70 bg-muted/25 transition-[border-color,background-color,box-shadow] duration-150",
+          "focus-within:border-primary/40 focus-within:bg-background focus-within:shadow-[0_0_0_3px_hsl(var(--primary)/0.08)]",
+          generating && "border-primary/30",
+        )}
+      >
+        {generating ? <div aria-hidden="true" className="git-review-generate-progress" /> : null}
         <Textarea
           ref={textareaRef}
           rows={1}
@@ -236,15 +257,20 @@ export function GitCommitComposer(props: {
           onKeyDown={handleTextareaKeyDown}
           placeholder={t("projectTools.gitReview.commitMessagePlaceholder")}
           disabled={writeDisabled || operationBusy}
-          className="max-h-[min(10rem,30dvh)] min-h-8 resize-none overflow-y-auto border-0 bg-transparent px-2.5 py-1.5 text-[calc(11px*var(--zone-font-scale,1))] leading-4 shadow-none placeholder:text-[calc(11px*var(--zone-font-scale,1))]"
+          aria-busy={generating}
+          className="max-h-[min(10rem,30dvh)] min-h-8 resize-none overflow-y-auto border-0 bg-transparent px-2.5 pb-1 pt-2 text-xs leading-5 shadow-none placeholder:text-xs placeholder:text-muted-foreground/70"
         />
-        <div className="flex items-center gap-2 border-t border-border/60 px-1.5 py-1">
+        <div className="flex items-center gap-1.5 px-1.5 pb-1.5">
           {textGenerationClient ? (
             <Button
               size="sm"
               variant="ghost"
               disabled={generateDisabled}
-              className={cn("h-7 w-7 shrink-0 px-0", COARSE_POINTER_BUTTON_CLASS)}
+              className={cn(
+                "h-7 shrink-0 gap-1 rounded-full border border-border/60 bg-background/70 px-2 text-[calc(11px*var(--zone-font-scale,1))] font-medium text-muted-foreground hover:border-primary/35 hover:text-foreground",
+                generating && "border-primary/40 text-primary hover:text-primary",
+                COARSE_POINTER_BUTTON_CLASS,
+              )}
               title={generateLabel}
               aria-label={generateLabel}
               onClick={() => void handleGenerate()}
@@ -254,9 +280,17 @@ export function GitCommitComposer(props: {
               ) : (
                 <WandSparkles className="h-3.5 w-3.5 text-primary" />
               )}
+              <span className="hidden @min-[15rem]:inline">
+                {generating
+                  ? t("projectTools.gitReview.generateCommitMessageCancel")
+                  : t("projectTools.gitReview.generateCommitMessageShort")}
+              </span>
             </Button>
           ) : null}
-          <div className="min-w-0 flex-1 text-[calc(11px*var(--zone-font-scale,1))] leading-4">
+          <div
+            role="status"
+            className="min-w-0 flex-1 text-[calc(11px*var(--zone-font-scale,1))] leading-4"
+          >
             {generationError ? (
               <p className="truncate text-destructive" title={generationError}>
                 {generationError}
@@ -268,23 +302,41 @@ export function GitCommitComposer(props: {
             ) : undoMessage !== null ? (
               <button
                 type="button"
-                className="truncate rounded-sm text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="inline-flex max-w-full items-center gap-1 rounded-sm text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 onClick={handleUndoGeneration}
               >
-                {t("projectTools.gitReview.generateCommitMessageUndo")}
+                <Undo2 className="h-3 w-3 shrink-0" aria-hidden="true" />
+                <span className="truncate">
+                  {t("projectTools.gitReview.generateCommitMessageUndo")}
+                </span>
               </button>
+            ) : stagedEntries.length === 0 && !writeDisabled ? (
+              <p className="truncate text-muted-foreground/70">
+                {t("projectTools.gitReview.commitRequiresStaged")}
+              </p>
             ) : null}
           </div>
           <Button
             size="sm"
             disabled={!canCommit}
-            className="h-7 shrink-0 [@media(pointer:coarse)]:h-9"
+            className={cn("h-7 shrink-0 gap-1.5 px-2.5", COARSE_POINTER_BUTTON_CLASS)}
+            title={`${t("projectTools.gitReview.commitStaged")} (${COMMIT_SHORTCUT_HINT})`}
             onClick={handleCommit}
           >
             {busy === "commit" ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : (
-              t("projectTools.gitReview.commit")
+              <>
+                <span>{t("projectTools.gitReview.commit")}</span>
+                {stagedEntries.length > 0 ? (
+                  <span className="rounded-sm bg-primary-foreground/25 px-1 py-0.5 text-[calc(10px*var(--zone-font-scale,1))] font-semibold leading-none tabular-nums">
+                    {stagedEntries.length}
+                  </span>
+                ) : null}
+                <kbd className="hidden font-sans text-[calc(10px*var(--zone-font-scale,1))] font-normal leading-none opacity-70 @min-[19rem]:inline">
+                  {COMMIT_SHORTCUT_HINT}
+                </kbd>
+              </>
             )}
           </Button>
         </div>

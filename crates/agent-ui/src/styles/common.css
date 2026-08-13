@@ -107,11 +107,40 @@
     }
   }
 
+  /* Indeterminate sweep across the top edge of the commit composer card while
+   * an AI commit-message generation request is in flight. */
+  .git-review-generate-progress {
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 2px;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .git-review-generate-progress::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, hsl(var(--primary) / 0.75), transparent);
+    animation: gitReviewGenerateSweep 1.1s ease-in-out infinite;
+  }
+  @keyframes gitReviewGenerateSweep {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(100%);
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .git-review-tab-enter,
     .git-review-pane-enter-forward,
     .git-review-pane-enter-back {
       animation: none;
+    }
+    .git-review-generate-progress::after {
+      animation: none;
+      background: hsl(var(--primary) / 0.4);
     }
   }
 }

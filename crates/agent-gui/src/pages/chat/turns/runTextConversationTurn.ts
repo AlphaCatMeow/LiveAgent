@@ -1,4 +1,5 @@
 import type { AssistantMessage, Context } from "@earendil-works/pi-ai";
+import type { HostedSearchBlock } from "@liveagent/ui/lib/chat/hostedSearch";
 import type { CompactionController } from "../../../lib/chat/compaction/controller";
 import { estimateTextTokenUnits } from "../../../lib/chat/compaction/tokenLedger";
 import type { ProviderRuntimeConfig } from "../../../lib/chat/compaction/types";
@@ -20,7 +21,6 @@ import type {
   MemoryExtractionModelConfig,
   MemoryExtractionStatusText,
 } from "../../../lib/chat/memory/extractionEngine";
-import type { HostedSearchBlock } from "../../../lib/chat/messages/hostedSearch";
 import {
   appendTextDeltaToRound,
   collapseThinking,
@@ -427,7 +427,7 @@ export async function runTextConversationTurn(params: RunTextConversationTurnPar
   settleLiveTranscript(transcriptStore);
   hookLifecycle.ensureMessageEnded();
   hookLifecycle.endAgent();
-  await persistConversationWithHistorySync({
+  const historyPersisted = await persistConversationWithHistorySync({
     conversationId,
     sessionId,
     providerId,
@@ -438,7 +438,10 @@ export async function runTextConversationTurn(params: RunTextConversationTurnPar
     createdAt,
     titlePromise,
   });
-  if (shouldRunMemoryExtraction) {
+  // Only extract memory after durable history lands; otherwise memory can
+  // retain the answer while a failed final persist leaves chat history on the
+  // user-only snapshot.
+  if (historyPersisted && shouldRunMemoryExtraction) {
     const currentMemoryExtractionModel: MemoryExtractionModelConfig = {
       providerId,
       model,

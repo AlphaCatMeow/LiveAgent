@@ -184,6 +184,10 @@ export type ChatTranscriptSettings = {
 
 export type CustomSettings = {
   conversationTitleModel?: SelectedModel;
+  // AI commit-message generation in the Git review dock. Unset means "follow
+  // the current conversation model"; a stored selection whose provider/model
+  // is no longer active normalizes back to unset, restoring that fallback.
+  commitMessageModel?: SelectedModel;
   chatSidebar: ChatSidebarSettings;
   chatTranscript: ChatTranscriptSettings;
   rightDock: RightDockSettings;
@@ -2512,6 +2516,10 @@ export function normalizeCustomSettings(
   return {
     conversationTitleModel: normalizeSelectedModelForProviders(
       normalizeSelectedModel(obj.conversationTitleModel),
+      customProviders,
+    ),
+    commitMessageModel: normalizeSelectedModelForProviders(
+      normalizeSelectedModel(obj.commitMessageModel),
       customProviders,
     ),
     chatSidebar: {

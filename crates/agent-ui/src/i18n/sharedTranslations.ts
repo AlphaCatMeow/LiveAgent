@@ -1541,6 +1541,9 @@ export const SHARED_TRANSLATIONS = {
     "settings.conversationTitleModel": "标题生成模型",
     "settings.conversationTitleModelFollowCurrent": "使用当前对话模型",
     "settings.conversationTitleModelHint": "未选择时，标题生成会使用当前对话使用的模型。",
+    "settings.commitMessageModel": "Commit 备注生成模型",
+    "settings.commitMessageModelHint":
+      "Git 审查中 AI 生成提交说明使用的模型。未选择或所选模型失效时，自动使用当前对话模型。",
     "settings.customSettingsModelEmpty": "当前 Provider 未配置模型。",
     "settings.failoverTitle": "自动故障转移",
     "settings.failoverEnabled": "已开启",
@@ -3779,6 +3782,9 @@ export const SHARED_TRANSLATIONS = {
     "settings.conversationTitleModelFollowCurrent": "Use current chat model",
     "settings.conversationTitleModelHint":
       "When unselected, title generation uses the model from the current chat.",
+    "settings.commitMessageModel": "Commit message model",
+    "settings.commitMessageModelHint":
+      "Model used to generate commit messages in Git review. When unselected or no longer available, the current chat model is used automatically.",
     "settings.customSettingsModelEmpty":
       "No active models are configured for the current providers.",
     "settings.failoverTitle": "Auto Failover",

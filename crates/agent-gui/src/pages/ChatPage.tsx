@@ -147,6 +147,7 @@ import {
 import { useChatTurnQueue } from "./chat/queue/useChatTurnQueue";
 import { syncMovedConversationRuntimeWorkdir } from "./chat/runtime/chatPageRuntime";
 import { resolveEffectiveChatModelSelection } from "./chat/runtime/modelSelection";
+import { resolveCommitMessageModelSelection } from "./chat/runtime/providerRuntimeConfig";
 import { useChatModelSelection } from "./chat/runtime/useChatModelSelection";
 import {
   type ManualCompactionRequest,
@@ -611,28 +612,29 @@ export function ChatPage(props: ChatPageProps) {
     updateConversationRuntimeEntry,
   });
 
-  const projectToolTextGenerationClient = useMemo<ProjectToolTextGenerationClient>(
-    () => ({
+  const projectToolTextGenerationClient = useMemo<ProjectToolTextGenerationClient>(() => {
+    // The only consumer today is the Git review commit composer: prefer the
+    // configured commit-message model; when unset or no longer valid, follow
+    // the current conversation model (which throws when unconfigured).
+    const resolveGenerationSelection = () =>
+      resolveCommitMessageModelSelection(settings) ??
+      resolveEffectiveChatModelSelection({
+        settings,
+        conversationSelectedModel: conversationRuntimeCacheRef.current.get(
+          currentConversationIdRef.current,
+        )?.selectedModel,
+      });
+    return {
       status: () => {
         try {
-          resolveEffectiveChatModelSelection({
-            settings,
-            conversationSelectedModel: conversationRuntimeCacheRef.current.get(
-              currentConversationIdRef.current,
-            )?.selectedModel,
-          });
+          resolveGenerationSelection();
           return "ready";
         } catch {
           return "unconfigured";
         }
       },
       generate: async (request) => {
-        const selected = resolveEffectiveChatModelSelection({
-          settings,
-          conversationSelectedModel: conversationRuntimeCacheRef.current.get(
-            currentConversationIdRef.current,
-          )?.selectedModel,
-        });
+        const selected = resolveGenerationSelection();
         const runtime = {
           ...createProviderRuntimeConfig(
             selected.provider,
@@ -664,9 +666,8 @@ export function ChatPage(props: ChatPageProps) {
         });
         return assistantMessageToText(assistant);
       },
-    }),
-    [conversationRuntimeCacheRef, currentConversationIdRef, currentConversationSessionId, settings],
-  );
+    };
+  }, [conversationRuntimeCacheRef, currentConversationIdRef, currentConversationSessionId, settings]);
 
   function cancelConversationLoad() {
     conversationLoadSequenceRef.current += 1;

@@ -667,7 +667,12 @@ export function ChatPage(props: ChatPageProps) {
         return assistantMessageToText(assistant);
       },
     };
-  }, [conversationRuntimeCacheRef, currentConversationIdRef, currentConversationSessionId, settings]);
+  }, [
+    conversationRuntimeCacheRef,
+    currentConversationIdRef,
+    currentConversationSessionId,
+    settings,
+  ]);
 
   function cancelConversationLoad() {
     conversationLoadSequenceRef.current += 1;

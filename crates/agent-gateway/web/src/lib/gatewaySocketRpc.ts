@@ -71,6 +71,9 @@ import {
   type FsWriteTextResponse,
   type GatewayChatCommandInput,
   type GatewaySettingsUpdateResponse,
+  type GatewayWorkspaceRootGrant,
+  type GatewayWorkspaceRootGrantDraft,
+  type GatewayWorkspaceRootGrantsResponse,
   type HistoryGetOptions,
   isConnectionSetupTimeoutError,
   isRecoverableGatewayTransportError,
@@ -1051,6 +1054,44 @@ export class GatewayWebSocketRpcClient extends GatewayWebSocketTransport {
 
   async listFsRoots(): Promise<FsRootsResponse> {
     return this.requestWithRecovery<FsRootsResponse>("fs.roots", {});
+  }
+
+  async listWorkspaceRootGrants(
+    projectId: string,
+    projectPath: string,
+  ): Promise<GatewayWorkspaceRootGrant[]> {
+    const response = await this.requestWithRecovery<GatewayWorkspaceRootGrantsResponse>(
+      "workspace_root_grants.list",
+      { project_id: projectId, project_path: projectPath },
+    );
+    return response.grants;
+  }
+
+  async applyWorkspaceRootGrants(
+    projectId: string,
+    projectPath: string,
+    grants: readonly GatewayWorkspaceRootGrantDraft[],
+  ): Promise<GatewayWorkspaceRootGrant[]> {
+    const response = await this.request<GatewayWorkspaceRootGrantsResponse>(
+      "workspace_root_grants.apply",
+      {
+        project_id: projectId,
+        project_path: projectPath,
+        grants: grants.map((grant) => ({
+          ...(grant.id ? { id: grant.id } : {}),
+          alias: grant.alias,
+          display_path: grant.displayPath,
+          access: grant.access,
+        })),
+      },
+    );
+    return response.grants;
+  }
+
+  async revokeWorkspaceRootGrants(projectId: string): Promise<void> {
+    await this.request<GatewayWorkspaceRootGrantsResponse>("workspace_root_grants.revoke", {
+      project_id: projectId,
+    });
   }
 
   async listDirs(path: string, maxResults?: number): Promise<FsListDirsResponse> {

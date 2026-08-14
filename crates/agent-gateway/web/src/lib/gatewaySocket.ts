@@ -51,6 +51,8 @@ import type {
   FsRootsResponse,
   FsWriteTextResponse,
   GatewayChatCommandInput,
+  GatewayWorkspaceRootGrant,
+  GatewayWorkspaceRootGrantDraft,
   HistoryGetOptions,
   HistoryListener,
   ManagedProcessLogPayload,
@@ -100,6 +102,8 @@ export type {
 export type {
   ChatFileOpenResponse,
   GatewayChatCommandInput,
+  GatewayWorkspaceRootGrant,
+  GatewayWorkspaceRootGrantDraft,
   ManagedProcessLogPayload,
   ManagedProcessRecordPayload,
   ManagedProcessStatePayload,
@@ -333,6 +337,16 @@ export type GatewayWebSocketClientLike = {
     showHidden?: boolean,
   ): Promise<MentionListResponse>;
   listFsRoots(): Promise<FsRootsResponse>;
+  listWorkspaceRootGrants(
+    projectId: string,
+    projectPath: string,
+  ): Promise<GatewayWorkspaceRootGrant[]>;
+  applyWorkspaceRootGrants(
+    projectId: string,
+    projectPath: string,
+    grants: readonly GatewayWorkspaceRootGrantDraft[],
+  ): Promise<GatewayWorkspaceRootGrant[]>;
+  revokeWorkspaceRootGrants(projectId: string): Promise<void>;
   listDirs(path: string, maxResults?: number): Promise<FsListDirsResponse>;
   createProjectFolder(parent: string, name: string): Promise<CreateProjectFolderResponse>;
   listFiles(

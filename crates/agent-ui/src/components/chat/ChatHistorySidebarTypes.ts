@@ -53,8 +53,6 @@ export type ChatHistorySidebarProps = {
   activeProjectId?: string;
   missingProjectPathKeys: ReadonlySet<string>;
   runningProjectPathKeys: ReadonlySet<string>;
-  projectRenamingId?: string | null;
-  projectRenameDraft?: string;
   projectsCollapsed?: boolean;
   recentCollapsed?: boolean;
   onProjectsCollapsedChange?: (collapsed: boolean) => void;
@@ -68,12 +66,8 @@ export type ChatHistorySidebarProps = {
   onSelectProject?: (project: WorkspaceProject) => void;
   onNewConversationForProject?: (project: WorkspaceProject) => void;
   onBrowseProjectInFileTree?: (project: WorkspaceProject) => void;
-  onConfigureProjectResources?: (project: WorkspaceProject) => void;
+  onConfigureProject?: (project: WorkspaceProject) => void;
   onBrowseProjectInSystemFileManager?: (project: WorkspaceProject) => void;
-  onStartRenamingProject?: (project: WorkspaceProject) => void;
-  onProjectRenameDraftChange?: (value: string) => void;
-  onCommitProjectRename?: () => void;
-  onCancelProjectRename?: () => void;
   onSetProjectPinned?: (project: WorkspaceProject, isPinned: boolean) => void;
   onRemoveProject?: (project: WorkspaceProject, options?: WorkspaceProjectRemoveOptions) => void;
   onArchiveProject?: (project: WorkspaceProject) => void;
@@ -119,8 +113,6 @@ export type ChatHistorySidebarWorkspaceSource = Pick<
   | "workspaceProjectGroups"
   | "activeProjectId"
   | "missingProjectPathKeys"
-  | "projectRenamingId"
-  | "projectRenameDraft"
   | "projectsCollapsed"
   | "recentCollapsed"
   | "onProjectsCollapsedChange"
@@ -135,11 +127,7 @@ export type ChatHistorySidebarWorkspaceSource = Pick<
   | "onNewConversationForProject"
   | "onBrowseProjectInFileTree"
   | "onBrowseProjectInSystemFileManager"
-  | "onConfigureProjectResources"
-  | "onStartRenamingProject"
-  | "onProjectRenameDraftChange"
-  | "onCommitProjectRename"
-  | "onCancelProjectRename"
+  | "onConfigureProject"
   | "onSetProjectPinned"
   | "onRemoveProject"
   | "onArchiveProject"
@@ -291,8 +279,6 @@ export function buildChatHistorySidebarWorkspaceProps(
     activeProjectId: source.activeProjectId,
     missingProjectPathKeys: source.missingProjectPathKeys,
     runningProjectPathKeys,
-    projectRenamingId: source.projectRenamingId,
-    projectRenameDraft: source.projectRenameDraft,
     projectsCollapsed: source.projectsCollapsed,
     recentCollapsed: source.recentCollapsed,
     onProjectsCollapsedChange: source.onProjectsCollapsedChange,
@@ -307,11 +293,7 @@ export function buildChatHistorySidebarWorkspaceProps(
     onNewConversationForProject: source.onNewConversationForProject,
     onBrowseProjectInFileTree: source.onBrowseProjectInFileTree,
     onBrowseProjectInSystemFileManager: source.onBrowseProjectInSystemFileManager,
-    onConfigureProjectResources: source.onConfigureProjectResources,
-    onStartRenamingProject: source.onStartRenamingProject,
-    onProjectRenameDraftChange: source.onProjectRenameDraftChange,
-    onCommitProjectRename: source.onCommitProjectRename,
-    onCancelProjectRename: source.onCancelProjectRename,
+    onConfigureProject: source.onConfigureProject,
     onSetProjectPinned: source.onSetProjectPinned,
     onRemoveProject: source.onRemoveProject,
     onArchiveProject: source.onArchiveProject,

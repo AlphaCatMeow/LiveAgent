@@ -140,25 +140,6 @@ export function resolveModelLimitsAcrossProviders(
   return { contextWindow: entry.contextWindow, maxOutputToken: entry.maxOutputToken };
 }
 
-// 跨供应商回查上线前，别家模型挂在本供应商下会以本供应商兜底值落库。存量
-// 恰为兜底对、且模型只在其他供应商目录命中时视为坏默认值替换为目录真实限额；
-// 两值有一处偏离兜底对即视为用户显式配置，原样保留。
-export function repairStaleCrossProviderLimits(
-  providerId: CatalogAppProviderId,
-  modelId: string,
-  limits: ModelLimits,
-): ModelLimits {
-  const fallback = PROVIDER_FALLBACK_LIMITS[providerId];
-  if (
-    limits.contextWindow !== fallback.contextWindow ||
-    limits.maxOutputToken !== fallback.maxOutputToken
-  ) {
-    return limits;
-  }
-  if (findCatalogModel(providerId, modelId)) return limits;
-  return resolveModelLimitsAcrossProviders(modelId) ?? limits;
-}
-
 export function resolveModelLimits(
   providerId: CatalogAppProviderId,
   modelId: string | undefined,

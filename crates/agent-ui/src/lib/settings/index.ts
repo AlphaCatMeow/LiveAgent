@@ -9,6 +9,7 @@ import {
   shouldSendAnthropicLongContextHeader,
 } from "@liveagent/ui/lib/models/anthropicContext";
 import {
+  extractProviderDeclaredLimits,
   getProviderFallbackLimits,
   normalizeModelLimits,
   repairStaleCrossProviderLimits,
@@ -641,7 +642,11 @@ export function normalizeProviderModelConfig(
         : "";
   if (!id) return null;
 
-  const defaults = getProviderModelDefaults(providerId, id);
+  // 优先级：供应商 /v1/models 接口自带的真实限额（如 OpenRouter 的
+  // context_length）> 本地目录/兜底默认值。obj.contextWindow/maxOutputToken
+  // 仍是内部字段名，仅用于已落库配置的回填读取——原始 API 响应不会带这两个
+  // 字段，因此不会被 extractProviderDeclaredLimits 的结果覆盖。
+  const defaults = extractProviderDeclaredLimits(obj) ?? getProviderModelDefaults(providerId, id);
   const ownedBy =
     (typeof obj.ownedBy === "string" ? obj.ownedBy.trim() : "") ||
     (typeof obj.owned_by === "string" ? obj.owned_by.trim() : "");

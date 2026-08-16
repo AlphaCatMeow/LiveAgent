@@ -5,6 +5,8 @@ export const ZH_CN_COMMON_TRANSLATIONS = {
   "app.errorBoundaryTitle": "页面出现异常",
   "app.loading": "正在加载设置...",
   "app.name": "LiveAgent",
+  "app.settingsSshSettingsChanged":
+    "SSH 设置已在另一端更新，已刷新为最新状态，请重新提交。",
   "common.currentUser": "当前用户",
   "common.dismissNotification": "关闭通知",
   "common.logout": "退出登录",
@@ -217,6 +219,7 @@ export const ZH_CN_COMMON_TRANSLATIONS = {
   "chat.configureModel": "点击下方按钮，配置供应商和模型。",
   "chat.goToSettings": "配置供应商",
   "chat.loading": "正在加载设置...",
+  "chat.loadingConversation": "正在加载对话...",
   "chat.sendMessage": "发送消息",
   "chat.send": "发送",
   "chat.stopGeneration": "停止生成",

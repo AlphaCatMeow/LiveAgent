@@ -154,6 +154,16 @@ macro_rules! app_invoke_handler {
             commands::settings::settings_save_remote,
             commands::settings::settings_save_memory,
             commands::settings::settings_save_model_failover,
+            commands::settings::settings_backup_export,
+            commands::settings::settings_backup_peek_import,
+            commands::settings::settings_backup_apply_import,
+            commands::settings::settings_backup_load_sync_config,
+            commands::settings::settings_backup_save_sync_config,
+            commands::settings::settings_backup_test_sync_connection,
+            commands::settings::settings_backup_fetch_remote_info,
+            commands::settings::settings_backup_upload,
+            commands::settings::settings_backup_download,
+            commands::settings::settings_backup_mark_dirty,
             commands::update::app_update_check,
             commands::update::app_update_install,
             commands::update::app_restart,
@@ -759,6 +769,9 @@ pub fn run() {
                 }
                 terminal_registry.attach_app_handle(app.handle().clone());
                 sftp_registry.attach_app_handle(app.handle().clone());
+                // 配置自动同步的后台任务：只消费脏信号并做防抖上传，
+                // 未开启自动同步时它会在每次唤醒后静默跳过。
+                services::webdav_auto_sync::start(app.handle().clone());
                 let gateway_controller = Arc::new(services::gateway::GatewayController::new(
                     app.handle().clone(),
                     Arc::clone(&automation_store),

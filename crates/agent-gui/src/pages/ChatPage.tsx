@@ -93,6 +93,7 @@ import {
   resolveWorkspaceResources,
   type SelectedModel,
   updateExecutionModeFromChatSelection,
+  updateSystem,
   updateWorkspaceResourceSettings,
   type WorkspaceProject,
   workspaceProjectPathKey,
@@ -1999,6 +2000,14 @@ export function ChatPage(props: ChatPageProps) {
                     modelOptions={modelOptions}
                     selectedValue={selectedValue}
                     chatRuntimeControls={chatRuntimeControlsForCurrentProvider}
+                    commandSafetyMode={settings.system.commandSafetyMode}
+                    onCommandSafetyModeChange={(mode) =>
+                      setSettings((prev) =>
+                        prev.system.commandSafetyMode === mode
+                          ? prev
+                          : updateSystem(prev, { commandSafetyMode: mode }),
+                      )
+                    }
                     reasoningOptions={chatRuntimeReasoningOptions}
                     thinkingAlwaysOn={chatRuntimeThinkingAlwaysOn}
                     contextUsageTokensSource={contextUsageTokensSource}

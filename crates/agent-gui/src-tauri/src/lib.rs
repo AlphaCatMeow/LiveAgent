@@ -176,6 +176,7 @@ macro_rules! app_invoke_handler {
             commands::update::app_update_install,
             commands::update::app_restart,
             commands::app::app_runtime_platform,
+            commands::app::app_frontend_ready,
             commands::app::app_set_close_window_behavior,
             commands::app::app_set_global_shortcuts,
             commands::app::app_window_pinned,
@@ -342,6 +343,11 @@ macro_rules! app_invoke_handler {
 }
 
 fn show_main_window(app: &tauri::AppHandle) -> tauri::Result<()> {
+    if let Some(ready_state) = app.try_state::<Arc<commands::app::FrontendReadyState>>() {
+        if !ready_state.0.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+    }
     if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         window.show()?;
         window.unminimize()?;
@@ -747,6 +753,7 @@ pub fn run() {
                 .build(),
         )
         .manage(Arc::new(commands::app::GlobalShortcutRegistry::default()))
+        .manage(Arc::new(commands::app::FrontendReadyState::default()))
         .manage(Arc::new(commands::app::WindowPinState::default()))
         .manage(Arc::new(commands::mcp::McpRuntimeManager::default()))
         .manage(Arc::clone(&memory_store))
@@ -764,6 +771,24 @@ pub fn run() {
         .manage(Arc::clone(&automation_scheduler))
         .manage(Arc::new(commands::hook::HookScopeRegistry::default()))
         .manage(stt_manager)
+        .on_page_load(|webview, payload| {
+            if webview.label() != MAIN_WINDOW_LABEL
+                || !matches!(payload.event(), tauri::webview::PageLoadEvent::Started)
+            {
+                return;
+            }
+            let app = webview.app_handle();
+            if let Some(ready_state) =
+                app.try_state::<Arc<commands::app::FrontendReadyState>>()
+            {
+                ready_state.0.store(false, Ordering::SeqCst);
+            }
+            if let Some(window) = app.get_webview_window(MAIN_WINDOW_LABEL) {
+                if window.is_visible().unwrap_or(false) {
+                    let _ = window.hide();
+                }
+            }
+        })
         .setup({
             let terminal_registry = Arc::clone(&terminal_registry);
             let sftp_registry = Arc::clone(&sftp_registry);

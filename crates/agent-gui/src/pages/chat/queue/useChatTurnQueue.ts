@@ -6,7 +6,14 @@ import type { PendingUploadedFile } from "@liveagent/ui/lib/chat/uploadedFiles";
 import type { ChatQueueTurnPreview } from "@liveagent/ui/pages/chat/ChatComposerBar";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { type MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type MutableRefObject,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useSyncExternalStore,
+} from "react";
 import type { LiveTranscriptStore } from "../../../lib/chat/conversation/liveTranscriptStore";
 import {
   type AppSettings,
@@ -19,6 +26,10 @@ import {
 import { answerAskUserQuestion } from "../../../lib/tools/askUserQuestionTools";
 import { answerToolApproval } from "../../../lib/tools/toolApproval";
 import { createTextComposerDraft } from "../composer/composerDraftText";
+import {
+  type ConversationQueueStore,
+  createConversationQueueStore,
+} from "../conversations/conversationQueueStore";
 import type { ActiveGatewayBridgeRequest, SendChatAction } from "../gateway/gatewayBridgeTypes";
 import {
   type GatewayChatClaimedRequest,
@@ -52,6 +63,7 @@ import {
 type UseChatTurnQueueParams = {
   settings: AppSettings;
   currentConversationId: string;
+  queueStore?: ConversationQueueStore;
   currentConversationIdRef: MutableRefObject<string>;
   conversationRuntimeCacheRef: MutableRefObject<Map<string, ConversationRuntimeEntry>>;
   buildRuntimeEntryFromVisibleState: () => ConversationRuntimeEntry;
@@ -97,6 +109,7 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
   const {
     settings,
     currentConversationId,
+    queueStore: providedQueueStore,
     currentConversationIdRef,
     conversationRuntimeCacheRef,
     buildRuntimeEntryFromVisibleState,
@@ -121,9 +134,27 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
     sendActionRef,
     manualCompactActionRef,
   } = params;
+  const fallbackQueueStoreRef = useRef<ConversationQueueStore | null>(null);
+  if (!fallbackQueueStoreRef.current) {
+    fallbackQueueStoreRef.current = createConversationQueueStore();
+  }
+  const queueStore = providedQueueStore ?? fallbackQueueStoreRef.current;
 
-  const [queuedChatTurns, setQueuedChatTurns] = useState<QueuedChatTurn[]>([]);
-  const queuedChatTurnsRef = useRef<QueuedChatTurn[]>([]);
+  const queuedChatTurnsRef = useRef<QueuedChatTurn[]>(queueStore.getAllSnapshot());
+  const subscribeQueuedChatTurns = useCallback(
+    (listener: () => void) =>
+      queueStore.subscribeAll(() => {
+        queuedChatTurnsRef.current = queueStore.getAllSnapshot();
+        listener();
+      }),
+    [queueStore],
+  );
+  const getQueuedChatTurnsSnapshot = useCallback(() => queueStore.getAllSnapshot(), [queueStore]);
+  const queuedChatTurns = useSyncExternalStore(
+    subscribeQueuedChatTurns,
+    getQueuedChatTurnsSnapshot,
+    getQueuedChatTurnsSnapshot,
+  );
   const queuedChatProcessingConversationIdsRef = useRef(new Set<string>());
   const queuedChatStopVersionsRef = useRef(new Map<string, number>());
   // 打断并执行的恢复意图：conversationId → 触发打断那一刻的 stop-request 版本号。
@@ -288,9 +319,8 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
   const setQueuedChatTurnsState = useCallback(
     (updater: (current: QueuedChatTurn[]) => QueuedChatTurn[]) => {
       const previous = queuedChatTurnsRef.current;
-      const next = updater(previous).slice();
+      const next = queueStore.update(updater);
       queuedChatTurnsRef.current = next;
-      setQueuedChatTurns(next);
       chatQueueRevisionRef.current += 1;
       const conversationIds = new Set<string>();
       for (const item of previous) conversationIds.add(item.conversationId);
@@ -300,7 +330,7 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
       publishChatQueueSnapshots(conversationIds, next);
       return next;
     },
-    [],
+    [queueStore],
   );
 
   const queuedChatTurnsForCurrentConversation = useMemo<ChatQueueTurnPreview[]>(
@@ -434,6 +464,52 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
       queuedChatTurnEditSlotRef.current = null;
     }
     clearCurrentComposerDraftForQueuedTurn(conversationId);
+    return true;
+  }
+
+  /**
+   * Enqueue a composer turn for an explicit conversation (workbench panes
+   * sending into a busy background conversation). Unlike the current-composer
+   * path it never touches the page composer or edit slots; the caller owns
+   * clearing its own composer. The turn's workdir comes from the target
+   * conversation's runtime entry, never from the visible conversation.
+   */
+  function enqueueComposerTurnForConversation(input: {
+    conversationId: string;
+    draft: MentionComposerDraft | null;
+    uploadedFiles: PendingUploadedFile[];
+  }) {
+    const conversationId = input.conversationId.trim();
+    const uploadedFiles = input.uploadedFiles.slice();
+    if (!conversationId || !queuedChatTurnHasContent(input.draft, uploadedFiles)) {
+      return false;
+    }
+    const runtimeEntry =
+      conversationRuntimeCacheRef.current.get(conversationId) ??
+      (conversationId === currentConversationIdRef.current
+        ? buildRuntimeEntryFromVisibleState()
+        : null);
+    const executionMode = settings.system.executionMode;
+    const workdirForTurn = isAgentExecutionMode(executionMode)
+      ? (
+          runtimeEntry?.workdir ??
+          (conversationId === currentConversationIdRef.current
+            ? displayedConversationWorkdir
+            : settings.system.workdir)
+        ).trim()
+      : "";
+    const queuedTurn = createQueuedChatTurn({
+      conversationId,
+      draft: input.draft,
+      uploadedFiles,
+      executionMode,
+      workdir: workdirForTurn,
+      commandSafetyMode: settings.system.commandSafetyMode,
+      runtimeControls: settings.chatRuntimeControls,
+    });
+    setQueuedChatTurnsState((current) => appendQueuedChatTurn(current, queuedTurn));
+    setPendingUploadsForConversation(conversationId, []);
+    clearCachedComposerDraft(conversationId);
     return true;
   }
 
@@ -1137,6 +1213,7 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
     stopConversation,
     stopSending,
     enqueueCurrentComposerTurn,
+    enqueueComposerTurnForConversation,
     requestQueuedChatTurnProcessing,
     runQueuedTurnNow,
     moveQueuedTurnUp,

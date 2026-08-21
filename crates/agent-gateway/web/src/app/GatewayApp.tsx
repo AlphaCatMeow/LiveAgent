@@ -17,6 +17,7 @@ import { terminalSessionBelongsToProject } from "@liveagent/ui/lib/terminal/sess
 import { useWorkspaceProjectDeletion } from "@liveagent/ui/lib/useWorkspaceProjectRemoval";
 import { useWorkspaceProjectSettingsActions } from "@liveagent/ui/lib/workspaceProjectRemoval";
 import type { ChatQueueTurnPreview } from "@liveagent/ui/pages/chat/ChatComposerBar";
+import { subscribeSkillEnvConfigRequested } from "@liveagent/ui/lib/skills/index";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createGatewayWorkspaceProjectRootClient } from "@/agent-ui-adapters/workspaceProjectRoots";
 import type { GatewayTranscriptNavHandle } from "@/components/GatewayTranscript";
@@ -1087,6 +1088,13 @@ function useGatewayAppController() {
     t: translateWorkspaceProject,
     setErrorMessage: setSidebarActionError,
     beforeRemoveWorkspaceProject,
+  });
+
+  // 聊天里的技能环境变量引导卡请求跳转：复用侧栏的 Skills Hub 打开动作。
+  useEffect(() => {
+    return subscribeSkillEnvConfigRequested(() => {
+      handleSidebarOpenSkillsHub();
+    });
   });
 
   const isWorkspaceProjectRunning = useCallback(

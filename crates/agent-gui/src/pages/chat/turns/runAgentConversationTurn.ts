@@ -276,6 +276,9 @@ export type RunAgentConversationTurnParams = {
   showSilentMemoryExtraction: boolean;
   skillsRootDir?: string;
   skillAccessPolicy?: SkillAccessPolicy;
+  /** 技能环境变量门禁与注入（调用方按当轮启用技能构造）。 */
+  skillEnvGate?: (baseDir: string) => { skillName: string; missing: string[] } | null;
+  resolveSkillEnvInjection?: () => Record<string, string>;
   onManagedSkillsChanged?: (change: {
     action: "install" | "create" | "delete";
     names: string[];
@@ -370,6 +373,8 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
     showSilentMemoryExtraction,
     skillsRootDir,
     skillAccessPolicy,
+    skillEnvGate,
+    resolveSkillEnvInjection,
     onManagedSkillsChanged,
     agentTemplates,
     getMcpSettings,
@@ -600,6 +605,8 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
     skillsEnabled: effectiveSkillsEnabled,
     skillsRootDir,
     skillAccessPolicy,
+    skillEnvGate,
+    resolveSkillEnvInjection,
     onManagedSkillsChanged,
     runtimeScope: "chat",
     currentChatModel: selectedModel,

@@ -455,9 +455,7 @@ let pendingSkillEnvConfigTarget: string | null = null;
 export function requestSkillEnvConfigNavigation(skillName: string) {
   if (typeof window === "undefined") return;
   pendingSkillEnvConfigTarget = skillName;
-  window.dispatchEvent(
-    new CustomEvent(SKILL_ENV_CONFIG_REQUEST_EVENT, { detail: { skillName } }),
-  );
+  window.dispatchEvent(new CustomEvent(SKILL_ENV_CONFIG_REQUEST_EVENT, { detail: { skillName } }));
 }
 
 /** Skills Hub 页取走待打开的技能名（一次性；覆盖事件发出时页面尚未挂载的冷启动路径）。 */

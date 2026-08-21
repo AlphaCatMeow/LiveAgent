@@ -13,11 +13,11 @@ import {
 } from "@liveagent/ui/lib/sidebar/openController";
 import { createSidebarStore } from "@liveagent/ui/lib/sidebar/store";
 import { useSidebarSelector } from "@liveagent/ui/lib/sidebar/useSidebarSelector";
+import { subscribeSkillEnvConfigRequested } from "@liveagent/ui/lib/skills/index";
 import { terminalSessionBelongsToProject } from "@liveagent/ui/lib/terminal/sessionStore";
 import { useWorkspaceProjectDeletion } from "@liveagent/ui/lib/useWorkspaceProjectRemoval";
 import { useWorkspaceProjectSettingsActions } from "@liveagent/ui/lib/workspaceProjectRemoval";
 import type { ChatQueueTurnPreview } from "@liveagent/ui/pages/chat/ChatComposerBar";
-import { subscribeSkillEnvConfigRequested } from "@liveagent/ui/lib/skills/index";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createGatewayWorkspaceProjectRootClient } from "@/agent-ui-adapters/workspaceProjectRoots";
 import type { GatewayTranscriptNavHandle } from "@/components/GatewayTranscript";

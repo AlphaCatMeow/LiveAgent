@@ -1139,8 +1139,7 @@ export function SkillsHubPage(props: SkillsHubPageProps) {
       // 批量启用跳过环境变量门禁未满足的技能（按钮计数已同步扣除）。
       const names = [...bulkSelection].filter(
         (name) =>
-          !isAlwaysEnabledSkillName(name) &&
-          (!target || skillEnvSatisfied.get(name) !== false),
+          !isAlwaysEnabledSkillName(name) && (!target || skillEnvSatisfied.get(name) !== false),
       );
       if (names.length === 0) return;
 

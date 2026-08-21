@@ -9,10 +9,7 @@ import {
   normalizeWorkspaceResourceSettings,
   workspaceProjectPathKey,
 } from "@liveagent/app/lib/settings/index";
-import type {
-  SkillEnvSettingsMap,
-  SkillEnvVarConfig,
-} from "@liveagent/ui/lib/skills/skillEnv";
+import type { SkillEnvSettingsMap, SkillEnvVarConfig } from "@liveagent/ui/lib/skills/skillEnv";
 
 export type GatewayProviderApiKeyUpdates = Record<string, string>;
 export type GatewayProviderUsageQuerySecretUpdates = Record<
@@ -199,9 +196,7 @@ export function redactSettingsForWebStorage(settings: AppSettings): AppSettings 
 }
 
 /** 技能环境变量值出口脱敏：值本体清空，configured 标记保留已配置状态。 */
-export function redactSkillsSettingsSecrets(
-  skills: AppSettings["skills"],
-): AppSettings["skills"] {
+export function redactSkillsSettingsSecrets(skills: AppSettings["skills"]): AppSettings["skills"] {
   const env: SkillEnvSettingsMap = {};
   for (const [skillName, vars] of Object.entries(skills.env)) {
     const nextVars: Record<string, SkillEnvVarConfig> = {};

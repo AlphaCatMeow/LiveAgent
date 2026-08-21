@@ -19,10 +19,7 @@ import {
   resolveExplicitSkillMentions,
   type SkillSummary,
 } from "@liveagent/ui/lib/skills/index";
-import {
-  collectSkillEnvInjection,
-  resolveSkillEnvStatus,
-} from "@liveagent/ui/lib/skills/skillEnv";
+import { collectSkillEnvInjection, resolveSkillEnvStatus } from "@liveagent/ui/lib/skills/skillEnv";
 import { invoke } from "@tauri-apps/api/core";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { useCallback } from "react";
@@ -1474,9 +1471,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
         const skill = selectedSkills.find((item) => item.baseDir === baseDir);
         if (!skill) return null;
         const status = resolveSkillEnvStatus(skill, skillEnvSettings);
-        return status.satisfied
-          ? null
-          : { skillName: skill.name, missing: status.missingRequired };
+        return status.satisfied ? null : { skillName: skill.name, missing: status.missingRequired };
       };
       skillEnvInjectionForTools = () =>
         collectSkillEnvInjection(

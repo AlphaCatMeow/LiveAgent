@@ -35,16 +35,16 @@ import {
   toolResultMessageToText,
   type WriteResultDetails,
 } from "@liveagent/ui/lib/chat/assistantBubbleAdapter";
-import type {
-  SubagentBatchDetails,
-  SubagentCardDetails,
-  SubagentMessageDetails,
-} from "@liveagent/ui/lib/subagents/protocol";
 import {
   notifySkillsDiscoveryUpdated,
   probeSkillEnvNames,
   requestSkillEnvConfigNavigation,
 } from "@liveagent/ui/lib/skills/index";
+import type {
+  SubagentBatchDetails,
+  SubagentCardDetails,
+  SubagentMessageDetails,
+} from "@liveagent/ui/lib/subagents/protocol";
 import { useState } from "react";
 import { Key, Loader2, Search } from "../../IconSet";
 import {
@@ -506,10 +506,7 @@ function SkillEnvMissingCard(props: { skillName: string; missing: string[]; read
             <>
               {probeOutcome ? (
                 <div className="text-[11px] leading-4 text-muted-foreground">
-                  {t("chat.skillEnvProbeAbsent").replace(
-                    "{names}",
-                    probeOutcome.absent.join(", "),
-                  )}
+                  {t("chat.skillEnvProbeAbsent").replace("{names}", probeOutcome.absent.join(", "))}
                 </div>
               ) : null}
               {!readOnly ? (

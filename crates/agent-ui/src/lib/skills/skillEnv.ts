@@ -49,7 +49,9 @@ function normalizeSkillEnvVarConfig(input: unknown): SkillEnvVarConfig | null {
   if (obj.override === "required" || obj.override === "ignored") {
     config.override = obj.override;
   }
-  return config.value !== undefined || config.configured !== undefined || config.override !== undefined
+  return config.value !== undefined ||
+    config.configured !== undefined ||
+    config.override !== undefined
     ? config
     : null;
 }
@@ -128,7 +130,10 @@ export function resolveSkillEnvStatus(
     systemValuePresent: boolean,
   ): ResolvedSkillEnvRequirement["state"] => {
     // configured=true 表示值已存在桌面端(WebUI 侧的脱敏副本没有值本体)。
-    if ((typeof varConfig?.value === "string" && varConfig.value.trim()) || varConfig?.configured === true) {
+    if (
+      (typeof varConfig?.value === "string" && varConfig.value.trim()) ||
+      varConfig?.configured === true
+    ) {
       return "user";
     }
     if (systemValuePresent) return "system";
@@ -145,8 +150,7 @@ export function resolveSkillEnvStatus(
       : varConfig?.override === "required"
         ? true
         : requirement.confidence === "declared" && requirement.required;
-    const systemValuePresent =
-      probeOverrides?.[requirement.name] ?? requirement.systemValuePresent;
+    const systemValuePresent = probeOverrides?.[requirement.name] ?? requirement.systemValuePresent;
     resolved.push({
       name: requirement.name,
       confidence: requirement.confidence,
@@ -206,9 +210,7 @@ export function collectSkillEnvInjection(
 ): Record<string, string> {
   if (!envSettings) return {};
   const out: Record<string, string> = {};
-  const names = skills
-    .map((skill) => skill.name)
-    .sort((a, b) => a.localeCompare(b));
+  const names = skills.map((skill) => skill.name).sort((a, b) => a.localeCompare(b));
   for (const skillName of names) {
     const vars = envSettings[skillName];
     if (!vars) continue;

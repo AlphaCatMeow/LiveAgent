@@ -187,6 +187,21 @@ export const EN_US_COMMON_TRANSLATIONS = {
   "chat.workspaceNewConversation": "New conversation",
   "chat.workspaceMore": "More",
   "chat.workspaceConfigure": "Configure",
+  "chat.projectPromptTitle": "Project prompt",
+  "chat.globalPromptTitle": "Global prompt",
+  "chat.projectPromptStrategy": "Relationship to the global prompt",
+  "chat.projectPromptStrategyHint":
+    "Choose how this project prompt combines with the active global template.",
+  "chat.projectPromptAppend": "Append",
+  "chat.projectPromptAppendHint":
+    "Apply the active global prompt first, then add this project's instructions.",
+  "chat.projectPromptReplace": "Replace",
+  "chat.projectPromptReplaceHint":
+    "Use only the project prompt here and leave out the global prompt.",
+  "chat.projectPromptContent": "Prompt content",
+  "chat.projectPromptContentHint": "Leave empty to use global prompts only for this project.",
+  "chat.projectPromptPlaceholder":
+    "Describe the context, constraints, and working style specific to this project...",
   "chat.workspaceSettingsTitle": "Project settings",
   "chat.workspaceSettingsNavigation": "Project settings navigation",
   "chat.workspaceSettingsGeneral": "General",

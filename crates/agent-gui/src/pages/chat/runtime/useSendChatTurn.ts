@@ -65,6 +65,7 @@ import {
   isAgentDevMode,
   isAgentExecutionMode,
   removeWorkspaceResourceReferences,
+  resolveEffectivePromptSettings,
   resolveWorkspaceResources,
   type SelectedModel,
   strictestCommandSafetyMode,
@@ -114,6 +115,7 @@ import type { createChatRuntimeHost } from "./ChatRuntimeHost";
 import {
   buildErrorAssistantMessage,
   formatHookWarningMessage,
+  resolveConversationPromptWorkdir,
   resolveEffectiveConversationWorkdir,
 } from "./chatPageRuntime";
 import {
@@ -202,7 +204,6 @@ type UseSendChatTurnParams = {
   availableSkills: SkillSummary[];
   skillsRootDir: string;
   refreshSkills: () => Promise<{ skills: SkillSummary[]; rootDir: string } | null>;
-  activeAgentPrompt: string;
   ensureTunnelToolTab: (projectPathKey?: string) => void;
   ensureSshTunnelToolTab: (projectPathKey?: string) => void;
   persistConversation: PersistConversationAction;
@@ -276,7 +277,6 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     availableSkills,
     skillsRootDir,
     refreshSkills,
-    activeAgentPrompt,
     ensureTunnelToolTab,
     ensureSshTunnelToolTab,
     persistConversation,
@@ -362,14 +362,17 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       (settings.chatRuntimeControls.planModeEnabled ||
         overrides?.runtimeControlsOverride?.planModeEnabled === true ||
         gatewayBridgeRequest?.runtimeControlsOverride?.planModeEnabled === true);
-    const effectiveWorkdir = resolveEffectiveConversationWorkdir({
+    const workdirResolution = {
       isAgentMode: effectiveIsAgentMode,
       workdirOverride: overrides?.workdirOverride,
       gatewayWorkdirOverride: gatewayBridgeRequest?.workdirOverride,
       persistedWorkdir: sidebarStore.peek(conversationId)?.cwd,
       runtimeWorkdir: runtimeEntry?.workdir,
       globalWorkdir: settings.system.workdir,
-    });
+    };
+    const effectiveWorkdir = resolveEffectiveConversationWorkdir(workdirResolution);
+    const promptWorkdir = resolveConversationPromptWorkdir(workdirResolution);
+    const effectiveAgentPrompt = resolveEffectivePromptSettings(settings, promptWorkdir).prompt;
     const effectiveProjectPathKey = workspaceProjectPathKey(effectiveWorkdir);
     const effectiveProject = workspaceProjects.find(
       (project) => workspaceProjectPathKey(project.path) === effectiveProjectPathKey,
@@ -637,9 +640,10 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     const sessionId = runtimeEntry.sessionId;
     const createdAt = runtimeEntry.createdAt;
     const conversationCwd = effectiveWorkdir || undefined;
+    const historyCwd = promptWorkdir || undefined;
     updateConversationRuntimeEntry(conversationId, (prev) => ({
       ...prev,
-      workdir: conversationCwd,
+      workdir: historyCwd,
     }));
     const transcriptStore = getConversationLiveTranscriptStore(conversationId);
     const compaction = getCompactionController(conversationId);
@@ -726,7 +730,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
           providerId,
           model,
           sessionId,
-          cwd: conversationCwd,
+          cwd: historyCwd,
           createdAt,
         }),
       );
@@ -1130,7 +1134,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
           providerId,
           model,
           selectedModel,
-          cwd: conversationCwd,
+          cwd: historyCwd,
           state: nextConversationState,
           fallbackTitle,
           createdAt,
@@ -1297,7 +1301,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       return buildPreparedConversationContext({
         state,
         tools,
-        activeAgentPrompt,
+        activeAgentPrompt: effectiveAgentPrompt,
         skillsPrompt,
         memoryPrompt,
         // 每次组装都现取:增量块按消息 id 绑定,已挂上的块在后续轮次原样重放,
@@ -1330,7 +1334,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
         state,
         resumeMessage,
         tools,
-        activeAgentPrompt,
+        activeAgentPrompt: effectiveAgentPrompt,
         skillsPrompt,
         memoryPrompt,
         memoryTurnUpdates: memoryTurnInjection.getMessageUpdates(conversationId),
@@ -1374,7 +1378,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
             providerId,
             model,
             selectedModel,
-            cwd: conversationCwd,
+            cwd: historyCwd,
             state,
             fallbackTitle,
             createdAt,
@@ -1395,7 +1399,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
             providerId,
             model,
             selectedModel,
-            cwd: conversationCwd,
+            cwd: historyCwd,
             state,
             fallbackTitle,
             createdAt,
@@ -1565,7 +1569,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
         providerId,
         model,
         selectedModel,
-        cwd: conversationCwd,
+        cwd: historyCwd,
         state: finalState,
         fallbackTitle,
         createdAt,
@@ -1607,7 +1611,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
         providerId,
         model,
         selectedModel,
-        cwd: conversationCwd,
+        cwd: historyCwd,
         state: finalState,
         fallbackTitle,
         createdAt,
@@ -1644,7 +1648,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
           providerId,
           model,
           selectedModel,
-          cwd: conversationCwd,
+          cwd: historyCwd,
           state: setTaskListState(nextConversationState, taskList),
           fallbackTitle,
           createdAt,
@@ -1772,6 +1776,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
             sessionId,
             conversationId,
             conversationCwd,
+            historyCwd,
             fallbackTitle,
             createdAt,
             titlePromise,

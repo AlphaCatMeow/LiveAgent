@@ -86,8 +86,10 @@ test("自定义拦截器插入默认之后、payload-debug-logging 链尾之前"
     const names = listPayloadInterceptorNames();
     assert.equal(names[names.length - 1], "payload-debug-logging");
     assert.equal(names[names.length - 2], "test-order");
-    assert.deepEqual(names.slice(0, EXPECTED_DEFAULT_ORDER.length - 1), 
-      EXPECTED_DEFAULT_ORDER.slice(0, -1));
+    assert.deepEqual(
+      names.slice(0, EXPECTED_DEFAULT_ORDER.length - 1),
+      EXPECTED_DEFAULT_ORDER.slice(0, -1),
+    );
   } finally {
     dispose();
   }

@@ -33,6 +33,7 @@ import {
   resolveProviderCacheRetention,
   toSimpleStreamReasoning,
 } from "./requestOptions";
+import { resolveStreamRetryConfig } from "./retryPolicy";
 import { buildTextModeToolResultsForAssistant } from "./textModeToolRecovery";
 import type { ProviderRuntimeConfig, StreamOptionsEx } from "./types";
 
@@ -115,6 +116,7 @@ function buildTextOnlyStreamOptions(params: {
     // hosted by the upstream provider, so it can stay on auto when explicitly enabled.
     toolChoice: usesOpenAIChatNativeWebSearch ? undefined : nativeWebSearch ? "auto" : "none",
     streamRetry: {
+      ...resolveStreamRetryConfig(params.runtime.retryPolicy),
       onRetry: params.onRetryStatus,
       onRetryRecovered: params.onRetryRecovered,
     },

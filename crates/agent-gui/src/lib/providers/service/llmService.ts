@@ -1,5 +1,6 @@
 import type { AssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { streamSimpleByApi } from "../runtime/streamByApi";
+import { usePayloadInterceptor } from "./interceptors";
 import type { LlmStreamRequest } from "./types";
 
 /**
@@ -59,4 +60,9 @@ export function llmStream(request: LlmStreamRequest): AssistantMessageEventStrea
 
 export const llm = {
   stream: llmStream,
+  /**
+   * 注册自定义 payload 拦截器（PR-3），返回幂等 dispose。执行位置在默认
+   * 拦截器之后、payload-debug-logging 链尾之前。
+   */
+  use: usePayloadInterceptor,
 };

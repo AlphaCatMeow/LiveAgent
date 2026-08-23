@@ -41,6 +41,7 @@
       "postcss": "8.5.8",
       "react": "19.2.4",
       "react-dom": "19.2.4",
+      "style-to-js": "2.0.2",
       "unplugin-icons": "23.0.1",
       "vite": "8.0.5"
     }

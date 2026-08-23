@@ -421,6 +421,7 @@ export const ImagePreview = memo(function ImagePreview(props: ImagePreviewProps)
   const [activeIndex, setActiveIndex] = useState(clampedRequestedIndex);
   const [viewerState, setViewerState] = useState<ImageViewerState>(resetImageViewerState);
   const [viewportSize, setViewportSize] = useState<ImageViewerSize>({ width: 0, height: 0 });
+  const [viewportElement, setViewportElement] = useState<HTMLDivElement | null>(null);
   const [naturalSize, setNaturalSize] = useState<ImageViewerSize>({ width: 0, height: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const [showInfo, setShowInfo] = useState(false);
@@ -430,6 +431,10 @@ export const ImagePreview = memo(function ImagePreview(props: ImagePreviewProps)
   const [isCopying, setIsCopying] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  const setViewportRef = useCallback((node: HTMLDivElement | null) => {
+    viewportRef.current = node;
+    setViewportElement(node);
+  }, []);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const resolvedDataRef = useRef(
     new WeakMap<ImagePreviewSlide, ReturnType<typeof resolveImagePreviewData>>(),
@@ -505,10 +510,9 @@ export const ImagePreview = memo(function ImagePreview(props: ImagePreviewProps)
   }, [open]);
 
   useEffect(() => {
-    const viewport = viewportRef.current;
-    if (!open || !viewport) return;
+    if (!open || !viewportElement) return;
     const updateViewportSize = () => {
-      setViewportSize({ width: viewport.clientWidth, height: viewport.clientHeight });
+      setViewportSize({ width: viewportElement.clientWidth, height: viewportElement.clientHeight });
     };
     updateViewportSize();
     if (typeof ResizeObserver === "undefined") {
@@ -516,9 +520,9 @@ export const ImagePreview = memo(function ImagePreview(props: ImagePreviewProps)
       return () => window.removeEventListener("resize", updateViewportSize);
     }
     const observer = new ResizeObserver(updateViewportSize);
-    observer.observe(viewport);
+    observer.observe(viewportElement);
     return () => observer.disconnect();
-  }, [open]);
+  }, [open, viewportElement]);
 
   const imageSize = useMemo(
     () => fitImageViewerSize(naturalSize, viewportSize, viewerState.rotation),
@@ -820,7 +824,7 @@ export const ImagePreview = memo(function ImagePreview(props: ImagePreviewProps)
           </div>
         </div>
         <div
-          ref={viewportRef}
+          ref={setViewportRef}
           role="application"
           aria-label={t("chat.imageViewer.viewer")}
           className={cn(

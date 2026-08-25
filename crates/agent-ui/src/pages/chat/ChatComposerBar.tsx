@@ -214,6 +214,8 @@ function ComposerContextUsageRing(props: {
       contextWindow={contextWindow}
       disabled={disabled}
       onConfirm={onConfirm}
+      // 低占用时让位：环只在能承担压缩入口时浮现，累计读数由下方状态栏承担。
+      hideBelowWarn
     />
   );
 }

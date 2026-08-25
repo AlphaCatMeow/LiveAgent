@@ -42,6 +42,11 @@ function hasInterceptorName(name: string): boolean {
 /**
  * 安装默认拦截器链。仅供 payloadPipeline.ts 模块初始化调用一次；重复安装
  * 抛错（防止测试加载器或 HMR 下的双重初始化悄悄改变链序）。
+ *
+ * 名称唯一性与 usePayloadInterceptor 共用同一张注册表：若加载顺序上自定义
+ * 拦截器先于本安装（插件初始化、HMR、测试加载器均可能），与默认名撞名时
+ * 这里同样抛错，而不是悄悄产出含同名项的链。全部校验先于任何状态写入，
+ * 失败不留部分注册状态。
  */
 export function installDefaultPayloadInterceptors(
   interceptors: readonly PayloadInterceptor[],
@@ -53,6 +58,11 @@ export function installDefaultPayloadInterceptors(
   for (const entry of interceptors) {
     if (seen.has(entry.name)) {
       throw new Error(`Duplicate default payload interceptor name: ${entry.name}`);
+    }
+    if (customInterceptors.some((custom) => custom.name === entry.name)) {
+      throw new Error(
+        `Default payload interceptor name is already taken by a custom interceptor: ${entry.name}`,
+      );
     }
     seen.add(entry.name);
   }

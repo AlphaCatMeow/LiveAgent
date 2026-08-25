@@ -153,6 +153,24 @@ test("同名重复注册抛错（含与默认拦截器同名）", () => {
   );
 });
 
+test("加载顺序反转：自定义先注册且与默认名撞名时，安装默认链抛错且不留部分状态", () => {
+  // 独立 loader 模拟"插件/测试先 import 服务层并注册自定义拦截器，之后
+  // payloadPipeline 才被加载"的顺序（llmService 不传递性求值 payloadPipeline，
+  // 这一顺序在真实模块图上可达）。
+  const isolated = createTsModuleLoader();
+  const api = isolated.loadModule("src/lib/providers/service/interceptors.ts");
+  api.usePayloadInterceptor({
+    name: "anthropic-automatic-caching",
+    intercept: (o) => o,
+  });
+  assert.throws(
+    () => isolated.loadModule("src/lib/providers/runtime/payloadPipeline.ts"),
+    /already taken by a custom interceptor: anthropic-automatic-caching/,
+  );
+  // 安装失败必须不留部分注册状态：链上只有先注册的那个自定义拦截器。
+  assert.deepEqual(api.listPayloadInterceptorNames(), ["anthropic-automatic-caching"]);
+});
+
 test("行为等价：空注册态 finalize 输出与旧数组组合逐字段一致", async () => {
   // 按注册化前的 finalizePayloadMiddlewares 数组原样重建旧组合链
   // （同一批 attach* 实现、同一顺序），对非平凡参数逐字段对比输出。

@@ -101,6 +101,47 @@ test("容器分档：时间/token/性能分组分别挂 28/40/52rem 断点", asy
   await unmount();
 });
 
+test("提供 contextWindow 时 context 分组恒显，与 scale 同级不挂断点", async () => {
+  const { container, unmount } = await render(sampleStats(), {
+    contextUsageTokens: 50_000,
+    contextWindow: 200_000,
+  });
+  const label = container.querySelector('[role="status"]').getAttribute("aria-label");
+  assert.equal(
+    label,
+    "51 turns · 672 steps ｜ Context 25% ｜ LLM 12m34s · Tools 42s ｜ In 111M tok · Out 2.3M tok ｜ Avg TTFT 20.9s · 170 tok/s · Cache hit 85%",
+  );
+  const contextEl = container.querySelector('[data-stats-group="context"]');
+  assert.ok(contextEl, "应渲染 context 分组");
+  assert.match(contextEl.className, /flex/);
+  assert.doesNotMatch(contextEl.className, /@min-/, "上下文占用恒显，不挂断点，移动端才能露出");
+  await unmount();
+});
+
+test("未提供合法 contextWindow 时 context 分组不存在（不影响其余分组的 aria-label）", async () => {
+  for (const contextWindow of [undefined, 0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    const { container, unmount } = await render(sampleStats(), {
+      contextUsageTokens: 50_000,
+      contextWindow,
+    });
+    const label = container.querySelector('[role="status"]').getAttribute("aria-label");
+    assert.doesNotMatch(
+      label,
+      /Context/,
+      `contextWindow=${contextWindow} 时不应出现 context 分组，实际：${label}`,
+    );
+    assert.equal(container.querySelector('[data-stats-group="context"]'), null);
+    await unmount();
+  }
+});
+
+test("contextWindow 有效但 contextUsageTokens 缺省时 context 分组按 0% 展示", async () => {
+  const { container, unmount } = await render(sampleStats(), { contextWindow: 200_000 });
+  const label = container.querySelector('[role="status"]').getAttribute("aria-label");
+  assert.match(label, /Context 0%/, `未提供 tokens 时应按 0% 展示：${label}`);
+  await unmount();
+});
+
 test("approximate 读数带 ≈ 前缀；精确读数不带", async () => {
   const approx = await render(sampleStats({ approximate: true }));
   const label = approx.container.querySelector('[role="status"]').getAttribute("aria-label");
@@ -171,33 +212,69 @@ test("空闲时零定时器：无运行段不注册心跳 interval", async () =>
   }
 });
 
-test("提供 onOpenTrajectory 时整条可点击，点击跳转轨迹视图", async () => {
-  let opened = 0;
+test("占用 ≥50% 且提供 onManualCompactConfirm 时整条渲染为确认弹层触发按钮", async () => {
   const { container, unmount } = await render(sampleStats(), {
-    onOpenTrajectory: () => {
-      opened += 1;
-    },
+    contextUsageTokens: 150_000,
+    contextWindow: 200_000, // 75%，越过 canManualCompact 的 50% 门槛
+    onManualCompactConfirm: () => {},
   });
 
   const button = container.querySelector("button");
   assert.ok(button, "应渲染为可点击按钮");
-  assert.equal(button.getAttribute("aria-label"), "Open trajectory");
+  assert.equal(button.getAttribute("aria-label"), "Compact context manually?");
   // 读数由外层 role=status 播报，内层行对辅助技术隐藏，避免同串数字读两遍。
   assert.equal(button.querySelector("[aria-hidden]")?.getAttribute("aria-hidden"), "true");
-
-  await act(async () => {
-    button.click();
-  });
-  assert.equal(opened, 1, "点击应触发一次跳转");
+  // Base UI Popover 在此 jsdom 测试环境下点击展开会抛错（ContextUsageRing 用
+  // 同样的 ConfirmActionPopover 复现同一崩溃，与本次改动无关，context-usage.
+  // test.mjs 也因此从未真的点开过那层），故不在此驱动真实点击；用下面的源码
+  // 断言代替，验证压缩只能从弹层内部确认触发，不会被整行点击绕过。
+  const source = readFileSync(
+    new URL("../../../agent-ui/src/components/chat/ConversationStatsBar.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /onConfirm=\{\(\) => void onManualCompactConfirm\?\.\(\)\}/,
+    "压缩必须经 ConfirmActionPopover 的 onConfirm 触发，而不是按钮 onClick 直接调用",
+  );
+  assert.match(
+    source,
+    /<button[\s\S]*?onClick=\{open\}/,
+    "触发按钮的 onClick 只应打开确认弹层（open），不能直接调用压缩回调",
+  );
 
   await unmount();
 });
 
-test("未提供 onOpenTrajectory 时是纯展示，不渲染按钮", async () => {
-  const { container, unmount } = await render(sampleStats());
-  assert.equal(container.querySelector("button"), null, "纯展示态不应有按钮");
+test("占用 <50% 时是纯展示，不渲染按钮（即使提供了 onManualCompactConfirm）", async () => {
+  const { container, unmount } = await render(sampleStats(), {
+    contextUsageTokens: 50_000,
+    contextWindow: 200_000, // 25%，未达 canManualCompact 的 50% 门槛
+    onManualCompactConfirm: () => {},
+  });
+  assert.equal(container.querySelector("button"), null, "占用未达门槛时不应有按钮");
   // 分组仍在，只是不可点。
   assert.ok(container.querySelector('[data-stats-group="scale"]'));
+  await unmount();
+});
+
+test("未提供 onManualCompactConfirm 时是纯展示，不渲染按钮（即使占用达标）", async () => {
+  const { container, unmount } = await render(sampleStats(), {
+    contextUsageTokens: 150_000,
+    contextWindow: 200_000,
+  });
+  assert.equal(container.querySelector("button"), null, "未提供回调时不应有按钮");
+  await unmount();
+});
+
+test("manualCompactBlocked 为 true 时即使占用达标也不可点", async () => {
+  const { container, unmount } = await render(sampleStats(), {
+    contextUsageTokens: 150_000,
+    contextWindow: 200_000,
+    onManualCompactConfirm: () => {},
+    manualCompactBlocked: true,
+  });
+  assert.equal(container.querySelector("button"), null, "压缩被阻塞时不应有按钮");
   await unmount();
 });
 

@@ -8,6 +8,7 @@
 
 import { ConversationStatsBar } from "@liveagent/ui/components/chat/ConversationStatsBar";
 import { useConversationStats } from "@liveagent/ui/lib/trajectory/useConversationStats";
+import type { ContextUsageTokensSource } from "@liveagent/ui/pages/chat/ChatComposerBar";
 import { useSyncExternalStore } from "react";
 import { createTauriTrajectoryHost } from "../../../agent-ui-adapters/trajectory";
 import {
@@ -19,13 +20,27 @@ import {
 // 宿主无状态（只是 invoke 的包装），模块级复用一份即可。
 const trajectoryHost = createTauriTrajectoryHost();
 
+const noopSubscribe = () => () => {};
+const readNoTokens = () => undefined;
+
 export function ConversationStatsBarHost(props: {
   conversationId: string;
   enabled?: boolean;
-  /** 整条点击切到该会话的轨迹视图；缺省为纯展示。 */
-  onOpenTrajectory?: () => void;
+  /** 提供且占用达标时整条可点击，弹出确认后触发手动压缩；缺省为纯展示。 */
+  onManualCompactConfirm?: (() => void) | (() => Promise<unknown>);
+  manualCompactBlocked?: boolean;
+  /** 与 composer 用量环同一订阅源，供状态栏恒显分组读取当前上下文占用。 */
+  contextUsageTokensSource?: ContextUsageTokensSource;
+  contextWindow?: number;
 }) {
-  const { conversationId, enabled = true, onOpenTrajectory } = props;
+  const {
+    conversationId,
+    enabled = true,
+    onManualCompactConfirm,
+    manualCompactBlocked,
+    contextUsageTokensSource,
+    contextWindow,
+  } = props;
   const liveEvents = useSyncExternalStore(subscribeDesktopLiveTrajectory, () =>
     desktopLiveTrajectoryEvents(conversationId),
   );
@@ -41,11 +56,19 @@ export function ConversationStatsBarHost(props: {
     authoritativeRevision,
     enabled,
   });
+  const contextUsageTokens = useSyncExternalStore(
+    contextUsageTokensSource?.subscribe ?? noopSubscribe,
+    contextUsageTokensSource?.getContextUsageTokens ?? readNoTokens,
+    contextUsageTokensSource?.getContextUsageTokens ?? readNoTokens,
+  );
 
   return (
     <ConversationStatsBar
       stats={stats}
-      {...(onOpenTrajectory === undefined ? {} : { onOpenTrajectory })}
+      contextUsageTokens={contextUsageTokens}
+      contextWindow={contextWindow}
+      manualCompactBlocked={manualCompactBlocked}
+      {...(onManualCompactConfirm === undefined ? {} : { onManualCompactConfirm })}
     />
   );
 }

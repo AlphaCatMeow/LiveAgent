@@ -145,13 +145,15 @@ export function useConversationStats(options: {
 - 单行、水平居中、`text-[calc(11px*var(--zone-font-scale,1))]`、`text-muted-foreground/70`，分组间用 `｜`（`text-muted-foreground/40`），组内用 `·`——与 `UsagePanel` 现有视觉语言一致。
 - 渲染在 composer 玻璃卡片**下方**、与卡片同宽的容器内（见 4.3），高度约 20px，不参与卡片的展开/收起动画。
 - **响应式收缩**：composer 卡片已是 `@container`，按容器宽度分档隐藏低优先级分组：
-  1. 恒显：`轮 · 步`
+  1. 恒显：`轮 · 步` `+ 上下文占用 %`（移动端够不到下一档，理由见 4.5 末尾的修订说明）
   2. ≥ 28rem：`+ LLM 时长 · 工具时长`
   3. ≥ 40rem：`+ 输入/输出 tok`
   4. ≥ 52rem：`+ 首 token · tok/s · 缓存命中`
 - **运行中心跳**：`isSending` 时每 1s 触发一次重渲染，把 `llmRunningSinceAt`/`toolRunningSinceAt` 折算进显示值；空闲时零定时器。
 - **空态**：`stats === null`（无任何轨迹事件）时渲染等高占位容器（`h-5`，无内容、`aria-hidden`），不返回 `null`——若不占位，首条 assistant 回复落地统计浮现的瞬间会让 composer/transcript 整体位移一次；常驻占位换零跳动为代价，稳态下视觉不可见。老会话、text 模式同样走这条占位分支。
-- **可选交互**（建议做，成本极低）：整条可点击 → 切换到该会话的轨迹视图（`ConversationViewTabs` 已有该入口）；hover 出 `LabelTooltip` 显示未被收缩掉的完整指标 + 压缩次数。
+- **交互**：hover 出 `LabelTooltip` 显示未被收缩掉的完整指标 + 压缩次数；占用达到手动压缩门槛（`canManualCompact`，≥50%）且宿主提供了压缩回调时整条可点击 → 弹出确认后触发手动压缩，门槛表达式与 `ContextUsageRing` 同源（`canManualCompact(ratio) && !manualCompactBlocked && Boolean(onManualCompactConfirm)`），复用同一套 `ConfirmActionPopover` 交互；不满足条件时纯展示，无点击行为。
+
+  **修订**：上述「整条可点击 → 切换到轨迹视图」的原始设计已推翻，改为点击触发手动压缩确认。原因：轨迹视图已有独立入口（`ConversationViewTabs`，桌面端与 WebUI 均已接线），状态栏复用点击手势去做导航是重复入口；而手动压缩此前只能从 `ContextUsageRing` 的环形入口触发，环在窄屏/低占用（`hideBelowWarn`）时会隐身，压缩入口跟着一起消失——状态栏本就常驻可见（见 4.5 恒显上下文占用分组的确认），复用为压缩入口正好补上这个缺口。点击只 `open()` 出 `ConfirmActionPopover`，压缩回调只挂在弹层内部的 `onConfirm`，不会被整行点击绕过确认步骤。
 - 无障碍：容器 `role="status"` + `aria-label` 拼完整文本；数字变化不用 `aria-live`（流式期间会刷屏）。
 
 ### 4.3 ChatComposerBar 的改动（最小侵入）
@@ -204,7 +206,9 @@ statsBar={
 
 同时已落地的还有 **`statsBar` 插槽**：ChatComposerBar 新增 `statsBar?: ReactNode`，渲染在玻璃卡片正下方、与卡片同宽的容器内，且内置 `approvalBar` 互斥——审批面板可见时状态栏自动让位（审批操作优先级高于统计读数）。宿主未接线时不占位，transcript 底部预留走既有 ResizeObserver 自动适应。
 
-- **上下文用量环（ContextUsageRing）改为低占用隐藏**（已确认的产品决策，随状态栏一起实施）：占用 `< CONTEXT_USAGE_WARN_RATIO`（50%，即不可手动压缩时）环不渲染；≥ 50% 时浮现，恰好与手动压缩入口的可用窗口重合。语义分工：环管「当前上下文占用」（瞬时、压缩后回落），状态栏管「全会话累计」（单调增长），状态栏**不含**上下文占用分组。实现为 `ContextUsageRing` 新增 `hideBelowWarn?: boolean`（默认 false，本处传 true），环在 `ratio < CONTEXT_USAGE_WARN_RATIO` 时返回 null；环是 absolute 定位，隐藏不影响右侧控制列布局。
+- **上下文用量环（ContextUsageRing）改为低占用隐藏**（已确认的产品决策，随状态栏一起实施）：占用 `< CONTEXT_USAGE_WARN_RATIO`（50%，即不可手动压缩时）环不渲染；≥ 50% 时浮现，恰好与手动压缩入口的可用窗口重合。语义分工：环管「当前上下文占用」（瞬时、压缩后回落），状态栏管「全会话累计」（单调增长）。实现为 `ContextUsageRing` 新增 `hideBelowWarn?: boolean`（默认 false，本处传 true），环在 `ratio < CONTEXT_USAGE_WARN_RATIO` 时返回 null；环是 absolute 定位，隐藏不影响右侧控制列布局。
+
+  **修订（移动端反馈）**：上述「状态栏不含上下文占用分组」的决定已推翻。原因：composer 容器宽度在移动端到不了状态栏的第一个断点（28rem），窄屏只剩「轮 · 步」；用量环又在占用 < 50% 时隐身（`hideBelowWarn`）——两者叠加导致低占用会话在窄屏下完全看不到任何上下文信息。修复：状态栏新增恒显的「上下文占用」分组（与 `轮 · 步` 同级，不挂 `@min-` 断点），读数与用量环同源（`contextUsageTokensSource` + `contextWindow` → `contextUsageRatio()`），但**不复用 `hideBelowWarn` 门槛**——只要有合法 `contextWindow`（`> 0` 且有限）就显示，`contextUsageTokens` 缺省时按 0% 展示，而非整组隐藏。环与状态栏因此不再互斥：环继续做「≥ 50% 才浮现的压缩入口」，状态栏做「随时可见的占用读数」，二者共享同一数据源但各自的显隐门槛独立。
 
 ## 5. 方案取舍：为什么不先做后端聚合
 
@@ -225,6 +229,7 @@ statsBar={
 | --- | --- | --- |
 | `chat.stats.turns` | `{n} 轮` | `{n} turns` |
 | `chat.stats.steps` | `{n} 步` | `{n} steps` |
+| `chat.stats.contextUsage` | `上下文 {p}%` | `Context {p}%` |
 | `chat.stats.llmTime` | `LLM {t}` | `LLM {t}` |
 | `chat.stats.toolTime` | `工具调用 {t}` | `Tools {t}` |
 | `chat.stats.ttftAvg` | `首 token 平均 {t}` | `Avg TTFT {t}` |
@@ -234,7 +239,9 @@ statsBar={
 | `chat.stats.outputTokens` | `输出 {n} tok` | `Out {n} tok` |
 | `chat.stats.compactions` | `压缩 {n} 次`（仅 tooltip） | `{n} compactions` |
 | `chat.stats.approximate` | `≈`（前缀，含 tooltip 释义） | `≈` |
-| `chat.stats.openTrajectory` | `查看轨迹详情` | `Open trajectory` |
+| `chat.manualCompactTitle` | `手动压缩上下文？` | `Compact context manually?`（同时用作触发按钮 `aria-label`） |
+| `chat.manualCompactDescription` | `将历史消息折叠为摘要检查点，释放上下文空间。` | `Folds earlier messages into a summary checkpoint to free context space.` |
+| `chat.manualCompactConfirm` | `压缩` | `Compact` |
 
 ## 7. 边界与降级
 
@@ -249,7 +256,8 @@ statsBar={
 | 轨迹视图打开中 | composer 挂起（`hidden`），状态栏随之隐藏；数据缓存共享，无重复拉取 |
 | 多 pane 同会话 | 模块级缓存共享事件与聚合，只多一份订阅 |
 | `approvalBar` 可见 | 状态栏暂时隐藏，审批操作优先 |
-| 上下文占用 < 50% | 用量环隐藏（见 4.5）；≥ 50% 浮现并承担手动压缩入口 |
+| 上下文占用 < 50% | 用量环隐藏（见 4.5）；≥ 50% 浮现并承担手动压缩入口。状态栏的占用分组不受此门槛影响，只要有合法 `contextWindow` 就恒显（见 4.5 修订） |
+| 无 `contextWindow`（老会话/text 模式） | 状态栏「上下文占用」分组整个不存在（不显示假的 0%），其余分组不受影响 |
 
 ## 8. 文件改动清单
 
@@ -294,6 +302,7 @@ hook 层：
 - 时长/token 格式化边界（59s、60s、999K、1M…）
 - `approvalBar` 可见时状态栏隐藏
 - 环 `hideBelowWarn`：49% 隐藏、50% 显示、压缩后回落再隐藏（补进现有 `context-usage.test.mjs`）
+- 上下文占用分组：合法 `contextWindow` 时恒显且不挂断点；`contextWindow` 缺省/非法（0、负数、NaN、Infinity）时分组整个不存在；`contextUsageTokens` 缺省但 `contextWindow` 合法时按 0% 展示（`conversation-stats-bar.test.mjs`）
 
 回归：composer 高度上报（`onHeightChange`）在状态栏出现/消失时正确更新；`pnpm check`（biome + ui-boundaries）通过。
 

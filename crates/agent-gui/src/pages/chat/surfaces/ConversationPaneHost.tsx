@@ -245,7 +245,10 @@ export const ConversationPaneHost = forwardRef<
                   conversationId={snapshot.conversationId}
                   // 轨迹页挂起输入区时状态栏随之隐藏，无需重复拉取。
                   enabled={!trajectoryActive}
-                  {...(trajectory === undefined ? {} : { onOpenTrajectory: trajectory.onOpen })}
+                  contextUsageTokensSource={composer.contextUsageTokensSource}
+                  contextWindow={composer.contextWindow}
+                  onManualCompactConfirm={controller.compact}
+                  manualCompactBlocked={isCompactionRunning}
                 />
               }
               fileDropOverlay={

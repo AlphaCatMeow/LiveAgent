@@ -1,6 +1,7 @@
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { cn } from "@liveagent/ui/lib/shared/utils";
 import { useEffect, useState } from "react";
+import { canManualCompact, contextUsageRatio } from "../../lib/chat/contextUsage";
 import {
   type ConversationStats,
   formatStatCount,
@@ -12,6 +13,7 @@ import {
   hasConversationStats,
   resolveStatDurations,
 } from "../../lib/trajectory/stats";
+import { ConfirmActionPopover } from "../ui/confirm-action-popover";
 import { LabelTooltip } from "../ui/label-tooltip";
 
 /** 心跳与 hook 的重建节流同频（docs/design/composer-context-stats-bar.md §4.2）。 */
@@ -36,23 +38,45 @@ function useRunningHeartbeat(running: boolean): number {
 }
 
 /**
- * 输入卡片正下方的全会话累计统计单行（会话规模 ｜ 时间开销 ｜ token 开销 ｜ 响应性能）。
+ * 输入卡片正下方的全会话累计统计单行（上下文占用 ｜ 会话规模 ｜ 时间开销 ｜ token 开销 ｜ 响应性能）。
  *
  * 纯展示：数据经 useConversationStats 聚合后由宿主注入。宽度分档收缩依赖自身的
- * `@container`——它与玻璃卡片同宽，档位阈值因此与卡片一致。当前上下文占用不在
- * 此处（那是用量环的职责，见 §4.5 语义分工）。恒定高度占位（见下方空态分支），
- * 不随首条统计到达/消失而改变 composer 总高度。
+ * `@container`——它与玻璃卡片同宽，档位阈值因此与卡片一致。上下文占用组与
+ * 「规模」组同属恒显档：移动端容器宽度撑不到第一个断点（28rem），此前只剩
+ * 轮·步，用量环又在低占用时隐身（hideBelowWarn），导致窄屏完全看不到上下文
+ * 信息——故把占用百分比也放进这里恒显，与用量环的瞬时读数同源、不互斥
+ * （原 §4.5 语义分工里「状态栏不含上下文占用」的决定按此反馈调整）。恒定
+ * 高度占位（见下方空态分支），不随首条统计到达/消失而改变 composer 总高度。
  */
 export function ConversationStatsBar(props: {
   stats: ConversationStats | null;
-  /** 提供时整条可点击，跳到该会话的轨迹视图；缺省为纯展示。 */
-  onOpenTrajectory?: () => void;
+  /**
+   * 提供且当前上下文占用 ≥50%（canManualCompact）时整条可点击，弹出确认后
+   * 触发手动压缩，门槛与 ContextUsageRing 同源；不满足条件时纯展示。
+   */
+  onManualCompactConfirm?: (() => void) | (() => Promise<unknown>);
+  /** 压缩正在进行等场景下临时关闭点击入口，即使占用达标也不可点。 */
+  manualCompactBlocked?: boolean;
+  /** 当前会话上下文占用 token（与用量环同源）；与 contextWindow 一并提供时才显示。 */
+  contextUsageTokens?: number;
+  contextWindow?: number;
 }) {
-  const { stats, onOpenTrajectory } = props;
+  const { stats, onManualCompactConfirm, manualCompactBlocked, contextUsageTokens, contextWindow } =
+    props;
   const { t, locale } = useLocale();
   const running =
     stats !== null && (stats.llmRunningSinceAt !== null || stats.toolRunningSinceAt !== null);
   const now = useRunningHeartbeat(running);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const ratio = contextUsageRatio(contextUsageTokens, contextWindow);
+  const compactAvailable =
+    canManualCompact(ratio) && !manualCompactBlocked && Boolean(onManualCompactConfirm);
+  // 确认弹层只在可压缩分支渲染；可压缩状态可能在弹层打开期间翻回 false
+  //（他端开始压缩、占用回落阈值下），渲染期归位避免残留 true 导致状态恢复
+  // 后弹层无操作自动弹开（与 ContextUsageRing 同一处理，见该文件注释）。
+  if (!compactAvailable && confirmOpen) {
+    setConfirmOpen(false);
+  }
 
   // 占位容器：暂无可展示数据时也保留同样高度，不返回 null。首条消息发送前
   // 统计恒为空，若此时不占位，assistant 回复落地统计浮现的那一刻 composer/
@@ -89,6 +113,12 @@ export function ConversationStatsBar(props: {
       ? [fill("chat.stats.cacheHit", "{p}", formatStatPercent(stats.cacheHitRatio))]
       : []),
   ];
+  // 与用量环用同一个 contextWindow 判空口径：没有模型上下文窗口信息（老会话/
+  // text 模式）时该分组整个不存在，而不是显示一个假的 0%。
+  const contextUsageItems =
+    typeof contextWindow === "number" && Number.isFinite(contextWindow) && contextWindow > 0
+      ? [fill("chat.stats.contextUsage", "{p}", formatStatPercent(ratio))]
+      : [];
   // 注解写在字面量上：写在 .filter() 结果上会让 minWidth 先宽化成 string。
   const allGroups: StatGroup[] = [
     {
@@ -98,6 +128,9 @@ export function ConversationStatsBar(props: {
         fill("chat.stats.steps", "{n}", String(stats.steps)),
       ],
     },
+    // 恒显档，与 scale 同级：移动端容器宽度到不了 28rem 断点，这是窄屏下
+    // 除轮·步外唯一还能露出的分组。
+    { key: "context", items: contextUsageItems },
     {
       key: "time",
       minWidth: "28rem",
@@ -134,9 +167,9 @@ export function ConversationStatsBar(props: {
       {stats.approximate ? (
         <span className="text-muted-foreground">{t("chat.stats.approximateHint")}</span>
       ) : null}
-      {onOpenTrajectory === undefined ? null : (
-        <span className="text-muted-foreground">{t("chat.stats.openTrajectory")}</span>
-      )}
+      {compactAvailable ? (
+        <span className="text-muted-foreground">{t("chat.manualCompactTitle")}</span>
+      ) : null}
     </span>
   );
 
@@ -177,17 +210,31 @@ export function ConversationStatsBar(props: {
       className="@container flex h-5 w-full items-center justify-center overflow-hidden"
     >
       <LabelTooltip label={tooltip}>
-        {onOpenTrajectory === undefined ? (
-          row
-        ) : (
-          <button
-            type="button"
-            onClick={onOpenTrajectory}
-            aria-label={t("chat.stats.openTrajectory")}
-            className="flex min-w-0 cursor-pointer items-center rounded-full px-1.5 outline-hidden transition-[background-color] hover:bg-muted/50 focus-visible:bg-muted/50"
+        {compactAvailable ? (
+          <ConfirmActionPopover
+            title={t("chat.manualCompactTitle")}
+            description={t("chat.manualCompactDescription")}
+            confirmLabel={t("chat.manualCompactConfirm")}
+            tone="default"
+            side="top"
+            align="center"
+            open={confirmOpen}
+            onOpenChange={setConfirmOpen}
+            onConfirm={() => void onManualCompactConfirm?.()}
           >
-            {row}
-          </button>
+            {(open) => (
+              <button
+                type="button"
+                onClick={open}
+                aria-label={t("chat.manualCompactTitle")}
+                className="flex min-w-0 cursor-pointer items-center rounded-full px-1.5 outline-hidden transition-[background-color] hover:bg-muted/50 focus-visible:bg-muted/50"
+              >
+                {row}
+              </button>
+            )}
+          </ConfirmActionPopover>
+        ) : (
+          row
         )}
       </LabelTooltip>
     </div>

@@ -86,7 +86,9 @@ export function aggregateTrajectoryStats(
     for (const step of turn.steps) {
       steps += 1;
 
-      if (step.endedAt === null) {
+      // 只有 status 才能开心跳：账本把崩溃遗留的 step 收敛成 aborted 却不补
+      // endedAt，按 endedAt 判定会让已死会话永远走秒表。
+      if (step.status === "running") {
         llmRunningSinceAt = earlier(llmRunningSinceAt, step.startedAt);
       } else {
         llmMs += positiveSpan(step.startedAt, step.endedAt);
@@ -99,7 +101,7 @@ export function aggregateTrajectoryStats(
       }
 
       for (const tool of step.tools) {
-        if (tool.endedAt === null) {
+        if (tool.status === "running") {
           toolRunningSinceAt = earlier(toolRunningSinceAt, tool.startedAt);
         } else {
           toolMs += positiveSpan(tool.startedAt, tool.endedAt);

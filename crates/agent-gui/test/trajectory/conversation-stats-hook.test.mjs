@@ -309,3 +309,45 @@ test("无任何事件的会话读数为 null", async () => {
 
   await probe.unmount();
 });
+
+test("liveOwnership 语义沿用轨迹视图：authoritative 空集收敛僵尸，observed 保持运行", async () => {
+  // 持久化里有一个没收尾的 step（进程崩溃遗留）。
+  const orphan = [
+    { k: "user", t: 1, at: 5_000, mi: 1 },
+    { k: "step_start", t: 1, s: 1, at: 5_010 },
+  ];
+
+  clearConversationStatsCache();
+  const desktop = mountHook({
+    conversationId: "c-ownership-desktop",
+    host: createFakeHost([orphan]).host,
+    liveEvents: [],
+    liveOwnership: "authoritative",
+    enabled: true,
+  });
+  await desktop.mount();
+  await drain();
+  assert.equal(
+    desktop.seen.current.stats.llmRunningSinceAt,
+    null,
+    "桌面端空 live 集是权威证据，遗留 running 收敛为 aborted",
+  );
+  await desktop.unmount();
+
+  clearConversationStatsCache();
+  const web = mountHook({
+    conversationId: "c-ownership-web",
+    host: createFakeHost([orphan]).host,
+    liveEvents: [],
+    liveOwnership: "observed",
+    enabled: true,
+  });
+  await web.mount();
+  await drain();
+  assert.equal(
+    web.seen.current.stats.llmRunningSinceAt,
+    5_010,
+    "观察端未收到实时流之前不判中断，运行段保持",
+  );
+  await web.unmount();
+});

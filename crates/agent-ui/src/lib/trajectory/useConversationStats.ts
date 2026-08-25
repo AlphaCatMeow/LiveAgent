@@ -78,6 +78,12 @@ export type UseConversationStatsOptions = {
   host: Pick<TrajectoryHost, "loadWindow">;
   /** `useSyncExternalStore` 产物，宿主传入。 */
   liveEvents: readonly TrajectoryEvent[];
+  /**
+   * live 事件为空时的中断收敛语义，沿用轨迹视图：
+   * - `authoritative`（桌面）：空集也是权威证据，持久化里仍 running 的条目收敛为 aborted；
+   * - `observed`（WebUI，默认）：仅在已观察到实时事件时收敛，避免页面刚重载时误判。
+   */
+  liveOwnership?: "authoritative" | "observed";
   /** edit-resend / rebase 后整体重载。 */
   authoritativeRevision?: number;
   /** 条为空或隐藏时不加载。 */
@@ -92,7 +98,7 @@ export type UseConversationStatsResult = {
 export function useConversationStats(
   options: UseConversationStatsOptions,
 ): UseConversationStatsResult {
-  const { host, liveEvents, authoritativeRevision = 0, enabled } = options;
+  const { host, liveEvents, liveOwnership, authoritativeRevision = 0, enabled } = options;
   const conversationId = options.conversationId.trim();
 
   const [loading, setLoading] = useState(false);
@@ -246,7 +252,12 @@ export function useConversationStats(
     if (persisted.length === 0 && live.length === 0) return null;
 
     const events = mergeTrajectoryEventWindows(persisted, live);
-    const liveIdentities = trajectoryLiveEventIdentities(live);
+    // 中断收敛沿用轨迹视图：authoritative 下空集也参与判定（进程重启的权威证据），
+    // observed 下只有观察到实时事件后才收敛，避免刚重载就把运行中的回合判成中断。
+    const liveIdentities =
+      liveOwnership === "authoritative" || live.length > 0
+        ? trajectoryLiveEventIdentities(live)
+        : undefined;
     const ledger = buildTrajectoryLedger(events, { liveIdentities });
     const approximate =
       entry === undefined ||
@@ -255,7 +266,7 @@ export function useConversationStats(
       events.length >= STATS_EVENT_CEILING;
     return aggregateTrajectoryStats(ledger, { approximate });
     // eventVersion / liveVersion 是重建触发器：前者跟随分页，后者被节流到 1s。
-  }, [conversationId, authoritativeRevision, enabled, eventVersion, liveVersion]);
+  }, [conversationId, authoritativeRevision, enabled, liveOwnership, eventVersion, liveVersion]);
 
   return { stats, loading };
 }

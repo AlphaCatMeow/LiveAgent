@@ -124,6 +124,31 @@ test("multiple running tools anchor on the earliest start", () => {
   assert.equal(stats.toolRunningSinceAt, BASE + 400);
 });
 
+test("an aborted step without step_end must not keep the stopwatch running", () => {
+  // 崩溃/强退遗留：账本按空 live 身份集把 step 收敛成 aborted，但不会补 endedAt。
+  // 按 endedAt 判定运行段会让已死会话的时长永远随心跳增长。
+  const ledger = buildTrajectoryLedger(
+    [
+      { k: "user", t: 1, at: BASE, tx: "go" },
+      { k: "step_start", t: 1, s: 1, at: BASE + 100 },
+      { k: "tool_start", t: 1, s: 1, at: BASE + 200, id: "zombie", n: "Bash" },
+    ],
+    { liveIdentities: new Set() },
+  );
+
+  assert.equal(ledger.turns[0].steps[0].status, "aborted");
+  assert.equal(ledger.turns[0].steps[0].endedAt, null, "前提：收敛为 aborted 时不补 endedAt");
+
+  const stats = aggregateTrajectoryStats(ledger);
+  assert.equal(stats.llmRunningSinceAt, null, "已中断的 step 不得再开心跳");
+  assert.equal(stats.toolRunningSinceAt, null, "已中断的工具调用同理");
+
+  // 时间推移不改变读数：秒表确实停了。
+  const early = resolveStatDurations(stats, BASE + 1_000);
+  const late = resolveStatDurations(stats, BASE + 9_999_000);
+  assert.deepEqual(late, early);
+});
+
 test("missing usage, missing first token, and zero spans never yield NaN", () => {
   const stats = aggregateTrajectoryStats(
     buildTrajectoryLedger([

@@ -464,7 +464,9 @@ export async function runTextConversationTurn(params: RunTextConversationTurnPar
           onRetryStatus: (attempt, maxAttempts, errorMessage, plannedDelayMs, providerLabel) => {
             trajectory.noteRetry(textRound, {
               attempt,
-              maxRetries: Math.max(0, maxAttempts - 1),
+              // 回调的 maxAttempts 已是重试预算——withStreamRetry 传入前已减去
+              // 首次尝试（与状态提示 "(n/m)" 的 m 同口径），直接落账。
+              maxRetries: maxAttempts,
               ...(plannedDelayMs === undefined ? {} : { delayMs: plannedDelayMs }),
               ...(errorMessage === "" ? {} : { error: errorMessage }),
               // 与 agent 模式同口径:failover 下把重试归属到具体候选。

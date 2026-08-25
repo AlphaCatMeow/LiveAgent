@@ -1324,8 +1324,9 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
           if (latest !== undefined) {
             trajectory.noteRetry(activeAgentRound, {
               attempt: latest.attempt,
-              // maxAttempts 含首次尝试，重试上限要减去它。
-              maxRetries: Math.max(0, latest.maxAttempts - 1),
+              // RetryAttemptRecord.maxAttempts 存的已是重试预算——withStreamRetry
+              // 回调传入前已减去首次尝试（与状态提示 "(n/m)" 的 m 同口径），直接落账。
+              maxRetries: latest.maxAttempts,
               ...(latest.plannedDelayMs === undefined ? {} : { delayMs: latest.plannedDelayMs }),
               ...(latest.errorMessage === "" ? {} : { error: latest.errorMessage }),
               ...(latest.providerLabel === undefined ? {} : { provider: latest.providerLabel }),

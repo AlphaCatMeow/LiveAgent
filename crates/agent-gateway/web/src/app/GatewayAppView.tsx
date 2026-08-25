@@ -937,7 +937,9 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
                           approvalBar={approvalBar}
                           statsBar={
                             <ConversationStatsBarHost
-                              key={displayedConversationId}
+                              // 前缀防与同级 taskProgressBar 的 key（裸会话 id）碰撞：React 对
+                              // 同键兄弟的 keyed diff 会让旧 fiber 逃过删除，DOM 残留逐次累积。
+                              key={`stats-${displayedConversationId}`}
                               conversationId={displayedConversationId}
                               host={trajectoryHost}
                               // 轨迹视图下输入区隐藏，状态栏无需拉取。

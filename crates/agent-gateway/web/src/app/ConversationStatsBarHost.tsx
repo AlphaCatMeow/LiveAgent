@@ -19,8 +19,10 @@ export function ConversationStatsBarHost(props: {
   conversationId: string;
   host: TrajectoryHost;
   enabled?: boolean;
+  /** 整条点击切到该会话的轨迹视图；缺省为纯展示。 */
+  onOpenTrajectory?: () => void;
 }) {
-  const { conversationId, host, enabled = true } = props;
+  const { conversationId, host, enabled = true, onOpenTrajectory } = props;
   const liveEvents = useSyncExternalStore(subscribeLiveTrajectory, () =>
     liveTrajectoryEvents(conversationId),
   );
@@ -37,5 +39,10 @@ export function ConversationStatsBarHost(props: {
     enabled,
   });
 
-  return <ConversationStatsBar stats={stats} />;
+  return (
+    <ConversationStatsBar
+      stats={stats}
+      {...(onOpenTrajectory === undefined ? {} : { onOpenTrajectory })}
+    />
+  );
 }

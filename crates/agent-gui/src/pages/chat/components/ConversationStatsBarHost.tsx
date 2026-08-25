@@ -19,8 +19,13 @@ import {
 // 宿主无状态（只是 invoke 的包装），模块级复用一份即可。
 const trajectoryHost = createTauriTrajectoryHost();
 
-export function ConversationStatsBarHost(props: { conversationId: string; enabled?: boolean }) {
-  const { conversationId, enabled = true } = props;
+export function ConversationStatsBarHost(props: {
+  conversationId: string;
+  enabled?: boolean;
+  /** 整条点击切到该会话的轨迹视图；缺省为纯展示。 */
+  onOpenTrajectory?: () => void;
+}) {
+  const { conversationId, enabled = true, onOpenTrajectory } = props;
   const liveEvents = useSyncExternalStore(subscribeDesktopLiveTrajectory, () =>
     desktopLiveTrajectoryEvents(conversationId),
   );
@@ -37,5 +42,10 @@ export function ConversationStatsBarHost(props: { conversationId: string; enable
     enabled,
   });
 
-  return <ConversationStatsBar stats={stats} />;
+  return (
+    <ConversationStatsBar
+      stats={stats}
+      {...(onOpenTrajectory === undefined ? {} : { onOpenTrajectory })}
+    />
+  );
 }

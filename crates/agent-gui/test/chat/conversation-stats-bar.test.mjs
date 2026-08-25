@@ -38,7 +38,7 @@ function sampleStats(overrides = {}) {
   };
 }
 
-async function render(statsValue) {
+async function render(statsValue, extraProps = {}) {
   const container = doc.createElement("div");
   doc.body.appendChild(container);
   const root = createRoot(container);
@@ -47,7 +47,7 @@ async function render(statsValue) {
       React.createElement(
         LocaleContext.Provider,
         { value: enLocale },
-        React.createElement(ConversationStatsBar, { stats: statsValue }),
+        React.createElement(ConversationStatsBar, { stats: statsValue, ...extraProps }),
       ),
     );
   });
@@ -86,17 +86,15 @@ test("完整读数：role=status + aria-label 拼出全部分组", async () => {
 
 test("容器分档：时间/token/性能分组分别挂 28/40/52rem 断点", async () => {
   const { container, unmount } = await render(sampleStats());
-  const groups = [...container.querySelectorAll('[role="status"] > div > span')].filter(
-    (node) => !node.className.includes("text-muted-foreground/40"),
-  );
-  const classesOf = (text) =>
-    groups.find((node) => node.textContent.includes(text))?.className ?? "";
+  // 按 data-stats-group 定位，不依赖 DOM 层级：整条可点击时会多包一层 button。
+  const classesOf = (group) =>
+    container.querySelector(`[data-stats-group="${group}"]`)?.className ?? "";
 
-  assert.match(classesOf("turns"), /flex/);
-  assert.doesNotMatch(classesOf("turns"), /@min-/, "轮·步恒显，不挂断点");
-  assert.match(classesOf("LLM"), /hidden @min-\[28rem\]:flex/);
-  assert.match(classesOf("In 111M tok"), /hidden @min-\[40rem\]:flex/);
-  assert.match(classesOf("Avg TTFT"), /hidden @min-\[52rem\]:flex/);
+  assert.match(classesOf("scale"), /flex/);
+  assert.doesNotMatch(classesOf("scale"), /@min-/, "轮·步恒显，不挂断点");
+  assert.match(classesOf("time"), /hidden @min-\[28rem\]:flex/);
+  assert.match(classesOf("tokens"), /hidden @min-\[40rem\]:flex/);
+  assert.match(classesOf("perf"), /hidden @min-\[52rem\]:flex/);
   await unmount();
 });
 
@@ -168,6 +166,51 @@ test("空闲时零定时器：无运行段不注册心跳 interval", async () =>
   } finally {
     globalThis.setInterval = originalSetInterval;
   }
+});
+
+test("提供 onOpenTrajectory 时整条可点击，点击跳转轨迹视图", async () => {
+  let opened = 0;
+  const { container, unmount } = await render(sampleStats(), {
+    onOpenTrajectory: () => {
+      opened += 1;
+    },
+  });
+
+  const button = container.querySelector("button");
+  assert.ok(button, "应渲染为可点击按钮");
+  assert.equal(button.getAttribute("aria-label"), "Open trajectory");
+  // 读数由外层 role=status 播报，内层行对辅助技术隐藏，避免同串数字读两遍。
+  assert.equal(button.querySelector("[aria-hidden]")?.getAttribute("aria-hidden"), "true");
+
+  await act(async () => {
+    button.click();
+  });
+  assert.equal(opened, 1, "点击应触发一次跳转");
+
+  await unmount();
+});
+
+test("未提供 onOpenTrajectory 时是纯展示，不渲染按钮", async () => {
+  const { container, unmount } = await render(sampleStats());
+  assert.equal(container.querySelector("button"), null, "纯展示态不应有按钮");
+  // 分组仍在，只是不可点。
+  assert.ok(container.querySelector('[data-stats-group="scale"]'));
+  await unmount();
+});
+
+test("压缩次数只在 tooltip 露出，不占用单行宽度", async () => {
+  const withCompactions = await render(sampleStats({ compactions: 3 }));
+  const label = withCompactions.container
+    .querySelector('[role="status"]')
+    .getAttribute("aria-label");
+  assert.doesNotMatch(label, /compactions/, "单行不展示压缩次数");
+  // tooltip 内容由 Base UI 按需挂载，这里断言其数据来源：hover 前不在 DOM 里。
+  assert.equal(
+    withCompactions.container.textContent.includes("3 compactions"),
+    false,
+    "未悬停时 tooltip 内容不应已渲染",
+  );
+  await withCompactions.unmount();
 });
 
 test("approvalBar 可见时状态栏让位（ChatComposerBar 插槽互斥）", () => {

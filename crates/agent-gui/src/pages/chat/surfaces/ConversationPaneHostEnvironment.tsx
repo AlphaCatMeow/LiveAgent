@@ -62,6 +62,11 @@ export type ConversationPaneTrajectory = {
   /** 每个会话独立持有视图状态；后台 Pane 也能保持自己的轨迹投影。 */
   active: boolean;
   renderContent: (snapshot: ConversationSurfaceSnapshot) => ReactNode;
+  /**
+   * 把本 Pane 切到轨迹视图（统计状态栏点击入口）。缺省表示当前不可切换
+   * （如主会话尚无 assistant 回复，视图门控会拦下切换请求）。
+   */
+  onOpen?: () => void;
 };
 
 export type ConversationPaneBinding = {

@@ -942,6 +942,12 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
                               host={trajectoryHost}
                               // 轨迹视图下输入区隐藏，状态栏无需拉取。
                               enabled={renderedConversationView !== "trajectory"}
+                              // 点击跳转与顶栏轨迹 tab 同门槛：没有 assistant 回复时不提供入口。
+                              {...(hasConversationReply
+                                ? {
+                                    onOpenTrajectory: () => setActiveConversationView("trajectory"),
+                                  }
+                                : {})}
                             />
                           }
                           fileDropOverlay={

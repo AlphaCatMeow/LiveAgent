@@ -2101,6 +2101,12 @@ export function ChatPage(props: ChatPageProps) {
     // 每个会话独立保存视图；当前 Pane 使用页面级实时数据渲染自己的轨迹。
     trajectory: {
       active: renderedConversationView === "trajectory",
+      // 与 renderedConversationView 同门槛：无 assistant 回复时视图被门控在
+      // conversation，此时给入口只会是死点击（状态写进去、视图不动，等回复
+      // 到达再突然跳走）。
+      ...(hasConversationReply
+        ? { onOpen: () => setConversationView(currentConversationId, "trajectory") }
+        : {}),
       renderContent: () => (
         <ConversationTrajectorySurface
           conversationId={currentConversationId}
@@ -2950,6 +2956,7 @@ export function ChatPage(props: ChatPageProps) {
       },
       trajectory: {
         active: paneTrajectoryActive,
+        onOpen: () => setConversationView(conversationId, "trajectory"),
         renderContent: (snapshot) => (
           <ConversationTrajectorySurface
             conversationId={conversationId}

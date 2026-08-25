@@ -506,6 +506,7 @@ export const EN_US_COMMON_TRANSLATIONS = {
   "chat.stats.outputTokens": "Out {n} tok",
   "chat.stats.compactions": "{n} compactions",
   "chat.stats.approximate": "≈",
+  "chat.stats.approximateHint": "≈ figures are estimated from a partial event set",
   "chat.stats.openTrajectory": "Open trajectory",
   "chat.upload.button": "Upload Files",
   "chat.upload.selectFiles": "Select and attach one or more readable files to this conversation",

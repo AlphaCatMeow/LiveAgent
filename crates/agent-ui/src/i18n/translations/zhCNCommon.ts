@@ -463,6 +463,7 @@ export const ZH_CN_COMMON_TRANSLATIONS = {
   "chat.stats.outputTokens": "输出 {n} tok",
   "chat.stats.compactions": "压缩 {n} 次",
   "chat.stats.approximate": "≈",
+  "chat.stats.approximateHint": "≈ 读数为部分事件的估算值",
   "chat.stats.openTrajectory": "查看轨迹详情",
   "chat.upload.button": "上传文件",
   "chat.upload.selectFiles": "选择并导入一个或多个当前对话可读取的文件",

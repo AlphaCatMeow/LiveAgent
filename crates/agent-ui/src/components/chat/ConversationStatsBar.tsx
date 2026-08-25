@@ -72,7 +72,8 @@ export function ConversationStatsBar(props: { stats: ConversationStats | null })
       ? [fill("chat.stats.cacheHit", "{p}", formatStatPercent(stats.cacheHitRatio))]
       : []),
   ];
-  const groups: StatGroup[] = [
+  // 注解写在字面量上：写在 .filter() 结果上会让 minWidth 先宽化成 string。
+  const allGroups: StatGroup[] = [
     {
       key: "scale",
       items: [
@@ -90,7 +91,8 @@ export function ConversationStatsBar(props: { stats: ConversationStats | null })
     },
     { key: "tokens", minWidth: "40rem", items: tokenItems },
     { key: "perf", minWidth: "52rem", items: perfItems },
-  ].filter((group) => group.items.length > 0);
+  ];
+  const groups = allGroups.filter((group) => group.items.length > 0);
 
   const prefix = stats.approximate ? `${t("chat.stats.approximate")} ` : "";
   const fullText = prefix + groups.map((group) => group.items.join(" · ")).join(" ｜ ");

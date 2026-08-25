@@ -62,6 +62,7 @@ import {
 } from "@/lib/trajectory/liveTrajectory";
 import { WorkdirPickerModal } from "@/pages/settings/WorkdirPickerModal";
 import { AgentSelector } from "./AgentSelector";
+import { ConversationStatsBarHost } from "./ConversationStatsBarHost";
 import { asErrorMessage } from "./chatEventUtils";
 import { CHAT_RUNTIME_FOREGROUND_PREPARE_TIMEOUT_MS } from "./constants";
 import type { GatewayAppViewModel } from "./GatewayApp";
@@ -934,6 +935,15 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
                             />
                           }
                           approvalBar={approvalBar}
+                          statsBar={
+                            <ConversationStatsBarHost
+                              key={displayedConversationId}
+                              conversationId={displayedConversationId}
+                              host={trajectoryHost}
+                              // 轨迹视图下输入区隐藏，状态栏无需拉取。
+                              enabled={renderedConversationView !== "trajectory"}
+                            />
+                          }
                           fileDropOverlay={
                             isFileDropActive ? (
                               <FileDropOverlay

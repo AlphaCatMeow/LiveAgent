@@ -461,12 +461,14 @@ export async function runTextConversationTurn(params: RunTextConversationTurnPar
           },
           signal: scope.controller.signal,
           debugLogger: streamAttempt === 0 ? conversationDebugLogger : recoveryDebugLogger,
-          onRetryStatus: (attempt, maxAttempts, errorMessage, plannedDelayMs) => {
+          onRetryStatus: (attempt, maxAttempts, errorMessage, plannedDelayMs, providerLabel) => {
             trajectory.noteRetry(textRound, {
               attempt,
               maxRetries: Math.max(0, maxAttempts - 1),
               ...(plannedDelayMs === undefined ? {} : { delayMs: plannedDelayMs }),
               ...(errorMessage === "" ? {} : { error: errorMessage }),
+              // 与 agent 模式同口径:failover 下把重试归属到具体候选。
+              ...(providerLabel === undefined ? {} : { provider: providerLabel }),
             });
             updateGatewayBridgeToolStatus(`连接已断开，正在重试 (${attempt}/${maxAttempts})...`);
             retryAttemptsForAttempt.push({
@@ -474,6 +476,7 @@ export async function runTextConversationTurn(params: RunTextConversationTurnPar
               maxAttempts,
               errorMessage,
               ...(plannedDelayMs === undefined ? {} : { plannedDelayMs }),
+              ...(providerLabel === undefined ? {} : { providerLabel }),
             });
             updateRetryAttempts(retryAttemptsForAttempt.slice(), transcriptStore);
           },

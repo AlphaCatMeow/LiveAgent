@@ -78,11 +78,14 @@ function buildTextOnlyStreamOptions(params: {
   cacheRetention?: CacheRetention;
   nativeWebSearch?: boolean;
   debugLogger?: StreamDebugLogger;
+  /** 本组 options 所属候选的展示标签（"Provider · model"），随 onRetryStatus 回传。 */
+  providerLabel?: string;
   onRetryStatus?: (
     attempt: number,
     maxAttempts: number,
     errorMessage: string,
     plannedDelayMs?: number,
+    providerLabel?: string,
   ) => void;
   onRetryRecovered?: () => void;
 }): StreamOptionsEx {
@@ -94,6 +97,7 @@ function buildTextOnlyStreamOptions(params: {
     }) && params.nativeWebSearch;
   const usesOpenAIChatNativeWebSearch =
     nativeWebSearch && params.providerId === "codex" && params.model.api === "openai-completions";
+  const onRetryStatus = params.onRetryStatus;
   const options: StreamOptionsEx = {
     apiKey: params.runtime.apiKey,
     headers: withHostedSearchProbeHeader(params.headers, params.hostedSearchProbeId),
@@ -124,7 +128,12 @@ function buildTextOnlyStreamOptions(params: {
     toolChoice: usesOpenAIChatNativeWebSearch ? undefined : nativeWebSearch ? "auto" : "none",
     streamRetry: {
       ...resolveStreamRetryConfig(params.runtime.retryPolicy),
-      onRetry: params.onRetryStatus,
+      // 绑定当前候选标签：failover 下备用供应商的流内重试才能在轨迹里归属
+      // 到具体候选，与 agent 模式 retryAttempts 携带 providerLabel 的口径一致。
+      onRetry: onRetryStatus
+        ? (attempt, maxAttempts, errorMessage, plannedDelayMs) =>
+            onRetryStatus(attempt, maxAttempts, errorMessage, plannedDelayMs, params.providerLabel)
+        : undefined,
       onRetryRecovered: params.onRetryRecovered,
     },
   };
@@ -185,11 +194,13 @@ export async function streamAssistantMessage(params: {
   allowJsonOutput?: boolean;
   nativeWebSearch?: boolean;
   onHostedSearch?: (block: HostedSearchBlock) => void;
+  /** `providerLabel` 是产生本次重试的候选标签；failover 下用于区分各候选。 */
   onRetryStatus?: (
     attempt: number,
     maxAttempts: number,
     errorMessage: string,
     plannedDelayMs?: number,
+    providerLabel?: string,
   ) => void;
   onRetryRecovered?: () => void;
   /** 每个实际尝试的候选各 fire 一次：脱敏后的传输装配快照（只含头名，不含值）。 */
@@ -236,6 +247,8 @@ export async function streamAssistantMessage(params: {
   const hostedSearchProbeId = shouldProbeHostedSearch
     ? createHostedSearchProbeId(params.providerId)
     : undefined;
+  const primaryFailoverLabel =
+    params.failover?.primary.label ?? `${params.providerId} · ${modelId}`;
   const options = buildTextOnlyStreamOptions({
     providerId: params.providerId,
     runtime: params.runtime,
@@ -249,6 +262,7 @@ export async function streamAssistantMessage(params: {
     cacheRetention: params.cacheRetention,
     nativeWebSearch: params.nativeWebSearch,
     debugLogger: params.debugLogger,
+    providerLabel: primaryFailoverLabel,
     onRetryStatus: params.onRetryStatus,
     onRetryRecovered: params.onRetryRecovered,
   });
@@ -274,7 +288,6 @@ export async function streamAssistantMessage(params: {
         failover.primary.selectedModel.model,
       )
     : failoverBreakerKey(params.providerId, modelId);
-  const primaryFailoverLabel = failover?.primary.label ?? `${params.providerId} · ${modelId}`;
 
   type PreparedTextFailoverTarget = {
     model: ReturnType<typeof createModelFromConfig>;
@@ -317,6 +330,7 @@ export async function streamAssistantMessage(params: {
           cacheRetention: params.cacheRetention,
           nativeWebSearch: params.nativeWebSearch,
           debugLogger: params.debugLogger,
+          providerLabel: fallback.label,
           onRetryStatus: params.onRetryStatus,
           onRetryRecovered: params.onRetryRecovered,
         }),

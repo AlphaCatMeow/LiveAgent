@@ -38,7 +38,8 @@ import { buildTextModeToolResultsForAssistant } from "./textModeToolRecovery";
 import { captureTransportSnapshot, type TransportSnapshot } from "./transportSnapshot";
 import type { ProviderRuntimeConfig, StreamOptionsEx } from "./types";
 
-function buildTextOnlySystemSuffix(allowJsonOutput = false) {
+// 导出供 turn runner 估算 provider 边界追加段（用量环 fixed 校准），非请求路径。
+export function buildTextOnlySystemSuffix(allowJsonOutput = false) {
   return [
     "Important Rules:",
     allowJsonOutput

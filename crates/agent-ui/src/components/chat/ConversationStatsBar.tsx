@@ -40,7 +40,8 @@ function useRunningHeartbeat(running: boolean): number {
  *
  * 纯展示：数据经 useConversationStats 聚合后由宿主注入。宽度分档收缩依赖自身的
  * `@container`——它与玻璃卡片同宽，档位阈值因此与卡片一致。当前上下文占用不在
- * 此处（那是用量环的职责，见 §4.5 语义分工）。
+ * 此处（那是用量环的职责，见 §4.5 语义分工）。恒定高度占位（见下方空态分支），
+ * 不随首条统计到达/消失而改变 composer 总高度。
  */
 export function ConversationStatsBar(props: {
   stats: ConversationStats | null;
@@ -53,7 +54,17 @@ export function ConversationStatsBar(props: {
     stats !== null && (stats.llmRunningSinceAt !== null || stats.toolRunningSinceAt !== null);
   const now = useRunningHeartbeat(running);
 
-  if (!hasConversationStats(stats) || stats === null) return null;
+  // 占位容器：暂无可展示数据时也保留同样高度，不返回 null。首条消息发送前
+  // 统计恒为空，若此时不占位，assistant 回复落地统计浮现的那一刻 composer/
+  // transcript 会整体位移一次，观感是布局"跳了一下"；常驻占位换来的是零跳动。
+  if (!hasConversationStats(stats) || stats === null) {
+    return (
+      <div
+        aria-hidden="true"
+        className="@container flex h-5 w-full items-center justify-center overflow-hidden"
+      />
+    );
+  }
 
   const durations = resolveStatDurations(stats, now);
   const fill = (key: string, token: string, value: string) => t(key).replace(token, value);

@@ -5,7 +5,7 @@ import { createDomTestEnv } from "../helpers/dom-test-env.mjs";
 
 // ConversationStatsBar 组件行为验收
 // (docs/design/composer-context-stats-bar.md §4.2、§9 组件层)：
-// 空态 null、四档容器收缩、≈ 前缀、role="status" 完整 aria-label、
+// 空态占位（保留高度，不 null）、四档容器收缩、≈ 前缀、role="status" 完整 aria-label、
 // 运行中心跳折算、approvalBar 互斥（插槽源码断言）。
 
 const env = await createDomTestEnv();
@@ -62,10 +62,13 @@ async function render(statsValue, extraProps = {}) {
   };
 }
 
-test("空态与全零读数都返回 null，不占高度", async () => {
+test("空态与全零读数渲染为占位容器（保留高度，避免统计浮现时布局跳动）", async () => {
   for (const statsValue of [null, EMPTY_CONVERSATION_STATS]) {
     const { container, unmount } = await render(statsValue);
-    assert.equal(container.innerHTML, "", `stats=${JSON.stringify(statsValue)} 应渲染为空`);
+    const placeholder = container.firstElementChild;
+    assert.ok(placeholder, `stats=${JSON.stringify(statsValue)} 应渲染占位容器`);
+    assert.equal(placeholder.getAttribute("role"), null, "占位态不带 role=status");
+    assert.match(placeholder.className, /h-5/, "占位容器高度需与有数据态一致");
     await unmount();
   }
 });

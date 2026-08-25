@@ -150,7 +150,7 @@ export function useConversationStats(options: {
   3. ≥ 40rem：`+ 输入/输出 tok`
   4. ≥ 52rem：`+ 首 token · tok/s · 缓存命中`
 - **运行中心跳**：`isSending` 时每 1s 触发一次重渲染，把 `llmRunningSinceAt`/`toolRunningSinceAt` 折算进显示值；空闲时零定时器。
-- **空态**：`stats === null`（无任何轨迹事件）时返回 `null`，整条不占高度——老会话、text 模式（`NOOP_TRAJECTORY_RECORDER`）自动隐藏，无需特判来源。
+- **空态**：`stats === null`（无任何轨迹事件）时渲染等高占位容器（`h-5`，无内容、`aria-hidden`），不返回 `null`——若不占位，首条 assistant 回复落地统计浮现的瞬间会让 composer/transcript 整体位移一次；常驻占位换零跳动为代价，稳态下视觉不可见。老会话、text 模式同样走这条占位分支。
 - **可选交互**（建议做，成本极低）：整条可点击 → 切换到该会话的轨迹视图（`ConversationViewTabs` 已有该入口）；hover 出 `LabelTooltip` 显示未被收缩掉的完整指标 + 压缩次数。
 - 无障碍：容器 `role="status"` + `aria-label` 拼完整文本；数字变化不用 `aria-live`（流式期间会刷屏）。
 
@@ -240,7 +240,7 @@ statsBar={
 
 | 场景 | 行为 |
 | --- | --- |
-| 老会话/text 模式，无轨迹事件 | 整条隐藏（`stats === null`） |
+| 老会话/text 模式，无轨迹事件 | 渲染等高占位容器（不隐藏、不返回 `null`），避免统计浮现时布局跳动 |
 | `trajectory_truncated` 段或分页未完成/触发 50k 挡板 | 显示但带 `≈` 前缀 |
 | 手动/自动压缩 | 统计是**事件累计**，不受上下文截断影响（与用量环的"当前上下文占用"口径互补，不冲突）；压缩次数进 tooltip |
 | edit-resend 砍掉旧轮次 | `authoritativeRevision` 触发整体重载，读数收敛到新历史 |
@@ -289,7 +289,7 @@ hook 层：
 
 组件层：
 
-- 空态返回 null；容器分档收缩（现有 workbench-dom-boundaries 测试风格）
+- 空态渲染等高占位容器（不返回 null）；容器分档收缩（现有 workbench-dom-boundaries 测试风格）
 - `≈` 前缀、`role="status"` aria-label 完整性
 - 时长/token 格式化边界（59s、60s、999K、1M…）
 - `approvalBar` 可见时状态栏隐藏

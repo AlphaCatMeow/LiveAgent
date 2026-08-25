@@ -13,7 +13,10 @@ import {
 } from "@liveagent/ui/lib/trajectory/sections";
 import type { TrajectoryUsage } from "@liveagent/ui/lib/trajectory/types";
 import type { CompactionController } from "../../../lib/chat/compaction/controller";
-import { estimateTextTokenUnits } from "../../../lib/chat/compaction/tokenLedger";
+import {
+  estimateTextTokens,
+  estimateTextTokenUnits,
+} from "../../../lib/chat/compaction/tokenLedger";
 import type { ProviderRuntimeConfig } from "../../../lib/chat/compaction/types";
 import { resolveTailBlockAnchorId } from "../../../lib/chat/context/contextTailBlock";
 import {
@@ -55,6 +58,7 @@ import {
   type AgentRunnerFailoverParams,
   runAssistantWithTools,
 } from "../../../lib/chat/runner/agentRunner";
+import { buildToolsSuffix } from "../../../lib/chat/runner/toolExecutionPrompt";
 import type { StreamDebugLogger } from "../../../lib/debug/agentDebug";
 import { assistantMessageToText } from "../../../lib/providers/llm";
 import { resolveRuntimePlatform } from "../../../lib/runtimePlatform";
@@ -674,6 +678,21 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
       ) !== "deny",
   );
 
+  // 工具执行规则段（toolsSuffix）由 runner 在 provider 边界拼进 systemPrompt，
+  // 传给账本/检查点估值的上下文都在此之前。不注入这份估算，压缩后的无锚点
+  // 窗口（检查点权威值 + 首个真实 usage 到达前）会系统性少算 ~4k，首个 usage
+  // 一到环就跳涨。每轮重注：工具集变化随之更新，文本模式会覆盖为小值。
+  compaction.noteFixedOverheadTokens(
+    estimateTextTokens(
+      buildToolsSuffix(
+        effectiveWorkdir,
+        combinedTools.map((tool) => tool.name),
+        runtimePlatform,
+        additionalRoots,
+      ),
+    ),
+  );
+
   const preCompactionStartedAt = perfNowMs();
   await compaction.maybeCompactPreSend({
     budgetContext: withAgentRuntimeContext(
@@ -859,15 +878,23 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
     });
   }
 
+  // 本次运行中出现过托管搜索的轮次。这类轮次的 usage 是服务端多次内部调用的
+  // 聚合值，不能作为上下文锚点；且搜索收尾会异步替换 assistant 消息对象，
+  // 提交时刻按内容块检测不可靠，必须靠这里的显式追踪。
+  const hostedSearchRounds = new Set<number>();
+
   function commitAssistantRoundMeta(
     assistant: AssistantMessage,
     round: number,
     options?: { contextRelevant?: boolean },
   ) {
     const contextRelevant = options?.contextRelevant !== false;
-    const contextUsageTokens = contextRelevant
-      ? compaction.observeContextMessages([assistant])
-      : undefined;
+    const suppressUsageAnchors = hostedSearchRounds.has(round);
+    if (contextRelevant) {
+      compaction.observeContextMessages([assistant], { suppressUsageAnchors });
+    }
+    // 用量环锚点不随事件携带：两端倒扫都从 meta 的 usage + stopReason 现算
+    //（共享层 assistantAnchorTokens），meta 只发原始事实。
     gatewayBridgeEvents.queueToken("", {
       round,
       provider: assistant.provider,
@@ -875,7 +902,6 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
       api: assistant.api,
       stopReason: assistant.stopReason,
       usage: assistant.usage,
-      ...(contextUsageTokens ? { contextUsageTokens } : {}),
       ...(contextRelevant ? {} : { contextRelevant: false }),
     });
     batchLiveRoundsUpdate(
@@ -888,8 +914,6 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
             api: String(assistant.api ?? ""),
             stopReason: String(assistant.stopReason ?? ""),
             usage: assistant.usage,
-            usageTotalTokens: assistant.usage?.totalTokens,
-            contextUsageTokens,
             contextRelevant,
           },
         })),
@@ -898,6 +922,7 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
   }
 
   function updateHostedSearch(hostedSearch: HostedSearchBlock, round: number) {
+    hostedSearchRounds.add(round);
     gatewayBridgeEvents.queueEvent({
       type: "hosted_search",
       id: hostedSearch.id,
@@ -1094,11 +1119,6 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
           protectionCheckChars = 0;
           sawToolCallInRound = false;
           hookLifecycle.startTurn(round);
-          const contextUsageTokens = compaction.contextUsageTokens;
-          gatewayBridgeEvents.queueToken("", {
-            round,
-            ...(contextUsageTokens ? { contextUsageTokens } : {}),
-          });
           batchLiveRoundsUpdate(
             (prev) => [
               ...prev,
@@ -1106,7 +1126,6 @@ export async function runAgentConversationTurn(params: RunAgentConversationTurnP
                 key: `r${round}`,
                 round,
                 blocks: [],
-                meta: contextUsageTokens ? { contextUsageTokens } : undefined,
                 runningToolCallIds: [],
                 thinkingOpen: false,
               },

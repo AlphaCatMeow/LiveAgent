@@ -305,6 +305,11 @@ export type ChatComposerBarProps = {
   approvalBar?: ReactNode;
   /** 文件拖入命中输入框时显示的局部反馈层。 */
   fileDropOverlay?: ReactNode;
+  /**
+   * 卡片正下方的会话统计状态栏插槽（docs/design/composer-context-stats-bar.md）。
+   * 卡片与胶囊已为它压缩过高度预算，宿主未接线时不占位。
+   */
+  statsBar?: ReactNode;
 };
 
 export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposerBarProps) {
@@ -368,6 +373,7 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
     taskProgressBar,
     approvalBar,
     fileDropOverlay,
+    statsBar,
   } = props;
   const { t } = useLocale();
   const [composerIsEmpty, setComposerIsEmpty] = useState(true);
@@ -976,7 +982,7 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
           <div
             className={cn(
               "relative flex flex-1 pl-4 pr-12",
-              pendingUploadedFiles.length > 0 ? "pt-1.5" : "pt-3.5",
+              pendingUploadedFiles.length > 0 ? "pt-1.5" : "pt-2.5",
               isComposerExpanded && "min-h-0",
             )}
             onFocusCapture={onPrepareChatRuntime}
@@ -995,14 +1001,16 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
               className={cn(
                 // 右让位由外层容器 pr-12 统一承担（见上），此处不再补 pr——
                 // 编辑器自身的右内距只会把文字推开、留下滚动条压在控制列上。
-                "px-0 py-0",
+                // min-h 覆盖编辑器默认 70px（twMerge 后写胜出）：折叠态压到
+                // 3 行文本高，为卡片下方的会话统计状态栏腾出高度预算。
+                "min-h-[60px] px-0 py-0",
                 isComposerExpanded &&
                   (surface === "desktop" ? "h-full max-h-none" : "h-full! max-h-none!"),
               )}
             />
           </div>
 
-          <div className="relative flex items-center justify-between gap-2 px-3 pb-2 pt-1">
+          <div className="relative flex items-center justify-between gap-2 px-3 pb-1.5 pt-0.5">
             <div className="flex min-w-0 flex-1 items-center gap-1">
               <DropdownMenu>
                 <DropdownMenuTrigger
@@ -1238,6 +1246,8 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
           </div>
           {fileDropOverlay}
         </div>
+        {/* 会话统计状态栏插槽：贴卡片下缘，与卡片同宽；审批面板可见时让位。 */}
+        {statsBar && approvalBar == null ? statsBar : null}
       </div>
     </div>
   );

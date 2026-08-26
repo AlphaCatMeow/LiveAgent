@@ -680,7 +680,12 @@ export function buildTrajectoryLedger(
         ...(step.stopReason === undefined ? {} : { stopReason: step.stopReason }),
         ...(step.usage === undefined ? {} : { usage: step.usage }),
         ...(step.headerId === undefined ? {} : { headerId: step.headerId }),
-        retries: [...step.retries].sort((left, right) => left.attempt - right.attempt),
+        // failover 切换后各候选的流内重试 attempt 各自从 1 重新计数，按 attempt
+        // 排会把后一候选的重试插进前一候选中间；按发生时刻排序还原真实时间线，
+        // attempt 仅作同毫秒兜底。
+        retries: [...step.retries].sort(
+          (left, right) => left.at - right.at || left.attempt - right.attempt,
+        ),
         failovers: [...step.failovers].sort(
           (left, right) => left.attempt - right.attempt || left.at - right.at,
         ),

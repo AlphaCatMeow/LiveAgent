@@ -150,6 +150,24 @@ test("retry provider labels survive into the ledger", () => {
   assert.equal(retry.delayMs, 200);
 });
 
+test("failover 后各候选的重试按发生时刻排序，不按 attempt 交错", () => {
+  // 真实时间线:P1 重试 1 → P1 重试 2 → failover 切到 P2 → P2 重试 1。
+  // 各候选的 withStreamRetry attempt 独立从 1 起,按 attempt 排会得到
+  // P1/1, P2/1, P1/2 的交错;账本必须还原时间线。
+  const ledger = buildTrajectoryLedger([
+    ...turnEvents(),
+    { k: "retry", t: 1, s: 1, at: BASE + 50, n: 1, max: 5, p: "P1 · claude-x" },
+    { k: "retry", t: 1, s: 1, at: BASE + 80, n: 2, max: 5, p: "P1 · claude-x" },
+    { k: "failover", t: 1, s: 1, at: BASE + 90, n: 1, from: "P1 · claude-x", to: "P2 · gpt-y", ti: 1 },
+    { k: "retry", t: 1, s: 1, at: BASE + 95, n: 1, max: 5, p: "P2 · gpt-y" },
+  ]);
+  const retries = ledger.turns[0].steps[0].retries;
+  assert.deepEqual(
+    retries.map((entry) => `${entry.provider}#${entry.attempt}`),
+    ["P1 · claude-x#1", "P1 · claude-x#2", "P2 · gpt-y#1"],
+  );
+});
+
 test("failover events converge into the owning step sorted by attempt", () => {
   const ledger = buildTrajectoryLedger([
     ...turnEvents(),

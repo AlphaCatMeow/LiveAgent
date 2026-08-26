@@ -610,6 +610,9 @@ export const ZH_CN_SETTINGS_TRANSLATIONS = {
   "settings.commitMessageModelHint":
     "Git 审查中 AI 生成提交说明使用的模型。未选择或所选模型失效时，自动使用当前对话模型。",
   "settings.customSettingsModelEmpty": "当前 Provider 未配置模型。",
+  "settings.composerContextDisplay": "用量环替代统计状态栏",
+  "settings.composerContextDisplayDesc":
+    "开启后，输入框右下角常显上下文用量环，隐藏卡片下方的会话统计状态栏；关闭则显示统计状态栏（上下文占用读数含在其中）。两种样式都保留占用 ≥50% 时的手动压缩入口。",
   "settings.failoverTitle": "自动故障转移",
   "settings.failoverEnabled": "已开启",
   "settings.failoverToggleHint":

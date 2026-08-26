@@ -1542,6 +1542,8 @@ export function normalizeCustomSettings(
     },
     chatTranscript: normalizeChatTranscriptSettings(obj.chatTranscript),
     rightDock: normalizeRightDockSettings(obj.rightDock),
+    // 严格二态：历史配置无此字段或值不合法时一律落回默认的统计状态栏。
+    composerContextDisplay: obj.composerContextDisplay === "ring" ? "ring" : "statsBar",
     // fontFamily was the single pre-split preference. Read it only to migrate
     // saved local settings into the new interface-specific field.
     interfaceFontFamily: normalizeFontFamily(obj.interfaceFontFamily ?? obj.fontFamily),

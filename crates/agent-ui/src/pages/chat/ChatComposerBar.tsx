@@ -1,6 +1,7 @@
 import {
   type ChatRuntimeControls,
   type CommandSafetyMode,
+  type ComposerContextDisplayMode,
   type ExecutionMode,
   isAgentExecutionMode,
   type ProviderId,
@@ -214,8 +215,8 @@ function ComposerContextUsageRing(props: {
       contextWindow={contextWindow}
       disabled={disabled}
       onConfirm={onConfirm}
-      // 低占用时让位：环只在能承担压缩入口时浮现，累计读数由下方状态栏承担。
-      hideBelowWarn
+      // 环只在 "ring" 展示模式下渲染（见 contextDisplayMode），此时它是唯一的
+      // 占用读数，必须 0% 起常显——不再挂低占用隐藏门槛。
     />
   );
 }
@@ -312,6 +313,13 @@ export type ChatComposerBarProps = {
    * 卡片与胶囊已为它压缩过高度预算，宿主未接线时不占位。
    */
   statsBar?: ReactNode;
+  /**
+   * 上下文占用的互斥展示样式（settings.customSettings.composerContextDisplay，
+   * docs/design/composer-context-stats-bar.md §4.6）。互斥在本组件内统一强制：
+   * "statsBar"（缺省）渲染 statsBar 插槽、不渲染用量环；"ring" 渲染常显用量环
+   * （0% 起，环是唯一读数）、statsBar 插槽即使传入也不挂载。
+   */
+  contextDisplayMode?: ComposerContextDisplayMode;
 };
 
 export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposerBarProps) {
@@ -376,6 +384,7 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
     approvalBar,
     fileDropOverlay,
     statsBar,
+    contextDisplayMode,
   } = props;
   const { t } = useLocale();
   const [composerIsEmpty, setComposerIsEmpty] = useState(true);
@@ -960,16 +969,19 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
             )}
           </button>
 
-          {/* 用量环位于卡片右侧控制列的垂直中心，保持在展开与发送按钮之间。 */}
-          <div className="absolute right-3 top-1/2 z-20 -translate-y-1/2">
-            <ComposerContextUsageRing
-              source={contextUsageTokensSource}
-              totalTokens={contextUsageTokens}
-              contextWindow={contextWindow}
-              disabled={controlsDisabled || isSending || manualCompactBlocked}
-              onConfirm={onManualCompactConfirm}
-            />
-          </div>
+          {/* 用量环位于卡片右侧控制列的垂直中心，保持在展开与发送按钮之间。
+              仅 "ring" 展示模式渲染：与 statsBar 插槽严格互斥（§4.6）。 */}
+          {contextDisplayMode === "ring" ? (
+            <div className="absolute right-3 top-1/2 z-20 -translate-y-1/2">
+              <ComposerContextUsageRing
+                source={contextUsageTokensSource}
+                totalTokens={contextUsageTokens}
+                contextWindow={contextWindow}
+                disabled={controlsDisabled || isSending || manualCompactBlocked}
+                onConfirm={onManualCompactConfirm}
+              />
+            </div>
+          ) : null}
 
           {/* 常驻 flex-1：动画把卡片钳在中间高度时由本区吸收伸缩，工具栏才能
               全程贴住卡片底边。min-h-0 只在展开态加——折叠态靠自动最小高度
@@ -1248,8 +1260,9 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
           </div>
           {fileDropOverlay}
         </div>
-        {/* 会话统计状态栏插槽：贴卡片下缘，与卡片同宽；审批面板可见时让位。 */}
-        {statsBar && approvalBar == null ? statsBar : null}
+        {/* 会话统计状态栏插槽：贴卡片下缘，与卡片同宽；审批面板可见时让位；
+            "ring" 展示模式下与用量环互斥，即使宿主传入也不挂载（§4.6）。 */}
+        {statsBar && approvalBar == null && contextDisplayMode !== "ring" ? statsBar : null}
       </div>
     </div>
   );

@@ -210,6 +210,19 @@ statsBar={
 
   **修订（移动端反馈）**：上述「状态栏不含上下文占用分组」的决定已推翻。原因：composer 容器宽度在移动端到不了状态栏的第一个断点（28rem），窄屏只剩「轮 · 步」；用量环又在占用 < 50% 时隐身（`hideBelowWarn`）——两者叠加导致低占用会话在窄屏下完全看不到任何上下文信息。修复：状态栏新增恒显的「上下文占用」分组（与 `轮 · 步` 同级，不挂 `@min-` 断点），读数与用量环同源（`contextUsageTokensSource` + `contextWindow` → `contextUsageRatio()`），但**不复用 `hideBelowWarn` 门槛**——只要有合法 `contextWindow`（`> 0` 且有限）就显示，`contextUsageTokens` 缺省时按 0% 展示，而非整组隐藏。环与状态栏因此不再互斥：环继续做「≥ 50% 才浮现的压缩入口」，状态栏做「随时可见的占用读数」，二者共享同一数据源但各自的显隐门槛独立。
 
+### 4.6 修订（2026-08-26）：状态栏与用量环改为严格互斥，由设置切换（已落地）
+
+产品决策（已确认，**严格二态**）：§4.5 修订确立的「环与状态栏并存」不再保留——两者改为互斥的两种展示样式，用户在供应商设置页的高级设置抽屉里切换，默认沿用状态栏。没有第三态（并存/自动），也就没有并存形态下环与状态栏双份压缩入口的重复问题。
+
+- **设置字段**：`settings.customSettings.composerContextDisplay: "statsBar" | "ring"`（`ComposerContextDisplayMode`）。`normalizeCustomSettings` 兜底 `"statsBar"`——旧配置无此字段、脏值（含曾设想过的 `"auto"`）一律落回默认。作为全局产品偏好随 gateway 设置同步：**不进** `syncableCustomSettings` 的本地重置清单（与字体/宽度这类设备本地偏好不同），桌面端与 WebUI 同步生效。
+- **互斥强制点在组件内**：`ChatComposerBar` 新增 `contextDisplayMode?: ComposerContextDisplayMode`（缺省按 `"statsBar"`），两个宿主只透传设置值，环/状态栏的取舍由组件统一裁决，宿主无法配置出并存形态：
+  - `"statsBar"`：渲染 `statsBar` 插槽，环整枚不渲染。压缩入口由状态栏整条点击承担（§4.2 修订）。
+  - `"ring"`：渲染用量环且**常显**（composer 不再传 `hideBelowWarn`）——环此时是唯一占用读数，低占用隐身会重现 §4.5 修订修掉的「看不到任何占用信息」缺口；`statsBar` 插槽即使宿主传入也不挂载。<50% 时环不可点击（`canManualCompact` 门槛不变），≥50% 起承担压缩入口。
+- **`ContextUsageRing.hideBelowWarn` 保留**为共享环的通用显示选项（真实 DOM 验收测试继续覆盖），只是 composer 这个挂载点不再使用。
+- **开关 UI**：`ProvidersSection` 高级设置抽屉（`CustomSettingsDrawer`）新增 Switch——开 = 用量环、关 = 状态栏；i18n key `settings.composerContextDisplay` / `settings.composerContextDisplayDesc`（zhCNSettings/enUSSettings）。
+- **接线**：桌面端 `ChatPage.tsx` 两处 composer 绑定与 WebUI `GatewayAppView.tsx` 各加一行 `contextDisplayMode`；`ConversationPaneHost` 与两端 `ConversationStatsBarHost` 零改动（statsBar 插槽照常构造，挂不挂载由组件裁决，未挂载时数据 hook 不 mount、无拉取开销）。
+- **测试**：`normalization.test.mjs` 覆盖二态归一化与 gateway 同步透传；`context-usage.test.mjs` 的 composer 源码断言改为互斥语义（环按模式渲染、statsBar 插槽在 ring 模式不挂载、composer 不再出现 `hideBelowWarn`）。
+
 ## 5. 方案取舍：为什么不先做后端聚合
 
 | | A. 纯前端（本方案） | B. 后端聚合命令 |
@@ -256,7 +269,7 @@ statsBar={
 | 轨迹视图打开中 | composer 挂起（`hidden`），状态栏随之隐藏；数据缓存共享，无重复拉取 |
 | 多 pane 同会话 | 模块级缓存共享事件与聚合，只多一份订阅 |
 | `approvalBar` 可见 | 状态栏暂时隐藏，审批操作优先 |
-| 上下文占用 < 50% | 用量环隐藏（见 4.5）；≥ 50% 浮现并承担手动压缩入口。状态栏的占用分组不受此门槛影响，只要有合法 `contextWindow` 就恒显（见 4.5 修订） |
+| 上下文占用 < 50% | statsBar 模式（默认）：无环，状态栏占用分组恒显（见 4.5 修订）；ring 模式：环常显但不可点击，≥ 50% 起承担手动压缩入口（见 4.6） |
 | 无 `contextWindow`（老会话/text 模式） | 状态栏「上下文占用」分组整个不存在（不显示假的 0%），其余分组不受影响 |
 
 ## 8. 文件改动清单
@@ -266,9 +279,12 @@ statsBar={
 | `crates/agent-ui/src/lib/trajectory/stats.ts` | 新增：类型 + `aggregateTrajectoryStats` + 格式化函数 |
 | `crates/agent-ui/src/lib/trajectory/useConversationStats.ts` | 新增：加载/分页/缓存/节流 hook |
 | `crates/agent-ui/src/components/chat/ConversationStatsBar.tsx` | 新增：展示组件 |
-| `crates/agent-ui/src/pages/chat/ChatComposerBar.tsx` | ✅ 已落地：`statsBar` 插槽（含 approvalBar 互斥）+ 卡片压缩（4.5）；待补：给环传 `hideBelowWarn` |
+| `crates/agent-ui/src/pages/chat/ChatComposerBar.tsx` | ✅ 已落地：`statsBar` 插槽（含 approvalBar 互斥）+ 卡片压缩（4.5）+ `contextDisplayMode` 严格互斥裁决（4.6，取代原「给环传 `hideBelowWarn`」方案） |
 | `crates/agent-ui/src/components/chat/TaskProgressIndicator.tsx` | ✅ 已落地：胶囊压缩（4.5，两端测试同步更新） |
-| `crates/agent-ui/src/components/chat/ContextUsageRing.tsx` | 修改：`hideBelowWarn` prop，低于 50% 返回 null（约 +4 行） |
+| `crates/agent-ui/src/components/chat/ContextUsageRing.tsx` | ✅ 已落地：`hideBelowWarn` prop（现为共享环通用显示选项，composer 挂载点不再传，见 4.6） |
+| `crates/agent-ui/src/lib/settings/types.ts` / `index.ts` | ✅ 已落地（4.6）：`ComposerContextDisplayMode` + `composerContextDisplay` 字段与二态归一化 |
+| `crates/agent-ui/src/pages/settings/ProvidersSection.tsx` + `zhCNSettings.ts` / `enUSSettings.ts` | ✅ 已落地（4.6）：高级设置抽屉的展示样式开关 + 文案 |
+| `crates/agent-gui/src/pages/ChatPage.tsx` | ✅ 已落地（4.6）：两处 composer 绑定透传 `contextDisplayMode` |
 | `crates/agent-ui/src/i18n/translations/zhCNCommon.ts` / `enUSCommon.ts` | 修改：新增 key |
 | `crates/agent-gui/src/pages/chat/surfaces/ConversationPaneHost.tsx`（+ 薄包装组件） | 修改：桌面接线 |
 | `crates/agent-gateway/web/src/app/GatewayAppView.tsx`（+ 薄包装组件） | 修改：Web 接线 |
@@ -301,7 +317,8 @@ hook 层：
 - `≈` 前缀、`role="status"` aria-label 完整性
 - 时长/token 格式化边界（59s、60s、999K、1M…）
 - `approvalBar` 可见时状态栏隐藏
-- 环 `hideBelowWarn`：49% 隐藏、50% 显示、压缩后回落再隐藏（补进现有 `context-usage.test.mjs`）
+- 环 `hideBelowWarn`：49% 隐藏、50% 显示、压缩后回落再隐藏（`context-usage.test.mjs` 对共享环的 DOM 验收；prop 保留，composer 不再传，见 4.6）
+- 严格互斥（4.6）：ChatComposerBar 按 `contextDisplayMode` 二选一渲染环/状态栏（`context-usage.test.mjs` 源码断言）；`composerContextDisplay` 二态归一化 + gateway 同步透传（`normalization.test.mjs`）
 - 上下文占用分组：合法 `contextWindow` 时恒显且不挂断点；`contextWindow` 缺省/非法（0、负数、NaN、Infinity）时分组整个不存在；`contextUsageTokens` 缺省但 `contextWindow` 合法时按 0% 展示（`conversation-stats-bar.test.mjs`）
 
 回归：composer 高度上报（`onHeightChange`）在状态栏出现/消失时正确更新；`pnpm check`（biome + ui-boundaries）通过。

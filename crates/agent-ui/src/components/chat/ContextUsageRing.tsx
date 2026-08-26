@@ -66,9 +66,10 @@ export function ContextUsageRing(props: {
   onConfirm?: (() => void) | (() => Promise<unknown>);
   className?: string;
   /**
-   * 占用低于警戒线（50%，即手动压缩尚不可用）时整枚环不渲染。composer 传 true：
-   * 环只在能承担压缩入口时浮现，累计读数交给下方的会话统计状态栏
-   * （docs/design/composer-context-stats-bar.md §4.5 语义分工）。
+   * 占用低于警戒线（50%，即手动压缩尚不可用）时整枚环不渲染。环与状态栏改为
+   * 严格互斥后 composer 不再传此项——"ring" 模式下环是唯一读数，必须常显
+   * （docs/design/composer-context-stats-bar.md §4.6）。保留为共享环的通用显示
+   * 选项，供未来低占用需让位的挂载点使用。
    */
   hideBelowWarn?: boolean;
 }) {

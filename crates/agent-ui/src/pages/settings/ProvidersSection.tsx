@@ -32,6 +32,7 @@ import { Button } from "@liveagent/ui/components/ui/button";
 import { Label } from "@liveagent/ui/components/ui/label";
 import { NumberInput } from "@liveagent/ui/components/ui/number-input";
 import { Sheet, SheetContent, SheetTitle } from "@liveagent/ui/components/ui/sheet";
+import { Switch } from "@liveagent/ui/components/ui/switch";
 import { useVerticalListReorder } from "@liveagent/ui/components/ui/useVerticalListReorder";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { buildModelOptions } from "@liveagent/ui/lib/models/modelOptions";
@@ -447,6 +448,29 @@ function CustomSettingsDrawer(
                 </div>
               </div>
             ) : null}
+            {/* Composer 上下文占用展示样式（严格二态，docs/design/composer-context-stats-bar.md §4.6）：
+                开 = 常显用量环，关 = 会话统计状态栏，二者互斥。 */}
+            <section className="flex items-center justify-between gap-3 py-5">
+              <div className="min-w-0">
+                <Label className="text-[12.5px] font-medium text-foreground/85">
+                  {t("settings.composerContextDisplay")}
+                </Label>
+                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/80">
+                  {t("settings.composerContextDisplayDesc")}
+                </p>
+              </div>
+              <Switch
+                checked={settings.customSettings.composerContextDisplay === "ring"}
+                aria-label={t("settings.composerContextDisplay")}
+                onCheckedChange={(checked) =>
+                  setSettings((prev) =>
+                    updateCustomSettings(prev, {
+                      composerContextDisplay: checked === true ? "ring" : "statsBar",
+                    }),
+                  )
+                }
+              />
+            </section>
             <FailoverSettingsCard
               settings={settings}
               setSettings={setSettings}

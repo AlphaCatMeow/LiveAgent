@@ -795,6 +795,7 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
                           thinkingAlwaysOn={chatRuntimeThinkingAlwaysOn}
                           contextUsageTokensSource={contextUsageTokensSource}
                           contextWindow={currentModelContextWindow}
+                          contextDisplayMode={settings.customSettings.composerContextDisplay}
                           onManualCompactConfirm={handleManualCompact}
                           manualCompactBlocked={manualCompactPending || composerCompactionBlocked}
                           gitClient={gitClient}

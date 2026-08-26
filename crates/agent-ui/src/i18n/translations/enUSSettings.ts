@@ -633,6 +633,9 @@ export const EN_US_SETTINGS_TRANSLATIONS = {
   "settings.commitMessageModelHint":
     "Model used to generate commit messages in Git review. When unselected or no longer available, the current chat model is used automatically.",
   "settings.customSettingsModelEmpty": "No active models are configured for the current providers.",
+  "settings.composerContextDisplay": "Usage ring instead of stats bar",
+  "settings.composerContextDisplayDesc":
+    "When on, the composer shows an always-visible context usage ring and hides the conversation stats bar below the card. When off, the stats bar (which includes the context usage readout) is shown instead. Both styles keep the manual compaction entry at ≥50% usage.",
   "settings.failoverTitle": "Auto Failover",
   "settings.failoverEnabled": "Enabled",
   "settings.failoverToggleHint":

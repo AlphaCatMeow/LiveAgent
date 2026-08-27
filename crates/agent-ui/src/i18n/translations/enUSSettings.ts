@@ -381,6 +381,25 @@ export const EN_US_SETTINGS_TRANSLATIONS = {
   "settings.builtinTool.cron_task_manager.desc": "Create and manage scheduled automations",
   "settings.builtinTool.cron_task_manager.detail":
     "Lets the model create, inspect and manage cron tasks that run prompts on a schedule. Task configuration is visible in the Cron section of settings.",
+  "settings.builtinTool.browser.name": "Browser",
+  "settings.builtinTool.browser.desc": "Automate a Chromium browser",
+  "settings.builtinTool.browser.detail":
+    "With the LiveAgent browser extension installed, actions run in a new tab of your own browser and reuse your login sessions (only tabs it creates are visible to it). Without the extension, it falls back to launching a dedicated browser with an isolated profile, separate from your logins. Supports navigation, page snapshots, clicking, typing, screenshots and JavaScript evaluation. Each action asks for approval by default; unavailable in offline sandbox mode.",
+  "settings.browserMode.label": "Browser mode",
+  "settings.browserMode.auto": "Auto",
+  "settings.browserMode.userProfile": "My browser",
+  "settings.browserMode.isolated": "Isolated",
+  "settings.browserMode.auto.desc":
+    "Uses your own browser (with your logins) when the extension is connected; otherwise falls back to an isolated browser automatically.",
+  "settings.browserMode.userProfile.desc":
+    "Always acts in your own browser, reusing your login sessions. Requires the LiveAgent browser extension; actions fail with guidance instead of silently downgrading when it is not connected.",
+  "settings.browserMode.isolated.desc":
+    "Always uses a dedicated browser with an isolated profile, fully separate from your logins.",
+  "settings.browserMode.extensionConnected": "Extension connected",
+  "settings.browserMode.extensionMissing": "Extension not connected",
+  "settings.browserMode.installGuide":
+    "Browsers do not allow external apps to install extensions silently, so load it manually once (it connects automatically afterwards): open chrome://extensions → enable “Developer mode” → “Load unpacked” → pick the directory below.",
+  "settings.browserMode.openExtensionDir": "Open extension folder",
   "settings.builtinTool.mcp_manager.name": "MCP Manager",
   "settings.builtinTool.mcp_manager.desc": "Manage MCP server connections and toggles",
   "settings.builtinTool.mcp_manager.detail":

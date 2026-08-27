@@ -35,7 +35,6 @@ import {
   MIN_CHAT_TRANSCRIPT_WIDTH,
 } from "@liveagent/ui/lib/transcript-width/transcriptWidthModel";
 import { normalizeModelFailoverSettings } from "./modelFailover";
-import { normalizeRetryErrorSettings } from "./retryError";
 import {
   normalizeChatTranscriptSettings,
   normalizeFontScaleSettings,
@@ -43,6 +42,7 @@ import {
   normalizePositiveInteger,
   normalizeStringArray,
 } from "./normalizers";
+import { normalizeRetryErrorSettings } from "./retryError";
 import {
   DEFAULT_RIGHT_DOCK_FILE_TREE_STATE,
   normalizeRightDockFileTreeExpandedPaths,
@@ -63,6 +63,7 @@ import {
 import type {
   AgentPromptTemplate,
   AppSettings,
+  BrowserAutomationMode,
   ChatRuntimeControls,
   ChatRuntimeReasoningProviderKey,
   CloseWindowBehavior,
@@ -84,6 +85,7 @@ import type {
   ProviderFailoverSettings,
   ProviderId,
   ProviderModelConfig,
+  ProviderRetryPolicy,
   ReasoningLevel,
   RemoteSettings,
   RightDockFileTreeState,
@@ -112,10 +114,12 @@ import type {
   WorkspaceResourceSettings,
 } from "./types";
 import {
+  BROWSER_AUTOMATION_MODES,
   COMMAND_SAFETY_MODES,
   DEFAULT_CHAT_RUNTIME_CONTROLS,
   getDefaultUsageQueryConfig,
   PROMPT_CACHE_HINT_MODES,
+  PROVIDER_RETRY_MAX_RETRIES_LIMITS,
   RIGHT_DOCK_BACKGROUND_TASKS_TAB_ID,
   RIGHT_DOCK_TOOL_KINDS,
   USAGE_QUERY_TIMEOUT_DEFAULT_SECS,
@@ -143,12 +147,12 @@ export {
   normalizeModelFailoverSettings,
   normalizeProviderFailoverSettings,
 } from "./modelFailover";
-export { normalizeRetryErrorSettings } from "./retryError";
 export {
   normalizeChatTranscriptSettings,
   normalizeFontScale,
   normalizeFontScaleSettings,
 } from "./normalizers";
+export { normalizeRetryErrorSettings } from "./retryError";
 export {
   DEFAULT_RIGHT_DOCK_FILE_TREE_STATE,
   normalizeRightDockBackgroundTasksState,
@@ -1044,6 +1048,30 @@ function normalizeUsageQueryConfig(input: unknown): UsageQueryConfig {
   };
 }
 
+/**
+ * 供应商级重试策略归一化。default 态在持久层不落字段（返回 undefined），
+ * 保证旧配置零迁移；非法输入（未知 mode、custom 无有效次数）一律视为
+ * default。custom 的 maxRetries（不含首次请求的重试次数）钳位 1..10。
+ */
+export function normalizeProviderRetryPolicy(input: unknown): ProviderRetryPolicy | undefined {
+  const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  if (obj.mode === "off") return { mode: "off" };
+  if (obj.mode === "custom") {
+    const raw = obj.maxRetries;
+    if (typeof raw !== "number" || !Number.isFinite(raw)) return undefined;
+    return {
+      mode: "custom",
+      maxRetries: clampInt(
+        raw,
+        PROVIDER_RETRY_MAX_RETRIES_LIMITS.min,
+        PROVIDER_RETRY_MAX_RETRIES_LIMITS.max,
+        PROVIDER_RETRY_MAX_RETRIES_LIMITS.min,
+      ),
+    };
+  }
+  return undefined;
+}
+
 export function normalizeCustomProvider(input: unknown): CustomProvider {
   const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
   const type = normalizeProviderId(obj.type);
@@ -1103,6 +1131,10 @@ export function normalizeCustomProvider(input: unknown): CustomProvider {
       : {}),
     nativeWebSearchEnabled: obj.nativeWebSearchEnabled !== false,
     useSystemProxy: obj.useSystemProxy === true,
+    ...((): { retryPolicy?: ProviderRetryPolicy } => {
+      const retryPolicy = normalizeProviderRetryPolicy(obj.retryPolicy);
+      return retryPolicy ? { retryPolicy } : {};
+    })(),
     usageQuery: normalizeUsageQueryConfig(obj.usageQuery),
   };
 }
@@ -1340,6 +1372,18 @@ export function strictestCommandSafetyMode(
   return COMMAND_SAFETY_MODE_STRICTNESS[a] >= COMMAND_SAFETY_MODE_STRICTNESS[b] ? a : b;
 }
 
+/**
+ * 浏览器接入模式归一。缺失/空串/未知值一律回 `auto`:该设置是行为选择而非
+ * 安全约束(登录态使用与否由 group:browser 审批把关),未知值不需要 fail-closed。
+ */
+export function normalizeBrowserAutomationMode(input: unknown): BrowserAutomationMode {
+  if (typeof input !== "string") return "auto";
+  const mode = input.trim();
+  return (BROWSER_AUTOMATION_MODES as readonly string[]).includes(mode)
+    ? (mode as BrowserAutomationMode)
+    : "auto";
+}
+
 export function normalizeSystemSettings(input: unknown): SystemSettings {
   const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
   return {
@@ -1347,6 +1391,7 @@ export function normalizeSystemSettings(input: unknown): SystemSettings {
     workdir: normalizeWorkdir(obj.workdir),
     toolPolicies: normalizeToolPolicies(obj.toolPolicies),
     commandSafetyMode: normalizeCommandSafetyMode(obj.commandSafetyMode),
+    browserAutomationMode: normalizeBrowserAutomationMode(obj.browserAutomationMode),
     workspaceProjects: normalizeWorkspaceProjects(obj.workspaceProjects),
     workspaceProjectGroups: normalizeWorkspaceProjectGroups(obj.workspaceProjectGroups),
     activeWorkspaceProjectId:
@@ -1567,6 +1612,7 @@ export function getDefaultSettings(): AppSettings {
       executionMode: "tools",
       workdir: "",
       commandSafetyMode: "auto",
+      browserAutomationMode: "auto",
       workspaceProjects: [],
       workspaceProjectGroups: [],
       activeWorkspaceProjectId: undefined,

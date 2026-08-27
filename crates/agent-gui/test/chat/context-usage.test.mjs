@@ -895,11 +895,14 @@ test("context usage ring still renders at low usage without hideBelowWarn", asyn
   });
 });
 
-test("composer enforces strict ring/stats-bar mutual exclusion by contextDisplayMode", () => {
-  // 严格二态（docs/design/composer-context-stats-bar.md §4.6）：ring 模式环常显
-  // （composer 不再传 hideBelowWarn，低占用也不得隐身——环是唯一读数）；
-  // statsBar 模式环整枚不渲染；statsBar 插槽在 ring 模式下即使宿主传入也不挂载。
-  assert.match(chatComposerBarSource, /\{contextDisplayMode === "ring" \? \(/);
+test("composer renders ring and stats bar per three-state contextDisplayMode", () => {
+  // 三档（docs/design/composer-context-stats-bar.md §4.7）：ring/both 模式环常显
+  // （composer 不传 hideBelowWarn，低占用也不得隐身）；statsBar 模式环整枚不渲染；
+  // statsBar 插槽只在 ring 模式下不挂载——statsBar/both 两档都渲染。
+  assert.match(
+    chatComposerBarSource,
+    /\{contextDisplayMode === "ring" \|\| contextDisplayMode === "both" \? \(/,
+  );
   assert.match(
     chatComposerBarSource,
     /statsBar && approvalBar == null && contextDisplayMode !== "ring"/,

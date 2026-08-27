@@ -35,6 +35,7 @@ import {
 import { Button } from "@liveagent/ui/components/ui/button";
 import { Label } from "@liveagent/ui/components/ui/label";
 import { NumberInput } from "@liveagent/ui/components/ui/number-input";
+import { SegmentedSlider } from "@liveagent/ui/components/ui/segmented-slider";
 import { Sheet, SheetContent, SheetTitle } from "@liveagent/ui/components/ui/sheet";
 import { Switch } from "@liveagent/ui/components/ui/switch";
 import { useVerticalListReorder } from "@liveagent/ui/components/ui/useVerticalListReorder";
@@ -463,28 +464,31 @@ function CustomSettingsDrawer(
                 ) : null}
               </div>
             </section>
-            {/* Composer 上下文占用展示样式（严格二态，docs/design/composer-context-stats-bar.md §4.6）：
-                开 = 常显用量环，关 = 会话统计状态栏，二者互斥。 */}
-            <section className="flex items-center justify-between gap-3 py-5">
-              <div className="min-w-0">
+            {/* Composer 上下文占用展示样式（三档滑块，docs/design/composer-context-stats-bar.md §4.7）：
+                从左到右 状态栏 / 都显示 / 用量环，对应 statsBar / both / ring。 */}
+            <section className="py-5">
+              <div className="flex items-center justify-between gap-3">
                 <Label className="text-[12.5px] font-medium text-foreground/85">
                   {t("settings.composerContextDisplay")}
                 </Label>
-                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground/80">
-                  {t("settings.composerContextDisplayDesc")}
-                </p>
+                <SegmentedSlider
+                  aria-label={t("settings.composerContextDisplay")}
+                  value={settings.customSettings.composerContextDisplay}
+                  options={[
+                    { value: "statsBar", label: t("settings.composerContextDisplayStatsBar") },
+                    { value: "both", label: t("settings.composerContextDisplayBoth") },
+                    { value: "ring", label: t("settings.composerContextDisplayRing") },
+                  ]}
+                  onValueChange={(mode) =>
+                    setSettings((prev) =>
+                      updateCustomSettings(prev, { composerContextDisplay: mode }),
+                    )
+                  }
+                />
               </div>
-              <Switch
-                checked={settings.customSettings.composerContextDisplay === "ring"}
-                aria-label={t("settings.composerContextDisplay")}
-                onCheckedChange={(checked) =>
-                  setSettings((prev) =>
-                    updateCustomSettings(prev, {
-                      composerContextDisplay: checked === true ? "ring" : "statsBar",
-                    }),
-                  )
-                }
-              />
+              <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/80">
+                {t("settings.composerContextDisplayDesc")}
+              </p>
             </section>
             <FailoverSettingsCard
               settings={settings}

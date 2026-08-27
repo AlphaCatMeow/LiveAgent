@@ -154,11 +154,12 @@ export type ChatTranscriptSettings = {
 };
 
 /**
- * Composer 上下文占用的互斥展示样式（严格二选一，docs/design/composer-context-stats-bar.md §4.6）：
- * "statsBar" 显示卡片下方的会话统计状态栏（含占用读数），用量环不渲染；
- * "ring" 显示常显用量环（0% 起），状态栏不渲染。两种样式都保留 ≥50% 的手动压缩入口。
+ * Composer 上下文占用的三档展示样式（docs/design/composer-context-stats-bar.md §4.7）：
+ * "statsBar" 只显示卡片下方的会话统计状态栏（含占用读数），用量环不渲染；
+ * "both" 状态栏与常显用量环同时显示；
+ * "ring" 只显示常显用量环（0% 起），状态栏不渲染。三档都保留 ≥50% 的手动压缩入口。
  */
-export type ComposerContextDisplayMode = "statsBar" | "ring";
+export type ComposerContextDisplayMode = "statsBar" | "both" | "ring";
 
 export type CustomSettings = {
   conversationTitleModel?: SelectedModel;

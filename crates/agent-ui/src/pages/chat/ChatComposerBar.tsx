@@ -215,8 +215,8 @@ function ComposerContextUsageRing(props: {
       contextWindow={contextWindow}
       disabled={disabled}
       onConfirm={onConfirm}
-      // 环只在 "ring" 展示模式下渲染（见 contextDisplayMode），此时它是唯一的
-      // 占用读数，必须 0% 起常显——不再挂低占用隐藏门槛。
+      // 环在 "ring" / "both" 展示模式下渲染（见 contextDisplayMode），必须 0% 起
+      // 常显——"ring" 模式它是唯一占用读数，不再挂低占用隐藏门槛。
     />
   );
 }
@@ -314,10 +314,11 @@ export type ChatComposerBarProps = {
    */
   statsBar?: ReactNode;
   /**
-   * 上下文占用的互斥展示样式（settings.customSettings.composerContextDisplay，
-   * docs/design/composer-context-stats-bar.md §4.6）。互斥在本组件内统一强制：
-   * "statsBar"（缺省）渲染 statsBar 插槽、不渲染用量环；"ring" 渲染常显用量环
-   * （0% 起，环是唯一读数）、statsBar 插槽即使传入也不挂载。
+   * 上下文占用的三档展示样式（settings.customSettings.composerContextDisplay，
+   * docs/design/composer-context-stats-bar.md §4.7）。取舍在本组件内统一裁决：
+   * "statsBar"（缺省）渲染 statsBar 插槽、不渲染用量环；"both" 状态栏与常显
+   * 用量环同时渲染；"ring" 渲染常显用量环（0% 起，环是唯一读数）、statsBar
+   * 插槽即使传入也不挂载。
    */
   contextDisplayMode?: ComposerContextDisplayMode;
 };
@@ -970,8 +971,8 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
           </button>
 
           {/* 用量环位于卡片右侧控制列的垂直中心，保持在展开与发送按钮之间。
-              仅 "ring" 展示模式渲染：与 statsBar 插槽严格互斥（§4.6）。 */}
-          {contextDisplayMode === "ring" ? (
+              "ring" / "both" 展示模式渲染，"statsBar" 模式整枚不渲染（§4.7）。 */}
+          {contextDisplayMode === "ring" || contextDisplayMode === "both" ? (
             <div className="absolute right-3 top-1/2 z-20 -translate-y-1/2">
               <ComposerContextUsageRing
                 source={contextUsageTokensSource}
@@ -1261,7 +1262,7 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
           {fileDropOverlay}
         </div>
         {/* 会话统计状态栏插槽：贴卡片下缘，与卡片同宽；审批面板可见时让位；
-            "ring" 展示模式下与用量环互斥，即使宿主传入也不挂载（§4.6）。 */}
+            只在 "ring" 展示模式下不挂载——"statsBar" 与 "both" 都渲染（§4.7）。 */}
         {statsBar && approvalBar == null && contextDisplayMode !== "ring" ? statsBar : null}
       </div>
     </div>

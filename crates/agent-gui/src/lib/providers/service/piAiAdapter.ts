@@ -13,6 +13,7 @@ import {
   stream as streamOpenAIResponses,
 } from "@earendil-works/pi-ai/api/openai-responses";
 import { resolveMaxTokens } from "../runtime/common";
+import { wrapInlineThinkTagStream } from "../runtime/inlineThinkTagStream";
 import { rejectEmptyOpenAICompletionsResponse } from "../runtime/openAICompletionsStream";
 import { withStreamRetry } from "../runtime/streamRetry";
 import {
@@ -120,8 +121,10 @@ function streamOpenAICompletionsApi(model: Model<Api>, context: Context, options
   };
   return withStreamRetry(
     () => {
-      return rejectEmptyOpenAICompletionsResponse(
-        streamOpenAICompletions(model as Model<"openai-completions">, context, openAIOptions),
+      return wrapInlineThinkTagStream(
+        rejectEmptyOpenAICompletionsResponse(
+          streamOpenAICompletions(model as Model<"openai-completions">, context, openAIOptions),
+        ),
       );
     },
     { signal: options.signal, ...options.streamRetry },

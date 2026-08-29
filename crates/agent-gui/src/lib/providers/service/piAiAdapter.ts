@@ -137,7 +137,10 @@ function streamOpenAIResponsesApi(model: Model<Api>, context: Context, options: 
     reasoningEffort: clampOpenAIReasoningEffort(model, options.reasoning),
   };
   return withStreamRetry(
-    () => streamOpenAIResponses(model as Model<"openai-responses">, context, openAIOptions),
+    () =>
+      wrapInlineThinkTagStream(
+        streamOpenAIResponses(model as Model<"openai-responses">, context, openAIOptions),
+      ),
     {
       signal: options.signal,
       ...options.streamRetry,

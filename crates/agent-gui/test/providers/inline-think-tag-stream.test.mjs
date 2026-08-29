@@ -319,52 +319,56 @@ test("inline think: aborting mid-thought flushes the reasoning and rewrites the 
   assert.equal(error.error.stopReason, "aborted");
 });
 
-test("inline think: streamSimpleByApi mounts the wrapper on openai-completions", async () => {
-  const message = createAssistant([{ type: "text", text: "<think>hmm</think>hi" }]);
-  const scopedLoader = createTsModuleLoader({
-    mocks: {
-      "@earendil-works/pi-ai/api/openai-completions": {
-        stream() {
-          return {
-            async *[Symbol.asyncIterator]() {
-              yield {
-                type: "text_delta",
-                contentIndex: 0,
-                delta: "<think>hmm</think>hi",
-                partial: message,
-              };
-              yield { type: "done", reason: "stop", message };
-            },
-            async result() {
-              return message;
-            },
-          };
+// 两个 OpenAI 兼容协议都要挂上：本地 llama.cpp 既可以走 /v1/chat/completions，
+// 也可以经 codex 预设走 /v1/responses，两条路都会内联 <think>。
+for (const api of ["openai-completions", "openai-responses"]) {
+  test(`inline think: streamSimpleByApi mounts the wrapper on ${api}`, async () => {
+    const message = createAssistant([{ type: "text", text: "<think>hmm</think>hi" }]);
+    const scopedLoader = createTsModuleLoader({
+      mocks: {
+        [`@earendil-works/pi-ai/api/${api}`]: {
+          stream() {
+            return {
+              async *[Symbol.asyncIterator]() {
+                yield {
+                  type: "text_delta",
+                  contentIndex: 0,
+                  delta: "<think>hmm</think>hi",
+                  partial: message,
+                };
+                yield { type: "done", reason: "stop", message };
+              },
+              async result() {
+                return message;
+              },
+            };
+          },
         },
       },
-    },
+    });
+    const { streamSimpleByApi } = scopedLoader.loadModule(
+      "src/lib/providers/runtime/streamByApi.ts",
+    );
+
+    const stream = streamSimpleByApi(
+      {
+        id: "qwen3",
+        api,
+        provider: "openai",
+        baseUrl: "http://127.0.0.1:11434/v1",
+        maxTokens: 1024,
+      },
+      { messages: [] },
+      { streamRetry: { disabled: true } },
+    );
+    const events = await collect(stream);
+    const result = await stream.result();
+
+    assert.equal(concatDeltas(events, "thinking_delta", 0), "hmm");
+    assert.equal(concatDeltas(events, "text_delta", 1), "hi");
+    assert.deepEqual(result.content, [
+      { type: "thinking", thinking: "hmm" },
+      { type: "text", text: "hi" },
+    ]);
   });
-  const { streamSimpleByApi } = scopedLoader.loadModule(
-    "src/lib/providers/runtime/streamByApi.ts",
-  );
-
-  const stream = streamSimpleByApi(
-    {
-      id: "qwen3",
-      api: "openai-completions",
-      provider: "openai",
-      baseUrl: "http://127.0.0.1:11434/v1",
-      maxTokens: 1024,
-    },
-    { messages: [] },
-    { streamRetry: { disabled: true } },
-  );
-  const events = await collect(stream);
-  const result = await stream.result();
-
-  assert.equal(concatDeltas(events, "thinking_delta", 0), "hmm");
-  assert.equal(concatDeltas(events, "text_delta", 1), "hi");
-  assert.deepEqual(result.content, [
-    { type: "thinking", thinking: "hmm" },
-    { type: "text", text: "hi" },
-  ]);
-});
+}

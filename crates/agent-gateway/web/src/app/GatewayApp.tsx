@@ -186,6 +186,10 @@ function useGatewayAppController() {
     () => (api ? createGatewayWorkspaceProjectRootClient(api) : undefined),
     [api],
   );
+  const [workspaceRootRevision, setWorkspaceRootRevision] = useState(0);
+  const handleWorkspaceDirectoriesMounted = useCallback(() => {
+    setWorkspaceRootRevision((revision) => revision + 1);
+  }, []);
   const effectiveTheme = resolveEffectiveTheme(settings.theme);
   const isAgentMode = settings.system.executionMode !== "text";
   const [sidebarOpen, setSidebarOpen] = useState(shouldOpenSidebarByDefault);
@@ -490,6 +494,7 @@ function useGatewayAppController() {
       activeWorkspaceProject,
       workspaceProjectRootClient,
       onWorkspaceCreated: handleWorkdirPickerSelect,
+      onWorkspaceDirectoriesMounted: handleWorkspaceDirectoriesMounted,
     });
 
   // 无会话兜底：等价于点一次“新对话”，返回新草稿会话 id 供上传立即挂靠。
@@ -500,6 +505,7 @@ function useGatewayAppController() {
     isUploadingFiles,
     isFileDropActive,
     fileInputRef,
+    folderInputRef,
     setUploadingFiles,
     getPendingUploadsForConversation,
     setPendingUploadsForConversation,
@@ -507,6 +513,7 @@ function useGatewayAppController() {
     moveConversationUploads,
     clearPendingUploads,
     handleImportReadableFiles,
+    handleImportSelectedDirectoryFiles,
     handleFileDragEnter,
     handleFileDragOver: handlePendingFileDragOver,
     handleFileDragLeave,
@@ -1785,6 +1792,7 @@ function useGatewayAppController() {
     fileDropLimitHint,
     fileDropTitle,
     fileInputRef,
+    folderInputRef,
     gatewayConnectionLost,
     getDisplayedConversationId,
     gitClient,
@@ -1813,6 +1821,7 @@ function useGatewayAppController() {
     handleFloorJump,
     handleGitReviewFocusRequestHandled,
     handleImportReadableFiles,
+    handleImportSelectedDirectoryFiles,
     handleInsertCodeMention,
     handleLoadEarlierHistory,
     handleLoadSharedHistoryStatus,
@@ -1990,6 +1999,7 @@ function useGatewayAppController() {
     workspaceFolderDropHandlers,
     workspaceProjects,
     workspaceProjectRootClient,
+    workspaceRootRevision,
     workspaceSshTerminalMounted,
     workspaceSshTerminalOpen,
     workspaceSshTerminalOpenRequest,

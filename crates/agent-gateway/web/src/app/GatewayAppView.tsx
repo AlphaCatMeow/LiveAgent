@@ -122,6 +122,7 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
     fileDropLimitHint,
     fileDropTitle,
     fileInputRef,
+    folderInputRef,
     gatewayConnectionLost,
     getDisplayedConversationId,
     gitClient,
@@ -150,6 +151,7 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
     handleFloorJump,
     handleGitReviewFocusRequestHandled,
     handleImportReadableFiles,
+    handleImportSelectedDirectoryFiles,
     handleInsertCodeMention,
     handleLoadEarlierHistory,
     handleLoadSharedHistoryStatus,
@@ -327,6 +329,7 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
     workspaceFolderDropHandlers,
     workspaceProjects,
     workspaceProjectRootClient,
+    workspaceRootRevision,
     workspaceSshTerminalMounted,
     workspaceSshTerminalOpen,
     workspaceSshTerminalOpenRequest,
@@ -427,6 +430,20 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
             onChange={(event) => {
               const files = Array.from(event.currentTarget.files ?? []);
               void handleImportReadableFiles(files);
+              event.currentTarget.value = "";
+            }}
+          />
+          <input
+            ref={(element) => {
+              folderInputRef.current = element;
+              element?.setAttribute("webkitdirectory", "");
+            }}
+            type="file"
+            multiple
+            aria-label={translate("chat.upload.selectFolder", settings.locale)}
+            className="gateway-hidden-file-input"
+            onChange={(event) => {
+              handleImportSelectedDirectoryFiles(Array.from(event.currentTarget.files ?? []));
               event.currentTarget.value = "";
             }}
           />
@@ -914,6 +931,7 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
                           onComposerBusyChange={handleComposerBusyChange}
                           onChatRuntimeControlsChange={handleChatRuntimeControlsChange}
                           onPickReadableFiles={() => fileInputRef.current?.click()}
+                          onPickWorkspaceFolder={() => folderInputRef.current?.click()}
                           onPasteFiles={handleImportReadableFiles}
                           onLoadUploadedImagePreview={handleLoadUploadedImagePreview}
                           loadHistoryPrompts={loadComposerHistoryPrompts}
@@ -1012,6 +1030,9 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
               fontScale={settings.customSettings.fontScale.rightDock}
               projectPathKey={terminalProjectPathKey}
               cwd={terminalProjectPath}
+              workspaceProject={activeWorkspaceProject}
+              workspaceProjectRootClient={workspaceProjectRootClient}
+              workspaceRootRevision={workspaceRootRevision}
               sessions={terminalSessions}
               sessionsLoaded={terminalSessionsLoaded}
               width={settings.customSettings.rightDock.width}

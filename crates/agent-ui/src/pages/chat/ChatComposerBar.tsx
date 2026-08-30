@@ -25,6 +25,7 @@ import {
   ChevronDown,
   ChevronUp,
   Clock3,
+  FolderOpen,
   Lightbulb,
   Loader2,
   Maximize2,
@@ -293,6 +294,8 @@ export type ChatComposerBarProps = {
   onOpenSettings: (section?: "providers", providerId?: string) => void;
   onChatRuntimeControlsChange: (patch: Partial<ChatRuntimeControls>) => void;
   onPickReadableFiles: () => void;
+  /** Select a folder to mount as a read-only project root. */
+  onPickWorkspaceFolder: () => void;
   onPasteFiles: (files: File[]) => void;
   onLoadUploadedImagePreview?: UploadedImagePreviewLoader;
   /** Prompts previously sent in this conversation for ↑/↓ recall. */
@@ -374,6 +377,7 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
     onOpenSettings,
     onChatRuntimeControlsChange,
     onPickReadableFiles,
+    onPickWorkspaceFolder,
     onPasteFiles,
     onLoadUploadedImagePreview,
     loadHistoryPrompts,
@@ -1079,7 +1083,17 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
                   >
                     <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                     <span className="font-medium leading-5">
-                      {t("chat.upload.filesAndFolders")}
+                      {t("chat.upload.files")}
+                    </span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={onPickWorkspaceFolder}
+                    disabled={uploadDisabled}
+                    className="composer-safety-item items-center gap-2 rounded-md py-1.5 text-xs"
+                  >
+                    <FolderOpen className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <span className="font-medium leading-5">
+                      {t("chat.upload.folder")}
                     </span>
                   </DropdownMenuItem>
                   {isAgentMode ? (

@@ -62,6 +62,7 @@ import {
 } from "@/lib/trajectory/liveTrajectory";
 import { WorkdirPickerModal } from "@/pages/settings/WorkdirPickerModal";
 import { AgentSelector } from "./AgentSelector";
+import { ConversationStatsBarHost } from "./ConversationStatsBarHost";
 import { asErrorMessage } from "./chatEventUtils";
 import { CHAT_RUNTIME_FOREGROUND_PREPARE_TIMEOUT_MS } from "./constants";
 import type { GatewayAppViewModel } from "./GatewayApp";
@@ -796,6 +797,7 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
                           thinkingAlwaysOn={chatRuntimeThinkingAlwaysOn}
                           contextUsageTokensSource={contextUsageTokensSource}
                           contextWindow={currentModelContextWindow}
+                          contextDisplayMode={settings.customSettings.composerContextDisplay}
                           onManualCompactConfirm={handleManualCompact}
                           manualCompactBlocked={manualCompactPending || composerCompactionBlocked}
                           gitClient={gitClient}
@@ -936,6 +938,23 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
                             />
                           }
                           approvalBar={approvalBar}
+                          statsBar={
+                            <ConversationStatsBarHost
+                              // 前缀防与同级 taskProgressBar 的 key（裸会话 id）碰撞：React 对
+                              // 同键兄弟的 keyed diff 会让旧 fiber 逃过删除，DOM 残留逐次累积。
+                              key={`stats-${displayedConversationId}`}
+                              conversationId={displayedConversationId}
+                              host={trajectoryHost}
+                              // 轨迹视图下输入区隐藏，状态栏无需拉取。
+                              enabled={renderedConversationView !== "trajectory"}
+                              contextUsageTokensSource={contextUsageTokensSource}
+                              contextWindow={currentModelContextWindow}
+                              onManualCompactConfirm={handleManualCompact}
+                              manualCompactBlocked={
+                                manualCompactPending || composerCompactionBlocked
+                              }
+                            />
+                          }
                           fileDropOverlay={
                             isFileDropActive ? (
                               <FileDropOverlay

@@ -420,40 +420,43 @@ export const RightDockPanel = memo(function RightDockPanel(props: RightDockPanel
   const workspaceRootScope = workspaceProject
     ? `${workspaceProject.id}\u0000${workspaceProject.path}`
     : "";
-  const refreshExternalRoots = useCallback(async (_revision?: number) => {
-    const requestId = ++externalRootsRequestRef.current;
-    if (!workspaceProject || !workspaceProjectRootClient) {
-      setExternalFileTreeRoots([]);
-      setExternalRootsScope(workspaceRootScope);
-      return;
-    }
-    try {
-      const grants = await workspaceProjectRootClient.list(workspaceProject);
-      if (requestId !== externalRootsRequestRef.current) return;
-      setExternalFileTreeRoots(
-        grants
-          .filter((grant) => grant.state === "active" && grant.id.trim() && grant.displayPath.trim())
-          .map((grant) => ({
-            id: grant.id.trim(),
-            name: grant.alias.trim() || grant.displayPath.trim(),
-            cwd: grant.displayPath.trim(),
-          })),
-      );
-      setExternalRootsScope(workspaceRootScope);
-    } catch {
-      if (requestId === externalRootsRequestRef.current) {
+  const refreshExternalRoots = useCallback(
+    async (_revision?: number) => {
+      const requestId = ++externalRootsRequestRef.current;
+      if (!workspaceProject || !workspaceProjectRootClient) {
         setExternalFileTreeRoots([]);
         setExternalRootsScope(workspaceRootScope);
+        return;
       }
-    }
-  }, [workspaceProject, workspaceProjectRootClient, workspaceRootScope]);
+      try {
+        const grants = await workspaceProjectRootClient.list(workspaceProject);
+        if (requestId !== externalRootsRequestRef.current) return;
+        setExternalFileTreeRoots(
+          grants
+            .filter(
+              (grant) => grant.state === "active" && grant.id.trim() && grant.displayPath.trim(),
+            )
+            .map((grant) => ({
+              id: grant.id.trim(),
+              name: grant.alias.trim() || grant.displayPath.trim(),
+              cwd: grant.displayPath.trim(),
+            })),
+        );
+        setExternalRootsScope(workspaceRootScope);
+      } catch {
+        if (requestId === externalRootsRequestRef.current) {
+          setExternalFileTreeRoots([]);
+          setExternalRootsScope(workspaceRootScope);
+        }
+      }
+    },
+    [workspaceProject, workspaceProjectRootClient, workspaceRootScope],
+  );
   useEffect(() => {
     void refreshExternalRoots(workspaceRootRevision);
   }, [refreshExternalRoots, workspaceRootRevision]);
   const visibleExternalFileTreeRoots =
-    externalRootsScope === workspaceRootScope
-      ? externalFileTreeRoots
-      : NO_EXTERNAL_FILE_TREE_ROOTS;
+    externalRootsScope === workspaceRootScope ? externalFileTreeRoots : NO_EXTERNAL_FILE_TREE_ROOTS;
   const {
     effectiveShouldRenderContent,
     effectiveWidthCollapsed,

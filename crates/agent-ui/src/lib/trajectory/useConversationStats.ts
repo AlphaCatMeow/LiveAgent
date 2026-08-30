@@ -153,8 +153,7 @@ export function useConversationStats(
         return;
       }
 
-      const cursor =
-        current.oldestSegmentIndex === null ? undefined : current.oldestSegmentIndex;
+      const cursor = current.oldestSegmentIndex === null ? undefined : current.oldestSegmentIndex;
       setLoading(true);
       hostRef.current
         .loadWindow(conversationId, cursor)

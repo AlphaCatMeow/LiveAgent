@@ -221,6 +221,8 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
     localeContextValue,
     manualCompactPending,
     manualCompactTransientConversations,
+    mentionableConversations,
+    searchMentionableConversations,
     materializeComposerDraftForSend,
     mentionApps,
     missingWorkspaceProjectPathKeys,
@@ -795,6 +797,8 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
                           inputPlaceholder={composerPlaceholder}
                           workdir={displayedConversationWorkdir}
                           enabledSkills={enabledComposerSkills}
+                          mentionableConversations={mentionableConversations}
+                          searchMentionableConversations={searchMentionableConversations}
                           mentionApps={mentionApps}
                           executionMode={settings.system.executionMode}
                           hasModels={modelOptions.length > 0}
@@ -871,6 +875,7 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
                                 const sendConversationId = getDisplayedConversationId();
                                 let text: string;
                                 let files: PendingUploadedFile[];
+                                let referencedConversations = draft?.conversationMentions ?? [];
                                 try {
                                   const materialized = draft
                                     ? await materializeComposerDraftForSend(
@@ -878,9 +883,14 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
                                         pendingUploadedFiles,
                                         displayedConversationWorkdir,
                                       )
-                                    : { text: "", uploadedFiles: pendingUploadedFiles };
+                                    : {
+                                        text: "",
+                                        uploadedFiles: pendingUploadedFiles,
+                                        referencedConversations: [],
+                                      };
                                   text = materialized.text;
                                   files = materialized.uploadedFiles;
+                                  referencedConversations = materialized.referencedConversations;
                                 } catch (error) {
                                   addNotify("error", asErrorMessage(error, "大段粘贴内容导入失败"));
                                   return;
@@ -896,6 +906,7 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
                                 void sendChat(text, {
                                   conversationId: sendConversationId,
                                   uploadedFiles: files,
+                                  referencedConversations,
                                   runtimeControls: chatRuntimeControlsForCurrentProvider,
                                 }).catch(() => {
                                   updatePendingUploadsForConversation(

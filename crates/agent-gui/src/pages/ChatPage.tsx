@@ -30,6 +30,7 @@ import {
   useComposerSkillSelection,
   useInsertCodeReviewSkill,
 } from "@liveagent/ui/lib/chat/useComposerActions";
+import { useMentionApps } from "@liveagent/ui/lib/chat/useMentionApps";
 import { setPreferredMonacoNlsLocale } from "@liveagent/ui/lib/monacoNls";
 import { useRightDockSettings } from "@liveagent/ui/lib/projectTools/useRightDockSettings";
 import {
@@ -651,6 +652,7 @@ export function ChatPage(props: ChatPageProps) {
     selectedSkillNames,
     skillsEnabled,
   );
+  const mentionApps = useMentionApps(activeWorkspaceResources.mcpServers, isAgentMode);
   const terminalProjectPath = isAgentMode ? activeWorkspaceProjectPath.trim() : "";
   const terminalProjectPathKey = terminalProjectPath
     ? workspaceProjectPathKey(terminalProjectPath)
@@ -2154,6 +2156,7 @@ export function ChatPage(props: ChatPageProps) {
       inputPlaceholder: composerPlaceholder,
       workdir: displayedConversationWorkdir,
       enabledSkills: enabledComposerSkills,
+      mentionApps,
       executionMode: settings.system.executionMode,
       hasModels,
       currentModelLabel,
@@ -3000,6 +3003,7 @@ export function ChatPage(props: ChatPageProps) {
         inputPlaceholder: t("chat.inputHint"),
         workdir: workspaceRoot ?? "",
         enabledSkills: enabledComposerSkills,
+        mentionApps,
         executionMode: settings.system.executionMode,
         hasModels,
         currentModelLabel: paneModelLabel,

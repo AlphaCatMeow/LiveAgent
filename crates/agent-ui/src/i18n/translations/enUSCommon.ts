@@ -1491,7 +1491,11 @@ export const EN_US_COMMON_TRANSLATIONS = {
   "workbench.showConversation": "Switch to conversation view",
   "workbench.loadConversation": "Load conversation",
   "workbench.openInSplit": "Open in split pane",
+  "workbench.openNewTerminalInSplit": "New terminal in split pane",
   "workbench.noSpaceForSplit": "Not enough space for another pane",
+  "workbench.dropStateChanged": "The pane layout changed. Drag the item again",
+  "workbench.workspaceDropFailed": "Failed to create the workspace conversation. Please retry.",
+  "workbench.conversationAlreadyOpen": "This conversation is already open and is now focused",
   "workbench.projectArchived": "This workspace is archived",
   "workbench.projectMissing": "This workspace folder is missing",
   "workbench.terminalConnecting": "Starting terminal…",
@@ -1500,6 +1504,9 @@ export const EN_US_COMMON_TRANSLATIONS = {
   "workbench.terminalRestart": "Restart terminal",
   "workbench.terminalRetry": "Retry",
   "workbench.terminalSessionMissing": "This terminal session is no longer available",
+  "workbench.terminalRestoreRequired":
+    "This terminal was restored from the previous layout. Confirm to start a new session.",
+  "workbench.terminalRestore": "Restore terminal",
   "workbench.terminalSshPrompt":
     "SSH authentication is required — open this host from the project tools panel first",
   "workbench.sshStatusConnected": "Connected",

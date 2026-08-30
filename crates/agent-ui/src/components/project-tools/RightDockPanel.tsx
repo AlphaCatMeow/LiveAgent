@@ -103,12 +103,24 @@ type RightDockPanelProps = {
   /** 存在时终端 tab 可拖出 dock(工作台宿主);默认无行为。 */
   onTerminalTabDragStart?: (
     session: TerminalSession,
-    event: { pointerId: number; clientX: number; clientY: number },
+    event: {
+      pointerId: number;
+      clientX: number;
+      clientY: number;
+      currentTarget?: EventTarget | null;
+    },
   ) => void;
   /** 存在时空态"新建终端"入口可拖出到工作台画板;点击行为不变。 */
-  onNewTerminalDragStart?: (event: { pointerId: number; clientX: number; clientY: number }) => void;
+  onNewTerminalDragStart?: (event: {
+    pointerId: number;
+    clientX: number;
+    clientY: number;
+    currentTarget?: EventTarget | null;
+  }) => void;
   /** 终端 tab 右键菜单「在工作台打开」;省略时菜单不出现(拖拽仍可用)。 */
   onOpenTerminalInWorkbench?: (session: TerminalSession) => void;
+  /** 新建菜单「在分屏中新建终端」;与拖拽 newTerminal 走同一提交语义。 */
+  onOpenNewTerminalInWorkbench?: () => void;
   /**
    * dock 视口报错时上抛 sessionId,由宿主按后端权威列表校验:会话确认
    * 消失(幽灵记录)则整表刷新,坏 tab 自动退场;仍存活的瞬时错误不动列表。
@@ -402,6 +414,7 @@ export const RightDockPanel = memo(function RightDockPanel(props: RightDockPanel
     onTerminalTabDragStart,
     onNewTerminalDragStart,
     onOpenTerminalInWorkbench,
+    onOpenNewTerminalInWorkbench,
     onSessionGhost,
     onInsertFileMention,
     onOpenFile,
@@ -934,6 +947,7 @@ export const RightDockPanel = memo(function RightDockPanel(props: RightDockPanel
                   tunnelAvailable={tunnelAvailable}
                   creating={creating}
                   onCreateTerminal={createTerminal}
+                  onOpenNewTerminalInWorkbench={onOpenNewTerminalInWorkbench}
                   onStartTool={startToolTab}
                   onOpenBackgroundTasks={openBackgroundTasks}
                 />

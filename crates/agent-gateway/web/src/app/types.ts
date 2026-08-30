@@ -23,7 +23,10 @@ export type SendChatFn = (
   options?: SendChatOptions,
 ) => Promise<ChatCommandOutcome | null>;
 
-export type ModelProviderSource = Pick<CustomProvider, "id" | "name" | "type" | "activeModels">;
+export type ModelProviderSource = Pick<
+  CustomProvider,
+  "id" | "name" | "type" | "requestFormat" | "activeModels"
+>;
 
 export type TunnelManagerToolChange = {
   action: "create" | "close";

@@ -53,7 +53,6 @@ type GatewayChatCommandActionOptions = {
   composerRef: MutableRefObject<MentionComposerHandle | null>;
   conversationIdRef: MutableRefObject<string>;
   conversationWorkdirsRef: MutableRefObject<Map<string, string>>;
-  currentChatProvider: AppSettings["customProviders"][number] | undefined;
   displayedConversationWorkdirRef: MutableRefObject<string>;
   draftClientRequestsRef: MutableRefObject<Map<string, string>>;
   getDisplayedConversationId: () => string;
@@ -79,13 +78,28 @@ type GatewayChatCommandActionOptions = {
   setConversationId: Dispatch<SetStateAction<string>>;
   setPendingUploadsForConversation: (conversationId: string, files: PendingUploadedFile[]) => void;
   setSelectedHistoryId: Dispatch<SetStateAction<string>>;
-  setUploadingFiles: (active: boolean) => void;
+  setUploadingFiles: (active: boolean, targetConversationId?: string) => void;
   settings: AppSettings;
   sidebarStore: SidebarStore;
   token: string;
   transcriptFollow: ScrollFollowHandle;
   transcriptStoreRegistry: TranscriptStoreRegistry;
 };
+
+export function resolveConversationRuntimeControls(input: {
+  activeProviders: ModelProviderSource[];
+  selectedModel: SelectedModel | undefined;
+  runtimeControls: AppSettings["chatRuntimeControls"];
+}) {
+  const provider = input.activeProviders.find(
+    (entry) => entry.id === input.selectedModel?.customProviderId,
+  );
+  return normalizeChatRuntimeControlsForProvider(input.runtimeControls, {
+    providerId: provider?.type,
+    requestFormat: provider?.requestFormat,
+    modelId: input.selectedModel?.model,
+  });
+}
 
 export function createGatewayChatCommandActions(options: GatewayChatCommandActionOptions) {
   const {
@@ -102,7 +116,6 @@ export function createGatewayChatCommandActions(options: GatewayChatCommandActio
     composerRef,
     conversationIdRef,
     conversationWorkdirsRef,
-    currentChatProvider,
     displayedConversationWorkdirRef,
     draftClientRequestsRef,
     getDisplayedConversationId,
@@ -190,14 +203,11 @@ export function createGatewayChatCommandActions(options: GatewayChatCommandActio
       });
     }
 
-    const runtimeControls = normalizeChatRuntimeControlsForProvider(
-      sendOptions?.runtimeControls ?? settings.chatRuntimeControls,
-      {
-        providerId: currentChatProvider?.type,
-        requestFormat: currentChatProvider?.requestFormat,
-        modelId: turnSelectedModel?.model,
-      },
-    );
+    const runtimeControls = resolveConversationRuntimeControls({
+      activeProviders,
+      selectedModel: turnSelectedModel,
+      runtimeControls: sendOptions?.runtimeControls ?? settings.chatRuntimeControls,
+    });
     const outcome = await chatCommandPipeline.submit({
       conversationId: activeConversationId,
       clientRequestId,
@@ -266,6 +276,8 @@ export function createGatewayChatCommandActions(options: GatewayChatCommandActio
     draft: MentionComposerDraft,
     files: PendingUploadedFile[],
     workdir: string,
+    // 大段粘贴导入期间的"上传中"状态归属会话:多 Pane 下只禁用目标 Pane。
+    targetConversationId?: string,
   ) => {
     let text = normalizeLogicalLineEndings(
       isAgentMode && draft.largePastes.length > 0
@@ -276,7 +288,7 @@ export function createGatewayChatCommandActions(options: GatewayChatCommandActio
     if (isAgentMode && draft.largePastes.length > 0) {
       setChatError(null);
       isImportingPastedTextRef.current = true;
-      setUploadingFiles(true);
+      setUploadingFiles(true, targetConversationId);
       try {
         const agentID = await resolveActiveAgentID();
         const imported = await importPastedTextsAsFiles({
@@ -323,7 +335,12 @@ export function createGatewayChatCommandActions(options: GatewayChatCommandActio
       settings.system.workdir
     ).trim();
     try {
-      const materialized = await materializeComposerDraftForSend(draft, uploadedFiles, workdir);
+      const materialized = await materializeComposerDraftForSend(
+        draft,
+        uploadedFiles,
+        workdir,
+        conversationId,
+      );
       if (!materialized.text && materialized.uploadedFiles.length === 0) return false;
       clearCurrentComposerDraftForQueuedTurn(conversationId);
       clearedComposer = true;

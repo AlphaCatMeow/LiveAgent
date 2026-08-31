@@ -2,6 +2,7 @@ import { ApplicationView } from "@liveagent/ui/application/ApplicationView";
 import { AppWorkbenchChrome } from "@liveagent/ui/application/AppWorkbenchChrome";
 import { useApplicationViewState } from "@liveagent/ui/application/useApplicationViewState";
 import { ConversationViewTabs } from "@liveagent/ui/components/chat/ConversationViewTabs";
+import type { RunClarifyTurn } from "@liveagent/ui/components/chat/clarify/clarifyTypes";
 import { HistoryShareModal } from "@liveagent/ui/components/chat/HistoryShareModal";
 import type { MentionComposerDraft } from "@liveagent/ui/components/chat/MentionComposer";
 import { NotifyToast } from "@liveagent/ui/components/chat/NotifyToast";
@@ -114,7 +115,7 @@ import {
 import { skillMentionInjection } from "../lib/chat/skills/mentionInjection";
 import { tauriGitClient } from "../lib/git/tauriGitClient";
 import { buildMemoryOverviewSection } from "../lib/memory/prompts/injection";
-import { toModelValue } from "../lib/providers/llm";
+import { createProviderRuntimeConfig, toModelValue } from "../lib/providers/llm";
 import {
   findProviderModelConfig,
   getChatRuntimeReasoningLevelsForProvider,
@@ -197,7 +198,12 @@ import {
   pruneIdleConversationRuntimeCaches,
   syncMovedConversationRuntimeWorkdir,
 } from "./chat/runtime/chatPageRuntime";
-import { resolveActiveModelSelection } from "./chat/runtime/modelSelection";
+import { createGuiClarifyRunner } from "./chat/runtime/clarifyRunner";
+import {
+  resolveActiveModelSelection,
+  resolveEffectiveChatModelSelection,
+} from "./chat/runtime/modelSelection";
+import { resolvePromptClarifyModelSelection } from "./chat/runtime/providerRuntimeConfig";
 import { useChatModelSelection } from "./chat/runtime/useChatModelSelection";
 import {
   type ManualCompactionRequest,
@@ -1114,6 +1120,7 @@ export function ChatPage(props: ChatPageProps) {
           deleteConversationLocalCaches(conversationId);
           subagentStoresRef.current.dispose(conversationId);
           cancelConversationTransientInteractions(conversationId);
+          clarifyRunnersRef.current.delete(conversationId);
         },
       });
     },
@@ -1477,6 +1484,24 @@ export function ChatPage(props: ChatPageProps) {
     requestConversationStop,
     requestActiveConversationStop,
     consumeConversationStop,
+    runGatewayClarifyTurn: async (messages, selection, runtimeControls) => {
+      const provider = settings.customProviders.find((p) => p.id === selection.providerId);
+      if (!provider) {
+        throw new Error(`clarify provider not found: ${selection.providerId}`);
+      }
+      // 与本地澄清共用 createGuiClarifyRunner：调用参数（cacheRetention/
+      // nativeWebSearch/context 拼装）单一来源，桥接路径不再手写一份。
+      const guiSelection = {
+        selectedModel: { customProviderId: provider.id, model: selection.model },
+        provider,
+        providerId: provider.type,
+        model: selection.model,
+      };
+      return createGuiClarifyRunner(
+        () => guiSelection,
+        () => createProviderRuntimeConfig(provider, selection.model, runtimeControls),
+      )(messages, new AbortController().signal);
+    },
   });
 
   const { send } = useSendChatTurn({
@@ -2129,6 +2154,40 @@ export function ChatPage(props: ChatPageProps) {
     t,
   });
 
+  // 提示词澄清执行器（按会话缓存）：ChatComposerBar 是 memo 组件，runner 的
+  // identity 必须跨渲染稳定。背景 Pane 的 binding 在普通函数里逐 Pane 构建
+  // （Pane 数量随布局变化），不能在里面 useMemo，故用 ref 缓存 + 惰性 getter：
+  // 每轮澄清调用时才解析当前设置与会话模型，中途切模型下一轮即生效。
+  const clarifySettingsRef = useRef(settings);
+  clarifySettingsRef.current = settings;
+  const clarifyRunnersRef = useRef(new Map<string, RunClarifyTurn>());
+  const getConversationClarifyRunner = useCallback(
+    (conversationId: string): RunClarifyTurn => {
+      let runner = clarifyRunnersRef.current.get(conversationId);
+      if (!runner) {
+        // 设置里的「澄清对话模型」优先；未选或失效时回退本会话当前模型。
+        const resolveClarifySelection = () =>
+          resolvePromptClarifyModelSelection(clarifySettingsRef.current) ??
+          resolveEffectiveChatModelSelection({
+            settings: clarifySettingsRef.current,
+            conversationSelectedModel:
+              conversationRuntimeRegistry.getSnapshot(conversationId)?.selectedModel ?? undefined,
+          });
+        runner = createGuiClarifyRunner(resolveClarifySelection, () => {
+          const selection = resolveClarifySelection();
+          return createProviderRuntimeConfig(
+            selection.provider,
+            selection.model,
+            clarifySettingsRef.current.chatRuntimeControls,
+          );
+        });
+        clarifyRunnersRef.current.set(conversationId, runner);
+      }
+      return runner;
+    },
+    [conversationRuntimeRegistry],
+  );
+
   // Full-featured binding for the pane hosting the page's current
   // conversation; it is the only pane wired to page-level composer bridging,
   // uploads, native drop and usage telemetry.
@@ -2250,6 +2309,13 @@ export function ChatPage(props: ChatPageProps) {
       onPasteFiles: importReadableFiles,
       onLoadUploadedImagePreview: loadComposerUploadedImagePreview,
       loadHistoryPrompts: loadComposerHistoryPrompts,
+      // 提示词澄清：当前会话模型跑纯文本补全；clarifyContext 只喂轻量工作区
+      // 信息（分支无现成状态，留空不为此新拉 git）。总开关关闭时不传执行器，
+      // ChatComposerBar 随之隐藏澄清按钮。
+      runClarifyTurn: settings.customSettings.promptClarifyEnabled
+        ? getConversationClarifyRunner(currentConversationId)
+        : undefined,
+      clarifyContext: { workdir: displayedConversationWorkdir },
       onRemovePendingUpload: removePendingUpload,
       onRunQueuedTurnNow: runQueuedTurnNow,
       onMoveQueuedTurnUp: moveQueuedTurnUp,
@@ -3347,6 +3413,14 @@ export function ChatPage(props: ChatPageProps) {
         },
         onLoadUploadedImagePreview: loadComposerUploadedImagePreview,
         loadHistoryPrompts: loadComposerHistoryPrompts,
+        // 背景 Pane 的澄清执行器同样按本 Pane 会话解析模型（见
+        // getConversationClarifyRunner 的惰性 getter）；总开关与主 Pane 同源。
+        runClarifyTurn: settings.customSettings.promptClarifyEnabled
+          ? getConversationClarifyRunner(conversationId)
+          : undefined,
+        // 与主 Pane 口径一致：clarifyContext 只喂本 Pane 会话的轻量工作区
+        // 信息；会话无 cwd/workdir 时不传空串，避免系统提示词带噪音。
+        clarifyContext: workspaceRoot ? { workdir: workspaceRoot } : undefined,
         onRemovePendingUpload: (relativePath) => removePendingUpload(relativePath, conversationId),
         onRunQueuedTurnNow: runQueuedTurnNow,
         onMoveQueuedTurnUp: moveQueuedTurnUp,

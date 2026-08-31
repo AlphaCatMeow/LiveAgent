@@ -3,6 +3,10 @@ import { AppWorkbenchChrome } from "@liveagent/ui/application/AppWorkbenchChrome
 import { AppErrorBoundary } from "@liveagent/ui/components/AppErrorBoundary";
 import { ChangedFilesActionsProvider } from "@liveagent/ui/components/chat/ChangedFilesCard";
 import { ConversationViewTabs } from "@liveagent/ui/components/chat/ConversationViewTabs";
+import type {
+  ClarifyContext,
+  RunClarifyTurn,
+} from "@liveagent/ui/components/chat/clarify/clarifyTypes";
 import { FileDropOverlay } from "@liveagent/ui/components/chat/FileDropOverlay";
 import { HistoryShareModal } from "@liveagent/ui/components/chat/HistoryShareModal";
 import { NotifyToast } from "@liveagent/ui/components/chat/NotifyToast";
@@ -58,6 +62,7 @@ import {
 } from "react";
 import { createGatewayTrajectoryHost } from "@/agent-ui-adapters/trajectory";
 import { GatewayTranscript } from "@/components/GatewayTranscript";
+import { executeClarifyPromptTurn } from "@/lib/chat/clarifyPromptTurn";
 import type { SttProviderId } from "@/lib/settings";
 import {
   getNextTheme,
@@ -98,6 +103,7 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
   useWindowFileDropGuard();
   const {
     activeFloorKey,
+    activeSelectedModel,
     activeView,
     activeWorkspaceProject,
     activeWorkspaceProjectPath,
@@ -129,6 +135,7 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
     confirmDialog,
     contextUsageTokensSource,
     conversationOpenState,
+    currentChatProvider,
     currentModelContextWindow,
     currentModelLabel,
     dismissNotify,
@@ -456,6 +463,33 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
       addNotify(notice.level, notice.message);
     },
     [addNotify, settings.locale],
+  );
+  // 提示词澄清执行器：经 gateway 中继到桌面宿主，用当前会话模型跑一轮纯文本
+  // 补全；模型覆盖/回退/错误拍平在 executeClarifyPromptTurn（两宿主共用）。
+  const runClarifyTurn = useCallback<RunClarifyTurn>(
+    (messages) =>
+      executeClarifyPromptTurn(
+        api,
+        settings,
+        {
+          provider: currentChatProvider,
+          model: activeSelectedModel?.model,
+          runtimeControls: chatRuntimeControlsForCurrentProvider,
+        },
+        messages,
+      ),
+    [
+      settings,
+      activeSelectedModel,
+      currentChatProvider,
+      chatRuntimeControlsForCurrentProvider,
+      api,
+    ],
+  );
+
+  const clarifyContext = useMemo<ClarifyContext | undefined>(
+    () => (displayedConversationWorkdir ? { workdir: displayedConversationWorkdir } : undefined),
+    [displayedConversationWorkdir],
   );
 
   // --- Session Workbench（多看板分屏）----------------------------------------
@@ -1445,6 +1479,12 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
                           ) : null}
                           <ChatComposerBar
                             surface="web"
+                            runClarifyTurn={
+                              settings.customSettings.promptClarifyEnabled
+                                ? runClarifyTurn
+                                : undefined
+                            }
+                            clarifyContext={clarifyContext}
                             conversationId={displayedConversationId}
                             // 轨迹页是只读分析视图：挂起输入区（保持挂载，草稿不丢）。
                             hidden={renderedConversationView === "trajectory"}

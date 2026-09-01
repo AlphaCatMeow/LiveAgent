@@ -2,7 +2,8 @@
 import { Loader2, RefreshCw, WandSparkles, X } from "@liveagent/ui/components/IconSet";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { cn } from "@liveagent/ui/lib/shared/utils";
-import { type KeyboardEvent, useState } from "react";
+import { type KeyboardEvent, useLayoutEffect, useRef, useState } from "react";
+import { isClarifyListFollowing, pinClarifyListIfFollowing } from "./clarifyPanelScroll";
 import { stripLeadingMarker } from "./clarifyProtocol";
 import type { ClarifySessionState } from "./useClarifySession";
 
@@ -15,11 +16,32 @@ type ClarifyPanelProps = {
   onClose: () => void;
 };
 
-/** 输入框上方内嵌的澄清面板：问答气泡 + 回答输入行 + 操作按钮。 */
+/** 浮在输入卡片正上方的澄清面板：问答气泡 + 回答输入行 + 操作按钮。 */
 export function ClarifyPanel(props: ClarifyPanelProps) {
   const { state, busy, onSubmitAnswer, onForceFinal, onRetry, onClose } = props;
   const { t } = useLocale();
   const [answer, setAnswer] = useState("");
+  const listRef = useRef<HTMLDivElement>(null);
+  const followRef = useRef(true);
+
+  // 流式增量必须在绘制前钉底，否则最新行会闪一帧裁切。max-h 钳制后滚动
+  // 容器自身不再长高，ResizeObserver 盯内部内容盒（换行/页脚挤占）。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 问答/流式/状态是钉底触发信号，effect 体只写 scrollTop。
+  useLayoutEffect(() => {
+    pinClarifyListIfFollowing(listRef.current, followRef.current);
+  }, [state.visibleMessages, state.streamingText, state.status, state.error, busy]);
+
+  useLayoutEffect(() => {
+    const viewport = listRef.current;
+    if (!viewport || typeof ResizeObserver === "undefined") return;
+    const content = viewport.firstElementChild;
+    const observer = new ResizeObserver(() => {
+      pinClarifyListIfFollowing(viewport, followRef.current);
+    });
+    observer.observe(viewport);
+    if (content instanceof Element) observer.observe(content);
+    return () => observer.disconnect();
+  }, []);
 
   const submit = () => {
     const text = answer.trim();
@@ -39,14 +61,16 @@ export function ClarifyPanel(props: ClarifyPanelProps) {
   const canGenerate = !busy && state.status !== "done";
 
   return (
-    // mr-12 让出卡片右侧控制列：展开/用量环/发送都是 right-3 + w-8（44px 竖直
-    // 轨道，同编辑器容器的 pr-12 约定）；48px = 44 轨道 + 4px 间隙，根容器
-    // overflow-hidden，内部问答气泡与回答行一并收在轨道左侧。
+    // 独立浮层：宽度与队列面板对齐（左右各收 0.75rem），与输入卡片留出
+    // 1.5rem 间隙——卡片上缘是 rounded-3xl 圆角，贴合式（border-b-0 +
+    // mb-[-1px]）只适合队列那种直角底边。shrink-0 兜展开态——外层列是
+    // flex-col justify-end，卡片 flex-1 吸收伸缩，面板高度只受 max-h-[40vh]
+    // 钳制，不参与压缩。
     <div
       data-clarify-panel=""
-      className="ml-4 mr-12 mb-1 mt-2 flex max-h-[40vh] flex-col overflow-hidden rounded-2xl border border-black/[0.055] bg-white/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.72)] backdrop-blur-2xl dark:border-white/[0.10] dark:bg-white/[0.06]"
+      className="relative z-30 mx-auto mb-1.5 flex max-h-[40vh] min-h-0 w-[calc(100%-1.5rem)] max-w-[720px] shrink-0 flex-col overflow-hidden rounded-2xl border border-black/[0.055] bg-white/80 shadow-[0_8px_24px_-18px_rgba(15,23,42,0.24),inset_0_1px_0_rgba(255,255,255,0.72)] backdrop-blur-2xl backdrop-saturate-[165%] dark:border-white/[0.10] dark:bg-white/[0.06] dark:shadow-[0_8px_24px_-18px_rgba(0,0,0,0.72),inset_0_1px_0_rgba(255,255,255,0.08)]"
     >
-      <div className="flex items-center justify-between gap-2 px-3 py-1.5">
+      <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-1.5">
         <span className="flex items-center gap-1.5 text-[calc(11px*var(--zone-font-scale,1))] font-medium text-muted-foreground">
           <WandSparkles className="h-3.5 w-3.5" />
           {t("chat.clarify.title")}
@@ -62,51 +86,62 @@ export function ClarifyPanel(props: ClarifyPanelProps) {
         </button>
       </div>
 
-      <div className="chat-queue-scroll flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto px-3 pb-2">
-        {state.visibleMessages.map((message, index) => (
-          <div
-            // biome-ignore lint/suspicious/noArrayIndexKey: 问答消息无唯一标识（role+内容可重复）；会话内列表只追加不重排，索引 key 稳定唯一。
-            key={index}
-            className={cn(
-              "max-w-[92%] whitespace-pre-wrap rounded-xl px-2.5 py-1.5 text-[calc(12px*var(--zone-font-scale,1))] leading-relaxed",
-              message.role === "user"
-                ? "self-end bg-primary/10 text-foreground"
-                : "self-start bg-muted/60 text-foreground/90",
-            )}
-          >
-            {message.role === "assistant" ? stripLeadingMarker(message.content) : message.content}
-          </div>
-        ))}
-        {busy && state.streamingText ? (
-          <div className="max-w-[92%] self-start whitespace-pre-wrap rounded-xl bg-muted/60 px-2.5 py-1.5 text-[calc(12px*var(--zone-font-scale,1))] leading-relaxed text-foreground/90">
-            {stripLeadingMarker(state.streamingText)}
-          </div>
-        ) : null}
-        {state.status === "asking" && !state.streamingText ? (
-          <div className="flex items-center gap-1.5 self-start rounded-xl bg-muted/60 px-2.5 py-1.5 text-[calc(12px*var(--zone-font-scale,1))] text-muted-foreground">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            {t("chat.clarify.thinking")}
-          </div>
-        ) : null}
-        {state.status === "error" && state.error ? (
-          <div className="flex items-center gap-2 self-start rounded-xl bg-destructive/10 px-2.5 py-1.5 text-[calc(12px*var(--zone-font-scale,1))] text-destructive">
-            <span className="min-w-0 flex-1">
-              {t("chat.clarify.errorPrefix")}: {state.error}
-            </span>
-            <button
-              type="button"
-              onClick={onRetry}
-              className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-xs font-medium transition-colors hover:bg-destructive/15"
+      <div
+        ref={listRef}
+        data-clarify-messages=""
+        className="chat-queue-scroll min-h-0 overflow-y-auto px-3 pb-2 [overflow-anchor:none]"
+        onScroll={() => {
+          const el = listRef.current;
+          if (!el) return;
+          followRef.current = isClarifyListFollowing(el);
+        }}
+      >
+        <div className="flex flex-col gap-1.5">
+          {state.visibleMessages.map((message, index) => (
+            <div
+              // biome-ignore lint/suspicious/noArrayIndexKey: 问答消息无唯一标识（role+内容可重复）；会话内列表只追加不重排，索引 key 稳定唯一。
+              key={index}
+              className={cn(
+                "max-w-[92%] whitespace-pre-wrap rounded-xl px-2.5 py-1.5 text-[calc(12px*var(--zone-font-scale,1))] leading-relaxed",
+                message.role === "user"
+                  ? "self-end bg-primary/10 text-foreground"
+                  : "self-start bg-muted/60 text-foreground/90",
+              )}
             >
-              <RefreshCw className="h-3 w-3" />
-              {t("chat.clarify.retry")}
-            </button>
-          </div>
-        ) : null}
+              {message.role === "assistant" ? stripLeadingMarker(message.content) : message.content}
+            </div>
+          ))}
+          {busy && state.streamingText ? (
+            <div className="max-w-[92%] self-start whitespace-pre-wrap rounded-xl bg-muted/60 px-2.5 py-1.5 text-[calc(12px*var(--zone-font-scale,1))] leading-relaxed text-foreground/90">
+              {stripLeadingMarker(state.streamingText)}
+            </div>
+          ) : null}
+          {state.status === "asking" && !state.streamingText ? (
+            <div className="flex items-center gap-1.5 self-start rounded-xl bg-muted/60 px-2.5 py-1.5 text-[calc(12px*var(--zone-font-scale,1))] text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              {t("chat.clarify.thinking")}
+            </div>
+          ) : null}
+          {state.status === "error" && state.error ? (
+            <div className="flex items-center gap-2 self-start rounded-xl bg-destructive/10 px-2.5 py-1.5 text-[calc(12px*var(--zone-font-scale,1))] text-destructive">
+              <span className="min-w-0 flex-1">
+                {t("chat.clarify.errorPrefix")}: {state.error}
+              </span>
+              <button
+                type="button"
+                onClick={onRetry}
+                className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-xs font-medium transition-colors hover:bg-destructive/15"
+              >
+                <RefreshCw className="h-3 w-3" />
+                {t("chat.clarify.retry")}
+              </button>
+            </div>
+          ) : null}
+        </div>
       </div>
 
       {canAnswer ? (
-        <div className="flex items-end gap-1.5 border-t border-black/[0.05] px-2.5 py-1.5 dark:border-white/[0.08]">
+        <div className="flex shrink-0 items-end gap-1.5 border-t border-black/[0.05] px-2.5 py-1.5 dark:border-white/[0.08]">
           <textarea
             value={answer}
             onChange={(event) => setAnswer(event.target.value)}

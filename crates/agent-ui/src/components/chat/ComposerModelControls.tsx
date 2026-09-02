@@ -12,20 +12,16 @@ import {
   ArrowDownAZ,
   Check,
   ChevronDown,
-  ClaudeIcon,
-  DeepseekIcon,
-  GeminiIcon,
   Globe,
   GlobeOff,
-  GrokIcon,
   Layers,
   Lightbulb,
   LightbulbOff,
-  OpenaiChatgptIcon,
   Pencil,
   Search,
   Sparkle,
 } from "@liveagent/ui/components/IconSet";
+import { ProviderBrandIcon } from "@liveagent/ui/components/ProviderBrandIcon";
 import { Button } from "@liveagent/ui/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@liveagent/ui/components/ui/popover";
 import { useLocale } from "@liveagent/ui/i18n/index";
@@ -65,15 +61,6 @@ const REASONING_COMPACT_I18N_KEYS: Record<ReasoningLevel, string> = {
   xhigh: "chat.runtime.reasoningCompact.xhigh",
   max: "chat.runtime.reasoningCompact.max",
 };
-
-function ProviderBrandIcon({ type, className }: { type: ProviderId; className?: string }) {
-  const cls = cn("h-4 w-4 shrink-0", className);
-  if (type === "claude_code") return <ClaudeIcon className={cls} />;
-  if (type === "gemini") return <GeminiIcon className={cls} />;
-  if (type === "xai") return <GrokIcon className={cls} />;
-  if (type === "deepseek") return <DeepseekIcon className={cls} />;
-  return <OpenaiChatgptIcon className={cn(cls, "fill-current dark:text-white")} />;
-}
 
 function RuntimeToggleChip(props: {
   pressed: boolean;

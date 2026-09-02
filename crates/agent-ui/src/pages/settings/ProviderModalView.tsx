@@ -64,8 +64,9 @@ import {
   resolveModelInputModalities,
 } from "@liveagent/ui/lib/models/modelCatalog";
 import {
-  CLI_IDENTITY_PROVIDER_IDS,
   CLI_IDENTITY_USER_AGENTS,
+  isCliIdentityProviderId,
+  listCliIdentityProviderIds,
 } from "@liveagent/ui/lib/providers/customHeaders";
 import { cn } from "@liveagent/ui/lib/shared/utils";
 import {
@@ -1126,20 +1127,25 @@ export function ProviderModalView({ viewModel }: { viewModel: ProviderModalViewM
                         <Fingerprint className="h-3.5 w-3.5" />
                         {t("settings.cliIdentityHeaders")}
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-56">
+                      <DropdownMenuContent align="end" className="w-64">
                         <DropdownMenuLabel className="px-2 pb-1 pt-1.5 text-xs font-medium text-muted-foreground">
                           {t("settings.cliIdentityHeadersHint")}
                         </DropdownMenuLabel>
-                        {CLI_IDENTITY_PROVIDER_IDS.map((identity) => (
+                        {listCliIdentityProviderIds(providerType).map((identity) => (
                           <DropdownMenuItem
                             key={identity}
                             className="items-center gap-2 rounded-md py-1.5 text-xs"
                             onSelect={() => applyCliIdentityHeaders(identity)}
                           >
-                            <span className="font-medium leading-5">
+                            <span className="shrink-0 whitespace-nowrap font-medium leading-5">
                               {t(`settings.cliIdentity.${identity}`)}
                             </span>
-                            <span className="ml-auto truncate font-mono text-[10px] text-muted-foreground">
+                            {isCliIdentityProviderId(providerType) && identity === providerType ? (
+                              <span className="shrink-0 whitespace-nowrap rounded bg-primary/10 px-1 py-px text-[10px] font-medium text-primary">
+                                {t("settings.cliIdentityRecommended")}
+                              </span>
+                            ) : null}
+                            <span className="ml-auto min-w-0 truncate font-mono text-[10px] text-muted-foreground">
                               {CLI_IDENTITY_USER_AGENTS[identity].split(" ")[0]}
                             </span>
                           </DropdownMenuItem>

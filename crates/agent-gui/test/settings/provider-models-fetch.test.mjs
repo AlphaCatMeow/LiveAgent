@@ -616,20 +616,16 @@ test("mergeFetchedModels never overwrites a user-edited stored value with a fres
   assert.equal(model.limitsSource, "user");
 });
 
-test("model bulk helpers count and apply only selected active states", () => {
+test("applyModelsActiveState applies enable/disable to target models only", () => {
   const activeModels = new Set(["enabled-model", "untouched-model"]);
-  const selectedModels = new Set(["enabled-model", "disabled-model"]);
+  const targetModels = ["enabled-model", "disabled-model"];
 
-  assert.deepEqual(providerUtils.getModelBulkActionCounts(selectedModels, activeModels), {
-    enableCount: 1,
-    disableCount: 1,
-  });
   assert.deepEqual(
-    [...providerUtils.applyModelBulkActiveState(activeModels, selectedModels, true)].sort(),
+    [...providerUtils.applyModelsActiveState(activeModels, targetModels, true)].sort(),
     ["disabled-model", "enabled-model", "untouched-model"],
   );
   assert.deepEqual(
-    [...providerUtils.applyModelBulkActiveState(activeModels, selectedModels, false)].sort(),
+    [...providerUtils.applyModelsActiveState(activeModels, targetModels, false)].sort(),
     ["untouched-model"],
   );
   assert.deepEqual([...activeModels].sort(), ["enabled-model", "untouched-model"]);

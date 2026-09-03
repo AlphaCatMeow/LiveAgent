@@ -15,7 +15,7 @@ import { useConfirmDialog } from "@liveagent/ui/components/ui/confirm-dialog";
 import { useVerticalListReorder } from "@liveagent/ui/components/ui/useVerticalListReorder";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import {
-  buildCliIdentityHeaders,
+  applyCliIdentity,
   type CliIdentityProviderId,
   CustomHeaderImportError,
   type CustomHeaderImportErrorCode,
@@ -76,6 +76,8 @@ type HeaderImportErrorCode = CustomHeaderImportErrorCode | "no-valid" | "failed"
 type HeaderImportSummary = {
   importedCount: number;
   overwrittenCount: number;
+  /** 切换 CLI 身份时剥掉的上一家身份头数量；普通导入不产生。 */
+  removedCount?: number;
   issues: CustomHeaderImportIssue[];
 };
 
@@ -686,18 +688,20 @@ function useProviderModalController({ providerType, initialData, onSave, onClose
     setHeaderImportError(null);
   }
 
-  // 一键模拟：把选中 CLI 的身份头并入现有列表。走与「导入」同一条合并路径，
-  // 同名头覆盖、其余保留，用户手工加的业务头不会被这一下清掉。
+  // 一键模拟：换成所选 CLI 的整套身份头。先剥掉其它 CLI 家族的残留头，再并入所选
+  // CLI 的头——只做同名覆盖会留下上一家的 x-app / X-Stainless-* / originator，拼出
+  // 一份假指纹。不属于任何 CLI 家族的业务头原样保留。
   function applyCliIdentityHeaders(identity: CliIdentityProviderId) {
-    const merged = mergeImportedCustomHeaders(customHeaders, buildCliIdentityHeaders(identity));
-    setCustomHeaders(merged.headers);
+    const result = applyCliIdentity(customHeaders, identity);
+    setCustomHeaders(result.headers);
     setHeaderSuggest(null);
     setHeaderValidationSubmitted(false);
     setHeaderImportOpen(false);
     setHeaderImportError(null);
     setHeaderImportSummary({
-      importedCount: merged.importedCount,
-      overwrittenCount: merged.overwrittenCount,
+      importedCount: result.importedCount,
+      overwrittenCount: result.overwrittenCount,
+      removedCount: result.removedCount,
       issues: [],
     });
   }
@@ -936,6 +940,11 @@ function useProviderModalController({ providerType, initialData, onSave, onClose
         t("settings.customHeaderImportSummary.overwritten") +
           " " +
           headerImportSummary.overwrittenCount,
+        (headerImportSummary.removedCount ?? 0) > 0
+          ? t("settings.customHeaderImportSummary.removed") +
+            " " +
+            headerImportSummary.removedCount
+          : null,
         headerImportSummary.issues.length > 0
           ? t("settings.customHeaderImportSummary.skipped") +
             " " +

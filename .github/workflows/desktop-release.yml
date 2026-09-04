@@ -124,6 +124,15 @@ jobs:
             --password "$APPLE_APP_SPECIFIC_PASSWORD" \
             --validate
 
+      - name: Install deterministic DMG builder
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/dmgbuild-venv"
+          "$RUNNER_TEMP/dmgbuild-venv/bin/python" -m pip install \
+            --disable-pip-version-check \
+            "dmgbuild==1.6.5"
+          echo "$RUNNER_TEMP/dmgbuild-venv/bin" >> "$GITHUB_PATH"
+
       - name: Build signed and notarized DMG
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}

@@ -33,8 +33,8 @@ import {
   findNewModelIds,
 } from "@liveagent/ui/lib/providers/modelVendor";
 import {
-  applyModelBulkActiveState,
   applyModelInputModalitiesMode,
+  applyModelsActiveState,
   applyUsageQueryModePreset,
   buildProviderModelsFetchKey,
   clampUsageQueryTimeoutSecs,
@@ -42,7 +42,6 @@ import {
   createUsageQueryDraft,
   detectCodingPlanProvider,
   fetchModelsFromApi,
-  getModelBulkActionCounts,
   getModelInputModalitiesMode,
   getPersistedUsageQueryProviderId,
   isGatewayWebuiRuntime,
@@ -222,10 +221,6 @@ function useProviderModalController({ providerType, initialData, onSave, onClose
   const [addingModel, setAddingModel] = useState(false);
   const [newModelName, setNewModelName] = useState("");
   const [modelSearch, setModelSearch] = useState("");
-  const [modelBulkMode, setModelBulkMode] = useState(false);
-  const [modelBulkSelection, setModelBulkSelection] = useState<ReadonlySet<string>>(
-    () => new Set(),
-  );
   const [editingModel, setEditingModel] = useState<ModelEditDraft | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
   const [activePanel, setActivePanel] = useState<ProviderDialogPanel>("general");
@@ -506,44 +501,6 @@ function useProviderModalController({ providerType, initialData, onSave, onClose
     });
   }
 
-  function exitModelBulkMode() {
-    setModelBulkMode(false);
-    setModelBulkSelection(new Set());
-  }
-
-  function toggleModelBulkMode() {
-    if (modelBulkMode) {
-      exitModelBulkMode();
-      return;
-    }
-    setEditingModel(null);
-    setAddingModel(false);
-    setModelBulkSelection(new Set());
-    setModelBulkMode(true);
-  }
-
-  function toggleModelBulkSelection(modelId: string) {
-    setModelBulkSelection((prev) => {
-      const next = new Set(prev);
-      if (next.has(modelId)) next.delete(modelId);
-      else next.add(modelId);
-      return next;
-    });
-  }
-
-  function selectVisibleModels() {
-    setModelBulkSelection((prev) => {
-      const next = new Set(prev);
-      for (const model of visibleModels) next.add(model.id);
-      return next;
-    });
-  }
-
-  function applyModelBulkState(enabled: boolean) {
-    setActiveModels((prev) => applyModelBulkActiveState(prev, modelBulkSelection, enabled));
-    setModelBulkSelection(new Set());
-  }
-
   function handleAddModel() {
     const model = newModelName.trim();
     if (!model) return;
@@ -566,12 +523,6 @@ function useProviderModalController({ providerType, initialData, onSave, onClose
     });
     setModels((prev) => prev.filter((item) => item.id !== model));
     setActiveModels((prev) => {
-      const next = new Set(prev);
-      next.delete(model);
-      return next;
-    });
-    setModelBulkSelection((prev) => {
-      if (!prev.has(model)) return prev;
       const next = new Set(prev);
       next.delete(model);
       return next;
@@ -742,7 +693,6 @@ function useProviderModalController({ providerType, initialData, onSave, onClose
     );
     if (invalidHeaderIndex >= 0) {
       setHeaderValidationSubmitted(true);
-      exitModelBulkMode();
       setActivePanel("request");
       // 导入视图会顶掉请求头列表,先切回列表再聚焦,否则目标输入框尚未挂载。
       setHeaderImportOpen(false);
@@ -873,15 +823,24 @@ function useProviderModalController({ providerType, initialData, onSave, onClose
         : orderedModels,
     [orderedModels, modelSearchQuery],
   );
-  const allVisibleModelsSelected =
-    visibleModels.length > 0 && visibleModels.every((model) => modelBulkSelection.has(model.id));
-  const { enableCount: modelBulkEnableCount, disableCount: modelBulkDisableCount } = useMemo(
-    () => getModelBulkActionCounts(modelBulkSelection, activeModels),
-    [modelBulkSelection, activeModels],
+  // 表头总开关：作用于当前可见（含搜索过滤）的模型。全部启用时视为“开”，
+  // 再点一次全部禁用；部分启用时点击补全为全部启用。
+  const visibleActiveCount = useMemo(
+    () => visibleModels.reduce((count, model) => count + (activeModels.has(model.id) ? 1 : 0), 0),
+    [visibleModels, activeModels],
   );
-  const modelReorderDisabledHint = modelBulkMode
-    ? t("settings.modelReorderDisabledBulk")
-    : modelSearchQuery
+  const allVisibleModelsActive =
+    visibleModels.length > 0 && visibleActiveCount === visibleModels.length;
+  function toggleVisibleModelsActive() {
+    setActiveModels((prev) =>
+      applyModelsActiveState(
+        prev,
+        visibleModels.map((model) => model.id),
+        !allVisibleModelsActive,
+      ),
+    );
+  }
+  const modelReorderDisabledHint = modelSearchQuery
       ? t("settings.modelReorderDisabledSearch")
       : t("settings.reorderNeedsTwoItems");
   const handleModelReorder = useCallback((nextIds: string[]) => {
@@ -900,7 +859,7 @@ function useProviderModalController({ providerType, initialData, onSave, onClose
     scrollContainerRef: modelScrollContainerRef,
   } = useVerticalListReorder({
     itemIds: orderedModels.map((model) => model.id),
-    canReorder: !modelBulkMode && !modelSearchQuery,
+    canReorder: !modelSearchQuery,
     reorderLabel: t("settings.reorderModel"),
     reorderHint: t("settings.reorderVerticalHint"),
     disabledHint: modelReorderDisabledHint,
@@ -975,13 +934,12 @@ function useProviderModalController({ providerType, initialData, onSave, onClose
     activePanel,
     addCustomHeader,
     addingModel,
-    allVisibleModelsSelected,
+    allVisibleModelsActive,
     apiKey,
     apiKeyForRequest,
     apiKeyIsRedactedDisplay,
     applyHeaderSuggestion,
     applyCliIdentityHeaders,
-    applyModelBulkState,
     baseUrl,
     canSaveEditingModel,
     canOverrideModelInputModalities,
@@ -993,7 +951,6 @@ function useProviderModalController({ providerType, initialData, onSave, onClose
     editingModelContextWindow,
     editingModelInputModalitiesMode,
     editingModelMaxOutputToken,
-    exitModelBulkMode,
     fetchError,
     fetchingModels,
     focusCustomHeader,
@@ -1019,10 +976,6 @@ function useProviderModalController({ providerType, initialData, onSave, onClose
     isFullUrl,
     isGatewayWebui,
     matchedBalanceProviders,
-    modelBulkDisableCount,
-    modelBulkEnableCount,
-    modelBulkMode,
-    modelBulkSelection,
     modelListRef,
     modelScrollContainerRef,
     modelSearch,
@@ -1046,7 +999,6 @@ function useProviderModalController({ providerType, initialData, onSave, onClose
     requestClose,
     requestFormat,
     saveInlineModelSettings,
-    selectVisibleModels,
     setActivePanel,
     setAddingModel,
     setApiKey,
@@ -1060,7 +1012,6 @@ function useProviderModalController({ providerType, initialData, onSave, onClose
     setHeaderSuggest,
     setHeaderSuggestActive,
     setIsFullUrl,
-    setModelBulkSelection,
     setModelSearch,
     setModelsUrl,
     setName,
@@ -1083,8 +1034,7 @@ function useProviderModalController({ providerType, initialData, onSave, onClose
     commitStreamRetryCountInput,
     t,
     toggleModel,
-    toggleModelBulkMode,
-    toggleModelBulkSelection,
+    toggleVisibleModelsActive,
     typeLabel,
     updateCustomHeader,
     usageQuery,
@@ -1094,6 +1044,7 @@ function useProviderModalController({ providerType, initialData, onSave, onClose
     usageVariableApiKey,
     usageVariableBaseUrl,
     useSystemProxy,
+    visibleActiveCount,
     visibleModels,
   };
   return viewModel;

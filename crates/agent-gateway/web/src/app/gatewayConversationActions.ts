@@ -169,17 +169,20 @@ export function createGatewayConversationActions(options: CreateGatewayConversat
       options.restoreCachedComposerDraft(targetConversationId);
       return;
     }
-    // 侧栏会话树跨工作空间点选:先把会话所属工作空间置为当前,右侧文件树/
-    // 终端/Git 才会跟着切到该工作空间根目录(#787)。搜索入口已在
-    // beforeCommit 里做同样的事,这里补齐普通点选通路。
-    if (options.isAgentMode) {
-      options.activateConversationWorkspace(
-        options.sidebarStore.peek(targetConversationId)?.cwd?.trim() ||
+    // 侧栏会话树跨工作空间点选:会话提交后(afterCommit)再把它所属的
+    // 工作空间置为当前,右侧文件树/终端/Git 随之切到该工作空间根目录
+    // (#787)。等提交而不是点选瞬间,避免作用域先行刷新与打开流程互相
+    // 打架;cwd 优先取本次历史响应写入的权威 workdir。
+    options.openController.open(targetConversationId, {
+      afterCommit: () => {
+        if (!options.isAgentMode) return;
+        options.activateConversationWorkspace(
           options.conversationWorkdirsRef.current.get(targetConversationId)?.trim() ||
-          "",
-      );
-    }
-    options.openController.open(targetConversationId);
+            options.sidebarStore.peek(targetConversationId)?.cwd?.trim() ||
+            "",
+        );
+      },
+    });
     options.restoreCachedComposerDraft(targetConversationId);
   };
 

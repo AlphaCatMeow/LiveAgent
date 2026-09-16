@@ -248,24 +248,29 @@ function createSidebarSelectHarness({ isAgentMode, sidebarCwd, runtimeWorkdir })
   return { actions, activated, opened };
 }
 
-test("sidebar select activates the conversation's workspace before opening it", () => {
+test("sidebar select opens immediately and activates the workspace only at commit", () => {
   const { actions, activated, opened } = createSidebarSelectHarness({
     isAgentMode: true,
     sidebarCwd: "/workspace/project-b",
   });
   actions.handleSidebarSelectConversation("conversation-b");
-  assert.deepEqual(activated, ["/workspace/project-b"]);
+  // 点选瞬间只发起打开,不先切工作空间(否则作用域先行刷新会顶掉本次打开)。
   assert.equal(opened.length, 1);
   assert.equal(opened[0].id, "conversation-b");
+  assert.deepEqual(activated, []);
+  // 会话提交后才激活其工作空间。
+  opened[0].options.afterCommit();
+  assert.deepEqual(activated, ["/workspace/project-b"]);
 });
 
-test("sidebar select falls back to the runtime workdir when the sidebar row has no cwd", () => {
-  const { actions, activated } = createSidebarSelectHarness({
+test("sidebar select prefers the authoritative runtime workdir at commit time", () => {
+  const { actions, activated, opened } = createSidebarSelectHarness({
     isAgentMode: true,
-    sidebarCwd: "",
+    sidebarCwd: "/workspace/project-stale",
     runtimeWorkdir: "/workspace/project-runtime",
   });
   actions.handleSidebarSelectConversation("conversation-b");
+  opened[0].options.afterCommit();
   assert.deepEqual(activated, ["/workspace/project-runtime"]);
 });
 
@@ -275,8 +280,9 @@ test("sidebar select leaves the workspace alone outside agent mode", () => {
     sidebarCwd: "/workspace/project-b",
   });
   actions.handleSidebarSelectConversation("conversation-b");
-  assert.deepEqual(activated, []);
   assert.equal(opened.length, 1);
+  opened[0].options.afterCommit();
+  assert.deepEqual(activated, []);
 });
 
 test("parseHistoryMessagesJson preserves Image tool result image content", () => {

@@ -353,6 +353,7 @@ export function ChatPage(props: ChatPageProps) {
     sidebarScope,
     historyScopeKey,
     activateWorkspaceProject,
+    activateConversationWorkspace,
     activateSearchConversationWorkspace,
     clearSearchConversationWorkspace,
     searchConversationWorkdir,
@@ -1796,11 +1797,24 @@ export function ChatPage(props: ChatPageProps) {
         });
       } else {
         prepareComposerForConversationChange();
+        // 侧栏会话树跨工作空间点选:先把会话所属工作空间置为当前,右侧
+        // 文件树/终端/Git 才会跟着切到该工作空间根目录(#787)。搜索入口
+        // 已在 beforeCommit 里做同样的事,这里补齐普通点选通路。
+        if (isAgentMode) {
+          const targetWorkdir =
+            sidebarStore.peek(targetConversationId)?.cwd?.trim() ||
+            conversationRuntimeCacheRef.current.get(targetConversationId)?.workdir?.trim() ||
+            "";
+          activateConversationWorkspace(targetWorkdir);
+        }
         openController.open(targetConversationId);
       }
     },
     [
+      activateConversationWorkspace,
       activateSearchConversationWorkspace,
+      conversationRuntimeCacheRef,
+      isAgentMode,
       openController,
       prepareComposerForConversationChange,
       sidebarStore,

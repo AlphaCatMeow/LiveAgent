@@ -25,6 +25,7 @@ import { isMobileSidebarLayout } from "./historyUtils";
 import type { SendChatFn } from "./types";
 
 type CreateGatewayConversationActionsOptions = {
+  activateConversationWorkspace: (cwd?: string) => void;
   activateSearchConversationWorkspace: (cwd?: string) => void;
   clearSearchConversationWorkspace: () => void;
   activeView: ApplicationViewId;
@@ -167,6 +168,16 @@ export function createGatewayConversationActions(options: CreateGatewayConversat
       options.setSelectedHistory(null);
       options.restoreCachedComposerDraft(targetConversationId);
       return;
+    }
+    // 侧栏会话树跨工作空间点选:先把会话所属工作空间置为当前,右侧文件树/
+    // 终端/Git 才会跟着切到该工作空间根目录(#787)。搜索入口已在
+    // beforeCommit 里做同样的事,这里补齐普通点选通路。
+    if (options.isAgentMode) {
+      options.activateConversationWorkspace(
+        options.sidebarStore.peek(targetConversationId)?.cwd?.trim() ||
+          options.conversationWorkdirsRef.current.get(targetConversationId)?.trim() ||
+          "",
+      );
     }
     options.openController.open(targetConversationId);
     options.restoreCachedComposerDraft(targetConversationId);

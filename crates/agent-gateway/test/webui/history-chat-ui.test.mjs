@@ -214,6 +214,71 @@ test("web edit-resend retains only persisted conversation references", async () 
   assert.equal(calls[0].options.editMessageRef, messageRef);
 });
 
+// #787: picking a conversation that belongs to another workspace from the
+// sidebar session tree must bring that workspace to the front so the right
+// dock (file tree / terminal / git) follows; search already did this via
+// beforeCommit, the plain click path did not.
+function createSidebarSelectHarness({ isAgentMode, sidebarCwd, runtimeWorkdir }) {
+  const activated = [];
+  const opened = [];
+  const actions = createGatewayConversationActions({
+    isAgentMode,
+    activeView: "chat",
+    activateConversationWorkspace: (cwd) => activated.push(cwd),
+    activateSearchConversationWorkspace: () => {},
+    sidebarStore: {
+      peek: (id) => (id === "conversation-b" && sidebarCwd ? { id, cwd: sidebarCwd } : undefined),
+      upsertLocal: () => {},
+    },
+    conversationWorkdirsRef: {
+      current: new Map(runtimeWorkdir ? [["conversation-b", runtimeWorkdir]] : []),
+    },
+    openController: {
+      cancel: () => {},
+      open: (id, options) => opened.push({ id, options }),
+    },
+    getVisibleComposerConversationId: () => "conversation-a",
+    isLocalDraftConversationId: () => false,
+    prepareComposerForConversationChange: () => {},
+    restoreCachedComposerDraft: () => {},
+    setActiveView: () => {},
+    setSidebarOpen: () => {},
+    pendingDisplayedConversationAutoBottomRef: { current: null },
+  });
+  return { actions, activated, opened };
+}
+
+test("sidebar select activates the conversation's workspace before opening it", () => {
+  const { actions, activated, opened } = createSidebarSelectHarness({
+    isAgentMode: true,
+    sidebarCwd: "/workspace/project-b",
+  });
+  actions.handleSidebarSelectConversation("conversation-b");
+  assert.deepEqual(activated, ["/workspace/project-b"]);
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0].id, "conversation-b");
+});
+
+test("sidebar select falls back to the runtime workdir when the sidebar row has no cwd", () => {
+  const { actions, activated } = createSidebarSelectHarness({
+    isAgentMode: true,
+    sidebarCwd: "",
+    runtimeWorkdir: "/workspace/project-runtime",
+  });
+  actions.handleSidebarSelectConversation("conversation-b");
+  assert.deepEqual(activated, ["/workspace/project-runtime"]);
+});
+
+test("sidebar select leaves the workspace alone outside agent mode", () => {
+  const { actions, activated, opened } = createSidebarSelectHarness({
+    isAgentMode: false,
+    sidebarCwd: "/workspace/project-b",
+  });
+  actions.handleSidebarSelectConversation("conversation-b");
+  assert.deepEqual(activated, []);
+  assert.equal(opened.length, 1);
+});
+
 test("parseHistoryMessagesJson preserves Image tool result image content", () => {
   const entries = chatUi.parseHistoryMessagesJson(JSON.stringify([
     {

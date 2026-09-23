@@ -1,3 +1,4 @@
+import { Maximize2, Minimize2 } from "@liveagent/ui/components/IconSet";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { cn } from "@liveagent/ui/lib/shared/utils";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -40,7 +41,7 @@ const CAPTION_BUTTON_CLASS = cn(
   "dark:hover:bg-white/[0.08] dark:active:bg-white/[0.05] dark:focus-visible:bg-white/[0.08]",
 );
 
-type CaptionGlyphKind = "minimize" | "maximize" | "restore" | "close";
+type CaptionGlyphKind = "minimize" | "close";
 
 /**
  * Fluent-style caption glyphs drawn on a 10x10 grid with 1px strokes so they
@@ -59,13 +60,6 @@ function CaptionGlyph({ kind }: { kind: CaptionGlyphKind }) {
       className="shrink-0"
     >
       {kind === "minimize" && <path d="M0 5.5h10" />}
-      {kind === "maximize" && <rect x="0.5" y="0.5" width="9" height="9" rx="1.5" />}
-      {kind === "restore" && (
-        <>
-          <rect x="0.5" y="2.5" width="7" height="7" rx="1.25" />
-          <path d="M2.5 2.5V2A1.5 1.5 0 0 1 4 0.5h4A1.5 1.5 0 0 1 9.5 2v4A1.5 1.5 0 0 1 8 7.5h-0.5" />
-        </>
-      )}
       {kind === "close" && <path d="M0.75 0.75l8.5 8.5M9.25 0.75l-8.5 8.5" strokeLinecap="round" />}
     </svg>
   );
@@ -239,7 +233,11 @@ export function WindowsTitleBar({ controlsOnly = false }: { controlsOnly?: boole
         title={maximizeLabel}
         onClick={toggleMaximize}
       >
-        <CaptionGlyph kind={isMaximized ? "restore" : "maximize"} />
+        {isMaximized ? (
+          <Minimize2 className="size-12px" strokeWidth={1.4} />
+        ) : (
+          <Maximize2 className="size-12px" strokeWidth={1.4} />
+        )}
       </button>
       <button
         type="button"

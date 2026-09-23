@@ -1,4 +1,3 @@
-import { Maximize2, Minimize2, Minus, X } from "@liveagent/ui/components/IconSet";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { cn } from "@liveagent/ui/lib/shared/utils";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -26,6 +25,50 @@ function isWindowsTauriRuntime() {
 
 function reportWindowChromeError(action: string, error: unknown) {
   console.error(`failed to ${action} LiveAgent window`, error);
+}
+
+const CAPTION_BUTTON_BASE_CLASS = cn(
+  "flex h-6 w-9 items-center justify-center rounded-md text-foreground/60",
+  "transition-[background-color,color] duration-150 ease-out",
+  "focus-visible:outline-hidden",
+);
+
+const CAPTION_BUTTON_CLASS = cn(
+  CAPTION_BUTTON_BASE_CLASS,
+  "hover:bg-black/[0.06] hover:text-foreground active:bg-black/[0.1]",
+  "focus-visible:bg-black/[0.06] focus-visible:text-foreground",
+  "dark:hover:bg-white/[0.08] dark:active:bg-white/[0.05] dark:focus-visible:bg-white/[0.08]",
+);
+
+type CaptionGlyphKind = "minimize" | "maximize" | "restore" | "close";
+
+/**
+ * Fluent-style caption glyphs drawn on a 10x10 grid with 1px strokes so they
+ * stay crisp at 100% scaling and match the native Windows 11 caption buttons.
+ */
+function CaptionGlyph({ kind }: { kind: CaptionGlyphKind }) {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 10 10"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1"
+      aria-hidden="true"
+      className="shrink-0"
+    >
+      {kind === "minimize" && <path d="M0 5.5h10" />}
+      {kind === "maximize" && <rect x="0.5" y="0.5" width="9" height="9" rx="1.5" />}
+      {kind === "restore" && (
+        <>
+          <rect x="0.5" y="2.5" width="7" height="7" rx="1.25" />
+          <path d="M2.5 2.5V2A1.5 1.5 0 0 1 4 0.5h4A1.5 1.5 0 0 1 9.5 2v4A1.5 1.5 0 0 1 8 7.5h-0.5" />
+        </>
+      )}
+      {kind === "close" && <path d="M0.75 0.75l8.5 8.5M9.25 0.75l-8.5 8.5" strokeLinecap="round" />}
+    </svg>
+  );
 }
 
 export function WindowsTitleBar({ controlsOnly = false }: { controlsOnly?: boolean }) {
@@ -174,50 +217,42 @@ export function WindowsTitleBar({ controlsOnly = false }: { controlsOnly?: boole
     <fieldset
       data-windows-window-controls=""
       data-tauri-drag-region="false"
-      className="m-0 flex h-full shrink-0 items-stretch border-0 p-0"
+      className={cn(
+        "m-0 flex h-full shrink-0 items-center gap-0.5 border-0 px-1",
+        !isFocused && "opacity-60",
+      )}
       aria-label={t("window.controls")}
     >
       <button
         type="button"
-        className={cn(
-          "group flex h-full w-38px items-center justify-center text-foreground/55",
-          "transition-colors duration-150",
-          "hover:bg-black/[0.05] hover:text-foreground/90 focus-visible:outline-hidden focus-visible:bg-black/[0.05] focus-visible:text-foreground/90 dark:hover:bg-white/[0.07] dark:focus-visible:bg-white/[0.07]",
-        )}
+        className={CAPTION_BUTTON_CLASS}
         aria-label={t("window.minimize")}
         title={t("window.minimize")}
         onClick={minimizeWindow}
       >
-        <Minus className="size-13px" strokeWidth={1.4} />
+        <CaptionGlyph kind="minimize" />
       </button>
       <button
         type="button"
-        className={cn(
-          "group flex h-full w-38px items-center justify-center text-foreground/55",
-          "transition-colors duration-150",
-          "hover:bg-black/[0.05] hover:text-foreground/90 focus-visible:outline-hidden focus-visible:bg-black/[0.05] focus-visible:text-foreground/90 dark:hover:bg-white/[0.07] dark:focus-visible:bg-white/[0.07]",
-        )}
+        className={CAPTION_BUTTON_CLASS}
         aria-label={maximizeLabel}
         title={maximizeLabel}
         onClick={toggleMaximize}
       >
-        {isMaximized ? (
-          <Minimize2 className="size-12px" strokeWidth={1.4} />
-        ) : (
-          <Maximize2 className="size-12px" strokeWidth={1.4} />
-        )}
+        <CaptionGlyph kind={isMaximized ? "restore" : "maximize"} />
       </button>
       <button
         type="button"
         className={cn(
-          "group flex h-full w-42px items-center justify-center text-foreground/55",
-          "transition-colors duration-150 hover:bg-ui-e81123 hover:text-white focus-visible:outline-hidden focus-visible:bg-ui-e81123 focus-visible:text-white",
+          CAPTION_BUTTON_BASE_CLASS,
+          "hover:bg-ui-e81123 hover:text-white active:bg-ui-e81123/80 active:text-white/90",
+          "focus-visible:bg-ui-e81123 focus-visible:text-white",
         )}
         aria-label={t("window.close")}
         title={t("window.close")}
         onClick={closeWindow}
       >
-        <X className="size-13px" strokeWidth={1.5} />
+        <CaptionGlyph kind="close" />
       </button>
     </fieldset>
   );

@@ -446,6 +446,7 @@
     --code-font-family:
       "SF Mono", SFMono-Regular, Menlo, Monaco, "Cascadia Code", Consolas, "Liberation Mono",
       monospace;
+    /* Keep in sync with the boot screen tokens in crates/agent-gui/index.html. */
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
 
@@ -542,6 +543,7 @@
   .dark {
     color-scheme: dark;
 
+    /* Keep in sync with the boot screen tokens in crates/agent-gui/index.html. */
     --background: 0 0% 9.4%;
     --foreground: 0 0% 98%;
 

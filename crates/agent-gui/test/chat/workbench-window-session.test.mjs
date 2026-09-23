@@ -166,7 +166,29 @@ test("startup paints theme and shell before progressively hydrating pane content
   assert.ok(themeScript >= 0 && themeScript < appScript);
   assert.ok(staticShell >= 0 && staticShell < appScript);
   assert.ok(frontendReady >= 0 && frontendReady < appScript);
-  assert.match(htmlSource, /--liveagent-boot-background/);
+  // 启动页背景必须与主界面 --background/--foreground 一致，且随主题切换。
+  const tokensSource = readFileSync(
+    new URL("../../../agent-ui/src/styles/tokens.css", import.meta.url),
+    "utf8",
+  );
+  const readToken = (source, selector, name) => {
+    const block = source.slice(source.indexOf(`${selector} {`));
+    return block.match(new RegExp(`--${name}:\\s*([^;]+);`))?.[1].trim();
+  };
+  for (const [selector, htmlSelector] of [
+    [":root", ":root"],
+    [".dark", "html.dark"],
+  ]) {
+    for (const name of ["background", "foreground"]) {
+      assert.equal(
+        readToken(htmlSource, htmlSelector, name),
+        readToken(tokensSource, selector, name),
+        `boot ${htmlSelector} --${name} must match tokens.css`,
+      );
+    }
+  }
+  assert.doesNotMatch(htmlSource, /--liveagent-boot-|#12141c/);
+  assert.match(htmlSource, /background: hsl\(var\(--background\)\)/);
   assert.match(
     htmlSource,
     /class="app-boot-icon" src="\/src-tauri\/icons\/icon-simple\.png"/,

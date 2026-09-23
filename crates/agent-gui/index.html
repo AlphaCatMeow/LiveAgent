@@ -13,28 +13,33 @@
             theme = saved.theme;
           }
         } catch {}
-        const dark =
-          theme === "dark" ||
-          (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-        document.documentElement.classList.toggle("dark", dark);
-        document.documentElement.style.setProperty(
-          "--liveagent-boot-background",
-          dark ? "#12141c" : "#ffffff",
-        );
+        const media = window.matchMedia("(prefers-color-scheme: dark)");
+        const apply = () => {
+          const dark = theme === "dark" || (theme === "system" && media.matches);
+          document.documentElement.classList.toggle("dark", dark);
+        };
+        apply();
+        // Follow OS theme changes while the boot screen is visible; once React
+        // mounts, App.tsx owns the `.dark` class and this listener is removed.
+        if (theme === "system") {
+          media.addEventListener?.("change", apply);
+          window.__liveagentBootThemeCleanup = () => media.removeEventListener?.("change", apply);
+        }
       })();
     </script>
     <style>
+      /* Keep --background / --foreground in sync with
+         crates/agent-ui/src/styles/tokens.css so the boot screen matches the
+         main UI; the stylesheet redefines the same tokens once it loads. */
       :root {
         color-scheme: light;
-        --liveagent-boot-background: #ffffff;
-        --liveagent-boot-track: rgba(24, 24, 27, 0.09);
-        --liveagent-boot-bar: rgba(15, 78, 113, 0.68);
+        --background: 0 0% 100%;
+        --foreground: 222.2 84% 4.9%;
       }
       html.dark {
         color-scheme: dark;
-        --liveagent-boot-background: #12141c;
-        --liveagent-boot-track: rgba(255, 255, 255, 0.1);
-        --liveagent-boot-bar: rgba(142, 211, 235, 0.72);
+        --background: 0 0% 9.4%;
+        --foreground: 0 0% 98%;
       }
       html,
       body,
@@ -42,7 +47,7 @@
         width: 100%;
         height: 100%;
         margin: 0;
-        background: var(--liveagent-boot-background, #ffffff);
+        background: hsl(var(--background));
       }
       body {
         overflow: hidden;
@@ -55,7 +60,7 @@
         align-items: center;
         justify-content: center;
         overflow: hidden;
-        background: var(--liveagent-boot-background);
+        background: hsl(var(--background));
       }
       .app-boot-content {
         display: flex;
@@ -75,14 +80,14 @@
         height: 3px;
         overflow: hidden;
         border-radius: 999px;
-        background: var(--liveagent-boot-track);
+        background: hsl(var(--foreground) / 0.08);
       }
       .app-boot-progress > span {
         display: block;
         width: 40%;
         height: 100%;
         border-radius: inherit;
-        background: var(--liveagent-boot-bar);
+        background: hsl(var(--foreground) / 0.45);
         animation: app-boot-progress 1.1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
       }
       @keyframes app-boot-progress {

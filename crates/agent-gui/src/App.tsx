@@ -281,6 +281,10 @@ export default function App() {
   useEffect(() => {
     const root = document.documentElement;
     root.classList.toggle("dark", effectiveTheme === "dark");
+    // index.html 的启动脚本在 system 主题下会监听系统主题；React 接管后移除它。
+    const bootWindow = window as Window & { __liveagentBootThemeCleanup?: () => void };
+    bootWindow.__liveagentBootThemeCleanup?.();
+    bootWindow.__liveagentBootThemeCleanup = undefined;
   }, [effectiveTheme]);
 
   useEffect(() => {

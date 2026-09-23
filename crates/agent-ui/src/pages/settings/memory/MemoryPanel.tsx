@@ -361,11 +361,12 @@ export function MemoryPanel(props: {
           </div>
 
           {unreviewedCount > 0 ? (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
               onClick={enableUnreviewedFilter}
               className={cn(
-                "mt-3 w-full rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2",
+                "mt-3 h-auto w-full justify-start whitespace-normal font-normal",
+                "rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2",
                 "text-left text-xs text-amber-700 hover:bg-amber-500/[0.1] dark:text-amber-300",
               )}
             >
@@ -373,7 +374,7 @@ export function MemoryPanel(props: {
               {unreviewedOnly ? null : (
                 <span className="ml-1 underline">{t("settings.memoryReviewNow")}</span>
               )}
-            </button>
+            </Button>
           ) : null}
           {pathsInfo?.isInCloud ? (
             <div

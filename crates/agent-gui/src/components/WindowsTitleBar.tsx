@@ -29,9 +29,9 @@ function reportWindowChromeError(action: string, error: unknown) {
 }
 
 const CAPTION_BUTTON_BASE_CLASS = cn(
-  "flex h-6 w-9 items-center justify-center rounded-md text-foreground/60",
+  "flex size-8 shrink-0 items-center justify-center rounded-lg text-foreground/60",
   "transition-[background-color,color] duration-150 ease-out",
-  "focus-visible:outline-hidden",
+  "outline-hidden focus-visible:outline-hidden focus-visible:ring-0",
 );
 
 const CAPTION_BUTTON_CLASS = cn(
@@ -212,7 +212,7 @@ export function WindowsTitleBar({ controlsOnly = false }: { controlsOnly?: boole
       data-windows-window-controls=""
       data-tauri-drag-region="false"
       className={cn(
-        "m-0 flex h-full shrink-0 items-center gap-0.5 border-0 px-1",
+        "m-0 flex h-full shrink-0 items-center gap-1 border-0 px-1",
         !isFocused && "opacity-60",
       )}
       aria-label={t("window.controls")}

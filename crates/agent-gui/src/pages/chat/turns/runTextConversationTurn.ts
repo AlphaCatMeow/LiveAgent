@@ -53,6 +53,7 @@ import {
   type TrajectoryRecorder,
 } from "../../../lib/trajectory/recorder";
 import { buildPartialAssistantMessage } from "../runtime/chatPageRuntime";
+import { runKBrainConversationTurn } from "./runKBrainConversationTurn";
 
 export type RuntimeModel = {
   api: AssistantMessage["api"];
@@ -152,6 +153,7 @@ export type RunTextConversationTurnParams = {
 };
 
 export async function runTextConversationTurn(params: RunTextConversationTurnParams) {
+  if (params.runtime.backend === "kbrain") return runKBrainConversationTurn(params);
   const {
     providerId,
     model,

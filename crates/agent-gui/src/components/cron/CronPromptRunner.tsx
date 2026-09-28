@@ -1,4 +1,5 @@
 import type { Context } from "@earendil-works/pi-ai";
+import { listen } from "@liveagent/app/shims/tauriEvent";
 import type { CompletePromptRunInput, PromptRunRequest } from "@liveagent/ui/lib/automation/index";
 import {
   buildSkillsSystemPrompt,
@@ -6,7 +7,6 @@ import {
   isAlwaysEnabledSkillName,
   type SkillSummary,
 } from "@liveagent/ui/lib/skills/index";
-import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef } from "react";
 import { backend } from "../../lib/automation/backend";
 import { runAssistantWithTools } from "../../lib/chat/runner/agentRunner";

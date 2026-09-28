@@ -735,6 +735,12 @@ export function buildProviderModelsFetchKey(
   return `${baseUrl.trim()}||${apiKey.trim()}||${routing}${isFullUrl ? "||full-url" : ""}${override ? `||models:${override}` : ""}${headers ? `||headers:${headers}` : ""}`;
 }
 
+export function getProviderModelDiscoveryUnavailableReason(): string | null {
+  return import.meta.env?.VITE_KBRAIN_BACKEND === "true"
+    ? "K-brain mode disables provider model discovery in settings. Configure models on the K-brain backend and select them from the chat model picker. No provider credentials were sent."
+    : null;
+}
+
 export async function fetchModelsFromApi(
   type: ProviderId,
   baseUrl: string,
@@ -747,6 +753,8 @@ export async function fetchModelsFromApi(
     customHeaders?: readonly CustomHeader[];
   },
 ): Promise<ProviderModelConfig[]> {
+  const unavailableReason = getProviderModelDiscoveryUnavailableReason();
+  if (unavailableReason) throw new Error(unavailableReason);
   const modelsUrlOverride = type === "gemini" ? "" : (options?.modelsUrl?.trim() ?? "");
   const normalizedApiKey = apiKey.trim();
   if (isGatewayWebuiRuntime()) {

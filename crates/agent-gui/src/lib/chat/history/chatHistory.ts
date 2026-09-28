@@ -1,5 +1,19 @@
 import type { Message } from "@earendil-works/pi-ai";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@liveagent/app/shims/tauriCore";
+import {
+  branchKBrainHistory,
+  deleteKBrainHistory,
+  editKBrainHistory,
+  getKBrainHistoryShare,
+  getKBrainHistoryWindow,
+  listKBrainHistory,
+  renameKBrainHistory,
+  setKBrainHistoryModel,
+  setKBrainHistoryPinned,
+  setKBrainHistoryShare,
+} from "../../kbrain/history";
+import { getKBrainSessionId } from "../../kbrain/mapping";
+import { getProviderRuntimeBackend } from "../../providers/runtime/providerRuntimeConfig";
 import { parseTaskListState } from "../../tools/taskState";
 import { normalizeConversationSystemPrompt } from "../context/systemPrompt";
 import {
@@ -64,6 +78,10 @@ export type ChatHistoryWorkdirSummary = {
 export type ChatHistoryWorkdirsResponse = {
   workdirs: ChatHistoryWorkdirSummary[];
 };
+
+function isKBrainHistory() {
+  return getProviderRuntimeBackend() === "kbrain";
+}
 
 type ChatHistorySegmentWireRecord = {
   segmentIndex: number;
@@ -260,6 +278,7 @@ export async function listChatHistory(
   pageSize: number,
   filter?: ChatHistoryListFilter,
 ) {
+  if (isKBrainHistory()) return listKBrainHistory(page, pageSize, filter);
   return invoke<ChatHistoryListPage>("chat_history_list", {
     page,
     pageSize,
@@ -269,10 +288,36 @@ export async function listChatHistory(
 }
 
 export async function listChatHistoryWorkdirs() {
+  if (isKBrainHistory()) {
+    const byPath = new Map<string, ChatHistoryWorkdirSummary>();
+    let pageNumber = 1;
+    const pageSize = 200;
+    let totalCount = 0;
+    do {
+      const page = await listKBrainHistory(pageNumber, pageSize);
+      totalCount = page.totalCount;
+      for (const item of page.items) {
+        const path = item.cwd?.trim();
+        if (!path) continue;
+        const current = byPath.get(path);
+        byPath.set(path, {
+          path,
+          conversationCount: (current?.conversationCount ?? 0) + 1,
+          updatedAt: Math.max(current?.updatedAt ?? 0, item.updatedAt),
+        });
+      }
+      pageNumber += 1;
+      if (page.items.length === 0) break;
+    } while ((pageNumber - 1) * pageSize < totalCount);
+    return {
+      workdirs: Array.from(byPath.values()).sort((left, right) => right.updatedAt - left.updatedAt),
+    };
+  }
   return invoke<ChatHistoryWorkdirsResponse>("chat_history_workdirs");
 }
 
 export async function listSharedChatHistory(page: number, pageSize: number) {
+  if (isKBrainHistory()) return listKBrainHistory(page, pageSize, undefined, true);
   return invoke<ChatHistoryListPage>("chat_history_shared_list", { page, pageSize });
 }
 
@@ -284,6 +329,14 @@ export async function getChatHistoryWindow(params: {
   includeActiveSegment: boolean;
   fallbackSystemPrompt?: string;
 }): Promise<ChatHistoryWindowRecord> {
+  if (isKBrainHistory()) {
+    return getKBrainHistoryWindow(params.id, {
+      maxMessages: params.maxMessages,
+      beforeOffset: params.beforeOffset,
+      expectedRevision: params.expectedRevision,
+      includeActive: params.includeActiveSegment,
+    });
+  }
   const record = await invoke<ChatHistoryWindowWireRecord>("chat_history_get_window", {
     id: params.id,
     maxMessages: params.maxMessages,
@@ -370,6 +423,15 @@ export async function replaceChatHistoryFromMessage(params: {
   expectedRevision: string;
   fallbackSystemPrompt?: string;
 }): Promise<ChatHistoryWindowRecord> {
+  if (isKBrainHistory()) {
+    return editKBrainHistory(
+      params.id,
+      params.baseMessageRef,
+      params.replacementMessage,
+      params.expectedRevision,
+      params.maxMessages,
+    );
+  }
   return withConversationWriteLock(params.id, async () => {
     const record = await invoke<ChatHistoryWindowWireRecord>("chat_history_replace_from_message", {
       id: params.id,
@@ -489,36 +551,43 @@ async function appendChatHistorySegmentRaw(input: ChatHistoryAppendSegmentInput)
 }
 
 export async function renameChatHistory(id: string, title: string) {
+  if (isKBrainHistory()) return renameKBrainHistory(id, title);
   return withConversationWriteLock(id, () =>
     invoke<ChatHistorySummary>("chat_history_rename", { id, title }),
   );
 }
 
 export async function branchChatHistory(id: string, baseMessageRef: HistoryMessageRef) {
+  if (isKBrainHistory()) return branchKBrainHistory(id, baseMessageRef);
   return withConversationWriteLock(id, () =>
     invoke<ChatHistorySummary>("chat_history_branch", { id, baseMessageRef }),
   );
 }
 
 export async function setChatHistoryPinned(id: string, isPinned: boolean) {
+  if (isKBrainHistory()) return setKBrainHistoryPinned(id, isPinned);
   return withConversationWriteLock(id, () =>
     invoke<ChatHistorySummary>("chat_history_set_pinned", { id, isPinned }),
   );
 }
 
 export async function setChatHistoryModel(id: string, selectedModelJson: string) {
+  if (isKBrainHistory()) return setKBrainHistoryModel(id, selectedModelJson);
   return withConversationWriteLock(id, () =>
     invoke<ChatHistorySummary>("chat_history_set_model", { id, selectedModelJson }),
   );
 }
 
 export async function setChatHistoryCwd(id: string, cwd: string) {
+  if (isKBrainHistory())
+    throw new Error("K-brain session cwd is managed by the backend and cannot be changed");
   return withConversationWriteLock(id, () =>
     invoke<ChatHistorySummary>("chat_history_set_cwd", { id, cwd }),
   );
 }
 
 export async function getChatHistoryShare(id: string) {
+  if (isKBrainHistory()) return getKBrainHistoryShare(id);
   return invoke<ChatHistoryShareStatus>("chat_history_share_get", { id });
 }
 
@@ -527,6 +596,7 @@ export async function setChatHistoryShare(
   enabled: boolean,
   options?: { redactToolContent?: boolean },
 ) {
+  if (isKBrainHistory()) return setKBrainHistoryShare(id, enabled, options);
   return withConversationWriteLock(id, () =>
     invoke<ChatHistoryShareStatus>("chat_history_share_set", {
       id,
@@ -537,6 +607,7 @@ export async function setChatHistoryShare(
 }
 
 export async function deleteChatHistory(id: string) {
+  if (isKBrainHistory()) return deleteKBrainHistory(id);
   return withConversationWriteLock(id, async () => {
     await invoke<void>("chat_history_delete", { id });
     // 检查点数据(索引 + blobs)以会话为单位存放，没有独立的 GC。会话都删了
@@ -619,6 +690,27 @@ async function writeConversationRuntime(
   commitPersistenceCursor: (cursor: ConversationPersistenceCursor) => void,
 ) {
   const activeSegment = getActiveSegment(state);
+  if (isKBrainHistory()) {
+    const nextCursor = {
+      activeSegmentIndex: activeSegment?.segmentIndex ?? 0,
+      activeSegmentId: activeSegment?.segmentId ?? "kbrain",
+    };
+    commitPersistenceCursor(nextCursor);
+    return {
+      id: conversation.id,
+      title: conversation.title,
+      providerId: conversation.providerId,
+      model: conversation.model,
+      sessionId:
+        getKBrainSessionId(conversation.id, import.meta.env?.VITE_KBRAIN_URL) ??
+        conversation.sessionId,
+      cwd: conversation.cwd,
+      selectedModelJson: conversation.selectedModelJson,
+      messageCount: state.meta.totalMessageCount,
+      createdAt: conversation.createdAt ?? conversation.updatedAt,
+      updatedAt: conversation.updatedAt,
+    } satisfies ChatHistorySummary;
+  }
   if (!activeSegment) {
     throw new Error("无法持久化缺少活跃分段的会话");
   }

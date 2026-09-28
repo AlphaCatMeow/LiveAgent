@@ -24,6 +24,7 @@ import {
   createConversationIdentity,
   waitForTitleLookahead,
 } from "../../../lib/chat/page/chatPageHelpers";
+import { getProviderRuntimeBackend } from "../../../lib/providers/runtime/providerRuntimeConfig";
 import { type SelectedModel, serializeSelectedModelJson } from "../../../lib/settings";
 import type { ConversationHydrationStore } from "../conversations/conversationHydrationStore";
 import {
@@ -617,7 +618,11 @@ export function useConversationHistoryActions(params: UseConversationHistoryActi
     const initialStoredTitle = titleToStore;
     void titlePromise
       .then(async (resolvedTitle) => {
-        if (!resolvedTitle || resolvedTitle === initialStoredTitle) return;
+        if (!resolvedTitle) return;
+        // K-brain persists messages itself; the local summary has not saved the title.
+        if (resolvedTitle === initialStoredTitle && getProviderRuntimeBackend() !== "kbrain") {
+          return;
+        }
 
         const currentItem = sidebarStore.peek(conversationId);
         if (!currentItem || currentItem.title !== initialStoredTitle) return;

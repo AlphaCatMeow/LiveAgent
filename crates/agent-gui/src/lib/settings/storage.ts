@@ -1,10 +1,11 @@
+import { invoke } from "@liveagent/app/shims/tauriCore";
 import { normalizeSidebarShortcuts } from "@liveagent/ui/lib/settings/sidebarShortcuts";
 import {
   buildGatewaySettingsSyncPayload,
   buildGatewaySettingsSyncUpdatePayload,
 } from "@liveagent/ui/lib/settings/sync";
-import { invoke } from "@tauri-apps/api/core";
 import { type Locale, normalizeLocale } from "../../i18n/config";
+import { isKBrainBrowserHost } from "../host";
 import { SettingsStorageError, type SettingsStorageErrorCode } from "./errors";
 import {
   type AppSettings,
@@ -29,6 +30,7 @@ import {
 } from "./index";
 
 const LOCAL_UI_SETTINGS_STORAGE_KEY = "liveagent.ui-settings.v1";
+const BROWSER_SETTINGS_STORAGE_KEY = "liveagent.kbrain-browser-settings.v1";
 
 type PersistedSettingsResponse = {
   providers?: unknown | null;
@@ -238,6 +240,93 @@ function normalizeDefaultWorkdir(input: unknown): string {
   return typeof input === "string" ? input.trim() : "";
 }
 
+function settingsObject(input: unknown): Record<string, unknown> {
+  return input && typeof input === "object" && !Array.isArray(input)
+    ? (input as Record<string, unknown>)
+    : {};
+}
+
+function browserUiSettings(input: unknown) {
+  const raw = settingsObject(input);
+  const system = settingsObject(raw.system);
+  const custom = settingsObject(raw.customSettings);
+  const dock = settingsObject(custom.rightDock);
+  const controls = settingsObject(raw.chatRuntimeControls);
+  // Project dock state is an open-ended bag; runtime prompts and proxy settings
+  // also belong to the backend, not this browser's presentation preferences.
+  const normalized = normalizeSettings({
+    customProviders: [],
+    system: {
+      executionMode: system.executionMode,
+      workdir: system.workdir,
+    } as AppSettings["system"],
+    customSettings: {
+      chatSidebar: custom.chatSidebar,
+      sidebarShortcuts: custom.sidebarShortcuts,
+      chatTranscript: custom.chatTranscript,
+      rightDock: { width: dock.width },
+      composerContextDisplay: custom.composerContextDisplay,
+      interfaceFontFamily: custom.interfaceFontFamily ?? custom.fontFamily,
+      chatFontFamily: custom.chatFontFamily,
+      codeFontFamily: custom.codeFontFamily,
+      fontScale: custom.fontScale,
+      promptClarifyEnabled: custom.promptClarifyEnabled,
+    } as AppSettings["customSettings"],
+    chatRuntimeControls: {
+      thinkingEnabled: controls.thinkingEnabled,
+      reasoning: controls.reasoning,
+      nativeWebSearchEnabled: controls.nativeWebSearchEnabled,
+      planModeEnabled: controls.planModeEnabled,
+    } as ChatRuntimeControls,
+    theme: raw.theme as Theme,
+    locale: (raw.locale ?? getDefaultSettings().locale) as Locale,
+  });
+  return {
+    system: {
+      executionMode: normalized.system.executionMode,
+      workdir: normalized.system.workdir,
+    },
+    customSettings: normalized.customSettings,
+    chatRuntimeControls: normalized.chatRuntimeControls,
+    theme: normalized.theme,
+    locale: normalized.locale,
+  };
+}
+
+function readBrowserPersistedSettings(): AppSettings {
+  try {
+    const raw = localStorage.getItem(BROWSER_SETTINGS_STORAGE_KEY);
+    const readObject = (value: string | null) => {
+      try {
+        return settingsObject(value ? JSON.parse(value) : undefined);
+      } catch {
+        return {};
+      }
+    };
+    const browser = readObject(raw);
+    // Import only presentation fields from the old shared UI key. Never write
+    // that key: it may still be used by direct/native settings on this origin.
+    const legacyUi = readObject(localStorage.getItem(LOCAL_UI_SETTINGS_STORAGE_KEY));
+    const safe = browserUiSettings({ ...legacyUi, ...browser });
+    localStorage.setItem(BROWSER_SETTINGS_STORAGE_KEY, JSON.stringify(safe));
+    return normalizeSettings({
+      ...safe,
+      system: { ...getDefaultSettings().system, ...safe.system },
+      customProviders: [],
+    });
+  } catch (error) {
+    throw new SettingsStorageError("load_failed", error);
+  }
+}
+
+function writeBrowserPersistedSettings(settings: AppSettings): void {
+  try {
+    localStorage.setItem(BROWSER_SETTINGS_STORAGE_KEY, JSON.stringify(browserUiSettings(settings)));
+  } catch (error) {
+    throw new SettingsStorageError("save_failed", error);
+  }
+}
+
 function applyDefaultWorkdirToSystem(system: unknown, defaultWorkdir: string): unknown {
   if (!defaultWorkdir) return system;
   const obj =
@@ -257,6 +346,9 @@ export type PersistedSettingsLoadResult = {
 };
 
 export async function loadPersistedSettingsWithDefaults(): Promise<PersistedSettingsLoadResult> {
+  if (isKBrainBrowserHost()) {
+    return { settings: readBrowserPersistedSettings(), defaultWorkdir: "" };
+  }
   const defaults = getDefaultSettings();
   const localUi = readLocalUiSettings();
   const persisted = await invokeSettingsCommand<PersistedSettingsResponse>(
@@ -312,6 +404,11 @@ export async function persistSettings(
 ): Promise<PersistSettingsResult> {
   const tasks: Promise<unknown>[] = [];
   const result: PersistSettingsResult = {};
+
+  if (isKBrainBrowserHost()) {
+    writeBrowserPersistedSettings(next);
+    return result;
+  }
 
   if (hasChanged(prev.customProviders, next.customProviders)) {
     tasks.push(
@@ -432,6 +529,7 @@ export async function persistSettings(
 }
 
 export async function publishGatewaySettingsSync(settings: AppSettings): Promise<void> {
+  if (isKBrainBrowserHost()) return;
   await invokeSettingsCommand("gateway_sync_failed", "gateway_publish_settings_sync", {
     payload: buildGatewaySettingsSyncPayload(settings),
   });

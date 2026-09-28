@@ -1,3 +1,5 @@
+import { invoke } from "@liveagent/app/shims/tauriCore";
+import { listen } from "@liveagent/app/shims/tauriEvent";
 import type {
   MentionComposerDraft,
   MentionComposerHandle,
@@ -5,8 +7,6 @@ import type {
 import { normalizeConversationMentionReferences } from "@liveagent/ui/lib/chat/mentionReferences";
 import type { PendingUploadedFile } from "@liveagent/ui/lib/chat/uploadedFiles";
 import type { ChatQueueTurnPreview } from "@liveagent/ui/pages/chat/ChatComposerBar";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import {
   type MutableRefObject,
   useCallback,
@@ -16,6 +16,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { LiveTranscriptStore } from "../../../lib/chat/conversation/liveTranscriptStore";
+import { isKBrainBackendEnabled } from "../../../lib/host";
 import {
   type AppSettings,
   type ChatRuntimeControls,
@@ -279,6 +280,7 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
     conversationId: string,
     queue: readonly QueuedChatTurn[] = queuedChatTurnsRef.current,
   ) {
+    if (isKBrainBackendEnabled()) return;
     const targetConversationId = rememberChatQueueConversationId(conversationId);
     if (!targetConversationId) {
       return;
@@ -882,6 +884,7 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: This native listener is registered once and dispatches through latest-action and mutable state refs to avoid stale closures without re-subscribing.
   useEffect(() => {
+    if (isKBrainBackendEnabled()) return;
     let disposed = false;
     let unlisten: (() => void) | null = null;
     type GatewayChatQueueRequestEvent = {

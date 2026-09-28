@@ -1,3 +1,4 @@
+import { invoke } from "@liveagent/app/shims/tauriCore";
 import { CheckCircle2, Download, Key, Loader2, RefreshCw } from "@liveagent/ui/components/IconSet";
 import { Button, RefreshButton } from "@liveagent/ui/components/ui/button";
 import { CopyButton } from "@liveagent/ui/components/ui/copy-button";
@@ -11,15 +12,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@liveagent/ui/components/ui/dialog";
-
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { cn } from "@liveagent/ui/lib/shared/utils";
 import {
   createDraftModelConfig,
   fetchModelsFromApi,
+  getProviderModelDiscoveryUnavailableReason,
   mergeFetchedModels,
 } from "@liveagent/ui/pages/settings/providerUtils";
-import { invoke } from "@tauri-apps/api/core";
 import { useMemo, useState } from "react";
 import ccswitchLogoUrl from "../../src-tauri/icons/custom/ccswitch.png";
 import cherryStudioLogoUrl from "../../src-tauri/icons/custom/cherrystudio.png";
@@ -415,6 +415,11 @@ export function ProviderSettingsExtension(props: {
   }
 
   async function syncModels(providers: CustomProvider[]) {
+    const unavailableReason = getProviderModelDiscoveryUnavailableReason();
+    if (unavailableReason) {
+      setMessage(unavailableReason);
+      return;
+    }
     const results = await Promise.all(
       providers.map(async (provider) => {
         try {
@@ -512,6 +517,13 @@ export function ProviderSettingsExtension(props: {
       }
       return updateCustomProviders(current, providers);
     });
+    const unavailableReason = getProviderModelDiscoveryUnavailableReason();
+    if (unavailableReason) {
+      setMessage(unavailableReason);
+      setCherryModalOpen(false);
+      setImporting(false);
+      return;
+    }
     const results = await Promise.all(
       importable.map(async (item) => {
         const id = cherryProviderId(item);

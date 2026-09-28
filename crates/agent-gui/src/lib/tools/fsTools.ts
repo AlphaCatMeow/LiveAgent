@@ -5,8 +5,8 @@ import type {
   ToolCall,
   ToolResultMessage,
 } from "@earendil-works/pi-ai";
+import { invoke } from "@liveagent/app/shims/tauriCore";
 import { invokeFs, isFsBackendError } from "@liveagent/ui/lib/tools/fsBackend";
-import { invoke } from "@tauri-apps/api/core";
 import { type TProperties, Type } from "typebox";
 import type { AdditionalProjectRoot } from "./additionalProjectRoots";
 import {

@@ -1,3 +1,4 @@
+import { openUrl } from "@liveagent/app/shims/tauriOpener";
 import { Download, ExternalLink, Loader2, RefreshCw } from "@liveagent/ui/components/IconSet";
 import { Markdown } from "@liveagent/ui/components/Markdown";
 import {
@@ -19,7 +20,6 @@ import {
 import { toast } from "@liveagent/ui/components/ui/toast-manager";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { AgentActivationSwitch } from "@liveagent/ui/pages/settings/shared";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useId } from "react";
 import type { AppUpdateController } from "../../lib/appUpdates";
 import type { ReleaseAnnouncementController } from "../../lib/releaseAnnouncement";

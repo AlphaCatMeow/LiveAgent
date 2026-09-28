@@ -1,6 +1,6 @@
+import { invoke } from "@liveagent/app/shims/tauriCore";
 import { sortSidebarConversations } from "@liveagent/ui/lib/sidebar/reconcile";
 import type { SidebarStore } from "@liveagent/ui/lib/sidebar/store";
-import { invoke } from "@tauri-apps/api/core";
 import {
   type Dispatch,
   type SetStateAction,
@@ -45,6 +45,10 @@ export function useSharedHistory(params: UseSharedHistoryParams) {
     setErrorMessage,
   } = params;
 
+  const kBrainBackendEnabled = import.meta.env?.VITE_KBRAIN_BACKEND === "true";
+  const shareBackendUrl = kBrainBackendEnabled
+    ? (import.meta.env?.VITE_KBRAIN_URL ?? "http://127.0.0.1:47321")
+    : undefined;
   const [shareConversation, setShareConversation] = useState<ChatHistorySummary | null>(null);
   const [shareStatus, setShareStatus] = useState<ChatHistoryShareStatus | null>(null);
   const [shareLoading, setShareLoading] = useState(false);
@@ -77,9 +81,10 @@ export function useSharedHistory(params: UseSharedHistoryParams) {
   // 分享链接必须带上它，否则非 80/443 部署复制出的链接打不开。
   const sharedManagerShareOriginPort = remoteSettings.gatewayPort;
   const canShareHistory =
-    remoteRuntimeStatus.online === true &&
-    remoteRuntimeStatus.enabled === true &&
-    remoteRuntimeStatus.configured === true;
+    kBrainBackendEnabled ||
+    (remoteRuntimeStatus.online === true &&
+      remoteRuntimeStatus.enabled === true &&
+      remoteRuntimeStatus.configured === true);
 
   const setSharedHistoryItemsState = useCallback((items: ChatHistorySummary[]) => {
     const nextItems = sortSidebarConversations(items.map((item) => ({ ...item, isShared: true })));
@@ -223,6 +228,7 @@ export function useSharedHistory(params: UseSharedHistoryParams) {
   );
 
   const refreshSharedManagerGatewayUrl = useCallback(() => {
+    if (kBrainBackendEnabled) return;
     setSharedManagerGatewayUrlLoading(true);
     void invoke<GatewayRuntimeStatus>("gateway_status")
       .then((status) => {
@@ -440,6 +446,7 @@ export function useSharedHistory(params: UseSharedHistoryParams) {
 
   return {
     canShareHistory,
+    shareBackendUrl,
     shareConversation,
     shareStatus,
     shareLoading,

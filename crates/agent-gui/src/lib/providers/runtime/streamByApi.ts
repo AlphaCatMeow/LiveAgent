@@ -1,6 +1,7 @@
 import type { Api, Context, Model } from "@earendil-works/pi-ai";
 import { ensureDefaultLlmAdapters } from "../service/defaultAdapters";
 import { resolveAdapter } from "../service/registry";
+import { getProviderRuntimeBackend } from "./providerRuntimeConfig";
 import type { StreamOptionsEx } from "./types";
 
 // 保证经本模块的任何调用（含被测试按路径 mock 后又还原的场景）注册表已就绪。
@@ -18,6 +19,11 @@ ensureDefaultLlmAdapters();
  * 可观测点是 seam 的公开契约，后续 PR 不得绕开。
  */
 export function streamSimpleByApi(model: Model<Api>, context: Context, options: StreamOptionsEx) {
+  if (getProviderRuntimeBackend() === "kbrain") {
+    throw new Error(
+      "Direct provider requests are disabled in K-brain mode. This operation requires a K-brain backend implementation.",
+    );
+  }
   ensureDefaultLlmAdapters();
   return resolveAdapter(model.api).stream(model, context, options);
 }

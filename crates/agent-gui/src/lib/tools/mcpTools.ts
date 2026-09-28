@@ -5,11 +5,11 @@ import type {
   ToolCall,
   ToolResultMessage,
 } from "@earendil-works/pi-ai";
+import { invoke } from "@liveagent/app/shims/tauriCore";
 import {
   hardcodedServerPolicyDefault,
   isCuaDriverServer,
 } from "@liveagent/ui/contracts/mcpServerDefaults";
-import { invoke } from "@tauri-apps/api/core";
 
 import type { McpServerConfig, ToolPolicy } from "../settings";
 import { type BuiltinToolBundle, createBuiltinMetadataMap } from "./builtinTypes";

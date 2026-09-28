@@ -141,21 +141,25 @@ test("backend events: delete removes, running/idle leave the list untouched", ()
   );
 });
 
-test("scope matching: workdir, unscoped, none", () => {
+test("scope matching: workdir, unscoped, all, none", () => {
   const inProject = conversation("a", { cwd: "/tmp/project" });
   const chatOnly = conversation("b");
   const workdirScope = { kind: "workdir", cwd: "/tmp/project" };
   const unscoped = { kind: "unscoped" };
+  const all = { kind: "all" };
   const none = { kind: "none" };
 
   assert.equal(scope.conversationMatchesScope(inProject, workdirScope), true);
   assert.equal(scope.conversationMatchesScope(chatOnly, workdirScope), false);
   assert.equal(scope.conversationMatchesScope(chatOnly, unscoped), true);
   assert.equal(scope.conversationMatchesScope(inProject, unscoped), false);
+  assert.equal(scope.conversationMatchesScope(inProject, all), true);
+  assert.equal(scope.conversationMatchesScope(chatOnly, all), true);
   assert.equal(scope.conversationMatchesScope(inProject, none), false);
 
   assert.equal(scope.sidebarScopeKey(workdirScope), "cwd:/tmp/project");
   assert.equal(scope.sidebarScopeKey(unscoped), "cwd-empty");
+  assert.equal(scope.sidebarScopeKey(all), "all");
   assert.equal(scope.sidebarScopeKey(none), "none");
 });
 

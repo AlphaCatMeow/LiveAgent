@@ -111,6 +111,8 @@ function scopeToHistoryListFilter(scope: SidebarScope): HistoryListFilter | null
     }
     case "unscoped":
       return { cwdEmpty: true };
+    case "all":
+      return null;
     case "none":
       return null;
   }

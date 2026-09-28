@@ -5,7 +5,11 @@ import {
   getChatRuntimeReasoningLevelsForProvider,
   normalizeChatRuntimeControlsForProvider,
 } from "../../settings";
-import type { ProviderRuntimeConfig } from "./types";
+import type { ProviderRuntimeBackend, ProviderRuntimeConfig } from "./types";
+
+export function getProviderRuntimeBackend(): ProviderRuntimeBackend {
+  return import.meta.env?.VITE_KBRAIN_BACKEND === "true" ? "kbrain" : "direct";
+}
 
 /**
  * ProviderRuntimeConfig 的唯一构造点——全仓仅此一处注入品牌。任何调用方都只能
@@ -23,11 +27,16 @@ export function createProviderRuntimeConfig(
   };
   const controls = normalizeChatRuntimeControlsForProvider(controlsInput, reasoningParams);
   const reasoningSupported = getChatRuntimeReasoningLevelsForProvider(reasoningParams).length > 0;
+  const backend = getProviderRuntimeBackend();
+  const direct = backend === "direct";
   return {
-    baseUrl: provider.baseUrl,
-    isFullUrl: provider.isFullUrl,
-    apiKey: provider.apiKey,
-    customHeaders: provider.customHeaders,
+    backend,
+    // K-brain owns upstream routing and credentials, including header/query secrets.
+    backendModelProvider: backend === "kbrain" ? provider.id : undefined,
+    baseUrl: direct ? provider.baseUrl : "",
+    isFullUrl: direct && provider.isFullUrl,
+    apiKey: direct ? provider.apiKey : "",
+    customHeaders: direct ? provider.customHeaders : undefined,
     requestFormat: provider.requestFormat,
     reasoning: reasoningSupported
       ? controls.thinkingEnabled

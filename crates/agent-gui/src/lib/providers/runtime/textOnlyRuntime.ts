@@ -6,6 +6,8 @@ import {
   mergeHostedSearchBlocks,
 } from "@liveagent/ui/lib/chat/hostedSearch";
 import { buildStreamRequestDebugPayload, type StreamDebugLogger } from "../../debug/agentDebug";
+import { createKBrainClient } from "../../kbrain/client";
+import type { KBrainMessage, KBrainModelRef } from "../../kbrain/types";
 import type { ProviderId } from "../../settings";
 import { withPowerActivity } from "../../system/powerActivity";
 import {
@@ -27,6 +29,7 @@ import {
   type ProviderFailoverCandidate,
   withProviderFailover,
 } from "./providerFailover";
+import { getProviderRuntimeBackend } from "./providerRuntimeConfig";
 import {
   buildProviderRequestMetadata,
   prepareProviderRequest,
@@ -37,6 +40,87 @@ import { resolveStreamRetryConfig } from "./retryPolicy";
 import { buildTextModeToolResultsForAssistant } from "./textModeToolRecovery";
 import { captureTransportSnapshot, type TransportSnapshot } from "./transportSnapshot";
 import type { ProviderRuntimeConfig, StreamOptionsEx } from "./types";
+
+function assertDirectTextGeneration(runtime: ProviderRuntimeConfig) {
+  if (runtime.backend === "kbrain" || getProviderRuntimeBackend() === "kbrain") {
+    throw new Error(
+      "Direct provider requests are disabled in K-brain mode. Use the K-brain backend text-generation contract.",
+    );
+  }
+}
+
+function canonicalTextMessages(context: Context): KBrainMessage[] {
+  const messages: KBrainMessage[] = [];
+  if (context.systemPrompt?.trim()) {
+    messages.push({ role: "system", content: [{ type: "text", text: context.systemPrompt }] });
+  }
+  for (const message of context.messages) {
+    if (message.role !== "user" && message.role !== "assistant") continue;
+    const content =
+      typeof message.content === "string"
+        ? [{ type: "text" as const, text: message.content }]
+        : message.content
+            .filter((part) => part.type === "text")
+            .map((part) => ({ type: "text" as const, text: part.text }));
+    if (content.some((part) => part.text.trim())) messages.push({ role: message.role, content });
+  }
+  if (messages.length === 0) throw new Error("Text generation context is empty");
+  return messages;
+}
+
+function kbrainTextModel(runtime: ProviderRuntimeConfig, model: string): KBrainModelRef {
+  const provider = runtime.backendModelProvider?.trim();
+  if (!provider) throw new Error("K-brain model provider is not configured");
+  const modelId = model.trim();
+  if (!modelId) throw new Error("No model selected");
+  return { provider, model: modelId };
+}
+
+async function generateKBrainText(params: {
+  model: string;
+  runtime: ProviderRuntimeConfig;
+  context: Context;
+  signal?: AbortSignal;
+  output?: "text" | "json";
+}) {
+  const client = createKBrainClient({
+    baseUrl: import.meta.env?.VITE_KBRAIN_URL,
+    token: import.meta.env?.VITE_KBRAIN_TOKEN,
+  });
+  const response = await client.generateText(
+    {
+      model: kbrainTextModel(params.runtime, params.model),
+      messages: canonicalTextMessages({
+        ...params.context,
+        systemPrompt: appendSystemPrompt(
+          params.context.systemPrompt,
+          buildTextOnlySystemSuffix(params.output === "json"),
+        ),
+      }),
+      ...(params.output ? { output: params.output } : {}),
+    },
+    params.signal,
+  );
+  if (response.version !== "kbrain.agent.v1" || typeof response.text !== "string") {
+    throw new Error("Malformed K-brain text-generation response");
+  }
+  return response;
+}
+
+function kbrainUsage(response: Awaited<ReturnType<typeof generateKBrainText>>) {
+  const input = response.usage?.input_tokens ?? 0;
+  const output = response.usage?.output_tokens ?? 0;
+  const cacheRead = response.usage?.cached_tokens ?? 0;
+  const cacheWrite = response.usage?.cache_write_tokens ?? 0;
+  return {
+    input,
+    output,
+    cacheRead,
+    cacheWrite,
+    totalTokens: input + output,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+}
 
 // 导出供 turn runner 估算 provider 边界追加段（用量环 fixed 校准），非请求路径。
 export function buildTextOnlySystemSuffix(allowJsonOutput = false) {
@@ -210,6 +294,27 @@ export async function streamAssistantMessage(params: {
   onRequestStart?: (info: { context: Context; systemSuffix: string }) => void;
   failover?: TextStreamFailoverParams;
 }) {
+  if (params.runtime.backend === "kbrain" || getProviderRuntimeBackend() === "kbrain") {
+    const generated = await generateKBrainText({
+      model: params.model,
+      runtime: params.runtime,
+      context: params.context,
+      signal: params.signal,
+      output: params.allowJsonOutput ? "json" : "text",
+    });
+    if (generated.text) params.onTextDelta(generated.text);
+    return {
+      role: "assistant",
+      content: [{ type: "text", text: generated.text }],
+      timestamp: Date.now(),
+      api: "kbrain-text" as Api,
+      provider: params.runtime.backendModelProvider ?? "kbrain",
+      model: params.model,
+      stopReason: "stop",
+      usage: kbrainUsage(generated),
+    } as AssistantMessage;
+  }
+  assertDirectTextGeneration(params.runtime);
   const modelId = params.model.trim();
   if (!modelId) throw new Error("No model selected");
   if (!params.runtime.baseUrl.trim()) throw new Error("Base URL cannot be empty");
@@ -303,6 +408,7 @@ export async function streamAssistantMessage(params: {
       return Promise.reject(new Error(`Unknown failover target index: ${index}`));
     }
     const prepared = (async () => {
+      assertDirectTextGeneration(fallback.runtime);
       const fallbackProxyRequest = await prepareProviderRequest(
         fallback.providerId,
         fallback.runtime,
@@ -597,6 +703,26 @@ export async function completeAssistantMessage(params: {
   debugLogger?: StreamDebugLogger;
   allowJsonOutput?: boolean;
 }) {
+  if (params.runtime.backend === "kbrain" || getProviderRuntimeBackend() === "kbrain") {
+    const generated = await generateKBrainText({
+      model: params.model,
+      runtime: params.runtime,
+      context: params.context,
+      signal: params.signal,
+      output: params.allowJsonOutput ? "json" : "text",
+    });
+    return {
+      role: "assistant",
+      content: [{ type: "text", text: generated.text }],
+      timestamp: Date.now(),
+      api: "kbrain-text" as Api,
+      provider: generated.model.provider,
+      model: generated.model.model,
+      stopReason: "stop",
+      usage: kbrainUsage(generated),
+    } as AssistantMessage;
+  }
+  assertDirectTextGeneration(params.runtime);
   const modelId = params.model.trim();
   if (!modelId) throw new Error("No model selected");
   if (!params.runtime.baseUrl.trim()) throw new Error("Base URL cannot be empty");

@@ -24,6 +24,7 @@ import {
 import { asErrorMessage } from "../chatPageUtils";
 import type { ConversationRuntimeEntry } from "./chatPageRuntime";
 import { resolveActiveModelSelection } from "./modelSelection";
+import { selectedModelsMatch } from "./providerRuntimeConfig";
 
 type UseChatModelSelectionParams = {
   settings: AppSettings;
@@ -98,41 +99,6 @@ export function useChatModelSelection(params: UseChatModelSelectionParams) {
     : undefined;
   const currentChatModelId = activeSelectedModel?.model;
 
-  // 模型与思考设置作为会话选择一起保存：写入 runtime entry，并持久化到会话历史。
-  const saveConversationSelection = useCallback(
-    (conversationId: string, selection: SelectedModel) => {
-      updateConversationRuntimeEntry(conversationId, (prev) =>
-        serializeSelectedModelJson(prev.selectedModel) === serializeSelectedModelJson(selection)
-          ? prev
-          : { ...prev, selectedModel: selection },
-      );
-      const persistedRow = sidebarStore.peek(conversationId);
-      const selectedModelJson = serializeSelectedModelJson(selection);
-      if (persistedRow && !persistedRow.isPending && selectedModelJson) {
-        void setChatHistoryModel(conversationId, selectedModelJson)
-          .then((summary) => sidebarStore.upsertLocal({ ...summary, isPending: undefined }))
-          .catch((error) => {
-            updateConversationRuntimeEntry(conversationId, (prev) => ({
-              ...prev,
-              errorMessage: asErrorMessage(error, "保存会话模型选择失败。"),
-            }));
-          });
-      }
-    },
-    [sidebarStore, updateConversationRuntimeEntry],
-  );
-
-  const handleSelectModel = useCallback(
-    (selection: SelectedModel) => {
-      const conversationId = currentConversationIdRef.current;
-      // 切换模型保留会话已有的思考设置；全局默认只记录模型。
-      const previous = conversationRuntimeCacheRef.current.get(conversationId)?.selectedModel;
-      saveConversationSelection(conversationId, { ...previous, ...selection });
-      setSettings((prev) => setSelectedModel(prev, selection));
-    },
-    [conversationRuntimeCacheRef, currentConversationIdRef, saveConversationSelection, setSettings],
-  );
-
   // 跨端收敛：history-sync 带回的会话模型选择（如 WebUI 发消息后落库）
   // 写回当前会话的 runtime entry；值相等或发送中不动，无回环。
   const displayedConversationPersistedModelJson =
@@ -145,9 +111,7 @@ export function useChatModelSelection(params: UseChatModelSelectionParams) {
     if (!parsed) return;
     const entry = conversationRuntimeCacheRef.current.get(currentConversationId);
     if (!entry || entry.isSending) return;
-    if (serializeSelectedModelJson(entry.selectedModel) === serializeSelectedModelJson(parsed)) {
-      return;
-    }
+    if (selectedModelsMatch(entry.selectedModel, parsed)) return;
     updateConversationRuntimeEntry(currentConversationId, (prev) => ({
       ...prev,
       selectedModel: parsed,
@@ -190,12 +154,7 @@ export function useChatModelSelection(params: UseChatModelSelectionParams) {
         applyConversationThinking(settings.chatRuntimeControls, activeSelectedModel),
         chatRuntimeReasoningParams,
       ),
-    [
-      activeSelectedModel,
-      chatRuntimeReasoningParams,
-      settings.chatRuntimeControls,
-      thinkingLiveVersion,
-    ],
+    [chatRuntimeReasoningParams, settings.chatRuntimeControls, thinkingLiveVersion],
   );
   const handleChatRuntimeControlsChange = useCallback(
     (patch: Partial<ChatRuntimeControls>) => {
@@ -204,8 +163,25 @@ export function useChatModelSelection(params: UseChatModelSelectionParams) {
         chatRuntimeControlsForCurrentProvider,
         patch,
       );
-      if (selection) saveConversationSelection(currentConversationIdRef.current, selection);
-      // 全局设置继续记录最近的调整，作为新会话的默认值。
+      const conversationId = currentConversationIdRef.current;
+      if (selection && conversationId) {
+        updateConversationRuntimeEntry(conversationId, (prev) => ({
+          ...prev,
+          selectedModel: selection,
+        }));
+        const persistedRow = sidebarStore.peek(conversationId);
+        const selectedModelJson = serializeSelectedModelJson(selection);
+        if (persistedRow && !persistedRow.isPending && selectedModelJson) {
+          void setChatHistoryModel(conversationId, selectedModelJson)
+            .then((summary) => sidebarStore.upsertLocal({ ...summary, isPending: undefined }))
+            .catch((error) => {
+              updateConversationRuntimeEntry(conversationId, (prev) => ({
+                ...prev,
+                errorMessage: asErrorMessage(error, "保存会话思考设置失败。"),
+              }));
+            });
+        }
+      }
       setSettings((prev) => ({
         ...prev,
         chatRuntimeControls: updateChatRuntimeControlsForProvider(
@@ -220,8 +196,56 @@ export function useChatModelSelection(params: UseChatModelSelectionParams) {
       chatRuntimeControlsForCurrentProvider,
       chatRuntimeReasoningParams,
       currentConversationIdRef,
-      saveConversationSelection,
       setSettings,
+      sidebarStore,
+      updateConversationRuntimeEntry,
+    ],
+  );
+
+  const handleSelectModel = useCallback(
+    (selection: SelectedModel) => {
+      const conversationId = currentConversationIdRef.current;
+      const currentSelection = activeSelectedModel;
+      const currentControls = normalizeChatRuntimeControlsForProvider(
+        applyConversationThinking(settings.chatRuntimeControls, currentSelection),
+        chatRuntimeReasoningParams,
+      );
+      const nextSelection =
+        currentSelection && !selectedModelsMatch(currentSelection, selection)
+          ? (applyThinkingPatchToSelection(selection, currentControls, {
+              thinkingEnabled: currentControls.thinkingEnabled,
+              reasoning: currentControls.reasoning,
+            }) ?? selection)
+          : selection;
+      updateConversationRuntimeEntry(conversationId, (prev) =>
+        selectedModelsMatch(prev.selectedModel, nextSelection)
+          ? prev
+          : { ...prev, selectedModel: nextSelection },
+      );
+      const persistedRow = sidebarStore.peek(conversationId);
+      const selectedModelJson = serializeSelectedModelJson(nextSelection);
+      if (persistedRow && !persistedRow.isPending && selectedModelJson) {
+        void setChatHistoryModel(conversationId, selectedModelJson)
+          .then((summary) => sidebarStore.upsertLocal({ ...summary, isPending: undefined }))
+          .catch((error) => {
+            updateConversationRuntimeEntry(conversationId, (prev) => ({
+              ...prev,
+              errorMessage: asErrorMessage(error, "保存会话模型选择失败。"),
+            }));
+          });
+      }
+      if (import.meta.env?.VITE_KBRAIN_BACKEND !== "true") {
+        setSettings((prev) => setSelectedModel(prev, selection));
+      }
+    },
+    [
+      activeSelectedModel,
+      chatRuntimeReasoningParams,
+      currentConversationIdRef,
+      settings.chatRuntimeControls,
+      setSettings,
+      sidebarStore,
+      updateConversationRuntimeEntry,
     ],
   );
 

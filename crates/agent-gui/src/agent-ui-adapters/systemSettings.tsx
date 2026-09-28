@@ -1,3 +1,4 @@
+import { invoke } from "@liveagent/app/shims/tauriCore";
 import {
   SettingsSelectContent,
   SettingsSelectTrigger,
@@ -9,7 +10,6 @@ import {
   SettingsGroup,
   SettingsRow,
 } from "@liveagent/ui/pages/settings/shared";
-import { invoke } from "@tauri-apps/api/core";
 import { useMemo } from "react";
 import { inferRuntimePlatform } from "../lib/runtimePlatform";
 import { CLOSE_WINDOW_BEHAVIOR_OPTIONS } from "../lib/settings";

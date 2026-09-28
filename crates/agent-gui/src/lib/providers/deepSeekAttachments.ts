@@ -1,4 +1,5 @@
 import type { Context, UserMessage } from "@earendil-works/pi-ai";
+import { invoke } from "@liveagent/app/shims/tauriCore";
 import {
   getUserMessageAttachments,
   locateUploadedFilesInstructionHeader,
@@ -6,7 +7,6 @@ import {
   type PendingUploadedFile,
   parsePastedTextDisplayReferences,
 } from "@liveagent/ui/lib/chat/uploadedFiles";
-import { invoke } from "@tauri-apps/api/core";
 
 type NativeAttachmentCommandResponse = {
   mimeType: string;

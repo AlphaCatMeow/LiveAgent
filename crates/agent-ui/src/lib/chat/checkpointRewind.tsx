@@ -127,6 +127,7 @@ export type CheckpointRewindAction = {
   available: boolean;
   pending: boolean;
   disabled: boolean;
+  disabledReason?: string;
   onRewind?: () => void;
 };
 
@@ -134,6 +135,7 @@ type CheckpointRewindContextValue = {
   turns: Map<string, CheckpointTurnSummary>;
   loading: boolean;
   disabled: boolean;
+  disabledReason?: string;
   busyTurn: number | null;
   rewind: (turn: CheckpointTurnSummary) => void;
 };
@@ -148,6 +150,7 @@ export function CheckpointRewindProvider(props: {
   conversationId?: string;
   /** 发送/流式中为 true:行内按钮全体禁用,且暂停列表刷新。 */
   disabled?: boolean;
+  disabledReason?: string;
   client: CheckpointRewindClient;
   /**
    * 回退授权的唯一来源:当前会话工作区根 + 仍处于 active 且可写的额外授权根。
@@ -160,6 +163,7 @@ export function CheckpointRewindProvider(props: {
   const {
     children,
     conversationId,
+    disabledReason,
     disabled = false,
     client,
     resolveAuthorizedRoots,
@@ -176,11 +180,12 @@ export function CheckpointRewindProvider(props: {
   // context value 会随宿主每帧重建,流式期间放大成全部用户行重渲染。
   const resolveRootsRef = useRef(resolveAuthorizedRoots);
   const onRewoundRef = useRef(onRewound);
-  const disabledRef = useRef(disabled);
+  const unavailable = disabled || Boolean(disabledReason);
+  const disabledRef = useRef(unavailable);
   useEffect(() => {
     resolveRootsRef.current = resolveAuthorizedRoots;
     onRewoundRef.current = onRewound;
-    disabledRef.current = disabled;
+    disabledRef.current = unavailable;
   });
 
   // 列表加载代际:慢响应(切会话前发出的)一律丢弃,防乱序覆盖。
@@ -212,8 +217,8 @@ export function CheckpointRewindProvider(props: {
 
   // 空闲(挂载/切会话/轮次结束)时刷新;发送中不拉取,半截时间线没有展示价值。
   useEffect(() => {
-    if (!disabled) void loadTurns();
-  }, [disabled, loadTurns]);
+    if (!unavailable) void loadTurns();
+  }, [unavailable, loadTurns]);
 
   // busy 守卫走 ref:rewind 不依赖 busyTurn state,身份保持稳定。
   const busyTurnRef = useRef<number | null>(null);
@@ -371,11 +376,12 @@ export function CheckpointRewindProvider(props: {
     () => ({
       turns: new Map(turns.map((turn) => [turn.turnId, turn])),
       loading,
-      disabled,
+      disabled: unavailable,
+      disabledReason,
       busyTurn,
       rewind: (turn) => void rewind(turn),
     }),
-    [busyTurn, disabled, loading, rewind, turns],
+    [busyTurn, disabledReason, loading, rewind, turns, unavailable],
   );
 
   return (
@@ -398,6 +404,7 @@ export function useCheckpointRewindAction(turnId?: string): CheckpointRewindActi
     available: !!turn,
     pending: !!turn && context.busyTurn === turn.turnSeq,
     disabled: context.disabled || context.loading || context.busyTurn !== null || !turn,
+    disabledReason: context.disabledReason,
     onRewind: turn ? () => context.rewind(turn) : undefined,
   };
 }

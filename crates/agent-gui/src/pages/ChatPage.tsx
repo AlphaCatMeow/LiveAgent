@@ -1,3 +1,5 @@
+import { invoke } from "@liveagent/app/shims/tauriCore";
+import { listen } from "@liveagent/app/shims/tauriEvent";
 import { openUrl } from "@liveagent/app/shims/tauriOpener";
 import { ApplicationView } from "@liveagent/ui/application/ApplicationView";
 import { AppWorkbenchChrome } from "@liveagent/ui/application/AppWorkbenchChrome";
@@ -101,8 +103,6 @@ import {
   surfaceIdentityKey,
   surfaceProjectRef,
 } from "@liveagent/ui/lib/workbench/types";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import {
   type CSSProperties,
   lazy,
@@ -139,6 +139,7 @@ import {
 } from "../lib/chat/page/chatPageHelpers";
 import { skillMentionInjection } from "../lib/chat/skills/mentionInjection";
 import { tauriGitClient } from "../lib/git/tauriGitClient";
+import { useKBrainCatalogSettings } from "../lib/kbrain/catalog";
 import { buildMemoryOverviewSection } from "../lib/memory/prompts/injection";
 import { createProviderRuntimeConfig, toModelValue } from "../lib/providers/llm";
 import {
@@ -289,7 +290,7 @@ export function ChatPage(props: ChatPageProps) {
 }
 function ChatPageContent(props: ChatPageProps) {
   const {
-    settings,
+    settings: directSettings,
     setSettings,
     sttProviderOverride,
     getMcpSettings,
@@ -301,6 +302,7 @@ function ChatPageContent(props: ChatPageProps) {
     appUpdate,
     onRunningConversationCountChange,
   } = props;
+  const { settings, error: modelCatalogError } = useKBrainCatalogSettings(directSettings);
   // Monaco reads NLS globals while the lazy editor module imports monaco-editor.
   setPreferredMonacoNlsLocale(settings.locale);
   const effectiveTheme = resolveEffectiveTheme(settings.theme);
@@ -342,6 +344,7 @@ function ChatPageContent(props: ChatPageProps) {
   const { confirm: requestConfirmDialog, dialog: confirmDialog } = useConfirmDialog();
 
   const isAgentMode = isAgentExecutionMode(settings.system.executionMode);
+  const kBrainBackendEnabled = import.meta.env?.VITE_KBRAIN_BACKEND === "true";
   const isAgentDevExecutionMode = isAgentDevMode(settings.system.executionMode);
   const workdir = settings.system.workdir.trim();
   const activeAgentPrompt = useMemo(() => {
@@ -453,6 +456,7 @@ function ChatPageContent(props: ChatPageProps) {
   const sidebarConversationsById = useSidebarSelector(sidebarStore, (s) => s.byId);
   const {
     canShareHistory,
+    shareBackendUrl,
     shareConversation,
     shareStatus,
     shareLoading,
@@ -487,7 +491,7 @@ function ChatPageContent(props: ChatPageProps) {
   });
 
   const { availableSkills, skillsRootDir, refreshSkills } = useChatSkills({
-    skillsEnabled: settings.skills.enabled && isAgentMode,
+    skillsEnabled: !kBrainBackendEnabled && settings.skills.enabled && isAgentMode,
     selectedSkillNames: settings.skills.selected,
     setSettings,
   });
@@ -723,7 +727,8 @@ function ChatPageContent(props: ChatPageProps) {
     () => resolveWorkspaceResources(settings, displayedConversationWorkdir),
     [displayedConversationWorkdir, settings],
   );
-  const skillsEnabled = activeWorkspaceResources.skillsEnabled && isAgentMode;
+  const skillsEnabled =
+    !kBrainBackendEnabled && activeWorkspaceResources.skillsEnabled && isAgentMode;
   const selectedSkillNames = useMemo(
     () => (skillsEnabled ? activeWorkspaceResources.skillNames : []),
     [activeWorkspaceResources.skillNames, skillsEnabled],
@@ -733,7 +738,10 @@ function ChatPageContent(props: ChatPageProps) {
     selectedSkillNames,
     skillsEnabled,
   );
-  const mentionApps = useMentionApps(activeWorkspaceResources.mcpServers, isAgentMode);
+  const mentionApps = useMentionApps(
+    activeWorkspaceResources.mcpServers,
+    isAgentMode && !kBrainBackendEnabled,
+  );
   const terminalProjectPath = isAgentMode ? activeWorkspaceProjectPath.trim() : "";
   const terminalProjectPathKey = terminalProjectPath
     ? workspaceProjectPathKey(terminalProjectPath)
@@ -854,7 +862,7 @@ function ChatPageContent(props: ChatPageProps) {
   }, [conversationRuntimeCacheRef, runningConversationIds, sidebarStore]);
 
   const { addNotify } = useNotifyToasts({
-    errorMessage,
+    errorMessage: errorMessage ?? modelCatalogError,
     hookWarning,
     compactionStatus,
   });
@@ -1328,6 +1336,7 @@ function ChatPageContent(props: ChatPageProps) {
   );
 
   useEffect(() => {
+    if (kBrainBackendEnabled) return;
     const previous = previousSubagentRuntimeConversationRef.current;
     if (previous && previous !== currentConversationId) {
       subagentStoresRef.current.dispose(previous);
@@ -1609,6 +1618,9 @@ function ChatPageContent(props: ChatPageProps) {
   // 不到工作区上下文，返回空提示词（当前会话必须同源，后台保持现状）。
   const resolveManualCompactionPromptInputs = useCallback(
     async (input: { isCurrentConversation: boolean; workdir?: string }) => {
+      if (kBrainBackendEnabled) {
+        throw new Error("Frontend compaction is unavailable in K-brain mode.");
+      }
       if (!input.isCurrentConversation) {
         return { activeAgentPrompt, skillsPrompt: "", memoryPrompt: "" };
       }
@@ -4058,7 +4070,7 @@ function ChatPageContent(props: ChatPageProps) {
           fontScale={settings.customSettings.fontScale.sidebar}
           conversationSearchRequestKey={conversationSearchRequestKey}
           activeView={activeView}
-          showProjects={isAgentMode}
+          showProjects={isAgentMode && !kBrainBackendEnabled}
           projects={workspaceProjects}
           workspaceProjectGroups={workspaceProjectGroups}
           activeProjectId={activeWorkspaceProject?.id ?? ""}
@@ -4152,6 +4164,7 @@ function ChatPageContent(props: ChatPageProps) {
                   isUpdating={shareUpdating}
                   errorMessage={shareError}
                   shareOrigin={sharedManagerShareOrigin}
+                  shareBackendUrl={shareBackendUrl}
                   shareOriginPort={sharedManagerShareOriginPort}
                   shareOriginLoading={sharedManagerGatewayUrlLoading}
                   onToggle={handleToggleHistoryShare}
@@ -4168,6 +4181,7 @@ function ChatPageContent(props: ChatPageProps) {
                   updatingIds={sharedManagerUpdatingIds}
                   errors={sharedManagerErrors}
                   shareOrigin={sharedManagerShareOrigin}
+                  shareBackendUrl={shareBackendUrl}
                   shareOriginPort={sharedManagerShareOriginPort}
                   shareOriginLoading={sharedManagerGatewayUrlLoading}
                   onRefresh={handleRefreshSharedHistoryStatuses}

@@ -10,9 +10,9 @@
  * - 非 Tauri 环境（vite dev / WebUI 无此模块）invoke 失败静默。
  */
 
+import { invoke } from "@liveagent/app/shims/tauriCore";
 import type { CronTask } from "@liveagent/ui/lib/automation/types";
 import type { SidebarConversation } from "@liveagent/ui/lib/sidebar/types";
-import { invoke } from "@tauri-apps/api/core";
 import { type Locale, t } from "../../i18n/config";
 import type { AppSettings, Theme, WorkspaceProject } from "../settings";
 import { workspaceProjectPathKey } from "../settings";

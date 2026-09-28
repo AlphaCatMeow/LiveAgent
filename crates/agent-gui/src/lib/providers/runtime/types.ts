@@ -24,8 +24,13 @@ declare const PROVIDER_RUNTIME_CONFIG_BRAND: unique symbol;
  * 请求头在聊天全链路上失效的根因。需要派生请用展开（{...runtime, reasoning}），
  * 品牌随展开保留。
  */
+export type ProviderRuntimeBackend = "direct" | "kbrain";
+
 export type ProviderRuntimeConfig = {
   readonly [PROVIDER_RUNTIME_CONFIG_BRAND]: true;
+  backend: ProviderRuntimeBackend;
+  /** Opaque K-brain catalog provider ID; never a vendor credential. */
+  backendModelProvider?: string;
   baseUrl: string;
   isFullUrl: boolean;
   apiKey: string;

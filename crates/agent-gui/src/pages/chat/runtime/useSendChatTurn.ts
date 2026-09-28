@@ -1,4 +1,5 @@
 import type { Context, UserMessage } from "@earendil-works/pi-ai";
+import { invoke } from "@liveagent/app/shims/tauriCore";
 import type {
   MentionComposerDraft,
   MentionComposerHandle,
@@ -20,7 +21,6 @@ import {
   resolveExplicitSkillMentions,
   type SkillSummary,
 } from "@liveagent/ui/lib/skills/index";
-import { invoke } from "@tauri-apps/api/core";
 import type { Dispatch, MutableRefObject, SetStateAction } from "react";
 import { useCallback } from "react";
 import { createHookRunScope } from "../../../lib/automation/hookRunner";
@@ -54,6 +54,7 @@ import {
 } from "../../../lib/chat/page/chatPageHelpers";
 import { skillMentionInjection } from "../../../lib/chat/skills/mentionInjection";
 import { createStreamDebugLogger } from "../../../lib/debug/agentDebug";
+import { liveAgentRuntimeCapabilities } from "../../../lib/host";
 import { createModelFromConfig, createProviderRuntimeConfig } from "../../../lib/providers/llm";
 import {
   type AppSettings,
@@ -332,6 +333,11 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     afterInitialHistoryPersist?: () => Promise<void>;
     editResendBaseMessageRef?: HistoryMessageRef;
   }) {
+    const capabilities = liveAgentRuntimeCapabilities();
+    if (!capabilities.gatewayMirror && overrides?.gatewayBridgeRequestOverride) {
+      setErrorMessage("LiveAgent Gateway chat requests are unavailable in K-brain mode.");
+      return false;
+    }
     const overrideConversationId = overrides?.conversationIdOverride?.trim() ?? "";
     const conversationId = overrideConversationId || currentConversationIdRef.current;
     if (!conversationId) {
@@ -382,7 +388,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       (project) => workspaceProjectPathKey(project.path) === effectiveProjectPathKey,
     );
     let additionalRoots: AdditionalProjectRoot[] = [];
-    if (effectiveIsAgentMode && effectiveProject) {
+    if (capabilities.frontendContext && effectiveIsAgentMode && effectiveProject) {
       try {
         additionalRoots = (await listWorkspaceRootGrants(effectiveProject))
           .filter((grant) => grant.state === "active")
@@ -404,11 +410,13 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     );
     const effectiveIsAgentDevExecutionMode = isAgentDevMode(effectiveExecutionMode);
     const workspaceResources = resolveWorkspaceResources(settings, effectiveWorkdir);
-    const effectiveSkillsEnabled = workspaceResources.skillsEnabled && effectiveIsAgentMode;
+    const effectiveSkillsEnabled =
+      capabilities.frontendContext && workspaceResources.skillsEnabled && effectiveIsAgentMode;
     const selectedSkillNames = effectiveSkillsEnabled ? workspaceResources.skillNames : [];
     const getEffectiveMcpSettings = () =>
       filterMcpSettingsForWorkspace(getMcpSettings(), workspaceResources);
     const hasRemoteGatewayTarget =
+      capabilities.gatewayMirror &&
       settings.remote.enabled &&
       settings.remote.gatewayUrl.trim() !== "" &&
       settings.remote.token.trim() !== "";
@@ -522,7 +530,10 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     // and text runtimes). The switch callback makes the winning fallback the
     // conversation's selection so follow-up turns start on the healthy
     // provider directly.
-    const failoverPlan = buildModelFailoverPlan(settings, effectiveSelectedModel, runtimeControls);
+    const failoverPlan =
+      providerConfig.backend === "direct"
+        ? buildModelFailoverPlan(settings, effectiveSelectedModel, runtimeControls)
+        : undefined;
     const failoverParams = failoverPlan
       ? {
           config: failoverPlan.config,
@@ -543,7 +554,9 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
           },
         }
       : undefined;
-    const memorySummaryModelSelection = resolveMemorySummaryModelSelection(settings);
+    // Frontend memory extraction and its model override are direct-only.
+    const memorySummaryModelSelection =
+      providerConfig.backend === "direct" ? resolveMemorySummaryModelSelection(settings) : null;
     const memoryExtractionModel = memorySummaryModelSelection
       ? {
           providerId: memorySummaryModelSelection.providerId,
@@ -577,8 +590,8 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     const runtimeModel = createModelFromConfig(
       providerId,
       model,
-      provider.baseUrl.trim(),
-      provider.requestFormat,
+      providerConfig.baseUrl.trim(),
+      providerConfig.requestFormat,
       providerConfig.modelConfig,
     );
 
@@ -729,15 +742,18 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
 
     let titlePromise: Promise<string | null> | null = null;
     if (isFirstTurn || isBranchDefaultTitle) {
-      const titleModelSelection = resolveConversationTitleModelSelection(
-        settings,
-        effectiveSelectedModel,
-      );
-      const titleProviderConfig = createProviderRuntimeConfig(
-        titleModelSelection.provider,
-        titleModelSelection.model,
-        runtimeControls,
-      );
+      const titleModelSelection =
+        providerConfig.backend === "direct"
+          ? resolveConversationTitleModelSelection(settings, effectiveSelectedModel)
+          : effectiveSelectedModel;
+      const titleProviderConfig =
+        providerConfig.backend === "direct"
+          ? createProviderRuntimeConfig(
+              titleModelSelection.provider,
+              titleModelSelection.model,
+              runtimeControls,
+            )
+          : providerConfig;
       titlePromise = startConversationTitleJob({
         providerId: titleModelSelection.providerId,
         model: titleModelSelection.model,
@@ -1040,20 +1056,23 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
         // barrier so an open trajectory view cannot race and reload the stale pre-rebase window.
         invalidateDesktopTrajectory(conversationId);
         trajectoryMessageIndex = Math.max(0, nextConversationState.meta.totalMessageCount - 1);
-        trajectoryTurn = await resolveTrajectoryTurnNumber({
-          conversationId,
-          currentUserPersisted: true,
-          fallbackTurn: nextConversationState.meta.totalMessageCount,
-        });
+        if (capabilities.trajectory) {
+          trajectoryTurn = await resolveTrajectoryTurnNumber({
+            conversationId,
+            currentUserPersisted: true,
+            fallbackTurn: nextConversationState.meta.totalMessageCount,
+          });
+        }
         const keepParentToolCallIds =
           collectRetainedSubagentParentToolCallIds(nextConversationState);
         subagentStoresRef.current.invalidate(conversationId);
-        await pruneSubagentRunsForConversation({
-          parentConversationId: conversationId,
-          keepParentToolCallIds,
-        }).catch((error) => {
-          console.warn("edit-resend subagent cleanup failed", error);
-        });
+        if (capabilities.frontendContext)
+          await pruneSubagentRunsForConversation({
+            parentConversationId: conversationId,
+            keepParentToolCallIds,
+          }).catch((error) => {
+            console.warn("edit-resend subagent cleanup failed", error);
+          });
       } catch (error) {
         const message = asErrorMessage(error, "替换编辑消息失败，原历史保持不变。");
         cancellation.userStop.abort();
@@ -1144,7 +1163,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       }
     }
 
-    if (!initialUserTurnPersisted) {
+    if (capabilities.trajectory && !initialUserTurnPersisted) {
       trajectoryTurn = await resolveTrajectoryTurnNumber({
         conversationId,
         currentUserPersisted: false,
@@ -1251,7 +1270,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       // this message can anchor its rebase without a history round-trip.
       messageRef: findHistoryMessageRefByMessageId(nextConversationState, pendingUserMessage.id),
     });
-    if (effectiveIsAgentMode) {
+    if (capabilities.checkpoints && effectiveIsAgentMode) {
       try {
         await invoke("checkpoint_begin_turn", {
           conversation_id: conversationId,
@@ -1265,10 +1284,13 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       return true;
     }
     acknowledgeGatewayRunStarted();
-    const [{ memoryTurnInjection }, { buildMemoryOverviewSection }] = await Promise.all([
-      import("../../../lib/chat/memory/injectionController"),
-      import("../../../lib/memory/prompts/injection"),
-    ]);
+    const memoryRuntime = capabilities.frontendContext
+      ? await Promise.all([
+          import("../../../lib/chat/memory/injectionController"),
+          import("../../../lib/memory/prompts/injection"),
+        ])
+      : null;
+    const memoryTurnInjection = memoryRuntime?.[0].memoryTurnInjection;
     let skillsPrompt = "";
     let memoryPrompt = "";
     /** 本轮 `/skill-name` 显式提及块;没有提及时恒为空串,不会挂出任何内容。 */
@@ -1286,40 +1308,43 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
 
     // recorder 跨轮存活：header 分段去重靠的就是「上一份 refs」，每轮新建会让
     // 去重立刻失效。这里只更新本轮的活动 segment。
-    const trajectoryRecording = acquireTrajectoryRecorder(
-      conversationId,
-      getActiveSegment(nextConversationState)?.segmentIndex ??
-        nextConversationState.meta.activeSegmentIndex,
-      // registry 已写入桌面实时缓存；这里只下发给 WebUI 轨迹页。
-      (events) => {
-        for (const event of events) {
-          gatewayBridgeEvents.queueEvent({
-            type: "trajectory",
-            event,
-            conversation_id: conversationId,
-          });
-        }
-      },
-    );
+    const trajectoryRecording = capabilities.trajectory
+      ? acquireTrajectoryRecorder(
+          conversationId,
+          getActiveSegment(nextConversationState)?.segmentIndex ??
+            nextConversationState.meta.activeSegmentIndex,
+          // registry 已写入桌面实时缓存；这里只下发给 WebUI 轨迹页。
+          (events) => {
+            for (const event of events) {
+              gatewayBridgeEvents.queueEvent({
+                type: "trajectory",
+                event,
+                conversation_id: conversationId,
+              });
+            }
+          },
+        )
+      : undefined;
     // 压缩有四条触发路径，逐个调用点埋点必漏；订阅控制器生命周期一次覆盖全部。
     // manual 发生在两轮之间，不属于任何 turn。
-    compaction.setObserver({
-      onStart: ({ trigger }) => {
-        trajectoryRecording.recorder.compactionStart({ standalone: trigger === "manual" });
-      },
-      onEnd: ({ trigger, status, tokensBefore, tokensAfter, newSegmentIndex, error }) => {
-        trajectoryRecording.recorder.compactionEnd({
-          status,
-          standalone: trigger === "manual",
-          ...(tokensBefore === undefined ? {} : { tokensBefore }),
-          ...(tokensAfter === undefined ? {} : { tokensAfter }),
-          ...(error === undefined ? {} : { error }),
-        });
-        if (status === "complete" && newSegmentIndex !== undefined) {
-          updateTrajectoryRecorderSegment(conversationId, newSegmentIndex);
-        }
-      },
-    });
+    if (trajectoryRecording)
+      compaction.setObserver({
+        onStart: ({ trigger }) => {
+          trajectoryRecording.recorder.compactionStart({ standalone: trigger === "manual" });
+        },
+        onEnd: ({ trigger, status, tokensBefore, tokensAfter, newSegmentIndex, error }) => {
+          trajectoryRecording.recorder.compactionEnd({
+            status,
+            standalone: trigger === "manual",
+            ...(tokensBefore === undefined ? {} : { tokensBefore }),
+            ...(tokensAfter === undefined ? {} : { tokensAfter }),
+            ...(error === undefined ? {} : { error }),
+          });
+          if (status === "complete" && newSegmentIndex !== undefined) {
+            updateTrajectoryRecorderSegment(conversationId, newSegmentIndex);
+          }
+        },
+      });
 
     function buildPreparedContext(
       state: ConversationViewState,
@@ -1330,6 +1355,10 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
         includeMemoryTurnUpdates?: boolean;
       },
     ): Context {
+      if (!capabilities.frontendContext) {
+        const context = buildRequestContext(state, options);
+        return { messages: context.messages };
+      }
       return buildPreparedConversationContext({
         state,
         tools,
@@ -1343,7 +1372,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
         memoryTurnUpdates:
           options?.includeMemoryTurnUpdates === false
             ? null
-            : memoryTurnInjection.getMessageUpdates(conversationId),
+            : memoryTurnInjection?.getMessageUpdates(conversationId),
         // 显式提及块与 memory 增量同一个口径:同样是合成出来的上下文,不能被
         // 记忆抽取这类旁路当成用户说的话再抽一遍。
         skillMentionUpdates:
@@ -1369,7 +1398,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
         activeAgentPrompt: effectiveAgentPrompt,
         skillsPrompt,
         memoryPrompt,
-        memoryTurnUpdates: memoryTurnInjection.getMessageUpdates(conversationId),
+        memoryTurnUpdates: memoryTurnInjection?.getMessageUpdates(conversationId),
         skillMentionUpdates: skillMentionInjection.getMessageUpdates(conversationId),
         includeAbortedMessages: options?.includeAbortedMessages,
         includeUploadedFilesMetadata: options?.includeUploadedFilesMetadata,
@@ -1377,74 +1406,82 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       });
     }
 
-    compaction.bindTurn({
-      providerId,
-      model,
-      runtime: providerConfig,
-      cancellation,
-      debugLogger: compactionDebugLogger,
-      buildPreparedContext,
-      buildResumeContext,
-      presend: {
-        baseState: baseConversationState,
-        pendingUserText: content,
-        composerText: content,
-        uploadedFiles,
-        composeAppliedState: (state) => appendMessagesToConversation(state, [pendingUserMessage]),
-      },
-      sinks: {
-        applyState: applyConversationState,
-        applyStateMidRun: rebaseConversationStateDuringRun,
-        publishStatus: (status) =>
-          updateConversationRuntimeEntry(conversationId, (prev) => ({
-            ...prev,
-            compactionStatus: status,
-          })),
-        setBridgeToolStatus: updateGatewayBridgeToolStatus,
-        queueCheckpoint: (state, contextUsageTokens) =>
-          gatewayBridgeEvents.queueCheckpoint(state, contextUsageTokens),
-        persist: (state) =>
-          persistConversation({
-            conversationId,
-            sessionId,
-            providerId,
-            model,
-            selectedModel,
-            cwd: historyCwd,
-            state,
-            fallbackTitle,
-            createdAt,
-            titlePromise,
-          }),
-        restoreComposer: (composerText, restoredUploads) => {
-          if (isConversationVisible() && typeof composerText === "string") {
-            composerRef.current?.setText(composerText);
-            composerRef.current?.focus();
-          }
-          setPendingUploadsForConversation(conversationId, restoredUploads);
+    if (capabilities.frontendContext) {
+      compaction.bindTurn({
+        providerId,
+        model,
+        runtime: providerConfig,
+        cancellation,
+        debugLogger: compactionDebugLogger,
+        complete:
+          providerConfig.backend === "kbrain"
+            ? async () => {
+                throw new Error("Frontend compaction is unavailable in K-brain mode.");
+              }
+            : undefined,
+        buildPreparedContext,
+        buildResumeContext,
+        presend: {
+          baseState: baseConversationState,
+          pendingUserText: content,
+          composerText: content,
+          uploadedFiles,
+          composeAppliedState: (state) => appendMessagesToConversation(state, [pendingUserMessage]),
         },
-        persistRollback: async (state) => {
-          abortedConversationCommitted = true;
-          await persistConversationWithHistorySync({
-            conversationId,
-            sessionId,
-            providerId,
-            model,
-            selectedModel,
-            cwd: historyCwd,
-            state,
-            fallbackTitle,
-            createdAt,
-            titlePromise,
-          });
+        sinks: {
+          applyState: applyConversationState,
+          applyStateMidRun: rebaseConversationStateDuringRun,
+          publishStatus: (status) =>
+            updateConversationRuntimeEntry(conversationId, (prev) => ({
+              ...prev,
+              compactionStatus: status,
+            })),
+          setBridgeToolStatus: updateGatewayBridgeToolStatus,
+          queueCheckpoint: (state, contextUsageTokens) =>
+            gatewayBridgeEvents.queueCheckpoint(state, contextUsageTokens),
+          persist: (state) =>
+            persistConversation({
+              conversationId,
+              sessionId,
+              providerId,
+              model,
+              selectedModel,
+              cwd: historyCwd,
+              state,
+              fallbackTitle,
+              createdAt,
+              titlePromise,
+            }),
+          restoreComposer: (composerText, restoredUploads) => {
+            if (isConversationVisible() && typeof composerText === "string") {
+              composerRef.current?.setText(composerText);
+              composerRef.current?.focus();
+            }
+            setPendingUploadsForConversation(conversationId, restoredUploads);
+          },
+          persistRollback: async (state) => {
+            abortedConversationCommitted = true;
+            await persistConversationWithHistorySync({
+              conversationId,
+              sessionId,
+              providerId,
+              model,
+              selectedModel,
+              cwd: historyCwd,
+              state,
+              fallbackTitle,
+              createdAt,
+              titlePromise,
+            });
+          },
+          // 压缩把携带 memory 增量块的 user 消息移出 active segment,增量对模型
+          // 永久不可见;丢弃注入状态,下一轮把 fresh 快照重冻结进 system 段 ——
+          // 压缩本来就要重建前缀,这次重冻结免费。
+          onCompacted: () => memoryTurnInjection?.invalidate(conversationId),
         },
-        // 压缩把携带 memory 增量块的 user 消息移出 active segment,增量对模型
-        // 永久不可见;丢弃注入状态,下一轮把 fresh 快照重冻结进 system 段 ——
-        // 压缩本来就要重建前缀,这次重冻结免费。
-        onCompacted: () => memoryTurnInjection.invalidate(conversationId),
-      },
-    });
-    compactionBound = true;
+      });
+      compactionBound = true;
+    }
 
     // Optionally append skills metadata to system prompt (progressive disclosure).
     if (effectiveSkillsEnabled && selectedSkillNames.length > 0) {
@@ -1522,34 +1559,37 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     // 因此只有首轮走 system prompt(那时它本就是稳定前缀的一部分),之后 system
     // 段冻结,变化改挂到当轮 user 消息尾部 —— 复用 pi-ai 已经打在最后一条 user
     // 消息上的那个断点,不额外占用 Anthropic 的 4 个 cache_control 名额。
-    let memoryOverview: string | null = null;
-    try {
-      memoryOverview = await buildMemoryOverviewSection(effectiveWorkdir);
-    } catch (error) {
-      console.warn("Failed to build memory overview prompt", error);
-      // null 表示这轮没读到,基线维持原样;空串是「一条记忆都没有」,属于正常内容。
-      memoryOverview = null;
+    if (memoryRuntime && memoryTurnInjection) {
+      const { buildMemoryOverviewSection } = memoryRuntime[1];
+      let memoryOverview: string | null = null;
+      try {
+        memoryOverview = await buildMemoryOverviewSection(effectiveWorkdir);
+      } catch (error) {
+        console.warn("Failed to build memory overview prompt", error);
+        // null 表示这轮没读到,基线维持原样;空串是「一条记忆都没有」,属于正常内容。
+        memoryOverview = null;
+      }
+      if (await finishRequestedStopBeforeRuntime()) {
+        return true;
+      }
+      // 放在停止检查之后:这一轮被停掉时请求根本没发出去,提前推进基线会让下一轮
+      // 漏报这次变化。
+      memoryPrompt = memoryTurnInjection.planTurn({
+        conversationId,
+        messageId: pendingUserMessage.id,
+        overview: memoryOverview,
+        // project 段随 workdir 换血,增量 diff 无法保真表达;基线记录冻结时的
+        // workdir,切换时由 planTurn 触发重冻结。
+        workdir: effectiveWorkdir,
+      }).systemText;
+      // 同样放在停止检查之后:这一轮被停掉时消息根本没发出去,提前记账只会给一个
+      // 永远对不上的消息 id 留下垃圾块。空块不会创建任何状态。
+      skillMentionInjection.record({
+        conversationId,
+        messageId: pendingUserMessage.id,
+        block: explicitSkillMentionBlock,
+      });
     }
-    if (await finishRequestedStopBeforeRuntime()) {
-      return true;
-    }
-    // 放在停止检查之后:这一轮被停掉时请求根本没发出去,提前推进基线会让下一轮
-    // 漏报这次变化。
-    memoryPrompt = memoryTurnInjection.planTurn({
-      conversationId,
-      messageId: pendingUserMessage.id,
-      overview: memoryOverview,
-      // project 段随 workdir 换血,增量 diff 无法保真表达;基线记录冻结时的
-      // workdir,切换时由 planTurn 触发重冻结。
-      workdir: effectiveWorkdir,
-    }).systemText;
-    // 同样放在停止检查之后:这一轮被停掉时消息根本没发出去,提前记账只会给一个
-    // 永远对不上的消息 id 留下垃圾块。空块不会创建任何状态。
-    skillMentionInjection.record({
-      conversationId,
-      messageId: pendingUserMessage.id,
-      block: explicitSkillMentionBlock,
-    });
 
     const hookScope = createHookRunScope({
       hooks: getAutomationState().hooks.hooks,
@@ -1787,11 +1827,11 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
             commitVisibleAbortedConversation,
             persistConversationWithHistorySync: persistTerminalConversation,
             freezeGatewayFinalProjection,
-            trajectory: trajectoryRecording.recorder,
+            trajectory: trajectoryRecording?.recorder,
             trajectoryTurn,
             trajectoryMessageIndex,
             trajectoryMessageId: pendingUserMessage.id,
-            readTrajectorySlots: trajectoryRecording.readSlots,
+            readTrajectorySlots: trajectoryRecording?.readSlots,
           },
         });
       } else {
@@ -1833,11 +1873,11 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
             commitVisibleAbortedConversation,
             persistConversationWithHistorySync: persistTerminalConversation,
             freezeGatewayFinalProjection,
-            trajectory: trajectoryRecording.recorder,
+            trajectory: trajectoryRecording?.recorder,
             trajectoryTurn,
             trajectoryMessageIndex,
             trajectoryMessageId: pendingUserMessage.id,
-            readTrajectorySlots: trajectoryRecording.readSlots,
+            readTrajectorySlots: trajectoryRecording?.readSlots,
           },
         });
       }
@@ -1889,11 +1929,11 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
           : gatewayRuntimeFinalState === "cancelled"
             ? "aborted"
             : "error";
-      trajectoryRecording.recorder.endTurn({
+      trajectoryRecording?.recorder.endTurn({
         status: trajectoryStatus,
         ...(gatewayRuntimeErrorMessage ? { error: gatewayRuntimeErrorMessage } : {}),
       });
-      await trajectoryRecording.recorder.flush();
+      await trajectoryRecording?.recorder.flush();
       await finalizeConversationRun(gatewayRuntimeFinalState);
       clearConversationStopHandler(conversationId, handleConversationStop);
       pruneIdleConversationCaches([conversationId]);

@@ -1,4 +1,5 @@
 import type { Api, Context, Model } from "@earendil-works/pi-ai";
+import { invoke } from "@liveagent/app/shims/tauriCore";
 import {
   getUserMessageAttachments,
   matchesUploadedFileInstructionLine,
@@ -6,7 +7,6 @@ import {
   UPLOADED_FILES_INSTRUCTION_HEADER_TEXTS,
   UPLOADED_FILES_READ_PAGING_HINT,
 } from "@liveagent/ui/lib/chat/uploadedFiles";
-import { invoke } from "@tauri-apps/api/core";
 
 type PayloadHook = (payload: unknown, model: Model<Api>) => unknown | Promise<unknown>;
 

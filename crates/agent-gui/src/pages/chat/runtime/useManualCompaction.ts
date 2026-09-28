@@ -1,5 +1,5 @@
+import { invoke } from "@liveagent/app/shims/tauriCore";
 import { deriveContextUsageTokens } from "@liveagent/ui/lib/chat/contextUsage";
-import { invoke } from "@tauri-apps/api/core";
 import type { MutableRefObject } from "react";
 import { useCallback } from "react";
 import type {

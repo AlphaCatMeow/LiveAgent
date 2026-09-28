@@ -1,7 +1,8 @@
 import type { ToolCall, ToolResultMessage } from "@earendil-works/pi-ai";
+import { homeDir } from "@liveagent/app/shims/tauriPath";
 import type { ConversationMentionReference } from "@liveagent/ui/lib/chat/mentionReferences";
 import type { SystemToolRuntimeScope } from "@liveagent/ui/lib/tools/systemToolOptions";
-import { homeDir } from "@tauri-apps/api/path";
+import { isKBrainBackendEnabled } from "../host";
 import type { RuntimePlatform } from "../runtimePlatform";
 import {
   type McpSettings,
@@ -216,6 +217,11 @@ type BaseBuiltinToolBundles = {
 async function buildBaseBuiltinToolBundles(
   params: BuildBuiltinBaseToolRegistryParams,
 ): Promise<BaseBuiltinToolBundles> {
+  if (isKBrainBackendEnabled()) {
+    throw new Error(
+      "Frontend tools are unavailable in K-brain mode; tools are owned by the backend.",
+    );
+  }
   const baseBundles: BuiltinToolBundle[] = [
     createFsTools({
       workdir: params.workdir,

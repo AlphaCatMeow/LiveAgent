@@ -1,10 +1,11 @@
+import { invoke } from "@liveagent/app/shims/tauriCore";
+import { type Event, listen } from "@liveagent/app/shims/tauriEvent";
 import type { ClarifyMessage } from "@liveagent/ui/components/chat/clarify/clarifyTypes";
 import { normalizeConversationMentionReferences } from "@liveagent/ui/lib/chat/mentionReferences";
 import { createUuid } from "@liveagent/ui/lib/shared/id";
-import { invoke } from "@tauri-apps/api/core";
-import { type Event, listen } from "@tauri-apps/api/event";
 import { useEffect, useRef } from "react";
 import type { HistoryMessageRef } from "../../../lib/chat/conversation/conversationState";
+import { isKBrainBackendEnabled } from "../../../lib/host";
 import { type ChatRuntimeControls, normalizeChatRuntimeControls } from "../../../lib/settings";
 import { createTextComposerDraft } from "../composer/composerDraftText";
 import { createClarifyDeltaForwarder } from "./clarifyDeltaForwarder";
@@ -160,6 +161,7 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
   }
 
   useEffect(() => {
+    if (isKBrainBackendEnabled()) return;
     let disposed = false;
     let unlistenChatRequestReady: (() => void) | null = null;
     let unlistenChatRuntimeWake: (() => void) | null = null;

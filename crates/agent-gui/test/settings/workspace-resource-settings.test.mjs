@@ -254,7 +254,18 @@ test("chat runtime resolves and snapshots workspace resources from the effective
   assert.match(sendRuntime, /getMcpSettings: getEffectiveMcpSettings/);
   assert.match(sendRuntime, /missing\.length > 0 && workspaceResources\.mode !== "custom"/);
   assert.match(guiChatPage, /resolveWorkspaceResources\(settings, displayedConversationWorkdir\)/);
-  assert.match(guiChatPage, /skillsEnabled: settings\.skills\.enabled && isAgentMode/);
+  assert.match(
+    guiChatPage,
+    /skillsEnabled: !kBrainBackendEnabled && settings\.skills\.enabled && isAgentMode/,
+  );
+  assert.match(
+    guiChatPage,
+    /const skillsEnabled =\s*!kBrainBackendEnabled && activeWorkspaceResources\.skillsEnabled && isAgentMode/,
+  );
+  assert.match(
+    sendRuntime,
+    /const effectiveSkillsEnabled =\s*capabilities\.frontendContext && workspaceResources\.skillsEnabled && effectiveIsAgentMode/,
+  );
   assert.match(sharedProjectSettings, /chat\.workspaceResourcesMissingSkill/);
 });
 

@@ -1,3 +1,4 @@
+import { listen } from "@liveagent/app/shims/tauriEvent";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -44,7 +45,6 @@ import { Switch } from "@liveagent/ui/components/ui/switch";
 import { toast } from "@liveagent/ui/components/ui/toast-manager";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { cn } from "@liveagent/ui/lib/shared/utils";
-import { listen } from "@tauri-apps/api/event";
 import { type ReactNode, useCallback, useEffect, useId, useState } from "react";
 import {
   applyBackupImport,

@@ -13,6 +13,8 @@ for (const node of parseTypeScriptSource(hostSource, "host.tsx").program.body) {
   if (name === "react" || name === "./ConversationPaneHostEnvironment" || name === "./paneComposerDraftSession") continue;
   mocks[name] = Object.fromEntries(node.specifiers.filter(s => s.type === "ImportSpecifier").map(s => [s.imported.name, () => null]));
 }
+mocks["@liveagent/ui/i18n/index"] = { useLocale: () => ({ locale: "en", t: key => key }) };
+mocks["../../../lib/host"] = { isKBrainBackendEnabled: () => false };
 let surfaceRenders = 0;
 mocks["./ConversationSurface"] = { ConversationSurface: () => { surfaceRenders++; return null; } };
 const env = await createDomTestEnv({ mocks });

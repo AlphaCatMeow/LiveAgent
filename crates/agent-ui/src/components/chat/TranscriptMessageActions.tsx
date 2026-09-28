@@ -72,7 +72,9 @@ export function TranscriptUserMessageActions(
   const { t } = useLocale();
   // Provider 外(只读分享页等)返回 null:整颗按钮不渲染。
   const rewind = useCheckpointRewindAction(rewindTurnId);
-  const rewindTitle = rewind?.available ? t("chat.rewindCode") : t("chat.rewindUnavailable");
+  const rewindTitle =
+    rewind?.disabledReason ??
+    (rewind?.available ? t("chat.rewindCode") : t("chat.rewindUnavailable"));
 
   return (
     <div className="mt-1 flex items-center justify-end gap-1.5 web:min-h-24px web:no-hover:opacity-100 web:max-640:opacity-100">

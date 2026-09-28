@@ -22,6 +22,7 @@ import { AgentsSection } from "./AgentsSection";
 import { CronSection } from "./CronSection";
 import { CuaDriverSection } from "./CuaDriverSection";
 import { HooksSection } from "./HooksSection";
+import { KBrainSettingsSection } from "./KBrainSettingsSection";
 import { MemoryPanel } from "./memory/MemoryPanel";
 import { ProvidersSection } from "./ProvidersSection";
 import { RemoteSection } from "./RemoteSection";
@@ -59,6 +60,7 @@ export function SettingsPage(props: SettingsPageProps) {
   );
   const sttSelectionChangedRef = useRef(STT_SELECTED_PROVIDER_CACHE.has(sttSettingsService));
   const extension = createSettingsExtension(props);
+  const kBrainMode = import.meta.env?.VITE_KBRAIN_BACKEND === "true";
 
   useEffect(() => setPendingProviderId(initialProviderId), [initialProviderId]);
   useEffect(() => {
@@ -93,17 +95,20 @@ export function SettingsPage(props: SettingsPageProps) {
         groupKey: "settings.groupGeneral",
         groupOrder: 10,
         order: 20,
-        labelKey: "settings.navProviders",
+        labelKey: kBrainMode ? "settings.navKBrain" : "settings.navProviders",
         icon: <Cpu className={extension.iconClassName} />,
         contentMode: "fill",
-        render: () => (
-          <ProvidersSection
-            settings={settings}
-            setSettings={setSettings}
-            initialProviderId={pendingProviderId}
-            onInitialProviderHandled={() => setPendingProviderId(undefined)}
-          />
-        ),
+        render: () =>
+          kBrainMode ? (
+            <KBrainSettingsSection settings={settings} setSettings={setSettings} />
+          ) : (
+            <ProvidersSection
+              settings={settings}
+              setSettings={setSettings}
+              initialProviderId={pendingProviderId}
+              onInitialProviderHandled={() => setPendingProviderId(undefined)}
+            />
+          ),
       },
       {
         id: "agents",

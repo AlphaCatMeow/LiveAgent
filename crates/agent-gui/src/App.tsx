@@ -1,4 +1,6 @@
 import type { Context } from "@earendil-works/pi-ai";
+import { invoke } from "@liveagent/app/shims/tauriCore";
+import { listen } from "@liveagent/app/shims/tauriEvent";
 import { AppErrorBoundary } from "@liveagent/ui/components/AppErrorBoundary";
 import { Pin } from "@liveagent/ui/components/IconSet";
 import { useConfirmDialog } from "@liveagent/ui/components/ui/confirm-dialog";
@@ -13,8 +15,6 @@ import {
 import { useSettingsOverlay } from "@liveagent/ui/lib/settings/useSettingsOverlay";
 import { applyFontFamilies } from "@liveagent/ui/lib/shared/fontFamily";
 import { cn } from "@liveagent/ui/lib/shared/utils";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import {
   lazy,
   type ReactNode,
@@ -31,6 +31,7 @@ import { useMacOsAppHeaderHeight } from "./components/MacOsTitleBarSpacer";
 import { ReleaseAnnouncementDialog } from "./components/ReleaseAnnouncementDialog";
 import { WindowsTitleBar } from "./components/WindowsTitleBar";
 import { useAppUpdateController } from "./lib/appUpdates";
+import { isKBrainBrowserHost } from "./lib/host";
 import { setRetryErrorExtension } from "./lib/providers/runtime/streamRetry";
 import { useReleaseAnnouncementController } from "./lib/releaseAnnouncement";
 import {
@@ -300,7 +301,7 @@ export default function App() {
   ]);
 
   useEffect(() => {
-    if (!settingsReady) return;
+    if (isKBrainBrowserHost() || !settingsReady) return;
     void invoke("app_set_close_window_behavior", {
       behavior: settings.closeWindowBehavior,
     }).catch(() => {

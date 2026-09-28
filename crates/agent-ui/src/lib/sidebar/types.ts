@@ -26,11 +26,12 @@ export type SidebarWorkdirSummary = {
   updatedAt: number;
 };
 
-// "none" means agent mode with no project selected: it resolves to an empty
-// list locally, without a backend round-trip and without a wire sentinel.
+// "all" is used by backends whose sessions are globally scoped; "none" means
+// agent mode with no project selected and resolves to an empty list locally.
 export type SidebarScope =
   | { kind: "workdir"; cwd: string }
   | { kind: "unscoped" }
+  | { kind: "all" }
   | { kind: "none" };
 
 export type SidebarListStatus = "initial" | "loading" | "syncing" | "ready";

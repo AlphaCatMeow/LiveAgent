@@ -530,13 +530,27 @@ export const HistoryRow = memo(function HistoryRow(props: HistoryRowProps) {
       return;
     }
 
+    // In selection mode the click handler is the single tap path. Handling
+    // pointerup as well would toggle twice and leave the row unselected.
+    if (isSelectionMode) {
+      resetLongPressState();
+      return;
+    }
+
     const shouldSelect = !longPressTriggeredRef.current && !longPressCancelledRef.current;
     resetLongPressState();
 
     if (shouldSelect && !isBusy) {
       handleSelect();
     }
-  }, [handleSelect, isBusy, isInteractionDisabled, isMobileMenuLayout, resetLongPressState]);
+  }, [
+    handleSelect,
+    isBusy,
+    isInteractionDisabled,
+    isMobileMenuLayout,
+    isSelectionMode,
+    resetLongPressState,
+  ]);
 
   const handleTitlePointerCancel = useCallback(() => {
     if (!isMobileMenuLayout) {
@@ -548,8 +562,18 @@ export const HistoryRow = memo(function HistoryRow(props: HistoryRowProps) {
   const handleTitleClick = useCallback(
     (event: ReactMouseEvent<HTMLButtonElement>) => {
       if (isMobileMenuLayout) {
-        event.preventDefault();
-        event.stopPropagation();
+        // Selection mode has no long-press menu. Use the native click as the
+        // mobile fallback because some WebViews do not deliver pointerup for a tap.
+        if (isSelectionMode) {
+          if (event.detail > 1) return;
+          handleSelect({
+            shiftKey: event.shiftKey,
+            toggleKey: event.ctrlKey || event.metaKey,
+          });
+        } else {
+          event.preventDefault();
+          event.stopPropagation();
+        }
         return;
       }
       if (event.detail > 1) return;
@@ -558,7 +582,7 @@ export const HistoryRow = memo(function HistoryRow(props: HistoryRowProps) {
         toggleKey: event.ctrlKey || event.metaKey,
       });
     },
-    [handleSelect, isMobileMenuLayout],
+    [handleSelect, isMobileMenuLayout, isSelectionMode],
   );
 
   const handleTitleKeyDown = useCallback(

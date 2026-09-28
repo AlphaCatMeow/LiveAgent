@@ -117,6 +117,7 @@ import {
   buildGatewayToolCallPreviewArguments,
   summarizeToolCallForApproval,
 } from "./gatewayToolPreview";
+import { runKBrainConversationTurn } from "./runKBrainConversationTurn";
 import { buildTrajectoryRuntimeContext } from "./trajectoryRuntimeContext";
 
 export type RuntimeModel = {
@@ -382,6 +383,7 @@ export type RunAgentConversationTurnParams = {
 };
 
 export async function runAgentConversationTurn(params: RunAgentConversationTurnParams) {
+  if (params.runtime.backend === "kbrain") return runKBrainConversationTurn(params);
   const {
     providerId,
     model,

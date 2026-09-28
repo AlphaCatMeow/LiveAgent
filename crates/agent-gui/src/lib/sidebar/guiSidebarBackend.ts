@@ -1,11 +1,12 @@
 import { listPinnedSidebarConversations } from "@liveagent/ui/lib/sidebar/pinnedHistory";
+
 // GUI adapter for the shared sidebar state layer: wraps the Tauri chat-history
 // IPC surface and the single CHAT_HISTORY_SYNC_EVENT subscription. This file
 // is NOT mirrored — it is the desktop end's platform boundary.
 
+import { listen } from "@liveagent/app/shims/tauriEvent";
 import type { SidebarBackend } from "@liveagent/ui/lib/sidebar/backend";
 import type { SidebarBackendEvent } from "@liveagent/ui/lib/sidebar/types";
-import { listen } from "@tauri-apps/api/event";
 import type { ChatHistorySummary } from "../chat/history/chatHistory";
 import {
   deleteChatHistory,
@@ -15,6 +16,7 @@ import {
   setChatHistoryCwd,
   setChatHistoryPinned,
 } from "../chat/history/chatHistory";
+import { getProviderRuntimeBackend } from "../providers/runtime/providerRuntimeConfig";
 
 // The desktop history sync wire protocol. The Rust side emits one event per
 // history mutation / run transition; this adapter is the only listener.
@@ -61,13 +63,15 @@ function toSidebarBackendEvent(event: ChatHistorySyncEvent): SidebarBackendEvent
 }
 
 export function createGuiSidebarBackend(): SidebarBackend {
+  const isKBrain = getProviderRuntimeBackend() === "kbrain";
   return {
     listPinnedConversations: () =>
       listPinnedSidebarConversations((page, pageSize) => listChatHistory(page, pageSize)),
     // scope.kind === "none" never reaches the adapter — the store resolves it
     // locally to an empty list without an IPC round-trip.
     listConversations: async (page, pageSize, scope) => {
-      const filter = scope.kind === "workdir" ? { cwd: scope.cwd } : { cwdEmpty: true };
+      const filter =
+        scope.kind === "workdir" ? { cwd: scope.cwd } : isKBrain ? undefined : { cwdEmpty: true };
       const result = await listChatHistory(page, pageSize, filter);
       // GUI ChatHistorySummary matches SidebarConversation field-for-field
       // (timestamps are already epoch milliseconds) — pass items through.
@@ -85,6 +89,7 @@ export function createGuiSidebarBackend(): SidebarBackend {
     deleteConversation: (id) => deleteChatHistory(id),
 
     subscribeEvents: (listener) => {
+      if (isKBrain) return () => undefined;
       let disposed = false;
       const unlistenPromise = listen<ChatHistorySyncEvent>(CHAT_HISTORY_SYNC_EVENT, (event) => {
         if (disposed) {

@@ -300,6 +300,70 @@ test("fetchModelsFromApi returns the default /v1/models result without falling b
   );
 });
 
+test("fetchModelsFromApi bypasses the HTTP cache for same-type /v1 providers (#885)", async () => {
+  // 桌面端两家同类型 /v1 供应商经本地反代的 URL 完全相同，上游只在请求头里。
+  // 这里模拟 WebView 的 HTTP 缓存：按 URL 记住响应，请求没声明 no-store 就直接回放——
+  // 正是 #885 里 B 家拿到 A 家模型列表和限额的路径。
+  const upstreamA = "https://api.agnes.example";
+  const upstreamB = "https://api.ei-token.example";
+  const payloads = {
+    [upstreamA]: {
+      data: [
+        { id: "agnes-only-model", context_length: 1_048_576, max_completion_tokens: 65_536 },
+        { id: "gpt-5", context_length: 1_048_576, max_completion_tokens: 65_536 },
+      ],
+    },
+    [upstreamB]: { data: [{ id: "ei-token-only-model" }, { id: "gpt-5" }] },
+  };
+  const network = [];
+  const httpCache = new Map();
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = (url, options) => {
+    const key = String(url);
+    if (options?.cache !== "no-store" && httpCache.has(key)) {
+      return Promise.resolve(httpCache.get(key));
+    }
+    network.push({ url: key, options });
+    const origin = options.headers["x-liveagent-upstream-origin"];
+    const response = jsonResponse(200, payloads[origin]);
+    if (options?.cache !== "no-store") httpCache.set(key, response);
+    return Promise.resolve(response);
+  };
+
+  try {
+    const modelsA = await providerUtils.fetchModelsFromApi("codex", `${upstreamA}/v1`, "key-a");
+    const modelsB = await providerUtils.fetchModelsFromApi("codex", `${upstreamB}/v1`, "key-b");
+
+    // 两次都真的发到了网络，而且请求 URL 相同——缓存键只看 URL 时必然串号。
+    assert.equal(network.length, 2);
+    assert.equal(network[0].url, network[1].url);
+    assert.ok(network[0].url.endsWith("/proxy/codex/v1/models"));
+    for (const call of network) assert.equal(call.options.cache, "no-store");
+    assert.equal(network[0].options.headers["x-liveagent-upstream-origin"], upstreamA);
+    assert.equal(network[1].options.headers["x-liveagent-upstream-origin"], upstreamB);
+    assert.equal(network[0].options.headers.Authorization, "Bearer key-a");
+    assert.equal(network[1].options.headers.Authorization, "Bearer key-b");
+
+    assert.deepEqual(
+      modelsA.map((model) => model.id),
+      ["agnes-only-model", "gpt-5"],
+    );
+    assert.ok(modelsA.every((model) => model.contextWindow === 1_048_576));
+    assert.deepEqual(
+      modelsB.map((model) => model.id),
+      ["ei-token-only-model", "gpt-5"],
+    );
+    // B 没声明限额：同名模型也不能带上 A 声明的窗口和来源。
+    for (const model of modelsB) {
+      assert.notEqual(model.contextWindow, 1_048_576, model.id);
+      assert.notEqual(model.limitsSource, "provider", model.id);
+    }
+  } finally {
+    if (previousFetch === undefined) delete globalThis.fetch;
+    else globalThis.fetch = previousFetch;
+  }
+});
+
 test("fetchModelsFromApi uses the exact models URL override without changing chat routing", async () => {
   await withFetchStub(
     () => jsonResponse(200, { data: [{ id: "gpt-custom" }] }),

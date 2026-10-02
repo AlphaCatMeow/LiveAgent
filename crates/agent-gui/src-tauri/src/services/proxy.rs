@@ -45,7 +45,12 @@ const UPSTREAM_HEADERS_MAX_BYTES: usize = 8 * 1024;
 const USE_SYSTEM_PROXY_HEADER: &str = "x-liveagent-use-system-proxy";
 const DEFAULT_ALLOW_HEADERS: &str = "authorization,content-type,x-api-key,x-goog-api-key,anthropic-version,x-liveagent-upstream-origin,x-liveagent-upstream-url,x-liveagent-upstream-headers,x-liveagent-proxy-token,x-liveagent-use-system-proxy";
 const ALLOW_METHODS_VALUE: &str = "GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD";
-const VARY_VALUE: &str = "Origin, Access-Control-Request-Method, Access-Control-Request-Headers";
+/// 本地反代自己写入的 Vary：CORS 预检相关三项，加上决定实际上游的 upstream-origin。
+/// 同类型供应商经反代的 URL 完全相同（/proxy/<type>/v1/models），上游只由
+/// x-liveagent-upstream-origin 区分；不把它写进 Vary，WebView 缓存会按 URL
+/// 把 A 家的响应当成 B 家的返回（#885）。
+const VARY_VALUE: &str = "Origin, Access-Control-Request-Method, Access-Control-Request-Headers, x-liveagent-upstream-origin";
+const VARY: &str = "vary";
 const IMAGE_PROXY_MAX_BYTES: usize = 25 * 1024 * 1024;
 const IMAGE_PROXY_TIMEOUT_SECS: u64 = 20;
 const IMAGE_PROXY_ACCEPT: &str = "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8";
@@ -603,10 +608,37 @@ fn apply_cors_headers(headers: &mut HeaderMap, request_headers: &HeaderMap) {
         HeaderName::from_static("access-control-allow-headers"),
         build_allow_headers_value(request_headers),
     );
-    headers.insert(
-        HeaderName::from_static("vary"),
-        HeaderValue::from_static(VARY_VALUE),
-    );
+    let vary = build_vary_value(headers);
+    headers.insert(HeaderName::from_static(VARY), vary);
+}
+
+/// 本地反代的 Vary 项在前，再并入响应里已有的 Vary（上游转发过来的），大小写
+/// 不敏感去重。上游声明的缓存维度（如 Accept-Encoding）原样保留，不能被反代吞掉；
+/// 上游给了 `*`（响应不可复用）就只留 `*`，那是更严格的语义。
+fn build_vary_value(headers: &HeaderMap) -> HeaderValue {
+    let mut items: Vec<&str> = VARY_VALUE.split(',').map(str::trim).collect();
+    for value in headers.get_all(VARY) {
+        let Ok(value) = value.to_str() else {
+            continue;
+        };
+        for item in value
+            .split(',')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+        {
+            if item == "*" {
+                return HeaderValue::from_static("*");
+            }
+            if !items
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(item))
+            {
+                items.push(item);
+            }
+        }
+    }
+    HeaderValue::from_str(&items.join(", "))
+        .unwrap_or_else(|_| HeaderValue::from_static(VARY_VALUE))
 }
 
 fn build_allow_headers_value(request_headers: &HeaderMap) -> HeaderValue {
@@ -726,6 +758,7 @@ fn build_upstream_request_headers(headers: &HeaderMap) -> Result<HeaderMap, Stri
     Ok(upstream_headers)
 }
 
+/// 上游的 Vary 会被转发进来，再由 apply_cors_headers 与反代自己的 Vary 项合并。
 fn should_forward_response_header(name: &HeaderName) -> bool {
     let lowered = name.as_str();
     !matches!(
@@ -740,7 +773,6 @@ fn should_forward_response_header(name: &HeaderName) -> bool {
             | TRAILER
             | TRANSFER_ENCODING
             | UPGRADE
-            | "vary"
     ) && !lowered.starts_with(ACCESS_CONTROL_PREFIX)
 }
 
@@ -1059,6 +1091,94 @@ mod tests {
         // 超限
         let oversized = "A".repeat(UPSTREAM_HEADERS_MAX_BYTES + 4);
         assert!(decode_upstream_header_overrides(&oversized).is_err());
+    }
+
+    #[test]
+    fn vary_merges_cors_items_upstream_origin_and_upstream_values() {
+        // 模拟 handle_proxy：先按 should_forward_response_header 拷上游头，再写 CORS。
+        let mut upstream = HeaderMap::new();
+        upstream.append(
+            HeaderName::from_static(VARY),
+            HeaderValue::from_static("Accept-Encoding, origin"),
+        );
+        upstream.append(
+            HeaderName::from_static(VARY),
+            HeaderValue::from_static("Authorization"),
+        );
+        upstream.insert(
+            HeaderName::from_static("cache-control"),
+            HeaderValue::from_static("public, max-age=14400"),
+        );
+        let mut response_headers = HeaderMap::new();
+        for (name, value) in &upstream {
+            if should_forward_response_header(name) {
+                response_headers.append(name, value.clone());
+            }
+        }
+
+        apply_cors_headers(&mut response_headers, &HeaderMap::new());
+
+        let vary: Vec<&str> = response_headers
+            .get_all(VARY)
+            .iter()
+            .map(|value| value.to_str().expect("vary is ascii"))
+            .collect();
+        assert_eq!(
+            vary.len(),
+            1,
+            "vary must be collapsed into one header: {vary:?}"
+        );
+        let items = vary_items(vary[0]);
+        assert_eq!(
+            items,
+            vec![
+                "origin",
+                "access-control-request-method",
+                "access-control-request-headers",
+                UPSTREAM_ORIGIN_HEADER,
+                "accept-encoding",
+                "authorization",
+            ]
+        );
+    }
+
+    #[test]
+    fn vary_includes_upstream_origin_without_upstream_vary() {
+        let mut headers = HeaderMap::new();
+        apply_cors_headers(&mut headers, &HeaderMap::new());
+
+        let items = vary_items(header_str(&headers, VARY).expect("vary is set"));
+        for expected in [
+            "origin",
+            "access-control-request-method",
+            "access-control-request-headers",
+            UPSTREAM_ORIGIN_HEADER,
+        ] {
+            assert!(
+                items.contains(&expected.to_string()),
+                "missing {expected}: {items:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn vary_star_from_upstream_is_kept_as_is() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_static(VARY),
+            HeaderValue::from_static("Accept-Encoding, *"),
+        );
+        apply_cors_headers(&mut headers, &HeaderMap::new());
+
+        assert_eq!(header_str(&headers, VARY), Some("*"));
+    }
+
+    fn vary_items(value: &str) -> Vec<String> {
+        value
+            .split(',')
+            .map(|item| item.trim().to_ascii_lowercase())
+            .filter(|item| !item.is_empty())
+            .collect()
     }
 
     fn encoded_overrides(value: serde_json::Value) -> HeaderValue {

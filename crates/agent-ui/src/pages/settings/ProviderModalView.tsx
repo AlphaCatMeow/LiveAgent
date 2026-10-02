@@ -523,7 +523,7 @@ export function ProviderModalView({ viewModel }: { viewModel: ProviderModalViewM
                         type="button"
                         variant="ghost"
                         size="sm"
-                        className="ml-auto h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                        className="ml-auto shrink-0 gap-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive max-[720px]:h-10"
                         onClick={() => void clearVisibleModels()}
                       >
                         <Trash2 className="size-3.5" />

@@ -547,13 +547,16 @@ export function ProviderSettingsExtension(props: {
             allItems,
             settings.customProviders.find((provider) => provider.id === id),
           );
+          // K-brain redacts a saved key on reload. Use the imported key only for
+          // this discovery request; keep the persisted provider key untouched.
+          const discoveryApiKey = provider.apiKey.trim() || item.apiKey.trim();
           const models = (
             await discoverProviderModels({
               type: provider.type,
               requestFormat: provider.requestFormat,
               providerId: provider.id,
               baseUrl: provider.baseUrl,
-              apiKey: provider.apiKey,
+              apiKey: discoveryApiKey,
               modelsUrl: provider.modelsUrl,
               isFullUrl: provider.isFullUrl,
               useSystemProxy: provider.useSystemProxy,

@@ -147,6 +147,14 @@ test("CC Switch and Cherry imports retain the original setSettings persistence c
     const resynced = current.customProviders.find((provider) => provider.id === "cherry-studio-ch-1");
     assert.equal(resynced.apiKey, "", "resync must not replace a backend-owned key with the imported key");
     assert.equal(resynced.apiKeyConfigured, true);
+    const resyncRequest = [...requests]
+      .reverse()
+      .find((request) => request.method === "POST" && request.url.endsWith("/models"));
+    assert.equal(
+      resyncRequest?.body.apiKey,
+      "cherry-import-secret",
+      "re-import must use the source key for discovery when the backend redacts the saved key",
+    );
     assert.deepEqual(resynced.activeModels, [], "resync must not reactivate user-disabled models");
     assert.deepEqual(resynced.modelOrder, ["discovered"]);
     assert.equal(resynced.models[0].contextWindow, 96000);

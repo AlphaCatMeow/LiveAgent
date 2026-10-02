@@ -41,6 +41,7 @@ include!("trajectory_window.rs");
 include!("trajectory_subagents.rs");
 include!("commands.rs");
 include!("migration.rs");
+pub mod pi_migration;
 include!("migration_tests.rs");
 include!("replace.rs");
 include!("branch.rs");

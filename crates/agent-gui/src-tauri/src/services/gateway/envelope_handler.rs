@@ -571,11 +571,7 @@ impl GatewayController {
                 Ok(())
             }
             Some(proto::gateway_envelope::Payload::ProviderModels(request)) => {
-                match gateway_bridge::handle_provider_models(
-                    self.app_handle.clone(),
-                    request,
-                )
-                .await
+                match gateway_bridge::handle_provider_models(self.app_handle.clone(), request).await
                 {
                     Ok(response) => {
                         self.send_agent_envelope(proto::AgentEnvelope {
@@ -1179,8 +1175,11 @@ impl GatewayController {
                         self.send_agent_envelope(proto::AgentEnvelope {
                             request_id,
                             timestamp: now_unix_seconds(),
-                            payload: Some(proto::agent_envelope::Payload::TerminalResponse(response)),
-                        }).await
+                            payload: Some(proto::agent_envelope::Payload::TerminalResponse(
+                                response,
+                            )),
+                        })
+                        .await
                     }
                     Err(error) => self.send_error_response(request_id, 500, error).await,
                 }

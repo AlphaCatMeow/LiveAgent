@@ -55,24 +55,25 @@ export function projectKBrainProviders(
     }
     if (provider.activeModels.includes(entry.model)) continue;
     const existing = existingById.get(entry.provider);
-    if (existing && !existing.activeModels.includes(entry.model)) continue;
-    const modelConfig =
-      existing?.models.find((model) => model.id === entry.model) ??
-      createProviderModelConfig(provider.type, entry.model);
+    const existingModel = existing?.models.find((model) => model.id === entry.model);
+    const modelConfig = existingModel ?? createProviderModelConfig(provider.type, entry.model);
     provider.models.push({
       ...modelConfig,
-      ...(!existing && entry.name ? { displayName: entry.name } : {}),
-      ...(!existing && entry.ownedBy ? { ownedBy: entry.ownedBy } : {}),
-      ...(!existing && typeof entry.contextWindow === "number"
+      ...(entry.name && !existingModel ? { displayName: entry.name } : {}),
+      ...(entry.ownedBy && !existingModel ? { ownedBy: entry.ownedBy } : {}),
+      ...(typeof entry.contextWindow === "number" && !existingModel
         ? { contextWindow: entry.contextWindow, limitsSource: "provider" as const }
         : {}),
-      ...(!existing && typeof entry.maxOutputTokens === "number"
+      ...(typeof entry.maxOutputTokens === "number" && !existingModel
         ? { maxOutputToken: entry.maxOutputTokens, limitsSource: "provider" as const }
         : {}),
-      ...(!existing && entry.inputModalities
+      ...(entry.inputModalities && !existingModel
         ? { inputModalities: entry.inputModalities as ["text"] | ["text", "image"] }
         : {}),
     });
+    // The backend catalog is the active-model source of truth. A model that
+    // appears here is newly active even when the previous UI snapshot lacks it;
+    // models omitted by the catalog remain hidden when they were disabled.
     provider.activeModels.push(entry.model);
   }
   return [...providers.values()];

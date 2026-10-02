@@ -8,7 +8,7 @@ import {
   createKBrainBootstrapRunner,
   notifyFrontendReady,
 } from "./lib/kbrain/bootstrap";
-import { migrateLegacyHistoryOnce } from "./lib/kbrain/historyMigration";
+import { migrateAllHistoryOnce } from "./lib/kbrain/historyMigration";
 import { inferRuntimePlatform } from "./lib/runtimePlatform";
 import { installWebviewNavigationGuard } from "./lib/system/webviewNavigationGuard";
 
@@ -30,7 +30,7 @@ function renderBootstrapError(error: unknown, retry: () => void) {
 const bootstrap = createKBrainBootstrapRunner(async () => {
   try {
     await connectKBrainBackendWithRetry();
-    const migration = await migrateLegacyHistoryOnce();
+    const migration = await migrateAllHistoryOnce();
     if (migration.failures.length > 0) {
       console.warn("Legacy history migration incomplete", migration.failures);
     }

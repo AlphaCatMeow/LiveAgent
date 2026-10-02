@@ -29,6 +29,25 @@ test("K-brain client loads through the generic TypeScript test helper", async ()
   ]);
 });
 
+test("K-brain provider discovery disables WebView caching for shared proxy paths", async () => {
+  let call;
+  const client = createKBrainClient({
+    baseUrl: "https://kbrain.test",
+    fetch: async (url, init = {}) => {
+      call = { url: String(url), init };
+      return jsonResponse({ version: "kbrain.agent.v1", provider: "p", models: [] });
+    },
+  });
+  await client.discoverProviderModels("provider-a", {
+    type: "codex",
+    baseUrl: "https://first.example/v1",
+    apiKey: "key-a",
+  });
+  assert.equal(new URL(call.url).pathname, "/v1/settings/providers/provider-a/models");
+  assert.equal(call.init.cache, "no-store");
+  assert.equal(call.init.headers["Cache-Control"], "no-cache, no-store, must-revalidate");
+});
+
 test("K-brain client sends auxiliary text generation through the versioned backend contract", async () => {
   const calls = [];
   const client = createKBrainClient({

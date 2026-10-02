@@ -18,9 +18,7 @@ pub async fn browser_action(
     let mut args = args;
     // 浏览器接入模式以持久化设置为唯一权威（同 load_runtime_command_safety_mode
     // 范式）：不信任渲染进程/网关透传，改设置后下一次动作即生效。
-    args.browser_mode = Some(
-        crate::commands::settings::load_runtime_browser_automation_mode(),
-    );
+    args.browser_mode = Some(crate::commands::settings::load_runtime_browser_automation_mode());
     manager.execute(args).await
 }
 

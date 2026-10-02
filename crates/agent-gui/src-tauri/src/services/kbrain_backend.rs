@@ -42,7 +42,6 @@ struct HealthResponse {
     version: String,
 }
 
-
 struct BackendProcess {
     child: Child,
     // Keeping stdin open enables the backend's parent-stdio watchdog.

@@ -62,6 +62,7 @@ macro_rules! app_invoke_handler {
             commands::chat_history::chat_history_share_set,
             commands::chat_history::chat_history_delete,
             commands::chat_history::legacy_history_migration_page,
+            commands::chat_history::pi_migration::pi_history_migration_page,
             // Trajectory (events ride the owning history segment)
             commands::chat_history::trajectory_append_events,
             commands::chat_history::trajectory_get_events,

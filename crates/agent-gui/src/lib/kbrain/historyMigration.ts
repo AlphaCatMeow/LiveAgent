@@ -69,6 +69,7 @@ export type LegacyPage = {
   conversations: LegacyConversation[];
   nextCursor?: string | null;
   complete: boolean;
+  source?: string;
 };
 export type MigrationImportResult = {
   source_id: string;
@@ -108,6 +109,7 @@ function canonicalMessage(value: unknown): KBrainMessage {
     provider?: unknown;
     model?: unknown;
     stopReason?: unknown;
+    toolCalls?: unknown;
     timestamp?: unknown;
     usage?: {
       input?: number;
@@ -124,13 +126,14 @@ function canonicalMessage(value: unknown): KBrainMessage {
   if (converted?.role === "tool" && message.role === "toolResult")
     converted.tool_call_id = message.toolCallId;
   if (converted?.role === "assistant" && message.role === "assistant") {
-    converted.tool_calls = message.content
-      .filter((part) => part.type === "toolCall")
-      .map((call) => ({
-        id: call.id,
-        name: call.name,
-        arguments: call.arguments,
-      }));
+    const toolCalls = Array.isArray(message.toolCalls)
+      ? message.toolCalls
+      : message.content.filter((part) => part.type === "toolCall");
+    converted.tool_calls = toolCalls
+      .filter((call): call is { id: string; name: string; arguments: unknown } =>
+        Boolean(call && typeof call === "object" && typeof call.id === "string" && typeof call.name === "string"),
+      )
+      .map((call) => ({ id: call.id, name: call.name, arguments: call.arguments }));
   }
   if (!converted) throw new Error("legacy history contains an unsupported message");
   const id = messageId(message);
@@ -262,6 +265,39 @@ async function fingerprint(payload: unknown): Promise<string> {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+type CachedMigration = {
+  fingerprint: string;
+  result: MigrationImportResult;
+};
+
+function migrationCacheKey(baseUrl: string) {
+  return `liveagent.kbrain-history-migration.v1:${baseUrl}`;
+}
+
+function readMigrationCache(baseUrl: string): Record<string, CachedMigration> {
+  try {
+    const raw = globalThis.localStorage?.getItem(migrationCacheKey(baseUrl));
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return parsed as Record<string, CachedMigration>;
+  } catch {
+    return {};
+  }
+}
+
+function writeMigrationCache(baseUrl: string, cache: Record<string, CachedMigration>) {
+  try {
+    globalThis.localStorage?.setItem(migrationCacheKey(baseUrl), JSON.stringify(cache));
+  } catch {
+    // Storage is optional; K-brain fingerprint idempotency remains authoritative.
+  }
+}
+
+function isStableMigrationResult(result: MigrationImportResult) {
+  return result.checkpoint === "available" || result.checkpoint === "not_found";
+}
+
 export async function migrateLegacyHistoryPage(
   page: LegacyPage,
   options: { fetch?: typeof globalThis.fetch; signal?: AbortSignal } = {},
@@ -280,13 +316,23 @@ export async function migrateLegacyHistoryPage(
   });
   const results: MigrationImportResult[] = [];
   const failures: MigrationFailure[] = [];
+  const cache = readMigrationCache(connection.baseUrl);
+  let cacheChanged = false;
   for (const item of page.conversations) {
     try {
       validateCheckpointExport(item.checkpoint);
       const messages = canonicalMessagesForMigration(item);
+      const sourceFingerprint = await fingerprint({ item, messages });
+      const cached = cache[item.id];
+      if (cached?.fingerprint === sourceFingerprint && isStableMigrationResult(cached.result)) {
+        const cachedResult: MigrationImportResult = { ...cached.result, status: "already_imported" };
+        setKBrainSessionId(item.id, cachedResult.backend_id, connection.baseUrl);
+        results.push(cachedResult);
+        continue;
+      }
       const payload = {
         source_id: item.id,
-        source_fingerprint: await fingerprint({ item, messages }),
+        source_fingerprint: sourceFingerprint,
         conversation_id: item.id,
         title: item.title,
         cwd: item.cwd,
@@ -341,6 +387,10 @@ export async function migrateLegacyHistoryPage(
         throw new Error("legacy history import response identity mismatch");
       }
       setKBrainSessionId(item.id, result.backend_id, connection.baseUrl);
+      if (isStableMigrationResult(result)) {
+        cache[item.id] = { fingerprint: sourceFingerprint, result };
+        cacheChanged = true;
+      }
       results.push(result);
     } catch (error) {
       failures.push({
@@ -349,6 +399,7 @@ export async function migrateLegacyHistoryPage(
       });
     }
   }
+  if (cacheChanged) writeMigrationCache(connection.baseUrl, cache);
   return {
     results,
     failures,
@@ -362,7 +413,8 @@ export async function migrateLegacyHistoryPage(
   };
 }
 
-export async function migrateLegacyHistoryOnce(
+async function migrateHistorySourceOnce(
+  command: "legacy_history_migration_page" | "pi_history_migration_page",
   options: { fetch?: typeof globalThis.fetch; signal?: AbortSignal } = {},
 ) {
   if (!isTauriHost() || !getConfiguredKBrainConnection()) {
@@ -373,19 +425,19 @@ export async function migrateLegacyHistoryOnce(
   const failures: MigrationFailure[] = [];
   try {
     do {
-      const page = await invoke<LegacyPage>("legacy_history_migration_page", { cursor });
+      const page = await invoke<LegacyPage>(command, { cursor });
       const migrated = await migrateLegacyHistoryPage(page, options);
       all.push(...migrated.results);
       failures.push(...migrated.failures);
       if (page.complete) break;
       if (!migrated.nextCursor || migrated.nextCursor === cursor) {
-        throw new Error("legacy history export did not advance its cursor");
+        throw new Error(`${command} did not advance its cursor`);
       }
       cursor = migrated.nextCursor;
     } while (cursor !== undefined);
   } catch (error) {
     failures.push({
-      sourceId: "legacy-export",
+      sourceId: command,
       error: error instanceof Error ? error.message : String(error),
     });
   }
@@ -395,5 +447,31 @@ export async function migrateLegacyHistoryOnce(
     complete:
       failures.length === 0 &&
       all.every((result) => result.checkpoint === "available" || result.checkpoint === "not_found"),
+  };
+}
+
+export async function migrateLegacyHistoryOnce(
+  options: { fetch?: typeof globalThis.fetch; signal?: AbortSignal } = {},
+) {
+  return migrateHistorySourceOnce("legacy_history_migration_page", options);
+}
+
+export async function migratePiHistoryOnce(
+  options: { fetch?: typeof globalThis.fetch; signal?: AbortSignal } = {},
+) {
+  return migrateHistorySourceOnce("pi_history_migration_page", options);
+}
+
+export async function migrateAllHistoryOnce(
+  options: { fetch?: typeof globalThis.fetch; signal?: AbortSignal } = {},
+) {
+  const [legacy, pi] = await Promise.all([
+    migrateLegacyHistoryOnce(options),
+    migratePiHistoryOnce(options),
+  ]);
+  return {
+    results: [...legacy.results, ...pi.results],
+    failures: [...legacy.failures, ...pi.failures],
+    complete: legacy.complete && pi.complete,
   };
 }

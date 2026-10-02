@@ -144,8 +144,7 @@ pub struct GatewayController {
     pub(crate) tunnel_proxy: TunnelProxy,
     pub(crate) workspace_watch: Arc<WorkspaceWatchService>,
     pending_chat_queue_requests: Mutex<HashMap<String, oneshot::Sender<proto::ChatQueueResponse>>>,
-    pending_clarify_turns:
-        Mutex<HashMap<String, oneshot::Sender<proto::ClarifyTurnResponse>>>,
+    pending_clarify_turns: Mutex<HashMap<String, oneshot::Sender<proto::ClarifyTurnResponse>>>,
     chat_ingress: ChatIngressMirror,
     chat_ingress_flush_lock: tokio::sync::Mutex<()>,
     terminal_forwarder_once: Once,

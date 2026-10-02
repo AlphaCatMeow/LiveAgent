@@ -2129,11 +2129,11 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use super::{
-        decode_kbrain_terminal_response, kbrain_terminal_request, proto,
-        flatten_history_messages_json, flatten_history_messages_json_window,
-        is_builtin_share_tool_name, kbrain_provider_models, parse_runs_limit,
-        redact_builtin_tool_content_json, resolve_stored_provider_models_config,
-        sanitize_provider_summaries, KBrainBackendConnection,
+        decode_kbrain_terminal_response, flatten_history_messages_json,
+        flatten_history_messages_json_window, is_builtin_share_tool_name, kbrain_provider_models,
+        kbrain_terminal_request, parse_runs_limit, proto, redact_builtin_tool_content_json,
+        resolve_stored_provider_models_config, sanitize_provider_summaries,
+        KBrainBackendConnection,
     };
     use crate::commands::chat_history::{
         self, history_message_content_hash, ChatHistoryMessageRef, ChatHistorySegmentRecord,

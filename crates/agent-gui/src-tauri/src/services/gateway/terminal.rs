@@ -566,7 +566,10 @@ impl GatewayController {
         Ok(())
     }
 
-    pub(crate) fn ensure_kbrain_terminal_request_allowed(&self, action: &str) -> Result<(), String> {
+    pub(crate) fn ensure_kbrain_terminal_request_allowed(
+        &self,
+        action: &str,
+    ) -> Result<(), String> {
         let config = self.config_tx.borrow().clone();
         match action {
             "create_ssh"

@@ -7,8 +7,7 @@ use crate::services::gateway::{
     GatewayChatCheckpointCommitResult, GatewayChatCheckpointInput, GatewayChatClaimedRequest,
     GatewayChatIngressAcceptResult, GatewayChatIngressBatchInput, GatewayChatQueueEventInput,
     GatewayChatQueueResponseInput, GatewayClarifyDeltaInput, GatewayClarifyRespondInput,
-    GatewayController,
-    GatewayStatusSnapshot,
+    GatewayController, GatewayStatusSnapshot,
 };
 use crate::services::provider_usage::{ProviderUsageResult, ProviderUsageService};
 use crate::services::tunnel::{

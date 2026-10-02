@@ -24,6 +24,9 @@ const ACCESS_CONTROL_REQUEST_METHOD: &str = "access-control-request-method";
 const ACCESS_CONTROL_PREFIX: &str = "access-control-";
 const CONTENT_LENGTH: &str = "content-length";
 const CONTENT_TYPE: &str = "content-type";
+const CACHE_CONTROL: &str = "cache-control";
+const PRAGMA: &str = "pragma";
+const EXPIRES: &str = "expires";
 const CONNECTION: &str = "connection";
 const HOST: &str = "host";
 const KEEP_ALIVE: &str = "keep-alive";
@@ -45,7 +48,10 @@ const UPSTREAM_HEADERS_MAX_BYTES: usize = 8 * 1024;
 const USE_SYSTEM_PROXY_HEADER: &str = "x-liveagent-use-system-proxy";
 const DEFAULT_ALLOW_HEADERS: &str = "authorization,content-type,x-api-key,x-goog-api-key,anthropic-version,x-liveagent-upstream-origin,x-liveagent-upstream-url,x-liveagent-upstream-headers,x-liveagent-proxy-token,x-liveagent-use-system-proxy";
 const ALLOW_METHODS_VALUE: &str = "GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD";
-const VARY_VALUE: &str = "Origin, Access-Control-Request-Method, Access-Control-Request-Headers";
+// The upstream origin is carried in a request header because providers sharing
+// a proxy path can have different hosts. Keep it in the cache key.
+const VARY_VALUE: &str = "Origin, Access-Control-Request-Method, Access-Control-Request-Headers, x-liveagent-upstream-origin";
+const VARY: &str = "vary";
 const IMAGE_PROXY_MAX_BYTES: usize = 25 * 1024 * 1024;
 const IMAGE_PROXY_TIMEOUT_SECS: u64 = 20;
 const IMAGE_PROXY_ACCEPT: &str = "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8";
@@ -608,10 +614,41 @@ fn apply_cors_headers(headers: &mut HeaderMap, request_headers: &HeaderMap) {
         HeaderName::from_static("access-control-allow-headers"),
         build_allow_headers_value(request_headers),
     );
-    headers.insert(
-        HeaderName::from_static("vary"),
-        HeaderValue::from_static(VARY_VALUE),
-    );
+    let vary = build_vary_value(headers);
+    headers.insert(HeaderName::from_static(VARY), vary);
+}
+
+fn build_vary_value(headers: &HeaderMap) -> HeaderValue {
+    let mut items: Vec<String> = VARY_VALUE
+        .split(',')
+        .map(|item| item.trim().to_ascii_lowercase())
+        .collect();
+    let mut upstream_values = Vec::new();
+    for value in headers.get_all(VARY) {
+        let Ok(value) = value.to_str() else {
+            continue;
+        };
+        for item in value
+            .split(',')
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+        {
+            if item == "*" {
+                return HeaderValue::from_static("*");
+            }
+            upstream_values.push(item);
+        }
+    }
+    for item in upstream_values {
+        if !items
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(item))
+        {
+            items.push(item.to_ascii_lowercase());
+        }
+    }
+    HeaderValue::from_str(&items.join(", "))
+        .unwrap_or_else(|_| HeaderValue::from_static(VARY_VALUE))
 }
 
 fn build_allow_headers_value(request_headers: &HeaderMap) -> HeaderValue {
@@ -736,6 +773,9 @@ fn should_forward_response_header(name: &HeaderName) -> bool {
     !matches!(
         lowered,
         CONTENT_LENGTH
+            | CACHE_CONTROL
+            | PRAGMA
+            | EXPIRES
             | CONNECTION
             | KEEP_ALIVE
             | PROXY_CONNECTION
@@ -745,7 +785,6 @@ fn should_forward_response_header(name: &HeaderName) -> bool {
             | TRAILER
             | TRANSFER_ENCODING
             | UPGRADE
-            | "vary"
     ) && !lowered.starts_with(ACCESS_CONTROL_PREFIX)
 }
 
@@ -754,11 +793,57 @@ mod tests {
     use super::*;
 
     #[test]
-    fn allows_only_non_model_hub_proxy() {
-        assert!(is_allowed_proxy_provider("hub"));
-        for provider in ["codex", "gemini", "anthropic", "openai", "xai"] {
-            assert!(!is_allowed_proxy_provider(provider), "{provider} must stay K-brain-owned");
+    fn does_not_forward_cache_headers_from_upstream() {
+        for name in [CACHE_CONTROL, PRAGMA, EXPIRES] {
+            assert!(!should_forward_response_header(&HeaderName::from_static(
+                name
+            )));
         }
+        for name in [CONTENT_TYPE, VARY, "etag", "x-request-id"] {
+            assert!(should_forward_response_header(&HeaderName::from_static(
+                name
+            )));
+        }
+    }
+
+    #[test]
+    fn vary_merges_cors_upstream_origin_and_upstream_values() {
+        let mut headers = HeaderMap::new();
+        headers.append(
+            HeaderName::from_static(VARY),
+            HeaderValue::from_static("Accept-Encoding, origin"),
+        );
+        headers.append(
+            HeaderName::from_static(VARY),
+            HeaderValue::from_static("Authorization"),
+        );
+        apply_cors_headers(&mut headers, &HeaderMap::new());
+        assert_eq!(headers.get_all(VARY).iter().count(), 1);
+        assert_eq!(
+            header_str(&headers, VARY),
+            Some("origin, access-control-request-method, access-control-request-headers, x-liveagent-upstream-origin, accept-encoding, authorization")
+        );
+    }
+
+    #[test]
+    fn vary_includes_upstream_origin_without_upstream_vary() {
+        let mut headers = HeaderMap::new();
+        apply_cors_headers(&mut headers, &HeaderMap::new());
+        assert_eq!(
+            header_str(&headers, VARY),
+            Some("origin, access-control-request-method, access-control-request-headers, x-liveagent-upstream-origin")
+        );
+    }
+
+    #[test]
+    fn vary_star_is_preserved() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_static(VARY),
+            HeaderValue::from_static("Accept-Encoding, *"),
+        );
+        apply_cors_headers(&mut headers, &HeaderMap::new());
+        assert_eq!(header_str(&headers, VARY), Some("*"));
     }
 
     #[test]

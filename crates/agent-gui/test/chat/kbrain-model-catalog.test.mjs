@@ -82,6 +82,17 @@ test("catalog projection keeps opaque backend IDs, deduplicates pairs and never 
   assert.equal(JSON.stringify(direct), before);
 });
 
+test("catalog activates models newly added by a provider import", () => {
+  const existing = directSettings();
+  const providers = projectKBrainProviders(
+    [{ provider: "local-provider", model: "imported-model", contextWindow: 64000 }],
+    existing.customProviders,
+  );
+  assert.deepEqual(providers[0].activeModels, ["imported-model"]);
+  assert.deepEqual(providers[0].models.map((model) => model.id), ["imported-model"]);
+  assert.equal(providers[0].models[0].contextWindow, 64000);
+});
+
 test("real catalog and selection hooks fetch /v1/models with the runtime connection", async () => {
   await mount(async root => {
     const request = deferred();

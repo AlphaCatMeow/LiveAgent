@@ -18,6 +18,7 @@ import {
   Trash2,
 } from "@liveagent/ui/components/IconSet";
 import { SettingsNotice } from "@liveagent/ui/components/settings/SettingsNotice";
+import { Badge } from "@liveagent/ui/components/ui/badge";
 import { Button, RefreshButton } from "@liveagent/ui/components/ui/button";
 import {
   Dialog,
@@ -61,6 +62,10 @@ import {
   strongestQuotaLevel,
 } from "./panelModel";
 import { type MemoryCreateDraft, useMemoryPanelData } from "./useMemoryPanelData";
+
+// Pending-review tone. Amber is a Tailwind palette override until a warning semantic token exists.
+const PENDING_REVIEW_TEXT = "text-amber-700 dark:text-amber-300";
+const PENDING_REVIEW_FILL = "bg-amber-500/10";
 
 const EMPTY_CREATE_DRAFT: MemoryCreateDraft = {
   slug: "",
@@ -257,9 +262,9 @@ export function MemoryPanel(props: {
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0 truncate text-xs font-semibold">{entryTitle(entry)}</div>
           {isPendingReview(entry) ? (
-            <div className="ml-auto shrink-0 rounded bg-amber-500/10 px-1.5 py-0.5 text-tiny text-amber-700 dark:text-amber-300">
+            <Badge size="compact" className={cn("ml-auto", PENDING_REVIEW_FILL, PENDING_REVIEW_TEXT)}>
               {t("settings.memoryUnreviewed")}
-            </div>
+            </Badge>
           ) : null}
           <div className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-tiny text-muted-foreground">
             {memoryTypeLabel(entry.memoryType, t)}
@@ -361,13 +366,16 @@ export function MemoryPanel(props: {
           </div>
 
           {unreviewedCount > 0 ? (
+            // Keep the shared Button for its focus ring and disabled handling. The amber
+            // tone stays as a caller override because there is no warning semantic token yet.
             <Button
               variant="ghost"
               onClick={enableUnreviewedFilter}
               className={cn(
-                "mt-3 h-auto w-full justify-start whitespace-normal font-normal",
-                "rounded-lg border border-amber-500/20 bg-amber-500/[0.06] px-3 py-2",
-                "text-left text-xs text-amber-700 hover:bg-amber-500/[0.1] dark:text-amber-300",
+                "mt-3 h-auto w-full justify-start whitespace-normal rounded-lg px-3 text-left",
+                "font-normal text-xs",
+                "border border-amber-500/20 bg-amber-500/[0.06] hover:bg-amber-500/[0.1]",
+                PENDING_REVIEW_TEXT,
               )}
             >
               {unreviewedCount} {t("settings.memoryAwaitingReview")}
@@ -492,9 +500,9 @@ export function MemoryPanel(props: {
                     unreviewedOnly ? setUnreviewedOnly(false) : enableUnreviewedFilter()
                   }
                   className={cn(
-                    "h-auto shrink-0 gap-1 px-2.5 text-xs",
+                    "shrink-0 gap-1",
                     unreviewedOnly
-                      ? "bg-amber-500/10 text-amber-700 hover:bg-amber-500/15 dark:text-amber-300"
+                      ? cn(PENDING_REVIEW_FILL, PENDING_REVIEW_TEXT, "hover:bg-amber-500/15")
                       : "text-muted-foreground",
                   )}
                 >

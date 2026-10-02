@@ -210,7 +210,7 @@ export const ZH_CN_SETTINGS_TRANSLATIONS = {
   "settings.memorySave": "保存",
   "settings.memoryFilterUnreviewed": "只看待审核",
   "settings.memoryNoUnreviewedEntries": "没有待审核的记忆。",
-  "settings.memoryReviewNow": "点击查看",
+  "settings.memoryReviewNow": "去审核",
   "settings.memoryUnreviewed": "待审核",
   "settings.memoryUpdated": "更新于",
   "settings.memoryAccept": "通过",

@@ -368,7 +368,7 @@ jobs:
           cp "$exe_path.sig" "dist/LiveAgent-${LIVEAGENT_RELEASE_TAG}-Windows-x64-Setup.exe.sig"
           mkdir -p dist/portable/LiveAgent
           cp "$portable_exe_path" dist/portable/LiveAgent/LiveAgent.exe
-          binary_dir="$(dirname "$portable_exe_path")"
+          binary_dir="crates/agent-gui/src-tauri/binaries"
           backend_path="$binary_dir/k-brain-x86_64-pc-windows-msvc.exe"
           computer_path="$binary_dir/k-brain-computer-x86_64-pc-windows-msvc.exe"
           test -f "$backend_path"

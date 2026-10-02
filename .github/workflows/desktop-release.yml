@@ -193,6 +193,7 @@ jobs:
         run: pnpm --dir crates/agent-gui prepare:kbrain:release
 
       - name: Import Apple signing certificate
+        if: env.LIVEAGENT_IS_PRERELEASE != 'true'
         env:
           APPLE_CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -214,6 +215,7 @@ jobs:
           security find-identity -v -p codesigning "$KEYCHAIN_PATH"
 
       - name: Store notarization profile
+        if: env.LIVEAGENT_IS_PRERELEASE != 'true'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -242,6 +244,7 @@ jobs:
         run: node scripts/release/verify-kbrain-packaging.mjs --target "${{ matrix.target }}" --binary-dir crates/agent-gui/src-tauri/binaries
 
       - name: Build signed and notarized DMG
+        if: env.LIVEAGENT_IS_PRERELEASE != 'true'
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           DESKTOP_MACOS_TARGET: ${{ matrix.target }}
@@ -251,6 +254,11 @@ jobs:
           LIVEAGENT_UPDATE_REPOSITORY: ${{ github.repository }}
         run: make desktop-build-macos-release
 
+      - name: Build unsigned preview macOS app
+        if: env.LIVEAGENT_IS_PRERELEASE == 'true'
+        working-directory: crates/agent-gui
+        run: pnpm tauri build --config src-tauri/tauri.macos.release.conf.json --config src-tauri/tauri.macos.preview.conf.json --config "$LIVEAGENT_TAURI_VERSION_CONFIG" --target "${{ matrix.target }}" --bundles app
+
       - name: Verify macOS package contains backend and computer helper
         run: node scripts/release/verify-kbrain-packaging.mjs --target "${{ matrix.target }}" --binary-dir crates/agent-gui/src-tauri/binaries --bundle-dir "target/${{ matrix.target }}/release/bundle/macos/LiveAgent.app" --no-receipt-hash
 
@@ -258,14 +266,20 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          dmg_path="$(find "target/${{ matrix.target }}/release/bundle/dmg" -maxdepth 1 -name 'LiveAgent_*.dmg' -print -quit)"
-          updater_path="$(find "target/${{ matrix.target }}/release/bundle/macos" -maxdepth 1 -name '*.app.tar.gz' -print -quit)"
-          test -n "$dmg_path"
-          test -n "$updater_path"
-          test -f "$updater_path.sig"
-          cp "$dmg_path" "dist/LiveAgent-${LIVEAGENT_RELEASE_TAG}-macOS-${{ matrix.suffix }}.dmg"
-          cp "$updater_path" "dist/LiveAgent-${LIVEAGENT_RELEASE_TAG}-macOS-${{ matrix.suffix }}.app.tar.gz"
-          cp "$updater_path.sig" "dist/LiveAgent-${LIVEAGENT_RELEASE_TAG}-macOS-${{ matrix.suffix }}.app.tar.gz.sig"
+          if [ "$LIVEAGENT_IS_PRERELEASE" = true ]; then
+            app_path="target/${{ matrix.target }}/release/bundle/macos/LiveAgent.app"
+            test -d "$app_path"
+            ditto -c -k --sequesterRsrc --keepParent "$app_path" "dist/LiveAgent-${LIVEAGENT_RELEASE_TAG}-macOS-${{ matrix.suffix }}.app.zip"
+          else
+            dmg_path="$(find "target/${{ matrix.target }}/release/bundle/dmg" -maxdepth 1 -name 'LiveAgent_*.dmg' -print -quit)"
+            updater_path="$(find "target/${{ matrix.target }}/release/bundle/macos" -maxdepth 1 -name '*.app.tar.gz' -print -quit)"
+            test -n "$dmg_path"
+            test -n "$updater_path"
+            test -f "$updater_path.sig"
+            cp "$dmg_path" "dist/LiveAgent-${LIVEAGENT_RELEASE_TAG}-macOS-${{ matrix.suffix }}.dmg"
+            cp "$updater_path" "dist/LiveAgent-${LIVEAGENT_RELEASE_TAG}-macOS-${{ matrix.suffix }}.app.tar.gz"
+            cp "$updater_path.sig" "dist/LiveAgent-${LIVEAGENT_RELEASE_TAG}-macOS-${{ matrix.suffix }}.app.tar.gz.sig"
+          fi
 
       - uses: actions/upload-artifact@v7
         with:
@@ -342,7 +356,7 @@ jobs:
           mkdir -p dist
           msi_path="$(find target crates/agent-gui/src-tauri/target -type f -name '*.msi' -path '*bundle*' -print -quit 2>/dev/null || true)"
           exe_path="$(find target crates/agent-gui/src-tauri/target -type f -name '*.exe' -path '*bundle*' -print -quit 2>/dev/null || true)"
-          portable_exe_path="$(find target crates/agent-gui/src-tauri/target -type f -name 'liveagent.exe' -path '*/release/*' ! -path '*bundle*' -print -quit 2>/dev/null || true)"
+          portable_exe_path="target/x86_64-pc-windows-msvc/release/liveagent.exe"
           test -n "$msi_path"
           test -n "$exe_path"
           test -n "$portable_exe_path"
@@ -470,6 +484,7 @@ jobs:
         run: bash scripts/release/verify-linux-glibc-baseline.sh
 
       - name: Strip bundled Wayland libraries and re-sign AppImage
+        if: env.LIVEAGENT_IS_PRERELEASE != 'true'
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -489,8 +504,12 @@ jobs:
           appimage_path="$(find crates/agent-gui/src-tauri/target target -type f -name '*.AppImage' -path '*bundle*' -print -quit 2>/dev/null || true)"
           test -n "$appimage_path"
           rm -rf "$RUNNER_TEMP/liveagent-appimage"
-          unsquashfs -quiet -d "$RUNNER_TEMP/liveagent-appimage" "$appimage_path"
-          node scripts/release/verify-kbrain-packaging.mjs --target x86_64-unknown-linux-gnu --binary-dir crates/agent-gui/src-tauri/binaries --bundle-dir "$RUNNER_TEMP/liveagent-appimage" --no-receipt-hash
+          mkdir -p "$RUNNER_TEMP/liveagent-appimage"
+          (
+            cd "$RUNNER_TEMP/liveagent-appimage"
+            "$GITHUB_WORKSPACE/$appimage_path" --appimage-extract >/dev/null
+          )
+          node scripts/release/verify-kbrain-packaging.mjs --target x86_64-unknown-linux-gnu --binary-dir crates/agent-gui/src-tauri/binaries --bundle-dir "$RUNNER_TEMP/liveagent-appimage/squashfs-root" --no-receipt-hash
 
       - name: Stage Linux artifacts
         run: |
@@ -604,5 +623,7 @@ jobs:
           fi
           gh release upload "$RELEASE_TAG" "${public_assets[@]}" --clobber
 
-          node scripts/release/create-tauri-updater-manifest.mjs release-artifacts release-artifacts/latest.json "$notes_path"
-          gh release upload "$RELEASE_TAG" release-artifacts/latest.json --clobber
+          if [ "$is_prerelease" != true ]; then
+            node scripts/release/create-tauri-updater-manifest.mjs release-artifacts release-artifacts/latest.json "$notes_path"
+            gh release upload "$RELEASE_TAG" release-artifacts/latest.json --clobber
+          fi

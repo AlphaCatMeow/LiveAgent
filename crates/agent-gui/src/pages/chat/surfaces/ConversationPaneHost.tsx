@@ -21,10 +21,16 @@ import { isKBrainBackendEnabled } from "../../../lib/host";
 import { ConversationStatsBarHost } from "../components/ConversationStatsBarHost";
 import { CurrentTaskProgress } from "../components/CurrentTaskProgress";
 import { DesktopCheckpointRewindProvider } from "../components/DesktopCheckpointRewindProvider";
+import { KBrainCheckpointRewindProvider } from "../components/KBrainCheckpointRewindProvider";
 import { PendingToolApprovalBar } from "../components/PendingToolApprovalBar";
 import type { ConversationPaneHostHandle } from "../conversations/useConversationPaneHostBridge";
 import { useConversationSurfaceSnapshot } from "../conversations/useConversationSurfaceSnapshot";
 import { buildQueuedChatTurnPreview } from "../queue/chatTurnQueue";
+
+const CheckpointRewindProvider = isKBrainBackendEnabled()
+  ? KBrainCheckpointRewindProvider
+  : DesktopCheckpointRewindProvider;
+
 import { ChatTranscript } from "../transcript/ChatTranscript";
 import {
   type ConversationPaneRegistration,
@@ -94,7 +100,9 @@ function RegisteredRestorableConversationPaneHostContent(props: {
       return;
     }
     if (typeof window.requestIdleCallback === "function") {
-      const idleCallback = window.requestIdleCallback(hydrate, { timeout: 800 });
+      const idleCallback = window.requestIdleCallback(hydrate, {
+        timeout: 800,
+      });
       return () => {
         cancelled = true;
         window.cancelIdleCallback(idleCallback);
@@ -157,8 +165,6 @@ const RegisteredConversationPaneHostContent = forwardRef<
 >(function RegisteredConversationPaneHost(props, forwardedRef) {
   const { identity, binding } = props.registration;
   const { paneId, conversationId } = identity;
-  const { locale } = useLocale();
-  const backendOwned = isKBrainBackendEnabled();
   const {
     controller,
     transcript,
@@ -247,7 +253,7 @@ const RegisteredConversationPaneHostContent = forwardRef<
             trajectory?.renderContent(snapshot)
           ) : (
             <ChangedFilesActionsProvider value={changedFilesActions}>
-              <DesktopCheckpointRewindProvider
+              <CheckpointRewindProvider
                 conversationId={snapshot.conversationId}
                 workspaceRoot={transcript.workspaceRoot}
                 project={checkpointRewind.project}
@@ -266,7 +272,7 @@ const RegisteredConversationPaneHostContent = forwardRef<
                   floatingOverhangPx={composerFloatingOverhang}
                   composerCenterOffsetPx={composerCenterOffset}
                 />
-              </DesktopCheckpointRewindProvider>
+              </CheckpointRewindProvider>
             </ChangedFilesActionsProvider>
           ),
           composer: (
@@ -282,7 +288,7 @@ const RegisteredConversationPaneHostContent = forwardRef<
               queuedTurns={queuedTurns}
               onStop={controller.stop}
               onManualCompactConfirm={controller.compact}
-              manualCompactBlocked={backendOwned || isCompactionRunning}
+              manualCompactBlocked={isCompactionRunning}
               onHeightChange={setComposerOverlayHeight}
               onFloatingOverhangChange={setComposerFloatingOverhang}
               onCenterOffsetChange={setComposerCenterOffset}
@@ -303,26 +309,18 @@ const RegisteredConversationPaneHostContent = forwardRef<
                 ) : null
               }
               statsBar={
-                backendOwned ? (
-                  <p className="px-3 py-1 text-xs text-muted-foreground" role="note">
-                    {locale === "zh-CN"
-                      ? "K-brain 管理工具、技能、记忆与提示词；桌面手动压缩、文件检查点回退和轨迹统计暂不支持。"
-                      : "K-brain manages tools, skills, memory and prompts. Desktop manual compaction, file checkpoint rewind and trajectory statistics are not supported."}
-                  </p>
-                ) : (
-                  <ConversationStatsBarHost
-                    // 前缀防与同级 taskProgressBar 的 key（裸会话 id）碰撞：React 对同键
-                    // 兄弟的 keyed diff 会让旧 fiber 逃过删除，DOM 残留逐次累积。
-                    key={`stats-${snapshot.conversationId}`}
-                    conversationId={snapshot.conversationId}
-                    // 轨迹页挂起输入区时状态栏随之隐藏，无需重复拉取。
-                    enabled={!trajectoryActive}
-                    contextUsageTokensSource={composer.contextUsageTokensSource}
-                    contextWindow={composer.contextWindow}
-                    onManualCompactConfirm={controller.compact}
-                    manualCompactBlocked={backendOwned || isCompactionRunning}
-                  />
-                )
+                <ConversationStatsBarHost
+                  // 前缀防与同级 taskProgressBar 的 key（裸会话 id）碰撞：React 对同键
+                  // 兄弟的 keyed diff 会让旧 fiber 逃过删除，DOM 残留逐次累积。
+                  key={`stats-${snapshot.conversationId}`}
+                  conversationId={snapshot.conversationId}
+                  // 轨迹页挂起输入区时状态栏随之隐藏，无需重复拉取。
+                  enabled={!trajectoryActive}
+                  contextUsageTokensSource={composer.contextUsageTokensSource}
+                  contextWindow={composer.contextWindow}
+                  onManualCompactConfirm={controller.compact}
+                  manualCompactBlocked={isCompactionRunning}
+                />
               }
               fileDropOverlay={
                 fileDrop.active ? (

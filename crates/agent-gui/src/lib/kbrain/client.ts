@@ -1,3 +1,4 @@
+import { resolveKBrainClientOptions } from "./runtimeConnection";
 import {
   KBRAIN_PROTOCOL_VERSION,
   type KBrainBranchRequest,
@@ -8,9 +9,12 @@ import {
   type KBrainHistoryResponse,
   type KBrainModelRef,
   type KBrainPromptRequest,
+  type KBrainQuestionAnswer,
   type KBrainRunAccepted,
   type KBrainSession,
   type KBrainSessionPage,
+  type KBrainSettingsDocument,
+  type KBrainSettingsUpdate,
   type KBrainSharedProjection,
   type KBrainShareStatus,
   type KBrainTextGenerateRequest,
@@ -18,13 +22,140 @@ import {
   type KBrainUpdateSessionRequest,
 } from "./types";
 
+export type KBrainCheckpointTurn = {
+  turn_seq: number;
+  turn_id: string;
+  file_count: number;
+  dir_count: number;
+  incomplete: boolean;
+  first_captured_at: number;
+};
+
+export type KBrainCheckpointDiff = {
+  turn_seq: number;
+  restore_files: number;
+  delete_files: number;
+  clean_files: number;
+  skipped_dirs: number;
+  missing_blobs: number;
+  unresolvable_files: number;
+  capture_errors: number;
+  entries: {
+    path: string;
+    key: string;
+    action: string;
+    current_hash?: string;
+  }[];
+};
+
+export type KBrainCheckpointResult = {
+  turn_seq: number;
+  restored_files: number;
+  deleted_files: number;
+  clean_files: number;
+  skipped_dirs: number;
+  capture_errors: number;
+  conflicts: string[];
+  failed: string[];
+  revision?: string;
+};
+
+export type KBrainCompactAccepted = {
+  version: typeof KBRAIN_PROTOCOL_VERSION;
+  conversation_id: string;
+  run_id: string;
+  accepted_seq: number;
+  status: string;
+  revision?: string;
+};
+
 export type KBrainEventHandlers = {
   onEvent: (event: KBrainEvent) => void;
   onError?: (error: Error) => void;
 };
 
+export type KBrainCheckpointExpected = { key: string; current_hash: string };
+
+export type KBrainProviderModelDiscoveryInput = {
+  type: string;
+  requestFormat?: string;
+  baseUrl: string;
+  apiKey: string;
+  useSystemProxy?: boolean;
+  isFullUrl?: boolean;
+  modelsUrl?: string;
+  providerId?: string;
+  customHeaders?: readonly { key: string; value: string }[];
+};
+
+export type KBrainProviderModelsResponse = {
+  version: string;
+  provider: string;
+  models: unknown[];
+};
+
 function trimBaseUrl(baseUrl: string) {
   return baseUrl.trim().replace(/\/+$/, "");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isFiniteInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value);
+}
+
+function isCheckpointTurn(value: unknown): value is KBrainCheckpointTurn {
+  return (
+    isRecord(value) &&
+    isFiniteInteger(value.turn_seq) &&
+    typeof value.turn_id === "string" &&
+    isFiniteInteger(value.file_count) &&
+    isFiniteInteger(value.dir_count) &&
+    typeof value.incomplete === "boolean" &&
+    typeof value.first_captured_at === "number"
+  );
+}
+
+function isCheckpointDiff(value: unknown): value is KBrainCheckpointDiff {
+  return (
+    isRecord(value) &&
+    isFiniteInteger(value.turn_seq) &&
+    isFiniteInteger(value.restore_files) &&
+    isFiniteInteger(value.delete_files) &&
+    isFiniteInteger(value.clean_files) &&
+    isFiniteInteger(value.skipped_dirs) &&
+    isFiniteInteger(value.missing_blobs) &&
+    isFiniteInteger(value.unresolvable_files) &&
+    isFiniteInteger(value.capture_errors) &&
+    Array.isArray(value.entries) &&
+    value.entries.every(
+      (entry) =>
+        isRecord(entry) &&
+        typeof entry.path === "string" &&
+        typeof entry.key === "string" &&
+        typeof entry.action === "string" &&
+        (entry.current_hash === undefined || typeof entry.current_hash === "string"),
+    )
+  );
+}
+
+function isCheckpointResult(value: unknown): value is KBrainCheckpointResult {
+  return (
+    isRecord(value) &&
+    isFiniteInteger(value.turn_seq) &&
+    isFiniteInteger(value.restored_files) &&
+    isFiniteInteger(value.deleted_files) &&
+    isFiniteInteger(value.clean_files) &&
+    isFiniteInteger(value.skipped_dirs) &&
+    isFiniteInteger(value.capture_errors) &&
+    Array.isArray(value.conflicts) &&
+    value.conflicts.every((item) => typeof item === "string") &&
+    Array.isArray(value.failed) &&
+    value.failed.every((item) => typeof item === "string") &&
+    (value.revision === undefined || typeof value.revision === "string")
+  );
 }
 
 async function readError(response: Response) {
@@ -41,8 +172,13 @@ async function readError(response: Response) {
   return error;
 }
 
-export function createKBrainClient(options: KBrainClientOptions = {}) {
-  const baseUrl = trimBaseUrl(options.baseUrl ?? "http://127.0.0.1:47321");
+export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
+  const options = resolveKBrainClientOptions(inputOptions);
+  // A custom fetch marks an explicit test client; preserve its historical local default.
+  const configuredBaseUrl =
+    options.baseUrl?.trim() ?? (options.fetch ? "http://127.0.0.1:47321" : undefined);
+  if (!configuredBaseUrl) throw new Error("K-brain backend connection is not ready");
+  const baseUrl = trimBaseUrl(configuredBaseUrl);
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
   const headers = () => ({
     Accept: "application/json",
@@ -62,11 +198,48 @@ export function createKBrainClient(options: KBrainClientOptions = {}) {
     return (await response.json()) as T;
   }
 
+  async function requestMemory<T>(command: string, args: Record<string, unknown> = {}): Promise<T> {
+    return request<T>("/v1/memory/manage", {
+      method: "POST",
+      body: JSON.stringify({ command, args }),
+    });
+  }
+
   async function createSession(input: KBrainCreateSessionRequest): Promise<KBrainSession> {
     return request<KBrainSession>("/v1/sessions", {
       method: "POST",
       body: JSON.stringify(input),
     });
+  }
+
+  async function importLegacyHistory(input: unknown, signal?: AbortSignal) {
+    const result = await request<{
+      source_id: string;
+      backend_id: string;
+      status: "imported" | "already_imported";
+      checkpoint: "available" | "partial" | "not_found" | "unresolved";
+      checkpoint_reason?: string;
+      fingerprint: string;
+    }>("/v1/migrations/liveagent-history", {
+      method: "POST",
+      body: JSON.stringify(input),
+      signal,
+    });
+    if (
+      !result ||
+      typeof result.source_id !== "string" ||
+      !result.source_id.trim() ||
+      typeof result.backend_id !== "string" ||
+      !result.backend_id.trim() ||
+      (result.status !== "imported" && result.status !== "already_imported") ||
+      !["available", "partial", "not_found", "unresolved"].includes(result.checkpoint) ||
+      (result.checkpoint_reason !== undefined && typeof result.checkpoint_reason !== "string") ||
+      typeof result.fingerprint !== "string" ||
+      !result.fingerprint.trim()
+    ) {
+      throw new Error("Malformed K-brain history import response");
+    }
+    return result;
   }
 
   async function listSessions(
@@ -99,6 +272,71 @@ export function createKBrainClient(options: KBrainClientOptions = {}) {
     return Array.isArray(result) ? result : (result.models ?? []);
   }
 
+  async function discoverProviderModels(
+    providerId: string | undefined,
+    input: unknown,
+  ): Promise<unknown> {
+    const id = providerId?.trim() || "draft";
+    return request<unknown>(`/v1/settings/providers/${encodeURIComponent(id)}/models`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async function getSettings(): Promise<KBrainSettingsDocument> {
+    return request<KBrainSettingsDocument>("/v1/settings");
+  }
+
+  async function updateSettings(input: KBrainSettingsUpdate): Promise<KBrainSettingsDocument> {
+    return request<KBrainSettingsDocument>("/v1/settings", {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async function getMcpSettings(): Promise<unknown> {
+    return request<unknown>("/v1/mcp");
+  }
+
+  async function updateMcpSettings(input: unknown): Promise<unknown> {
+    return request<unknown>("/v1/mcp", {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async function discoverMcpTools(
+    input: { cwd?: string; server_ids?: string[] } = {},
+  ): Promise<unknown> {
+    const query = new URLSearchParams();
+    if (input.cwd) query.set("cwd", input.cwd);
+    if (input.server_ids?.length) query.set("server_ids", input.server_ids.join(","));
+    return request<unknown>(`/v1/mcp/tools?${query}`);
+  }
+
+  async function searchMcpTools(input: {
+    query: string;
+    cwd?: string;
+    server_ids?: string[];
+    max_results?: number;
+  }): Promise<unknown> {
+    return request<unknown>("/v1/mcp/search", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async function callMcpTool(input: {
+    name: string;
+    arguments?: unknown;
+    cwd?: string;
+  }): Promise<unknown> {
+    return request<unknown>("/v1/mcp/tools/call", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
   async function getSession(conversationId: string): Promise<KBrainSession> {
     return request<KBrainSession>(`/v1/sessions/${encodeURIComponent(conversationId)}`);
   }
@@ -112,7 +350,9 @@ export function createKBrainClient(options: KBrainClientOptions = {}) {
       includeActive?: boolean;
     },
   ): Promise<KBrainHistoryResponse> {
-    const query = new URLSearchParams({ max_messages: String(params.maxMessages) });
+    const query = new URLSearchParams({
+      max_messages: String(params.maxMessages),
+    });
     if (params.beforeOffset !== undefined) query.set("before_offset", String(params.beforeOffset));
     if (params.expectedRevision !== undefined)
       query.set("expected_revision", params.expectedRevision);
@@ -141,6 +381,56 @@ export function createKBrainClient(options: KBrainClientOptions = {}) {
       method: "POST",
       body: JSON.stringify(input),
     });
+  }
+
+  async function listCheckpoints(conversationId: string): Promise<KBrainCheckpointTurn[]> {
+    const result = await request<unknown>(
+      `/v1/sessions/${encodeURIComponent(conversationId)}/checkpoints`,
+    );
+    if (!Array.isArray(result) || !result.every(isCheckpointTurn)) {
+      throw new Error("Malformed K-brain checkpoint list response");
+    }
+    return result;
+  }
+
+  async function checkpointPreview(
+    conversationId: string,
+    turnSeq: number,
+    authorizedRoots: string[],
+  ): Promise<KBrainCheckpointDiff> {
+    const result = await request<unknown>(
+      `/v1/sessions/${encodeURIComponent(conversationId)}/checkpoints/${turnSeq}/preview`,
+      {
+        method: "POST",
+        body: JSON.stringify({ authorized_roots: authorizedRoots }),
+      },
+    );
+    if (!isCheckpointDiff(result)) throw new Error("Malformed K-brain checkpoint preview response");
+    return result;
+  }
+
+  async function checkpointRewind(
+    conversationId: string,
+    turnSeq: number,
+    authorizedRoots: string[],
+    expected: { key: string; currentHash: string }[],
+  ): Promise<KBrainCheckpointResult> {
+    const result = await request<unknown>(
+      `/v1/sessions/${encodeURIComponent(conversationId)}/checkpoints/${turnSeq}/rewind`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          authorized_roots: authorizedRoots,
+          expected: expected.map((entry) => ({
+            key: entry.key,
+            current_hash: entry.currentHash,
+          })),
+        }),
+      },
+    );
+    if (!isCheckpointResult(result))
+      throw new Error("Malformed K-brain checkpoint rewind response");
+    return result;
   }
 
   async function deleteSession(conversationId: string): Promise<{ ok: boolean }> {
@@ -198,6 +488,36 @@ export function createKBrainClient(options: KBrainClientOptions = {}) {
     return result;
   }
 
+  async function compactSession(
+    conversationId: string,
+    input: { client_request_id?: string; expected_revision: string },
+  ): Promise<KBrainCompactAccepted> {
+    if (!input.expected_revision?.trim()) {
+      throw new Error("expected_revision is required for compaction");
+    }
+    const clientRequestId = input.client_request_id?.trim() || crypto.randomUUID();
+    const result = await request<KBrainCompactAccepted>(
+      `/v1/sessions/${encodeURIComponent(conversationId)}/compact`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          conversation_id: conversationId,
+          client_request_id: clientRequestId,
+          ...(input.expected_revision ? { expected_revision: input.expected_revision } : {}),
+        }),
+      },
+    );
+    if (
+      result.version !== KBRAIN_PROTOCOL_VERSION ||
+      result.conversation_id !== conversationId ||
+      !result.run_id ||
+      !Number.isSafeInteger(result.accepted_seq)
+    ) {
+      throw new Error("Malformed K-brain compaction acceptance");
+    }
+    return result;
+  }
+
   async function startRun(input: KBrainPromptRequest): Promise<KBrainRunAccepted> {
     const accepted = await request<KBrainRunAccepted>(
       `/v1/sessions/${encodeURIComponent(input.conversation_id)}/runs`,
@@ -220,7 +540,13 @@ export function createKBrainClient(options: KBrainClientOptions = {}) {
   async function cancelRun(conversationId: string, runId: string): Promise<void> {
     await request<unknown>(
       `/v1/sessions/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/cancel`,
-      { method: "POST", body: JSON.stringify({ conversation_id: conversationId, run_id: runId }) },
+      {
+        method: "POST",
+        body: JSON.stringify({
+          conversation_id: conversationId,
+          run_id: runId,
+        }),
+      },
     );
   }
 
@@ -229,6 +555,26 @@ export function createKBrainClient(options: KBrainClientOptions = {}) {
       method: "POST",
       body: JSON.stringify({ conversation_id: conversationId }),
     });
+  }
+
+  async function resolveQuestion(
+    conversationId: string,
+    questionId: string,
+    runId: string,
+    answers: KBrainQuestionAnswer[],
+  ): Promise<void> {
+    await request<unknown>(
+      `/v1/sessions/${encodeURIComponent(conversationId)}/questions/${encodeURIComponent(questionId)}`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          conversation_id: conversationId,
+          question_id: questionId,
+          run_id: runId,
+          answers,
+        }),
+      },
+    );
   }
 
   async function resolvePermission(
@@ -245,7 +591,11 @@ export function createKBrainClient(options: KBrainClientOptions = {}) {
         body: JSON.stringify({
           conversation_id: conversationId,
           run_id: runId,
-          decision: { permission_id: permissionId, decision, ...(reason ? { reason } : {}) },
+          decision: {
+            permission_id: permissionId,
+            decision,
+            ...(reason ? { reason } : {}),
+          },
         }),
       },
     );
@@ -320,16 +670,31 @@ export function createKBrainClient(options: KBrainClientOptions = {}) {
 
   return {
     createSession,
+    requestMemory,
+    importLegacyHistory,
     listSessions,
     listModels,
+    discoverProviderModels,
+    getSettings,
+    updateSettings,
+    getMcpSettings,
+    updateMcpSettings,
+    discoverMcpTools,
+    searchMcpTools,
+    callMcpTool,
     generateText,
+    compactSession,
     getSession,
     updateSession,
     startRun,
     cancelRun,
     closeSession,
     resolvePermission,
+    resolveQuestion,
     getHistory,
+    listCheckpoints,
+    checkpointPreview,
+    checkpointRewind,
     branchSession,
     editSession,
     deleteSession,

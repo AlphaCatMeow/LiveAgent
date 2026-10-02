@@ -415,7 +415,7 @@ test("a direct queue stop pauses processing until composer Stop resumes it", asy
   hookHarness.cleanup();
 });
 
-test("gateway tool_answer forwards validated JSON with conversation isolation", async () => {
+test("K-brain native queue subscribes to Gateway queue answers", async () => {
   const hookHarness = createHookHarness();
   const listeners = new Map();
   const responses = [];
@@ -423,6 +423,17 @@ test("gateway tool_answer forwards validated JSON with conversation isolation", 
   const loader = createTsModuleLoader({
     mocks: {
       react: hookHarness.react,
+      [new URL("../../src/lib/host.ts", import.meta.url).pathname]: {
+        isKBrainBackendEnabled() {
+          return true;
+        },
+        isTauriHost() {
+          return true;
+        },
+        isKBrainBrowserHost() {
+          return false;
+        },
+      },
       "@tauri-apps/api/core": {
         async invoke(command, args) {
           if (command === "gateway_chat_queue_respond") {
@@ -524,61 +535,10 @@ test("gateway tool_answer forwards validated JSON with conversation isolation", 
     }),
   );
 
-  const listener = listeners.get("gateway:chat-queue-request");
-  assert.ok(listener);
-  const answers = [{ questionId: "choice", selectedLabel: "Second" }];
-
-  listener({
-    payload: {
-      requestId: "request-accepted",
-      action: "tool_answer",
-      conversationId: "conversation-owner",
-      itemId: "call-ask-remote",
-      requestJson: JSON.stringify(answers),
-    },
-  });
   await flushPromises();
-  assert.deepEqual(answerCalls[0], {
-    toolCallId: "call-ask-remote",
-    answers,
-    options: { conversationId: "conversation-owner" },
-  });
-  assert.equal(
-    responses.find((response) => response.input.requestId === "request-accepted").input.accepted,
-    true,
-  );
-
-  listener({
-    payload: {
-      requestId: "request-mismatch",
-      action: "tool_answer",
-      conversationId: "conversation-other",
-      itemId: "call-ask-remote",
-      requestJson: JSON.stringify(answers),
-    },
-  });
-  await flushPromises();
-  const mismatch = responses.find((response) => response.input.requestId === "request-mismatch");
-  assert.equal(mismatch.input.accepted, false);
-  assert.equal(mismatch.input.errorCode, "not_found");
-  assert.match(mismatch.input.message, /different conversation/);
-
-  listener({
-    payload: {
-      requestId: "request-invalid-json",
-      action: "tool_answer",
-      conversationId: "conversation-owner",
-      itemId: "call-ask-remote",
-      requestJson: "{broken",
-    },
-  });
-  await flushPromises();
-  const invalid = responses.find(
-    (response) => response.input.requestId === "request-invalid-json",
-  );
-  assert.equal(invalid.input.accepted, false);
-  assert.equal(invalid.input.errorCode, "invalid_payload");
-  assert.equal(answerCalls.length, 2);
+  assert.equal(listeners.has("gateway:chat-queue-request"), true);
+  assert.deepEqual(responses, []);
+  assert.deepEqual(answerCalls, []);
 
   hookHarness.cleanup();
 });

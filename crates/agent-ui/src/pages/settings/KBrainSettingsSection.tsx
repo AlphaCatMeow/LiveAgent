@@ -4,53 +4,13 @@ import { Input } from "@liveagent/ui/components/ui/input";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { useEffect, useMemo, useState } from "react";
 
-export type KBrainSettingsProvider = {
-  id: string;
-  name: string;
-  api: string;
-  baseUrl: string;
-  apiKeyConfigured: boolean;
-  models: KBrainSettingsModel[];
-};
-export type KBrainSettingsModel = {
-  provider: string;
-  id: string;
-  name?: string;
-  contextWindow?: number;
-  maxOutputTokens?: number;
-  vision?: boolean;
-};
-export type KBrainSettingsDocument = {
-  mode: "kbrain";
-  defaultModel: string;
-  defaultProvider: string;
-  providers: KBrainSettingsProvider[];
-  models: KBrainSettingsModel[];
-};
+import type {
+  KBrainSettingsAdapter,
+  KBrainSettingsDocument,
+  KBrainSettingsProvider,
+} from "./kbrainSettingsAdapter";
 
 const SETTINGS_CHANGED_EVENT = "kbrain:settings-changed";
-
-function endpoint() {
-  return (import.meta.env?.VITE_KBRAIN_URL ?? "http://127.0.0.1:47321").replace(/\/+$/, "");
-}
-function authHeaders(): Record<string, string> {
-  const token = (import.meta.env?.VITE_KBRAIN_TOKEN ?? "").trim();
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${endpoint()}${path}`, {
-    ...init,
-    headers: {
-      Accept: "application/json",
-      ...authHeaders(),
-      ...(init?.body === undefined ? {} : { "Content-Type": "application/json" }),
-      ...(init?.headers ?? {}),
-    },
-  });
-  if (!response.ok)
-    throw new Error((await response.text()) || `K-brain request failed (${response.status})`);
-  return (await response.json()) as T;
-}
 
 export function toKBrainProviderUpdate(
   provider: KBrainSettingsProvider,
@@ -67,8 +27,11 @@ export function toKBrainProviderUpdate(
   };
 }
 
-export function KBrainSettingsSection(_props: SettingsSectionProps) {
+export function KBrainSettingsSection(
+  props: SettingsSectionProps & { kbrain: KBrainSettingsAdapter },
+) {
   const { t } = useLocale();
+  const { kbrain } = props;
   const [document, setDocument] = useState<KBrainSettingsDocument | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -90,7 +53,8 @@ export function KBrainSettingsSection(_props: SettingsSectionProps) {
 
   useEffect(() => {
     let cancelled = false;
-    void request<KBrainSettingsDocument>("/v1/settings")
+    void kbrain
+      .getSettings()
       .then((value) => {
         if (cancelled) return;
         setDocument(value);
@@ -104,7 +68,7 @@ export function KBrainSettingsSection(_props: SettingsSectionProps) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [kbrain]);
 
   function updateProvider(patch: Partial<KBrainSettingsProvider>) {
     if (!provider || !document) return;
@@ -183,20 +147,17 @@ export function KBrainSettingsSection(_props: SettingsSectionProps) {
     setStatus(null);
     setError(null);
     try {
-      const response = await request<KBrainSettingsDocument>("/v1/settings", {
-        method: "PUT",
-        body: JSON.stringify({
-          defaultModel: document.defaultModel,
-          defaultProvider: document.defaultProvider,
-          deleteProviders: deletedProviderIds,
-          providers: document.providers.map((item) =>
-            toKBrainProviderUpdate(
-              item,
-              item.id === provider?.id ? apiKey : "",
-              item.id === provider?.id && clearKey,
-            ),
+      const response = await kbrain.updateSettings({
+        defaultModel: document.defaultModel,
+        defaultProvider: document.defaultProvider,
+        deleteProviders: deletedProviderIds,
+        providers: document.providers.map((item) =>
+          toKBrainProviderUpdate(
+            item,
+            item.id === provider?.id ? apiKey : "",
+            item.id === provider?.id && clearKey,
           ),
-        }),
+        ),
       });
       setDocument(response);
       setApiKey("");

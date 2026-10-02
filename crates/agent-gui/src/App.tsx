@@ -1,4 +1,4 @@
-import type { Context } from "@earendil-works/pi-ai";
+import type { Context } from "@liveagent/app/lib/agentTypes";
 import { invoke } from "@liveagent/app/shims/tauriCore";
 import { listen } from "@liveagent/app/shims/tauriEvent";
 import { AppErrorBoundary } from "@liveagent/ui/components/AppErrorBoundary";
@@ -7,6 +7,11 @@ import { useConfirmDialog } from "@liveagent/ui/components/ui/confirm-dialog";
 import { Toaster } from "@liveagent/ui/components/ui/toaster";
 import { LocaleContext, t as translate, useLocaleContextValue } from "@liveagent/ui/i18n/index";
 import { loadThinkingLiveSupplement } from "@liveagent/ui/lib/models/thinkingLive";
+import {
+  configureResourceHostCapabilities,
+  kbrainResourceHostCapabilities,
+  type ResourceHostCapabilities,
+} from "@liveagent/ui/lib/resourceHost";
 import {
   applyGatewaySettingsSyncPayload,
   buildGatewaySettingsSyncPayload,
@@ -25,6 +30,9 @@ import {
   useRef,
   useState,
 } from "react";
+import { settingsHostAdapter } from "./agent-ui-adapters/kbrainSettings";
+import { kbrainSkillsAdapter } from "./agent-ui-adapters/kbrainSkills";
+
 import { AppBootShell } from "./components/app/AppBootShell";
 import { useNativeInputContextMenu } from "./components/input-context-menu/NativeInputContextMenu";
 import { useMacOsAppHeaderHeight } from "./components/MacOsTitleBarSpacer";
@@ -56,6 +64,12 @@ import {
 import { desktopSttSettingsService } from "./lib/stt/desktopSttSettingsService";
 import type { SectionId } from "./pages/settings/types";
 
+const guiResourceHostCapabilities: ResourceHostCapabilities = {
+  ...kbrainResourceHostCapabilities,
+  skillsAdapter: kbrainSkillsAdapter,
+};
+configureResourceHostCapabilities(guiResourceHostCapabilities);
+
 let chatPageModule: Promise<typeof import("./pages/ChatPage")> | null = null;
 
 function loadChatPage() {
@@ -69,9 +83,6 @@ const SettingsPage = lazy(async () => ({
 }));
 const CronPromptRunner = lazy(async () => ({
   default: (await import("./components/cron/CronPromptRunner")).CronPromptRunner,
-}));
-const MemoryOrganizerHost = lazy(async () => ({
-  default: (await import("./components/memory/useMemoryOrganizer")).MemoryOrganizerHost,
 }));
 
 function getDefaultContext(): Context {
@@ -368,6 +379,7 @@ export default function App() {
         const persistedSettingsPromise = loadPersistedSettingsWithDefaults();
         void loadChatPage();
         const { settings: loaded, defaultWorkdir } = await persistedSettingsPromise;
+        loaded.skills = (await kbrainSkillsAdapter.list()).settings;
         if (!cancelled) {
           defaultWorkdirRef.current = defaultWorkdir;
           const loadedWithDefaults = applyRuntimeSystemDefaults(loaded, defaultWorkdir);
@@ -437,19 +449,30 @@ export default function App() {
 
       saveChainRef.current = saveChainRef.current
         .catch(() => undefined)
-        .then(() => persistSettings(prev, next))
+        .then(async () => {
+          if (JSON.stringify(prev.skills) !== JSON.stringify(next.skills)) {
+            await kbrainSkillsAdapter.settings(next.skills);
+          }
+          return persistSettings(prev, next);
+        })
         .then(async (persistResult) => {
           const publishTarget = normalizeSettings({
             ...next,
+            ...(persistResult.customProviders
+              ? { customProviders: persistResult.customProviders }
+              : {}),
             ...(persistResult.ssh ? { ssh: persistResult.ssh } : {}),
             ...(persistResult.stt ? { stt: persistResult.stt } : {}),
           });
           if (
-            (persistResult.ssh || persistResult.stt) &&
+            (persistResult.customProviders || persistResult.ssh || persistResult.stt) &&
             saveSequenceRef.current === saveSequence
           ) {
             const merged = normalizeSettings({
               ...settingsRef.current,
+              ...(persistResult.customProviders
+                ? { customProviders: persistResult.customProviders }
+                : {}),
               ...(persistResult.ssh ? { ssh: persistResult.ssh } : {}),
               ...(persistResult.stt ? { stt: persistResult.stt } : {}),
             });
@@ -511,6 +534,7 @@ export default function App() {
   const reloadPersistedSettings = useCallback(async () => {
     await saveChainRef.current.catch(() => undefined);
     const { settings: loaded, defaultWorkdir } = await loadPersistedSettingsWithDefaults();
+    loaded.skills = (await kbrainSkillsAdapter.list()).settings;
     defaultWorkdirRef.current = defaultWorkdir;
     const loadedWithDefaults = applyRuntimeSystemDefaults(loaded, defaultWorkdir);
     settingsRef.current = loadedWithDefaults;
@@ -743,7 +767,6 @@ export default function App() {
         {backgroundHostsReady ? (
           <Suspense fallback={null}>
             <CronPromptRunner settings={settings} />
-            <MemoryOrganizerHost settings={settings} setSettings={setSettings} />
           </Suspense>
         ) : null}
         <AppErrorBoundary fallbackHeader={<WindowsTitleBar />}>
@@ -753,6 +776,7 @@ export default function App() {
             <ChatPage
               settings={settings}
               setSettings={setSettings}
+              resourceHost={guiResourceHostCapabilities}
               sttProviderOverride={sttProviderOverride}
               getMcpSettings={getMcpSettings}
               getToolPolicies={getToolPolicies}
@@ -787,6 +811,7 @@ export default function App() {
                 >
                   <SettingsPage
                     settings={settings}
+                    settingsHost={settingsHostAdapter}
                     setSettings={setSettings}
                     saveState={settingsSaveState}
                     onBack={closeSettings}

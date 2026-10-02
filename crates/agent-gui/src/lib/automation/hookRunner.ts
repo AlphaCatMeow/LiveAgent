@@ -104,18 +104,8 @@ export function createHookRunScope(params: {
   const dispatch = (event: HookEvent) => {
     if (!accepting) return;
     const hooks = hooksByEvent.get(event);
-    if (backendOwned) {
-      const hook = hooks?.[0];
-      if (hook) {
-        params.onWarning?.({
-          hookName: hook.name,
-          hookType: hook.type,
-          event,
-          message: "K-brain owns hook execution; LiveAgent hooks are disabled in K-brain mode.",
-        });
-      }
-      return;
-    }
+    // The backend snapshots stored hooks and dispatches from the real Agent lifecycle.
+    if (backendOwned) return;
     if (!hooks || hooks.length === 0) return;
 
     if (queuedDispatches >= MAX_QUEUED_DISPATCHES) {

@@ -3,46 +3,10 @@ import path from "node:path";
 import vm from "node:vm";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { Compile } from "typebox/compile";
 import { transpileTypeScriptModule } from "../../../../scripts/typescript-source-tools.mjs";
 
 const DEFAULT_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".json"];
-
-// Real json-parse/validation implementations from pi-ai (imported by file URL
-// to bypass the package exports map) so argument-integrity and schema-check
-// code paths behave exactly like runtime.
-const piAiJsonParse = await import(
-  new URL(
-    "../../node_modules/@earendil-works/pi-ai/dist/utils/json-parse.js",
-    import.meta.url,
-  ).href
-);
-const piAiValidation = await import(
-  new URL(
-    "../../node_modules/@earendil-works/pi-ai/dist/utils/validation.js",
-    import.meta.url,
-  ).href
-);
-const piAiEventStream = await import(
-  new URL(
-    "../../node_modules/@earendil-works/pi-ai/dist/utils/event-stream.js",
-    import.meta.url,
-  ).href
-);
-const piAiRetry = await import(
-  new URL("../../node_modules/@earendil-works/pi-ai/dist/utils/retry.js", import.meta.url).href
-);
-const piAiProvidersAll = await import(
-  new URL(
-    "../../node_modules/@earendil-works/pi-ai/dist/providers/all.js",
-    import.meta.url,
-  ).href
-);
-const piAiModels = await import(
-  new URL(
-    "../../node_modules/@earendil-works/pi-ai/dist/models.js",
-    import.meta.url,
-  ).href
-);
 
 function createDefaultMocks() {
   const typeboxMock = {
@@ -87,65 +51,6 @@ function createDefaultMocks() {
   };
 
   return {
-    "@earendil-works/pi-ai": {
-      getModel(id, config = {}) {
-        return {
-          id,
-          provider: config.provider ?? "mock",
-          api: config.api ?? "mock",
-          maxTokens: config.maxTokens ?? 128_000,
-          ...config,
-        };
-      },
-      streamSimple() {
-        throw new Error("streamSimple mock was not expected to be called");
-      },
-      validateToolArguments: piAiValidation.validateToolArguments,
-      parseJsonWithRepair: piAiJsonParse.parseJsonWithRepair,
-      parseStreamingJson: piAiJsonParse.parseStreamingJson,
-      repairJson: piAiJsonParse.repairJson,
-      getSupportedThinkingLevels: piAiModels.getSupportedThinkingLevels,
-      clampThinkingLevel: piAiModels.clampThinkingLevel,
-      isRetryableAssistantError: piAiRetry.isRetryableAssistantError,
-      createAssistantMessageEventStream: piAiEventStream.createAssistantMessageEventStream,
-      EventStream: class EventStream {
-        constructor() {
-          throw new Error("EventStream mock was not expected to be constructed");
-        }
-      },
-    },
-    "@earendil-works/pi-ai/api/anthropic-messages": {
-      stream() {
-        throw new Error("stream (anthropic-messages) mock was not expected to be called");
-      },
-    },
-    "@earendil-works/pi-ai/api/openai-completions": {
-      stream() {
-        throw new Error("stream (openai-completions) mock was not expected to be called");
-      },
-    },
-    "@earendil-works/pi-ai/api/openai-responses": {
-      stream() {
-        throw new Error("stream (openai-responses) mock was not expected to be called");
-      },
-    },
-    "@earendil-works/pi-ai/api/google-generative-ai": {
-      stream() {
-        throw new Error("stream (google-generative-ai) mock was not expected to be called");
-      },
-    },
-    "@earendil-works/pi-ai/providers/all": {
-      getBuiltinModel: piAiProvidersAll.getBuiltinModel,
-      getBuiltinModels: piAiProvidersAll.getBuiltinModels,
-      getBuiltinProviders: piAiProvidersAll.getBuiltinProviders,
-    },
-    "@earendil-works/pi-ai/compat": {
-      EventStream: piAiEventStream.EventStream,
-      validateToolArguments: piAiValidation.validateToolArguments,
-      streamSimple() {
-        throw new Error("streamSimple mock was not expected to be called");
-      },
-    },
     "@tauri-apps/api/core": {
       invoke() {
         throw new Error("tauri invoke mock was not expected to be called");
@@ -211,17 +116,11 @@ export function createTsModuleLoader(options = {}) {
     : path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
   const hostSourceDir = path.join(rootDir, "src");
   const sharedSourceDir = fileURLToPath(new URL("../../../agent-ui/src", import.meta.url));
-  const requireFromRoot = createRequire(path.join(rootDir, "package.json"));
   const cache = new Map();
   const defaultMocks = createDefaultMocks();
   const mocks = new Map(Object.entries(defaultMocks));
-  // Tests conventionally override a mocked module by supplying only the
-  // handful of exports they care about (e.g. { getModel() {...} } for
-  // "@earendil-works/pi-ai"), expecting every other default export — like
-  // the real isRetryableAssistantError/createAssistantMessageEventStream —
-  // to keep working underneath. Shallow-merge instead of replacing so those
-  // partial overrides don't silently drop unrelated default exports.
-  for (const [specifier, override] of Object.entries(options.mocks ?? {})) {
+  const optionMocks = options.mocks ?? {};
+  for (const [specifier, override] of Object.entries(optionMocks)) {
     const base = defaultMocks[specifier];
     const isPlainMerge =
       base &&
@@ -231,6 +130,20 @@ export function createTsModuleLoader(options = {}) {
       typeof override === "object" &&
       !Array.isArray(override);
     mocks.set(specifier, isPlainMerge ? { ...base, ...override } : override);
+  }
+
+  const hostModulePath = path.join(hostSourceDir, "lib/host.ts");
+  const hasExplicitHostMock =
+    Object.hasOwn(optionMocks, hostModulePath) ||
+    Object.hasOwn(optionMocks, "@liveagent/app/lib/host");
+  if (Object.hasOwn(optionMocks, "@tauri-apps/api/core") && !hasExplicitHostMock) {
+    const hostModule = loadModule("src/lib/host.ts");
+    mocks.set(hostModulePath, {
+      ...hostModule,
+      isKBrainBackendEnabled: () => false,
+      isTauriHost: () => true,
+      isKBrainBrowserHost: () => false,
+    });
   }
 
   function resolveLocal(specifier, parentDir = rootDir) {
@@ -262,6 +175,9 @@ export function createTsModuleLoader(options = {}) {
     if (
       specifier.startsWith(".") ||
       path.isAbsolute(specifier) ||
+      specifier.startsWith("src/") ||
+      specifier.startsWith("test/") ||
+      specifier.startsWith("src-tauri/") ||
       specifier.startsWith("@liveagent/ui/") ||
       specifier.startsWith("@liveagent/app/") ||
       specifier.startsWith("@liveagent/adapters/")
@@ -277,10 +193,7 @@ export function createTsModuleLoader(options = {}) {
     if (mock !== undefined) return mock;
     if (specifier.endsWith(".css")) return {};
 
-    if (specifier === "@earendil-works/pi-agent-core") {
-      const packageJson = requireFromRoot.resolve("@earendil-works/pi-agent-core/package.json");
-      return loadModule(path.join(path.dirname(packageJson), "dist/agent.js"));
-    }
+
 
     const isRootRelative =
       specifier.startsWith("src/") ||
@@ -343,9 +256,18 @@ export function createTsModuleLoader(options = {}) {
     return module.exports;
   }
 
+  function validateToolArguments(tool, toolCall) {
+    const validator = Compile(tool.parameters);
+    if (!validator.Check(toolCall.arguments)) {
+      throw new Error(`Invalid arguments for ${toolCall.name}`);
+    }
+    return toolCall.arguments;
+  }
+
   return {
     rootDir,
     loadModule,
     resolveLocal,
+    validateToolArguments,
   };
 }

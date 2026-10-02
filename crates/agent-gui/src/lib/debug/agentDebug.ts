@@ -1,4 +1,4 @@
-import type { Context } from "@earendil-works/pi-ai";
+import type { Context } from "@liveagent/app/lib/agentTypes";
 import { invoke } from "@liveagent/app/shims/tauriCore";
 
 import type { CodexRequestFormat, ExecutionMode, ProviderId, ReasoningLevel } from "../settings";

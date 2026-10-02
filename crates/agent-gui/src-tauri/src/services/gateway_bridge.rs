@@ -2,6 +2,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use serde::Deserialize;
 use serde_json::{json, Value};
+use tauri::{AppHandle, Manager};
 
 use crate::commands::{
     chat_file_links::open_chat_file_link_for_conversation,
@@ -33,6 +34,7 @@ use crate::services::automation::{
     validate_cron_expression, AutomationApplyInput, AutomationStore,
 };
 use crate::services::gateway::proto;
+use crate::services::kbrain_backend::{KBrainBackendConnection, KBrainBackendState};
 use crate::services::memory::{
     MemoryAcceptArgs, MemoryBatchArgs, MemoryDeleteArgs, MemoryDeleteProjectArgs, MemoryListArgs,
     MemoryOrganizeDueClaimArgs, MemoryOrganizeRunCreateArgs, MemoryOrganizeRunListArgs,
@@ -507,31 +509,39 @@ pub async fn handle_provider_list() -> Result<proto::ProviderListResponse, Strin
 }
 
 pub async fn handle_provider_models(
+    app: AppHandle,
     request: proto::ProviderModelsRequest,
 ) -> Result<proto::ProviderModelsResponse, String> {
+    let backend = app
+        .try_state::<Arc<KBrainBackendState>>()
+        .ok_or_else(|| "K-brain backend state is unavailable".to_string())?;
+    let connection = tauri::async_runtime::spawn_blocking({
+        let backend = Arc::clone(backend.inner());
+        let app = app.clone();
+        move || backend.ensure_started(&app)
+    })
+    .await
+    .map_err(|error| format!("K-brain backend startup task failed: {error}"))??;
+    let provider_id = request.provider_id.trim().to_string();
     let provider_type = request.provider_type.trim().to_string();
-    let request_api_key = request.api_key.trim().to_string();
-    // message 字段带存在性：未设置=草稿没带头，沿用落库配置；设置了（哪怕是空
-    // 列表）=草稿的头就是权威值。
-    let request_custom_headers = request.custom_headers.as_ref().map(|headers| {
+    let request_headers = request.custom_headers.as_ref().map(|headers| {
         headers
             .headers
             .iter()
             .map(|header| (header.name.clone(), header.value.clone()))
             .collect::<Vec<_>>()
     });
-    let config = if request_api_key.is_empty() {
-        let provider_id = request.provider_id.trim().to_string();
-        let expected_provider_type = provider_type.clone();
-        let is_full_url = request.is_full_url;
-        let custom_headers = request_custom_headers.clone();
+    let config = if request.api_key.trim().is_empty() {
+        let provider_id_for_lookup = provider_id.clone();
+        let provider_type_for_lookup = provider_type.clone();
+        let request_headers_for_lookup = request_headers.clone();
         tauri::async_runtime::spawn_blocking(move || {
             let conn = open_db()?;
             resolve_stored_provider_models_config(
-                &provider_id,
-                &expected_provider_type,
-                is_full_url,
-                custom_headers,
+                &provider_id_for_lookup,
+                &provider_type_for_lookup,
+                request.is_full_url,
+                request_headers_for_lookup,
                 load_providers(&conn)?,
             )
         })
@@ -539,27 +549,52 @@ pub async fn handle_provider_models(
         .map_err(|error| format!("读取供应商 API Key 任务失败：{error}"))??
     } else {
         ProviderModelsRequestConfig {
-            provider_type,
+            provider_type: provider_type.clone(),
             base_url: request.base_url.trim().to_string(),
-            api_key: request_api_key,
+            api_key: request.api_key.trim().to_string(),
             use_system_proxy: request.use_system_proxy,
-            models_url: Some(request.models_url.trim().to_string())
-                .filter(|value| !value.is_empty()),
+            models_url: request.models_url.trim().to_string(),
             is_full_url: request.is_full_url.unwrap_or(false),
-            custom_headers: request_custom_headers.unwrap_or_default(),
+            custom_headers: request_headers.unwrap_or_default(),
         }
     };
-    let models_json = crate::services::provider_models::fetch_provider_models(
-        &config.provider_type,
-        &config.base_url,
-        &config.api_key,
-        config.use_system_proxy,
-        config.models_url.as_deref(),
-        config.is_full_url,
-        &config.custom_headers,
+    let api = match config.provider_type.as_str() {
+        "gemini" => "google-generative-ai",
+        "claude_code" => "anthropic-messages",
+        "codex" => match request.request_format.trim() {
+            "openai-completions" => "openai-completions",
+            _ => "openai-responses",
+        },
+        "xai" => "openai-responses",
+        "deepseek" => "openai-completions",
+        other => return Err(format!("unsupported provider type: {other}")),
+    };
+    let mut body = serde_json::json!({
+        "type": config.provider_type,
+        "api": api,
+        "baseUrl": config.base_url,
+        "apiKey": config.api_key,
+        "isFullUrl": config.is_full_url,
+        "modelsUrl": config.models_url,
+        "useSystemProxy": config.use_system_proxy,
+        "requestFormat": request.request_format.trim(),
+    });
+    if !provider_id.is_empty() {
+        body["providerId"] = Value::String(provider_id);
+    }
+    body["customHeaders"] = serde_json::to_value(
+        config
+            .custom_headers
+            .iter()
+            .map(|(key, value)| json!({ "key": key, "value": value }))
+            .collect::<Vec<_>>(),
     )
-    .await?;
-    Ok(proto::ProviderModelsResponse { models_json })
+    .map_err(|error| format!("serialize provider headers failed: {error}"))?;
+    let models = kbrain_provider_models(&connection, body).await?;
+    Ok(proto::ProviderModelsResponse {
+        models_json: serde_json::to_string(&models)
+            .map_err(|error| format!("serialize K-brain model response failed: {error}"))?,
+    })
 }
 
 #[derive(Debug, PartialEq)]
@@ -568,7 +603,7 @@ struct ProviderModelsRequestConfig {
     base_url: String,
     api_key: String,
     use_system_proxy: bool,
-    models_url: Option<String>,
+    models_url: String,
     is_full_url: bool,
     custom_headers: Vec<(String, String)>,
 }
@@ -615,9 +650,23 @@ fn resolve_stored_provider_models_config(
     let models_url = provider
         .get("modelsUrl")
         .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    let stored_headers = provider
+        .get("customHeaders")
+        .and_then(Value::as_array)
+        .map(|headers| {
+            headers
+                .iter()
+                .filter_map(|header| {
+                    let key = header.get("key").and_then(Value::as_str)?.trim();
+                    let value = header.get("value").and_then(Value::as_str)?;
+                    (!key.is_empty()).then(|| (key.to_string(), value.to_string()))
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     Ok(ProviderModelsRequestConfig {
         provider_type: stored_provider_type.to_string(),
         base_url,
@@ -633,23 +682,234 @@ fn resolve_stored_provider_models_config(
                 .and_then(Value::as_bool)
                 .unwrap_or(false)
         }),
-        custom_headers: custom_headers.unwrap_or_else(|| {
-            provider
-                .get("customHeaders")
-                .and_then(Value::as_array)
-                .map(|headers| {
-                    headers
-                        .iter()
-                        .filter_map(|header| {
-                            let key = header.get("key").and_then(Value::as_str)?.trim();
-                            let value = header.get("value").and_then(Value::as_str)?;
-                            (!key.is_empty()).then(|| (key.to_string(), value.to_string()))
-                        })
-                        .collect()
-                })
-                .unwrap_or_default()
-        }),
+        custom_headers: custom_headers.unwrap_or(stored_headers),
     })
+}
+
+pub async fn handle_kbrain_terminal_request(
+    app: AppHandle,
+    request: proto::TerminalRequest,
+) -> Result<proto::TerminalResponse, String> {
+    let backend = app
+        .try_state::<Arc<KBrainBackendState>>()
+        .ok_or_else(|| "K-brain backend state is unavailable".to_string())?;
+    let connection = tauri::async_runtime::spawn_blocking({
+        let backend = Arc::clone(backend.inner());
+        let app = app.clone();
+        move || backend.ensure_started(&app)
+    })
+    .await
+    .map_err(|error| format!("K-brain backend startup task failed: {error}"))??;
+    kbrain_terminal_request(&connection, &request).await
+}
+
+async fn kbrain_terminal_request(
+    connection: &KBrainBackendConnection,
+    request: &proto::TerminalRequest,
+) -> Result<proto::TerminalResponse, String> {
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .map_err(|error| format!("create K-brain HTTP client failed: {error}"))?;
+    let action = request.action.trim().to_ascii_lowercase();
+    if request.conversation_id.trim().is_empty() || request.run_id.trim().is_empty() {
+        return Err("canonical terminal request requires conversation_id and run_id".to_string());
+    }
+    let path = "/v1/terminal";
+    let body = json!({
+        "action": action,
+        "conversation_id": request.conversation_id.trim(),
+        "run_id": request.run_id.trim(),
+        "data": request.data,
+        "cwd": request.cwd,
+        "session_id": request.session_id,
+        "max_bytes": request.max_bytes,
+        "project_path_key": request.project_path_key,
+        "shell": request.shell,
+        "title": request.title,
+        "cols": request.cols,
+        "rows": request.rows,
+    });
+    let response = client
+        .post(format!(
+            "{}{}",
+            connection.base_url.trim_end_matches('/'),
+            path
+        ))
+        .bearer_auth(&connection.token)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|error| format!("K-brain terminal request failed: {error}"))?;
+    let status = response.status();
+    let payload = response
+        .json::<Value>()
+        .await
+        .map_err(|error| format!("K-brain terminal response was invalid JSON: {error}"))?;
+    if !status.is_success() {
+        return Err(format!("K-brain terminal request failed (HTTP {status})"));
+    }
+    if payload.get("conversation_id").and_then(Value::as_str)
+        != Some(request.conversation_id.trim())
+        || payload.get("run_id").and_then(Value::as_str) != Some(request.run_id.trim())
+    {
+        return Err("K-brain terminal response identity mismatch".to_string());
+    }
+    decode_kbrain_terminal_response(payload)
+}
+
+fn decode_kbrain_terminal_response(payload: Value) -> Result<proto::TerminalResponse, String> {
+    use base64::Engine;
+    fn record(value: &Value) -> Result<proto::TerminalSession, String> {
+        let id = value
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+            .ok_or("terminal response has no session id")?;
+        let text = |key: &str| {
+            value
+                .get(key)
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string()
+        };
+        let number = |key: &str| value.get(key).and_then(Value::as_u64).unwrap_or_default();
+        Ok(proto::TerminalSession {
+            id: id.to_string(),
+            project_path_key: text("project_path_key"),
+            cwd: text("cwd"),
+            shell: text("shell"),
+            title: text("title"),
+            pid: number("pid") as u32,
+            cols: number("cols") as u32,
+            rows: number("rows") as u32,
+            created_at: number("created_at"),
+            updated_at: number("updated_at"),
+            finished_at: number("finished_at"),
+            exit_code: value
+                .get("exit_code")
+                .and_then(Value::as_i64)
+                .unwrap_or_default() as i32,
+            running: value
+                .get("running")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            kind: text("kind"),
+            ..Default::default()
+        })
+    }
+    let output = base64::engine::general_purpose::STANDARD
+        .decode(
+            payload
+                .get("output")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+        )
+        .map_err(|error| format!("invalid terminal output encoding: {error}"))?;
+    let sessions = payload
+        .get("sessions")
+        .and_then(Value::as_array)
+        .map(|items| items.iter().map(record).collect::<Result<Vec<_>, _>>())
+        .transpose()?
+        .unwrap_or_default();
+    let shell_options = payload
+        .get("shell_options")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| proto::TerminalShellOption {
+                    id: item
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    label: item
+                        .get("label")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    command: item
+                        .get("command")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(proto::TerminalResponse {
+        action: payload
+            .get("action")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        session: payload.get("session").map(record).transpose()?,
+        sessions,
+        output,
+        truncated: payload
+            .get("truncated")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        output_start_offset: payload
+            .get("output_start_offset")
+            .and_then(Value::as_u64)
+            .unwrap_or_default(),
+        output_end_offset: payload
+            .get("output_end_offset")
+            .and_then(Value::as_u64)
+            .unwrap_or_default(),
+        default_shell: payload
+            .get("default_shell")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        shell_options,
+        ..Default::default()
+    })
+}
+
+async fn kbrain_provider_models(
+    connection: &KBrainBackendConnection,
+    body: Value,
+) -> Result<Value, String> {
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .map_err(|error| format!("create K-brain HTTP client failed: {error}"))?;
+    let provider_id = body
+        .get("providerId")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("draft");
+    let response = client
+        .post(format!(
+            "{}/v1/settings/providers/{}/models",
+            connection.base_url.trim_end_matches('/'),
+            urlencoding::encode(provider_id),
+        ))
+        .bearer_auth(&connection.token)
+        .header("content-type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|error| format!("K-brain provider discovery request failed: {error}"))?;
+    let status = response.status();
+    let payload = response.json::<Value>().await.map_err(|error| {
+        format!("K-brain provider discovery response was invalid JSON: {error}")
+    })?;
+    if !status.is_success() {
+        let message = payload
+            .get("error")
+            .and_then(Value::as_str)
+            .or_else(|| payload.get("message").and_then(Value::as_str))
+            .unwrap_or("K-brain provider discovery failed");
+        return Err(format!("{message} (HTTP {status})"));
+    }
+    Ok(payload
+        .get("models")
+        .cloned()
+        .unwrap_or_else(|| Value::Array(Vec::new())))
 }
 
 pub async fn handle_skill_files_list() -> Result<proto::SkillFilesListResponse, String> {
@@ -1866,11 +2126,14 @@ fn sanitize_provider_summary(provider: &Value) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use serde_json::{json, Value};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     use super::{
+        decode_kbrain_terminal_response, kbrain_terminal_request, proto,
         flatten_history_messages_json, flatten_history_messages_json_window,
-        is_builtin_share_tool_name, parse_runs_limit, redact_builtin_tool_content_json,
-        resolve_stored_provider_models_config, sanitize_provider_summaries,
+        is_builtin_share_tool_name, kbrain_provider_models, parse_runs_limit,
+        redact_builtin_tool_content_json, resolve_stored_provider_models_config,
+        sanitize_provider_summaries, KBrainBackendConnection,
     };
     use crate::commands::chat_history::{
         self, history_message_content_hash, ChatHistoryMessageRef, ChatHistorySegmentRecord,
@@ -1942,128 +2205,254 @@ mod tests {
     }
 
     #[test]
-    fn provider_models_resolves_redacted_webui_config_from_matching_provider() {
-        let providers = json!([{
-            "id": "provider-a",
-            "type": "codex",
-            "baseUrl": "https://stored.example.com/v1/responses",
-            "apiKey": "stored-secret",
-            "isFullUrl": true,
-            "modelsUrl": "https://stored.example.com/models",
-            "useSystemProxy": true
-        }]);
-        assert_eq!(
-            resolve_stored_provider_models_config(
-                "provider-a",
-                "codex",
-                None,
-                None,
-                Some(providers),
-            )
-            .expect("stored provider config"),
-            super::ProviderModelsRequestConfig {
-                provider_type: "codex".to_string(),
-                base_url: "https://stored.example.com/v1/responses".to_string(),
-                api_key: "stored-secret".to_string(),
-                use_system_proxy: true,
-                models_url: Some("https://stored.example.com/models".to_string()),
-                is_full_url: true,
-                custom_headers: Vec::new(),
+    fn stored_provider_model_config_preserves_redacted_settings_and_draft_overrides() {
+        let stored = json!([
+            {
+                "id": "saved/provider",
+                "type": "codex",
+                "apiKey": "saved-secret",
+                "baseUrl": "https://relay.example.test/v1",
+                "modelsUrl": "https://catalog.example.test/models",
+                "useSystemProxy": true,
+                "isFullUrl": true,
+                "customHeaders": [{ "key": "X-Saved", "value": "yes" }]
             }
-        );
-    }
-
-    #[test]
-    fn provider_models_custom_headers_fall_back_to_stored_only_when_draft_omits_them() {
-        let providers = json!([{
-            "id": "provider-a",
-            "type": "codex",
-            "baseUrl": "https://stored.example.com",
-            "apiKey": "stored-secret",
-            "customHeaders": [{ "key": "User-Agent", "value": "stored-cli/1.0" }]
-        }]);
-
-        // 草稿没带请求头（proto 的 custom_headers 缺省）→ 沿用落库配置。
-        let inherited = resolve_stored_provider_models_config(
-            "provider-a",
-            "codex",
-            None,
-            None,
-            Some(providers.clone()),
-        )
-        .expect("stored provider config");
-        assert_eq!(
-            inherited.custom_headers,
-            vec![("User-Agent".to_string(), "stored-cli/1.0".to_string())]
-        );
-
-        // 草稿把请求头清空了 → 按空集发，绝不回落到落库配置（否则用户删不掉伪装头）。
-        let cleared = resolve_stored_provider_models_config(
-            "provider-a",
-            "codex",
-            None,
-            Some(Vec::new()),
-            Some(providers.clone()),
-        )
-        .expect("stored provider config");
-        assert!(cleared.custom_headers.is_empty());
-
-        // 草稿显式给了头 → 覆盖落库配置。
-        let overridden = resolve_stored_provider_models_config(
-            "provider-a",
-            "codex",
-            None,
-            Some(vec![("User-Agent".to_string(), "draft-cli/2.0".to_string())]),
-            Some(providers),
-        )
-        .expect("stored provider config");
-        assert_eq!(
-            overridden.custom_headers,
-            vec![("User-Agent".to_string(), "draft-cli/2.0".to_string())]
-        );
-    }
-
-    #[test]
-    fn provider_models_applies_webui_full_url_mode_to_stored_endpoint() {
-        let providers = json!([{
-            "id": "provider-a",
-            "type": "codex",
-            "baseUrl": "https://stored.example.com/v1/responses",
-            "apiKey": "stored-secret",
-            "isFullUrl": false
-        }]);
+        ]);
         let config = resolve_stored_provider_models_config(
-            "provider-a",
+            "saved/provider",
             "codex",
-            Some(true),
-            None,
-            Some(providers),
+            Some(false),
+            Some(vec![("X-Draft".to_string(), "yes".to_string())]),
+            Some(stored),
         )
-        .expect("stored provider config with draft full URL mode");
+        .expect("resolve saved provider config");
 
-        assert_eq!(config.base_url, "https://stored.example.com/v1/responses");
-        assert_eq!(config.api_key, "stored-secret");
-        assert!(config.is_full_url);
+        assert_eq!(config.provider_type, "codex");
+        assert_eq!(config.api_key, "saved-secret");
+        assert_eq!(config.base_url, "https://relay.example.test/v1");
+        assert_eq!(config.models_url, "https://catalog.example.test/models");
+        assert!(config.use_system_proxy);
+        assert!(!config.is_full_url);
+        assert_eq!(
+            config.custom_headers,
+            vec![("X-Draft".to_string(), "yes".to_string())]
+        );
     }
 
     #[test]
-    fn provider_models_rejects_mismatched_stored_provider_type() {
-        let providers = json!([{
-            "id": "provider-a",
-            "type": "claude_code",
-            "apiKey": "stored-secret"
-        }]);
-        assert_eq!(
-            resolve_stored_provider_models_config(
-                "provider-a",
-                "codex",
-                None,
-                None,
-                Some(providers),
-            )
-            .expect_err("provider type mismatch"),
-            "供应商类型与已保存配置不匹配"
-        );
+    fn stored_provider_model_config_rejects_missing_or_mismatched_credentials() {
+        let missing =
+            resolve_stored_provider_models_config("missing", "codex", None, None, Some(json!([])))
+                .expect_err("missing provider must fail");
+        assert!(missing.contains("未找到已保存的供应商"));
+
+        let mismatch = resolve_stored_provider_models_config(
+            "saved",
+            "gemini",
+            None,
+            None,
+            Some(json!([{ "id": "saved", "type": "codex", "apiKey": "secret" }])),
+        )
+        .expect_err("provider type mismatch must fail");
+        assert!(mismatch.contains("类型"));
+
+        let no_key = resolve_stored_provider_models_config(
+            "saved",
+            "codex",
+            None,
+            None,
+            Some(json!([{ "id": "saved", "type": "codex", "apiKey": "" }])),
+        )
+        .expect_err("missing API key must fail");
+        assert!(no_key.contains("API Key"));
+    }
+
+    #[tokio::test]
+    async fn kbrain_terminal_posts_identity_and_decodes_binary_snapshot() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind local K-brain fixture");
+        let address = listener.local_addr().expect("fixture address");
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept discovery request");
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            let header_end = loop {
+                let count = socket.read(&mut buffer).await.expect("read request");
+                assert!(count > 0, "fixture request ended before headers");
+                request.extend_from_slice(&buffer[..count]);
+                if let Some(index) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                    break index + 4;
+                }
+            };
+            let headers = String::from_utf8_lossy(&request[..header_end]).into_owned();
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    line.strip_prefix("Content-Length:")
+                        .or_else(|| line.strip_prefix("content-length:"))
+                })
+                .and_then(|value| value.trim().parse::<usize>().ok())
+                .expect("content length");
+            while request.len() < header_end + content_length {
+                let count = socket.read(&mut buffer).await.expect("read request body");
+                assert!(count > 0, "fixture request ended before body");
+                request.extend_from_slice(&buffer[..count]);
+            }
+            let body: Value =
+                serde_json::from_slice(&request[header_end..header_end + content_length])
+                    .expect("discovery request JSON");
+            assert!(
+                headers.contains("authorization: Bearer fixture-token")
+                    || headers.contains("Authorization: Bearer fixture-token")
+            );
+            assert!(headers.starts_with("POST /v1/terminal "));
+            assert_eq!(body["conversation_id"], "conversation");
+            assert_eq!(body["run_id"], "run");
+            assert_eq!(body["session_id"], "term-1");
+            assert_eq!(body["action"], "read");
+            assert!(body.get("command").is_none());
+            let payload = r#"{"conversation_id":"conversation","run_id":"run","action":"read","session":{"id":"term-1","pid":42,"running":true,"kind":"local"},"output":"AP9B","output_start_offset":7,"output_end_offset":10,"truncated":true}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                payload.len(),
+                payload
+            );
+            socket
+                .write_all(response.as_bytes())
+                .await
+                .expect("write fixture response");
+        });
+
+        let result = kbrain_terminal_request(
+            &KBrainBackendConnection {
+                base_url: format!("http://{address}"),
+                token: "fixture-token".to_string(),
+                protocol_version: "kbrain.agent.v1".to_string(),
+            },
+            &proto::TerminalRequest {
+                action: "read".to_string(),
+                conversation_id: "conversation".to_string(),
+                run_id: "run".to_string(),
+                session_id: "term-1".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("terminal snapshot");
+        assert_eq!(result.output, vec![0, 255, 65]);
+        assert_eq!(result.output_start_offset, 7);
+        assert_eq!(result.output_end_offset, 10);
+        assert!(result.truncated);
+        assert_eq!(result.session.unwrap().pid, 42);
+        server.await.expect("fixture server");
+    }
+
+    #[tokio::test]
+    async fn kbrain_terminal_requires_complete_identity() {
+        let error = kbrain_terminal_request(
+            &KBrainBackendConnection {
+                base_url: "http://127.0.0.1:1".to_string(),
+                token: "token".to_string(),
+                protocol_version: "kbrain.agent.v1".to_string(),
+            },
+            &proto::TerminalRequest {
+                action: "read".to_string(),
+                run_id: "run".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect_err("missing identity");
+        assert!(error.contains("conversation_id and run_id"));
+    }
+
+    #[test]
+    fn kbrain_terminal_rejects_invalid_buffer_and_missing_session_id() {
+        assert!(decode_kbrain_terminal_response(json!({"output":"%%%"})).is_err());
+        assert!(decode_kbrain_terminal_response(json!({"session":{}})).is_err());
+    }
+
+    #[tokio::test]
+    async fn kbrain_provider_models_posts_normalized_discovery_request_and_reads_models() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind local K-brain fixture");
+        let address = listener.local_addr().expect("fixture address");
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept discovery request");
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            let header_end = loop {
+                let count = socket.read(&mut buffer).await.expect("read request");
+                assert!(count > 0, "fixture request ended before headers");
+                request.extend_from_slice(&buffer[..count]);
+                if let Some(index) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                    break index + 4;
+                }
+            };
+            let headers = String::from_utf8_lossy(&request[..header_end]).into_owned();
+            let content_length = headers
+                .lines()
+                .find_map(|line| {
+                    line.strip_prefix("Content-Length:")
+                        .or_else(|| line.strip_prefix("content-length:"))
+                })
+                .and_then(|value| value.trim().parse::<usize>().ok())
+                .expect("content length");
+            while request.len() < header_end + content_length {
+                let count = socket.read(&mut buffer).await.expect("read request body");
+                assert!(count > 0, "fixture request ended before body");
+                request.extend_from_slice(&buffer[..count]);
+            }
+            let body: Value =
+                serde_json::from_slice(&request[header_end..header_end + content_length])
+                    .expect("discovery request JSON");
+            assert!(
+                headers.contains("authorization: Bearer fixture-token")
+                    || headers.contains("Authorization: Bearer fixture-token")
+            );
+            assert!(headers.contains("/saved%2Fprovider/models"));
+            assert_eq!(body["providerId"], "saved/provider");
+            assert_eq!(body["api"], "openai-completions");
+            assert_eq!(body["requestFormat"], "openai-completions");
+            assert_eq!(body["apiKey"], "saved-secret");
+            assert_eq!(body["customHeaders"][0]["key"], "X-Client");
+            let payload = r#"{"models":[{"id":"fixture-model","displayName":"Fixture Model"}]}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                payload.len(),
+                payload
+            );
+            socket
+                .write_all(response.as_bytes())
+                .await
+                .expect("write fixture response");
+        });
+
+        let result = kbrain_provider_models(
+            &KBrainBackendConnection {
+                base_url: format!("http://{address}"),
+                token: "fixture-token".to_string(),
+                protocol_version: "kbrain.agent.v1".to_string(),
+            },
+            json!({
+                "providerId": "saved/provider",
+                "type": "codex",
+                "api": "openai-completions",
+                "requestFormat": "openai-completions",
+                "apiKey": "saved-secret",
+                "baseUrl": "https://relay.example.test/v1",
+                "modelsUrl": "https://catalog.example.test/models",
+                "isFullUrl": true,
+                "useSystemProxy": true,
+                "customHeaders": [{ "key": "X-Client", "value": "fixture" }]
+            }),
+        )
+        .await
+        .expect("K-brain discovery response");
+        assert_eq!(result[0]["id"], "fixture-model");
+        server.await.expect("fixture server");
     }
 
     #[test]

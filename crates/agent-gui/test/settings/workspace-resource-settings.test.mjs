@@ -256,11 +256,11 @@ test("chat runtime resolves and snapshots workspace resources from the effective
   assert.match(guiChatPage, /resolveWorkspaceResources\(settings, displayedConversationWorkdir\)/);
   assert.match(
     guiChatPage,
-    /skillsEnabled: !kBrainBackendEnabled && settings\.skills\.enabled && isAgentMode/,
+    /skillsEnabled\s*:\s*!kBrainBackendEnabled\s*&&\s*settings\.skills\.enabled\s*&&\s*isAgentMode/,
   );
   assert.match(
     guiChatPage,
-    /const skillsEnabled =\s*!kBrainBackendEnabled && activeWorkspaceResources\.skillsEnabled && isAgentMode/,
+    /const\s+skillsEnabled\s*=\s*!kBrainBackendEnabled\s*&&\s*activeWorkspaceResources\.skillsEnabled\s*&&\s*isAgentMode/,
   );
   assert.match(
     sendRuntime,

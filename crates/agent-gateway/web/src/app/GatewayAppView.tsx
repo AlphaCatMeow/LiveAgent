@@ -44,6 +44,7 @@ import {
 } from "@liveagent/ui/lib/chat/checkpointRewind";
 import type { PendingUploadedFile } from "@liveagent/ui/lib/chat/uploadedFiles";
 import { mergePendingUploadedFiles } from "@liveagent/ui/lib/chat/uploadedFiles";
+import { nativeResourceHostCapabilities } from "@liveagent/ui/lib/resourceHost";
 import { cn } from "@liveagent/ui/lib/shared/utils";
 import { useSidebarSelector } from "@liveagent/ui/lib/sidebar/useSidebarSelector";
 import {
@@ -114,6 +115,7 @@ import {
 } from "@/lib/webStyleClasses";
 import { WorkdirPickerModal } from "@/pages/settings/WorkdirPickerModal";
 import { openUrl } from "@/shims/tauriOpener";
+import { settingsHostAdapter } from "../agent-ui-adapters/settingsExtension";
 import { AgentSelector } from "./AgentSelector";
 import { ConversationStatsBarHost } from "./ConversationStatsBarHost";
 import { asErrorMessage } from "./chatEventUtils";
@@ -160,6 +162,7 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
     chatRuntimeThinkingAlwaysOn,
     closeSettings,
     codeReviewSkill,
+    cancelQueuedChatEdit,
     commitQueuedChatEdit,
     composerCompactionBlocked,
     composerInputDisabled,
@@ -555,6 +558,24 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
     sessionWorkbench.enabled && Object.keys(workbenchController.workbench.layout.panes).length >= 2;
   const primarySendInFlightConversationRef = useRef<string | null>(null);
 
+  useEffect(() => {
+    const handleQueueEditEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented || !(event.target instanceof Element))
+        return;
+      const composer = event.target.closest("[data-file-upload-conversation-id]");
+      const session = queuedChatEditSessionRef.current;
+      if (
+        !session ||
+        composer?.getAttribute("data-file-upload-conversation-id") !== session.conversationId
+      )
+        return;
+      event.preventDefault();
+      void cancelQueuedChatEdit();
+    };
+    document.addEventListener("keydown", handleQueueEditEscape);
+    return () => document.removeEventListener("keydown", handleQueueEditEscape);
+  }, [cancelQueuedChatEdit, queuedChatEditSessionRef]);
+
   const handlePrimaryComposerSend = useCallback(() => {
     const sendConversationId = getDisplayedConversationId();
     if (primarySendInFlightConversationRef.current === sendConversationId) return;
@@ -565,7 +586,7 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
       (!uploadingConversationId || uploadingConversationId === sendConversationId);
     if (uploadBlocksSend || isImportingPastedTextRef.current) return;
     if (composerInputDisabled) return;
-    if (queuedChatEditSessionRef.current) {
+    if (queuedChatEditSessionRef.current?.conversationId === getDisplayedConversationId()) {
       primarySendInFlightConversationRef.current = sendConversationId;
       void (async () => {
         try {
@@ -1482,6 +1503,7 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
                       activeView={activeView}
                       settings={settings}
                       setSettings={setSettings}
+                      resourceHost={nativeResourceHostCapabilities}
                       isAgentMode={isAgentMode}
                       initialSkills={availableSkills}
                       initialSkillsRootDir={skillsRootDir}
@@ -1762,7 +1784,10 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
                                     ) {
                                       return;
                                     }
-                                    if (queuedChatEditSessionRef.current) {
+                                    if (
+                                      queuedChatEditSessionRef.current?.conversationId ===
+                                      getDisplayedConversationId()
+                                    ) {
                                       submitInFlightRef.current = true;
                                       void (async () => {
                                         try {
@@ -2098,6 +2123,7 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
             >
               <SettingsPage
                 settings={settings}
+                settingsHost={settingsHostAdapter}
                 setSettings={setSettings}
                 saveState={settingsSaveState}
                 onBack={closeSettings}

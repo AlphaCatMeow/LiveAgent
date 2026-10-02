@@ -28,6 +28,10 @@ target
 .vscode
 target
 bin
+# Generated Tauri external binary and local locked-artifact cache
+crates/agent-gui/src-tauri/binaries/
+.liveagent/kbrain-artifact/
+.liveagent/kbrain-cache/
 .serena
 chatroom
 

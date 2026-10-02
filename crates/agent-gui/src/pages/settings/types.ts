@@ -23,8 +23,11 @@ export type SectionId =
   | "cua"
   | "about";
 
+import type { SettingsHostAdapter } from "@liveagent/ui/pages/settings/kbrainSettingsAdapter";
+
 export type SettingsPageProps = {
   settings: AppSettings;
+  settingsHost?: SettingsHostAdapter;
   setSettings: SetSettingsFn;
   saveState: SettingsSaveState;
   onBack: () => void;

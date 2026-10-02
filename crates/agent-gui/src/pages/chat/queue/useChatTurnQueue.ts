@@ -16,7 +16,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import type { LiveTranscriptStore } from "../../../lib/chat/conversation/liveTranscriptStore";
-import { isKBrainBackendEnabled } from "../../../lib/host";
+import { isKBrainBackendEnabled, isTauriHost } from "../../../lib/host";
 import {
   type AppSettings,
   type ChatRuntimeControls,
@@ -280,7 +280,7 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
     conversationId: string,
     queue: readonly QueuedChatTurn[] = queuedChatTurnsRef.current,
   ) {
-    if (isKBrainBackendEnabled()) return;
+    if (isKBrainBackendEnabled() && !isTauriHost()) return;
     const targetConversationId = rememberChatQueueConversationId(conversationId);
     if (!targetConversationId) {
       return;
@@ -884,7 +884,7 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: This native listener is registered once and dispatches through latest-action and mutable state refs to avoid stale closures without re-subscribing.
   useEffect(() => {
-    if (isKBrainBackendEnabled()) return;
+    if (isKBrainBackendEnabled() && !isTauriHost()) return;
     let disposed = false;
     let unlisten: (() => void) | null = null;
     type GatewayChatQueueRequestEvent = {

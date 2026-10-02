@@ -1,4 +1,4 @@
-import type { Message } from "@earendil-works/pi-ai";
+import type { Message } from "@liveagent/app/lib/agentTypes";
 import type { ConversationOpenRequest } from "@liveagent/ui/lib/sidebar/openController";
 import type { SidebarStore } from "@liveagent/ui/lib/sidebar/store";
 import { type Dispatch, type MutableRefObject, type SetStateAction, useRef } from "react";

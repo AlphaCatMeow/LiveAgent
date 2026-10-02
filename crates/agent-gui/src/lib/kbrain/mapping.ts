@@ -1,4 +1,5 @@
 import { createUuid } from "@liveagent/ui/lib/shared/id";
+import { getKBrainRuntimeConnection } from "./runtimeConnection";
 
 const mappingKey = "kbrain-session-map:v1";
 const legacyKeyPrefix = "kbrain-session:";
@@ -11,7 +12,12 @@ type MappingState = {
 };
 
 function normalizeBaseUrl(baseUrl?: string) {
-  return (baseUrl ?? "http://127.0.0.1:47321").trim().replace(/\/+$/, "");
+  const managed = getKBrainRuntimeConnection();
+  const normalized = (baseUrl ?? managed?.baseUrl ?? "http://127.0.0.1:47321")
+    .trim()
+    .replace(/\/+$/, "");
+  // The managed backend retains its storage identity across ephemeral ports.
+  return managed && normalized === managed.baseUrl ? "liveagent-managed-kbrain" : normalized;
 }
 
 function scopedKey(baseUrl: string, conversationId: string) {

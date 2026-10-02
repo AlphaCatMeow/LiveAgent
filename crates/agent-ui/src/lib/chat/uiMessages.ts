@@ -1,11 +1,11 @@
+import { assistantMessageToText } from "@liveagent/app/lib/providers/llm";
 import type {
   AssistantMessage,
   Message,
   ToolCall,
   ToolResultMessage,
   Usage,
-} from "@liveagent/app/lib/agentTypes";
-import { assistantMessageToText } from "@liveagent/app/lib/providers/llm";
+} from "@liveagent/ui/lib/chat/agentTypes";
 import { ASK_USER_QUESTION_DEADLINE_ARG } from "@liveagent/ui/lib/chat/askUserQuestion";
 import { estimateThinkingReplayTokenUnits } from "@liveagent/ui/lib/chat/contextUsage";
 import {

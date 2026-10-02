@@ -61,6 +61,7 @@ macro_rules! app_invoke_handler {
             commands::chat_history::chat_history_share_get,
             commands::chat_history::chat_history_share_set,
             commands::chat_history::chat_history_delete,
+            commands::chat_history::legacy_history_migration_page,
             // Trajectory (events ride the owning history segment)
             commands::chat_history::trajectory_append_events,
             commands::chat_history::trajectory_get_events,
@@ -365,6 +366,7 @@ macro_rules! app_invoke_handler {
             commands::gateway::provider_usage_query,
             commands::gateway::provider_usage_test,
             services::proxy::proxy_get_server_info,
+            services::kbrain_backend::kbrain_backend_connection,
         ]
     };
 }
@@ -883,6 +885,9 @@ pub fn run() {
         .manage(Arc::clone(&memory_store))
         .manage(Arc::clone(&provider_usage_service))
         .manage(Arc::clone(&power_activity))
+        .manage(Arc::new(
+            services::kbrain_backend::KBrainBackendState::default(),
+        ))
         .manage(Arc::new(runtime::shell_runner::ShellRunRegistry::default()))
         .manage(Arc::clone(&shell_session_manager))
         .manage(Arc::clone(&managed_process_registry))
@@ -1048,6 +1053,11 @@ pub fn run() {
                 terminal_registry.shutdown_cleanup();
                 shell_session_manager.shutdown_cleanup();
                 managed_process_registry.shutdown_cleanup();
+                if let Some(backend) =
+                    _app.try_state::<Arc<services::kbrain_backend::KBrainBackendState>>()
+                {
+                    backend.shutdown();
+                }
                 git_clone_task_registry.shutdown_cleanup();
                 browser_manager.shutdown_cleanup();
                 power_activity.clear_all();

@@ -421,6 +421,7 @@ test("gateway bridge forwards sandboxOffline on a directly claimed agent turn", 
       "sandboxOffline",
     );
     assert.equal(overrides.executionModeOverride, "tools");
+    assert.equal(overrides.gatewayBridgeRequestOverride.clientRequestId, "client-sandbox-direct");
     assert.equal(overrides.workdirOverride, "/workspace/project");
     assert.deepEqual(overrides.composerDraftOverride.conversationMentions, [
       {

@@ -4,6 +4,7 @@ import type { SidebarConversation } from "@liveagent/ui/lib/sidebar/types";
 import { type MutableRefObject, useCallback, useEffect, useMemo } from "react";
 import { setChatHistoryModel } from "../../../lib/chat/history/chatHistory";
 import { buildModelOptions } from "../../../lib/chat/page/chatPageHelpers";
+import { isKBrainBackendEnabled } from "../../../lib/host";
 import { toModelValue } from "../../../lib/providers/llm";
 import {
   type AppSettings,
@@ -234,7 +235,7 @@ export function useChatModelSelection(params: UseChatModelSelectionParams) {
             }));
           });
       }
-      if (import.meta.env?.VITE_KBRAIN_BACKEND !== "true") {
+      if (!isKBrainBackendEnabled()) {
         setSettings((prev) => setSelectedModel(prev, selection));
       }
     },

@@ -1,10 +1,12 @@
-import type { Context } from "@earendil-works/pi-ai";
+import type { Context } from "@liveagent/app/lib/agentTypes";
+import type { ResourceHostCapabilities } from "@liveagent/ui/lib/resourceHost";
 import type { AppUpdateController } from "../../lib/appUpdates";
 import type { AppSettings, SttProviderId } from "../../lib/settings";
 import type { SectionId } from "../settings/types";
 
 export type ChatPageProps = {
   settings: AppSettings;
+  resourceHost?: ResourceHostCapabilities;
   setSettings: (updater: (prev: AppSettings) => AppSettings) => void;
   sttProviderOverride?: SttProviderId | null;
   getMcpSettings: () => AppSettings["mcp"];

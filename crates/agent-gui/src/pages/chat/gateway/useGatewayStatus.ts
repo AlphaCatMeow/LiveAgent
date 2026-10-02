@@ -1,6 +1,7 @@
 import { invoke } from "@liveagent/app/shims/tauriCore";
 import { listen } from "@liveagent/app/shims/tauriEvent";
 import { useEffect, useMemo, useState } from "react";
+import { isKBrainBackendEnabled, isTauriHost } from "../../../lib/host";
 import type { AppSettings } from "../../../lib/settings";
 import { buildFallbackGatewayStatus, type GatewayRuntimeStatus } from "./gatewayRuntimeStatusModel";
 
@@ -40,7 +41,7 @@ export function useGatewayStatus(params: UseGatewayStatusParams) {
   );
 
   useEffect(() => {
-    if (import.meta.env?.VITE_KBRAIN_BACKEND === "true") return;
+    if (isKBrainBackendEnabled() && !isTauriHost()) return;
     let cancelled = false;
 
     void invoke<GatewayRuntimeStatus>("gateway_status")
@@ -61,7 +62,7 @@ export function useGatewayStatus(params: UseGatewayStatusParams) {
   }, [remoteSnapshot]);
 
   useEffect(() => {
-    if (import.meta.env?.VITE_KBRAIN_BACKEND === "true") return;
+    if (isKBrainBackendEnabled() && !isTauriHost()) return;
     let cancelled = false;
     let dispose: (() => void) | null = null;
 

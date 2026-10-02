@@ -67,7 +67,6 @@ import {
 import { createSidebarStore } from "@liveagent/ui/lib/sidebar/store";
 import type { SidebarConversation } from "@liveagent/ui/lib/sidebar/types";
 import { useSidebarSelector } from "@liveagent/ui/lib/sidebar/useSidebarSelector";
-import { buildSkillsSystemPrompt, type SkillSummary } from "@liveagent/ui/lib/skills/index";
 import { useChatSkills } from "@liveagent/ui/lib/skills/useChatSkills";
 import {
   mergeTerminalSession,
@@ -129,8 +128,6 @@ import {
   type RenderTimelineItem,
 } from "../lib/chat/conversation/conversationState";
 import type { ChatHistorySummary } from "../lib/chat/history/chatHistory";
-import { memoryExtraction } from "../lib/chat/memory/extractionController";
-import { memoryTurnInjection } from "../lib/chat/memory/injectionController";
 import {
   buildFallbackConversationTitle,
   createConversationIdentity,
@@ -139,8 +136,8 @@ import {
 } from "../lib/chat/page/chatPageHelpers";
 import { skillMentionInjection } from "../lib/chat/skills/mentionInjection";
 import { tauriGitClient } from "../lib/git/tauriGitClient";
+import { isKBrainBackendEnabled } from "../lib/host";
 import { useKBrainCatalogSettings } from "../lib/kbrain/catalog";
-import { buildMemoryOverviewSection } from "../lib/memory/prompts/injection";
 import { createProviderRuntimeConfig, toModelValue } from "../lib/providers/llm";
 import {
   applyConversationThinking,
@@ -154,7 +151,6 @@ import {
   normalizeChatRuntimeControlsForProvider,
   normalizeSelectedModelForProviders,
   parseSelectedModelJson,
-  resolveEffectivePromptSettings,
   resolveEffectiveTheme,
   resolveWorkspaceResources,
   updateExecutionModeFromChatSelection,
@@ -236,6 +232,7 @@ import {
 import { resolvePromptClarifyModelSelection } from "./chat/runtime/providerRuntimeConfig";
 import { useChatModelSelection } from "./chat/runtime/useChatModelSelection";
 import {
+  cancelManualCompaction,
   type ManualCompactionRequest,
   type ManualCompactionResult,
   useManualCompaction,
@@ -292,6 +289,7 @@ function ChatPageContent(props: ChatPageProps) {
   const {
     settings: directSettings,
     setSettings,
+    resourceHost,
     sttProviderOverride,
     getMcpSettings,
     getToolPolicies,
@@ -320,7 +318,9 @@ function ChatPageContent(props: ChatPageProps) {
   const [conversationState, setConversationState] = useState<ConversationViewState>(
     () => initialConversationStateRef.current,
   );
-  const [compactionStatus, setCompactionStatus] = useState<CompactionStatus>({ phase: "idle" });
+  const [compactionStatus, setCompactionStatus] = useState<CompactionStatus>({
+    phase: "idle",
+  });
   const [isSending, setIsSending] = useState(false);
   const [isImportingPastedText, setIsImportingPastedText] = useState(false);
   const isImportingPastedTextRef = useRef(false);
@@ -344,12 +344,9 @@ function ChatPageContent(props: ChatPageProps) {
   const { confirm: requestConfirmDialog, dialog: confirmDialog } = useConfirmDialog();
 
   const isAgentMode = isAgentExecutionMode(settings.system.executionMode);
-  const kBrainBackendEnabled = import.meta.env?.VITE_KBRAIN_BACKEND === "true";
+  const kBrainBackendEnabled = isKBrainBackendEnabled();
   const isAgentDevExecutionMode = isAgentDevMode(settings.system.executionMode);
   const workdir = settings.system.workdir.trim();
-  const activeAgentPrompt = useMemo(() => {
-    return resolveEffectivePromptSettings(settings, "").globalPrompt;
-  }, [settings]);
   // The sidebar store owns all sidebar domain state (conversation list,
   // workdirs, running set); ChatPage only issues imperative calls and keeps a
   // few narrow selector subscriptions.
@@ -617,7 +614,6 @@ function ChatPageContent(props: ChatPageProps) {
     getConversationStopRequestVersion,
     isConversationStopRequested,
     consumeConversationStop,
-    setConversationRunningState,
     setConversationStopHandler,
     clearConversationStopHandler,
     requestActiveConversationStop,
@@ -1016,7 +1012,10 @@ function ChatPageContent(props: ChatPageProps) {
           prev.chatRuntimeControls.planModeEnabled
             ? {
                 ...prev,
-                chatRuntimeControls: { ...prev.chatRuntimeControls, planModeEnabled: false },
+                chatRuntimeControls: {
+                  ...prev.chatRuntimeControls,
+                  planModeEnabled: false,
+                },
               }
             : prev,
         );
@@ -1122,8 +1121,6 @@ function ChatPageContent(props: ChatPageProps) {
       locallySyncedHistoryUpdatedAtRef.current.delete(key);
       gatewayBridgeHistorySummaryRef.current.delete(key);
       setPendingUploadsForConversation(key, []);
-      memoryExtraction.dispose(key);
-      memoryTurnInjection.dispose(key);
       skillMentionInjection.dispose(key);
       deleteConversationArtifacts(key);
       setQueuedChatTurnsState((current) => removeQueuedChatTurnsForConversation(current, key));
@@ -1355,7 +1352,7 @@ function ChatPageContent(props: ChatPageProps) {
     if (subagentWarmupSignatureRef.current === warmupSignature) return;
     subagentWarmupSignatureRef.current = warmupSignature;
     subagentStoresRef.current.warmup(currentConversationId);
-  }, [currentConversationId, historyItems, settings.agents]);
+  }, [currentConversationId, historyItems, settings.agents, kBrainBackendEnabled]);
 
   useEffect(
     () => () => {
@@ -1537,7 +1534,10 @@ function ChatPageContent(props: ChatPageProps) {
       // 与本地澄清共用 createGuiClarifyRunner：调用参数（cacheRetention/
       // nativeWebSearch/context 拼装）单一来源，桥接路径不再手写一份。
       const guiSelection = {
-        selectedModel: { customProviderId: provider.id, model: selection.model },
+        selectedModel: {
+          customProviderId: provider.id,
+          model: selection.model,
+        },
         provider,
         providerId: provider.type,
         model: selection.model,
@@ -1584,7 +1584,6 @@ function ChatPageContent(props: ChatPageProps) {
     getPendingUploadsForConversation,
     setPendingUploadsForConversation,
     getConversationLiveTranscriptStore,
-    getCompactionController,
     clearAbortSnapshot,
     getAbortSnapshot,
     resetLiveTranscript,
@@ -1612,73 +1611,10 @@ function ChatPageContent(props: ChatPageProps) {
   sendActionRef.current = send;
   stopSendingActionRef.current = stopSending;
 
-  // 手动压缩的同源提示词构建：当前会话据其工作区解析 skills/memory 提示词，
-  // 与发送链路的 buildPreparedContext 同源（activeAgentPrompt 单独直传）。手动
-  // 压缩无触发消息，skills 的 explicit 提及为空。跨会话中继的后台会话在此层拿
-  // 不到工作区上下文，返回空提示词（当前会话必须同源，后台保持现状）。
-  const resolveManualCompactionPromptInputs = useCallback(
-    async (input: { isCurrentConversation: boolean; workdir?: string }) => {
-      if (kBrainBackendEnabled) {
-        throw new Error("Frontend compaction is unavailable in K-brain mode.");
-      }
-      if (!input.isCurrentConversation) {
-        return { activeAgentPrompt, skillsPrompt: "", memoryPrompt: "" };
-      }
-      const promptWorkdir = input.workdir?.trim() ?? "";
-      const effectivePrompt = resolveEffectivePromptSettings(settings, promptWorkdir).prompt;
-      const resources = resolveWorkspaceResources(settings, promptWorkdir);
-      let skillsPrompt = "";
-      if (resources.skillsEnabled && isAgentMode && resources.skillNames.length > 0) {
-        const byName = new Map(availableSkills.map((skill) => [skill.name, skill]));
-        const selectedSkills = resources.skillNames
-          .map((name) => byName.get(name))
-          .filter((skill): skill is SkillSummary => Boolean(skill));
-        if (selectedSkills.length > 0) {
-          skillsPrompt = buildSkillsSystemPrompt({
-            rootDir: skillsRootDir,
-            selected: selectedSkills,
-          });
-        }
-      }
-      let memoryPrompt = "";
-      if (promptWorkdir) {
-        try {
-          memoryPrompt = await buildMemoryOverviewSection(promptWorkdir);
-        } catch (error) {
-          console.warn("Failed to build manual compaction memory prompt", error);
-          memoryPrompt = "";
-        }
-      }
-      return { activeAgentPrompt: effectivePrompt, skillsPrompt, memoryPrompt };
-    },
-    [activeAgentPrompt, availableSkills, isAgentMode, settings, skillsRootDir],
-  );
-
   const handleManualCompact = useManualCompaction({
-    settings,
-    t,
-    currentConversationIdRef,
-    isConversationRunning,
-    setConversationRunningState,
-    setConversationAbortController,
-    setConversationStopHandler,
-    clearConversationStopHandler,
-    consumeConversationStop,
-    buildRuntimeEntryFromVisibleState,
-    conversationRuntimeCacheRef,
-    ensureConversationReady: ensureGatewayBridgeConversationReady,
-    getCompactionController,
-    getConversationLiveTranscriptStore,
-    updateConversationRuntimeEntry,
-    resetLiveTranscript,
-    updateToolStatus,
-    queueGatewayBridgeEventForRequest,
-    flushGatewayBridgeEventsForRequest,
-    registerGatewayRunMirror,
-    finishGatewayRunMirror,
-    persistConversation,
-    setErrorMessage,
-    resolveManualCompactionPromptInputs,
+    onCompleted: async (conversationId) => {
+      await hydrateConversationActionRef.current(conversationId);
+    },
   });
   manualCompactActionRef.current = handleManualCompact;
   const conversationSurfaceProject = useMemo(
@@ -1873,6 +1809,7 @@ function ChatPageContent(props: ChatPageProps) {
     // abort + force 清理）。未停到任何东西且会话未运行时必须消费掉 stop
     // intent，否则该会话下一次 send 会被静默吞掉（同 gateway:chat-cancel 守卫）。
     const stopConversationRun = (conversationId: string) => {
+      cancelManualCompaction(conversationId);
       const params = appActionParamsRef.current;
       const stopped = params.stopConversation(conversationId);
       if (!stopped && !params.isConversationRunning(conversationId)) {
@@ -1887,31 +1824,34 @@ function ChatPageContent(props: ChatPageProps) {
     // Rust 直连动作的结果反馈（目前只有托盘的 cron 启用开关）：toast 呈现，
     // 任务名从 automation store 现查（可能已被删除，回退显示 id）。
     // 勾选态本身经 automation:cron-changed → store → 托盘同步 effect 刷新。
-    listen<{ action: string; id?: string; ok: boolean; error?: string; value?: string }>(
-      "app:action-feedback",
-      (event) => {
-        const params = appActionParamsRef.current;
-        if (event.payload.action !== "toggle-cron-task") {
-          return;
-        }
-        const taskId = event.payload.id ?? "";
-        const task = getAutomationState().cron.tasks.find((entry) => entry.id === taskId);
-        const name = task?.name.trim() || taskId;
-        if (event.payload.ok) {
-          const messageKey =
-            event.payload.value === "enabled" ? "tray.cronEnabled" : "tray.cronDisabled";
-          params.addNotify("success", params.t(messageKey).replace("{name}", name));
-        } else {
-          params.addNotify(
-            "error",
-            params
-              .t("tray.cronToggleFailed")
-              .replace("{name}", name)
-              .replace("{error}", event.payload.error ?? ""),
-          );
-        }
-      },
-    )
+    listen<{
+      action: string;
+      id?: string;
+      ok: boolean;
+      error?: string;
+      value?: string;
+    }>("app:action-feedback", (event) => {
+      const params = appActionParamsRef.current;
+      if (event.payload.action !== "toggle-cron-task") {
+        return;
+      }
+      const taskId = event.payload.id ?? "";
+      const task = getAutomationState().cron.tasks.find((entry) => entry.id === taskId);
+      const name = task?.name.trim() || taskId;
+      if (event.payload.ok) {
+        const messageKey =
+          event.payload.value === "enabled" ? "tray.cronEnabled" : "tray.cronDisabled";
+        params.addNotify("success", params.t(messageKey).replace("{name}", name));
+      } else {
+        params.addNotify(
+          "error",
+          params
+            .t("tray.cronToggleFailed")
+            .replace("{name}", name)
+            .replace("{error}", event.payload.error ?? ""),
+        );
+      }
+    })
       .then((nextUnlisten) => {
         if (cancelled) {
           nextUnlisten();
@@ -2954,7 +2894,12 @@ function ChatPageContent(props: ChatPageProps) {
       const project = dockToolProjectRef();
       if (!project) return;
       beginWorkbenchDrag(
-        { kind: "projectTool", tool, project, title: t(projectToolSurfaceTitleKey(tool)) },
+        {
+          kind: "projectTool",
+          tool,
+          project,
+          title: t(projectToolSurfaceTitleKey(tool)),
+        },
         event,
       );
     },
@@ -3031,7 +2976,11 @@ function ChatPageContent(props: ChatPageProps) {
     const edges = preferVertical ? (["bottom", "right"] as const) : (["right", "bottom"] as const);
     for (const edge of edges) {
       if (canSplitRectAtEdge(focusedRect, edge)) {
-        return { kind: "pane-edge", paneId: layout.focusedPaneId, edge } as const;
+        return {
+          kind: "pane-edge",
+          paneId: layout.focusedPaneId,
+          edge,
+        } as const;
       }
     }
     return null;
@@ -3739,7 +3688,12 @@ function ChatPageContent(props: ChatPageProps) {
         }
         onDragHandlePointerDown={(event) => {
           beginWorkbenchDrag(
-            { kind: "pane", paneId: pane.paneId, surfaceKey: surfaceIdentityKey(surface), title },
+            {
+              kind: "pane",
+              paneId: pane.paneId,
+              surfaceKey: surfaceIdentityKey(surface),
+              title,
+            },
             {
               pointerId: event.pointerId,
               clientX: event.clientX,
@@ -3964,7 +3918,10 @@ function ChatPageContent(props: ChatPageProps) {
         onGeometryChange={handleWorkbenchGeometryChange}
         dropPreview={
           workbenchDragState?.previewRect
-            ? { rect: workbenchDragState.previewRect, label: workbenchDragState.payload.title }
+            ? {
+                rect: workbenchDragState.previewRect,
+                label: workbenchDragState.payload.title,
+              }
             : null
         }
         emptyState={
@@ -4201,6 +4158,7 @@ function ChatPageContent(props: ChatPageProps) {
                 activeView={activeView}
                 settings={settings}
                 setSettings={setSettings}
+                resourceHost={resourceHost}
                 isAgentMode={isAgentMode}
                 initialSkills={availableSkills}
                 initialSkillsRootDir={skillsRootDir}

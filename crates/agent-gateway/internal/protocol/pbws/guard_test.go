@@ -252,3 +252,24 @@ func TestVetAgentRequestRejectsMalformedCheckpoint(t *testing.T) {
 		}
 	}
 }
+
+func TestCanonicalTerminalRetainsNativeRemoteGate(t *testing.T) {
+	for _, action := range []string{"create", "read", "input", "close", "list"} {
+		request := &gatewayv2.TerminalRequest{Action: action, ConversationId: "conversation", RunId: "run", SessionId: "term-1"}
+		if err := vetCanonicalTerminal(request); err != nil {
+			t.Fatal(err)
+		}
+		env := &gatewayv2.GatewayEnvelope{Payload: &gatewayv2.GatewayEnvelope_TerminalRequest{TerminalRequest: request}}
+		if err := vetAgentRequest(session.AgentView{}, env); err == nil {
+			t.Fatalf("native Remote gate bypassed: %s", action)
+		}
+	}
+	for _, request := range []*gatewayv2.TerminalRequest{
+		{Action: "read", RunId: "run"}, {Action: "create_ssh", ConversationId: "c", RunId: "r"},
+		{Action: "resize", ConversationId: "c", RunId: "r", Cols: 65536},
+	} {
+		if err := vetCanonicalTerminal(request); err == nil {
+			t.Fatalf("invalid request accepted: %+v", request)
+		}
+	}
+}

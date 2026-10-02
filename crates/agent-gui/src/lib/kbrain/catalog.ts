@@ -6,9 +6,14 @@ import {
   getDefaultUsageQueryConfig,
 } from "../settings";
 import { createKBrainClient } from "./client";
+import { getKBrainRuntimeConnection } from "./runtimeConnection";
 import type { KBrainModelRef } from "./types";
 
-export function projectKBrainProviders(models: readonly KBrainModelRef[]): CustomProvider[] {
+export function projectKBrainProviders(
+  models: readonly KBrainModelRef[],
+  existingProviders: readonly CustomProvider[] = [],
+): CustomProvider[] {
+  const existingById = new Map(existingProviders.map((provider) => [provider.id, provider]));
   const providers = new Map<string, CustomProvider>();
   for (const entry of models) {
     if (
@@ -20,26 +25,54 @@ export function projectKBrainProviders(models: readonly KBrainModelRef[]): Custo
       continue;
     let provider = providers.get(entry.provider);
     if (!provider) {
-      provider = {
-        id: entry.provider,
-        name: entry.provider,
-        // The catalog exposes opaque IDs, not vendor types. Routing uses id, never type.
-        type: "codex",
-        baseUrl: "",
-        isFullUrl: false,
-        apiKey: "",
-        models: [],
-        activeModels: [],
-        reasoning: "off",
-        promptCachingEnabled: false,
-        nativeWebSearchEnabled: false,
-        useSystemProxy: false,
-        usageQuery: getDefaultUsageQueryConfig(),
-      };
+      const existing = existingById.get(entry.provider);
+      provider = existing
+        ? {
+            ...existing,
+            apiKey: "",
+            customHeaders: undefined,
+            usageQuery: getDefaultUsageQueryConfig(),
+            models: [],
+            activeModels: [],
+          }
+        : {
+            id: entry.provider,
+            name: entry.provider,
+            // The catalog exposes opaque IDs, not vendor types. Routing uses id, never type.
+            type: "codex",
+            baseUrl: "",
+            isFullUrl: false,
+            apiKey: "",
+            models: [],
+            activeModels: [],
+            reasoning: "off",
+            promptCachingEnabled: false,
+            nativeWebSearchEnabled: false,
+            useSystemProxy: false,
+            usageQuery: getDefaultUsageQueryConfig(),
+          };
       providers.set(entry.provider, provider);
     }
     if (provider.activeModels.includes(entry.model)) continue;
-    provider.models.push(createProviderModelConfig(provider.type, entry.model));
+    const existing = existingById.get(entry.provider);
+    if (existing && !existing.activeModels.includes(entry.model)) continue;
+    const modelConfig =
+      existing?.models.find((model) => model.id === entry.model) ??
+      createProviderModelConfig(provider.type, entry.model);
+    provider.models.push({
+      ...modelConfig,
+      ...(!existing && entry.name ? { displayName: entry.name } : {}),
+      ...(!existing && entry.ownedBy ? { ownedBy: entry.ownedBy } : {}),
+      ...(!existing && typeof entry.contextWindow === "number"
+        ? { contextWindow: entry.contextWindow, limitsSource: "provider" as const }
+        : {}),
+      ...(!existing && typeof entry.maxOutputTokens === "number"
+        ? { maxOutputToken: entry.maxOutputTokens, limitsSource: "provider" as const }
+        : {}),
+      ...(!existing && entry.inputModalities
+        ? { inputModalities: entry.inputModalities as ["text"] | ["text", "image"] }
+        : {}),
+    });
     provider.activeModels.push(entry.model);
   }
   return [...providers.values()];
@@ -61,10 +94,11 @@ type CatalogOptions = {
 export const KBRAIN_SETTINGS_CHANGED_EVENT = "kbrain:settings-changed";
 
 export function useKBrainCatalogSettings(settings: AppSettings, options: CatalogOptions = {}) {
-  const enabled = options.enabled ?? import.meta.env?.VITE_KBRAIN_BACKEND === "true";
+  const connection = getKBrainRuntimeConnection();
+  const enabled = options.enabled ?? connection !== null;
   const [settingsVersion, setSettingsVersion] = useState(0);
-  const baseUrl = options.baseUrl ?? import.meta.env?.VITE_KBRAIN_URL;
-  const token = options.token ?? import.meta.env?.VITE_KBRAIN_TOKEN;
+  const baseUrl = options.baseUrl ?? connection?.baseUrl;
+  const token = options.token ?? connection?.token;
   const [catalog, setCatalog] = useState<{
     baseUrl: string | undefined;
     token: string | undefined;
@@ -86,7 +120,12 @@ export function useKBrainCatalogSettings(settings: AppSettings, options: Catalog
       .listModels()
       .then((models) => {
         if (!cancelled) {
-          setCatalog({ baseUrl, token, providers: projectKBrainProviders(models), error: null });
+          setCatalog({
+            baseUrl,
+            token,
+            providers: projectKBrainProviders(models, settings.customProviders),
+            error: null,
+          });
         }
       })
       .catch((error: unknown) => {
@@ -102,7 +141,7 @@ export function useKBrainCatalogSettings(settings: AppSettings, options: Catalog
     return () => {
       cancelled = true;
     };
-  }, [enabled, baseUrl, token, settingsVersion]); // refresh after backend settings writes
+  }, [enabled, baseUrl, token, settingsVersion, settings.customProviders]); // refresh after backend settings writes
   const currentCatalog = catalog?.baseUrl === baseUrl && catalog?.token === token ? catalog : null;
   const runtimeSettings = useMemo(
     () => (enabled ? projectKBrainSettings(settings, currentCatalog?.providers ?? []) : settings),

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/Stack-Cairn/K-brain",
+  "sourceRevision": "e6743be5600046f5c0fb3db256dbf2c49abf66af",
+  "protocol": "kbrain.agent.v1",
+  "requiredBackendFlags": ["-parent-stdio"],
+  "artifactPrefix": "kbrain-source-",
+  "platforms": {
+    "aarch64-apple-darwin": { "goos": "darwin", "goarch": "arm64", "assets": { "backend": "k-brain-darwin-arm64", "computer": "k-brain-computer-darwin-arm64" } },
+    "x86_64-apple-darwin": { "goos": "darwin", "goarch": "amd64", "assets": { "backend": "k-brain-darwin-x64", "computer": "k-brain-computer-darwin-x64" } },
+    "x86_64-unknown-linux-gnu": { "goos": "linux", "goarch": "amd64", "assets": { "backend": "k-brain-linux-x64", "computer": "k-brain-computer-linux-x64" } },
+    "x86_64-pc-windows-msvc": { "goos": "windows", "goarch": "amd64", "assets": { "backend": "k-brain-windows-x64.exe", "computer": "k-brain-computer-windows-x64.exe" } }
+  },
+  "downloads": {}
+}

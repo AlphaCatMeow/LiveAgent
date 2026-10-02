@@ -1,4 +1,4 @@
-import type { ToolResultMessage } from "@earendil-works/pi-ai";
+import type { ToolResultMessage } from "@liveagent/app/lib/agentTypes";
 import { estimateContentTokenUnits } from "@liveagent/ui/lib/chat/contextUsage";
 import { sanitizeMessageForModelContext } from "../context/requestContextSanitizer";
 import {

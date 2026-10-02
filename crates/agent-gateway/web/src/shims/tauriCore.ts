@@ -288,6 +288,7 @@ export async function invoke<T>(command: string, args?: Record<string, unknown>)
         String(args?.provider_id ?? ""),
         typeof args?.is_full_url === "boolean" ? args.is_full_url : undefined,
         Array.isArray(args?.custom_headers) ? args.custom_headers : undefined,
+        typeof args?.request_format === "string" ? args.request_format : undefined,
       )) as T;
     case "settings_reset_ssh_known_host": {
       const host = String(args?.host ?? "").trim();

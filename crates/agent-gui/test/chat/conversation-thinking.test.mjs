@@ -104,7 +104,7 @@ test("desktop saves thinking and model per conversation and keeps thinking acros
   assert.equal(render().chatRuntimeControlsForCurrentProvider.reasoning, "low");
   render().handleSelectModel(second);
   assert.deepEqual(cache.get("a").selectedModel, { ...second, thinkingEnabled: true, reasoning: "low" });
-  assert.deepEqual(app.selectedModel, second, "global default records only the model");
+  assert.deepEqual(app.selectedModel, first, "conversation selection must not mutate backend/global defaults");
   currentId.current = "b";
   const b = render();
   assert.equal(b.activeSelectedModel.model, first.model);

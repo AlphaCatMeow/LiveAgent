@@ -43,6 +43,12 @@ type Config struct {
 	WebSocketWriteQueueSize  int
 	MaxMessageBytes          int
 	RelayBufferSeconds       int
+	// K-brain remote target turns Gateway chat into canonical K-brain HTTP/SSE.
+	KBrainURL      string
+	KBrainToken    string
+	KBrainAgentID  string
+	KBrainProvider string
+	KBrainModel    string
 }
 
 func Load() *Config {
@@ -76,6 +82,11 @@ func Load() *Config {
 		"maximum WebSocket protobuf message size in bytes",
 	)
 	flag.IntVar(&cfg.RelayBufferSeconds, "relay-buffer-seconds", getenvInt("LIVEAGENT_GATEWAY_RELAY_BUFFER_SECONDS", 30), "seconds of chat events to buffer for brief reconnections")
+	flag.StringVar(&cfg.KBrainURL, "kbrain-url", getenv("LIVEAGENT_GATEWAY_KBRAIN_URL", ""), "K-brain backend URL for the remote chat target")
+	flag.StringVar(&cfg.KBrainToken, "kbrain-token", getenv("LIVEAGENT_GATEWAY_KBRAIN_TOKEN", ""), "K-brain backend bearer token")
+	flag.StringVar(&cfg.KBrainAgentID, "kbrain-agent-id", getenv("LIVEAGENT_GATEWAY_KBRAIN_AGENT_ID", "kbrain"), "Gateway target id for K-brain remote chat")
+	flag.StringVar(&cfg.KBrainProvider, "kbrain-provider", getenv("LIVEAGENT_GATEWAY_KBRAIN_PROVIDER", ""), "default K-brain provider for Gateway chat")
+	flag.StringVar(&cfg.KBrainModel, "kbrain-model", getenv("LIVEAGENT_GATEWAY_KBRAIN_MODEL", ""), "default K-brain model for Gateway chat")
 	os.Args = normalizeLegacyArgs(os.Args)
 	flag.Parse()
 
@@ -88,6 +99,11 @@ func Load() *Config {
 	}
 	cfg.TLSCert = strings.TrimSpace(cfg.TLSCert)
 	cfg.TLSKey = strings.TrimSpace(cfg.TLSKey)
+	cfg.KBrainURL = strings.TrimRight(strings.TrimSpace(cfg.KBrainURL), "/")
+	cfg.KBrainToken = strings.TrimSpace(cfg.KBrainToken)
+	cfg.KBrainAgentID = strings.TrimSpace(cfg.KBrainAgentID)
+	cfg.KBrainProvider = strings.TrimSpace(cfg.KBrainProvider)
+	cfg.KBrainModel = strings.TrimSpace(cfg.KBrainModel)
 
 	if cfg.Token == "" {
 		flag.Usage()

@@ -1,4 +1,11 @@
-import type { AssistantMessage, ImageContent, Message, TextContent } from "@earendil-works/pi-ai";
+import type {
+  AssistantMessage,
+  FileContent,
+  ImageContent,
+  Message,
+  TextContent,
+} from "@liveagent/app/lib/agentTypes";
+import type { HostedSearchBlock } from "@liveagent/ui/lib/chat/hostedSearch";
 import {
   type ConversationViewState,
   getHistoryMessageContentHash,
@@ -22,6 +29,8 @@ import {
   getKBrainSessionId,
   setKBrainSessionId,
 } from "./mapping";
+import { questionResultDetails } from "./questions";
+import { getConfiguredKBrainConnection } from "./runtimeConnection";
 import { contextToKBrainMessages } from "./turn";
 import type {
   KBrainHistoryResponse,
@@ -34,11 +43,11 @@ import type {
 const KBRAIN_API = "kbrain.agent.v1" as AssistantMessage["api"];
 
 function baseUrl() {
-  return import.meta.env?.VITE_KBRAIN_URL;
+  return getConfiguredKBrainConnection()?.baseUrl;
 }
 
 function client() {
-  return createKBrainClient({ baseUrl: baseUrl(), token: import.meta.env?.VITE_KBRAIN_TOKEN });
+  return createKBrainClient();
 }
 
 function epoch(value: string | number | undefined, fallback = Date.now()) {
@@ -61,15 +70,53 @@ function contentText(message: KBrainMessage) {
     .join("");
 }
 
-function userContent(message: KBrainMessage): string | (TextContent | ImageContent)[] {
-  const content: (TextContent | ImageContent)[] = [];
+function userContent(
+  message: KBrainMessage,
+): string | (TextContent | ImageContent | FileContent)[] {
+  const content: (TextContent | ImageContent | FileContent)[] = [];
   for (const block of message.content ?? []) {
     if (block.type === "text" && block.text) content.push({ type: "text", text: block.text });
     if (block.type === "image" && block.image_url && block.mime_type) {
       content.push({ type: "image", data: block.image_url, mimeType: block.mime_type });
     }
+    if (block.type === "file" && block.file_url && block.mime_type) {
+      content.push({
+        type: "file",
+        data: block.file_url,
+        mimeType: block.mime_type,
+        ...(block.filename ? { filename: block.filename } : {}),
+      });
+    }
   }
   return content.length === 1 && content[0]?.type === "text" ? content[0].text : content;
+}
+
+function historyStopReason(reason: string | undefined): AssistantMessage["stopReason"] {
+  switch (reason) {
+    case "cancelled":
+    case "aborted":
+      return "aborted";
+    case "tool_use":
+    case "toolUse":
+      return "toolUse";
+    case "length":
+    case "error":
+    case "deferred":
+      return reason;
+    default:
+      return "stop";
+  }
+}
+
+function toHostedSearch(value: KBrainMessage["hosted_search"]): HostedSearchBlock[] {
+  return (value ?? []).map((search) => ({
+    type: "hostedSearch" as const,
+    id: search.id,
+    provider: search.provider,
+    status: search.status,
+    queries: search.queries,
+    sources: search.sources,
+  }));
 }
 
 function toMessage(message: KBrainMessage, index: number): Message | null {
@@ -83,11 +130,21 @@ function toMessage(message: KBrainMessage, index: number): Message | null {
     } as Message;
   }
   if (message.role === "tool") {
+    const converted = userContent(message);
+    const content =
+      typeof converted === "string" ? [{ type: "text" as const, text: converted }] : converted;
     return {
       role: "toolResult",
       toolCallId: message.tool_call_id || `kbrain-tool-${index}`,
       toolName: message.name || "tool",
-      content: [{ type: "text", text: contentText(message) }],
+      content,
+      details: questionResultDetails(
+        message.name,
+        content
+          .filter((part) => part.type === "text")
+          .map((part) => part.text)
+          .join(""),
+      ),
       isError: message.stop_reason === "error" || message.stop_reason === "cancelled",
       timestamp,
     };
@@ -99,6 +156,7 @@ function toMessage(message: KBrainMessage, index: number): Message | null {
     if (block.type === "thinking" && block.text)
       content.push({ type: "thinking", thinking: block.text });
   }
+  content.push(...toHostedSearch(message.hosted_search));
   for (const call of message.tool_calls ?? []) {
     content.push({
       type: "toolCall",
@@ -123,7 +181,7 @@ function toMessage(message: KBrainMessage, index: number): Message | null {
       totalTokens: (message.usage?.input_tokens ?? 0) + (message.usage?.output_tokens ?? 0),
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     },
-    stopReason: message.stop_reason === "error" ? "error" : "stop",
+    stopReason: historyStopReason(message.stop_reason),
     timestamp,
   };
 }

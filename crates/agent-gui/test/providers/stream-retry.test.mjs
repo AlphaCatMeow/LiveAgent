@@ -11,9 +11,6 @@ const {
   setRetryErrorExtension,
   getRetryErrorExtension,
 } = loader.loadModule("src/lib/providers/runtime/streamRetry.ts");
-const { isFailoverEligibleAssistantError } = loader.loadModule(
-  "src/lib/providers/runtime/providerFailover.ts",
-);
 
 function createUsage() {
   return {
@@ -470,20 +467,6 @@ test("withStreamRetry retries a Cloudflare 525 via the module default extension 
   );
   await collectEvents(wrapped);
   assert.equal(calls, 2);
-});
-
-test("isFailoverEligibleAssistantError treats a Cloudflare 525 as failover-eligible via the extension", () => {
-  const message = createAssistant(undefined, "error", { errorMessage: "HTTP 525 SSL Handshake Failed" });
-  assert.equal(isFailoverEligibleAssistantError(message, { statusCodes: [525] }), true);
-});
-
-test("isFailoverEligibleAssistantError still rejects client-class errors even if the extension matches", () => {
-  // Context-overflow is ineligible regardless of extension — switching providers
-  // can't fix a too-long prompt.
-  const message = createAssistant(undefined, "error", {
-    errorMessage: "prompt is too long (520 context length exceeded)",
-  });
-  assert.equal(isFailoverEligibleAssistantError(message, { statusCodes: [520] }), false);
 });
 
 // ---- Extension state + classifier edge cases ----

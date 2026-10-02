@@ -64,11 +64,38 @@ export class ChatCommandPipeline {
   private byRunId = new Map<string, PendingChatCommand>();
   private timeouts = new Map<string, ReturnType<typeof setTimeout>>();
   private settledOutcomes = new WeakMap<PendingChatCommand, ChatCommandOutcome>();
+  private boundConversationIds = new Map<string, string>();
+  private bindingWaiters = new WeakMap<PendingChatCommand, Set<(id: string | null) => void>>();
 
   constructor(private readonly hooks: ChatCommandPipelineHooks) {}
 
   hasPending(conversationId: string): boolean {
     return this.pending.has(conversationId);
+  }
+
+  resolveConversationId(conversationId: string): string {
+    return this.boundConversationIds.get(conversationId) ?? conversationId;
+  }
+
+  waitForConversationBinding(conversationId: string): Promise<string | null> {
+    const resolved = this.resolveConversationId(conversationId);
+    if (resolved !== conversationId) return Promise.resolve(resolved);
+    const pending = this.pending.get(conversationId);
+    if (!pending) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      let waiters = this.bindingWaiters.get(pending);
+      if (!waiters) {
+        waiters = new Set();
+        this.bindingWaiters.set(pending, waiters);
+      }
+      waiters.add(resolve);
+    });
+  }
+
+  private settleBindingWaiters(pending: PendingChatCommand, conversationId: string | null): void {
+    const waiters = this.bindingWaiters.get(pending);
+    this.bindingWaiters.delete(pending);
+    for (const resolve of waiters ?? []) resolve(conversationId);
   }
 
   // Conversations with an in-flight submission — activity hydration must not
@@ -85,7 +112,9 @@ export class ChatCommandPipeline {
       }
       store.removeOptimisticUserEntry(pending.clientRequestId);
       this.settledOutcomes.set(pending, { kind: "settled" });
+      this.settleBindingWaiters(pending, null);
     }
+    this.boundConversationIds.clear();
     for (const timeout of this.timeouts.values()) {
       clearTimeout(timeout);
     }
@@ -167,8 +196,10 @@ export class ChatCommandPipeline {
           // subscriptions, then the pending command follows the real id.
           const previousConversationId = pending.conversationId;
           pending.conversationId = update.conversationId;
+          this.boundConversationIds.set(previousConversationId, update.conversationId);
           this.movePending(previousConversationId, update.conversationId, pending);
           this.hooks.onBound?.(update, pending);
+          this.settleBindingWaiters(pending, update.conversationId);
         }
         return;
       }
@@ -187,6 +218,13 @@ export class ChatCommandPipeline {
         store.removeOptimisticUserEntry(pending.clientRequestId);
         const outcome: ChatCommandOutcome = { kind: "queued_in_gui", update };
         this.settledOutcomes.set(pending, outcome);
+        const boundConversationId = update.conversationId?.trim() ?? "";
+        this.settleBindingWaiters(
+          pending,
+          boundConversationId && boundConversationId !== pending.conversationId
+            ? boundConversationId
+            : null,
+        );
         this.clearPending(pending);
         this.hooks.onQueuedInGui?.(update, pending);
         return;
@@ -236,6 +274,7 @@ export class ChatCommandPipeline {
     }
     store.removeOptimisticUserEntry(pending.clientRequestId);
     store.appendLocalError(message);
+    this.settleBindingWaiters(pending, null);
     this.clearPending(pending);
     this.hooks.onFailed?.(pending, errorCode, message);
     return outcome;

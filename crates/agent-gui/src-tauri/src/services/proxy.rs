@@ -6,7 +6,7 @@ use std::{
 
 use axum::{
     body::{to_bytes, Body},
-    extract::{OriginalUri, Path, Query, State},
+    extract::{OriginalUri, Query, State},
     http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode},
     response::Response,
     routing::{any, get},
@@ -65,13 +65,6 @@ pub struct ProxyServerState {
 }
 
 #[derive(Deserialize)]
-struct ProxyRoutePath {
-    provider: String,
-    #[serde(rename = "rest")]
-    _rest: Option<String>,
-}
-
-#[derive(Deserialize)]
 struct ImageProxyQuery {
     url: String,
 }
@@ -104,8 +97,8 @@ pub fn start_proxy_server() -> Result<Arc<ProxyServerState>, String> {
 
     let app = Router::new()
         .route("/image-proxy", get(handle_image_proxy))
-        .route("/proxy/{provider}", any(handle_proxy))
-        .route("/proxy/{provider}/{*rest}", any(handle_proxy))
+        .route("/proxy/hub", any(handle_proxy))
+        .route("/proxy/hub/{*rest}", any(handle_proxy))
         .with_state(state.clone());
 
     tauri::async_runtime::spawn(async move {
@@ -324,12 +317,12 @@ fn resolve_image_proxy_mime(
 
 async fn handle_proxy(
     State(state): State<Arc<ProxyServerState>>,
-    Path(ProxyRoutePath { provider, .. }): Path<ProxyRoutePath>,
     method: Method,
     headers: HeaderMap,
     OriginalUri(original_uri): OriginalUri,
     body: Body,
 ) -> Response {
+    let provider = "hub";
     if method == Method::OPTIONS {
         return preflight_response(&headers);
     }
@@ -344,6 +337,14 @@ async fn handle_proxy(
         Ok(value) => value,
         Err(response) => return response,
     };
+
+    if !is_allowed_proxy_provider(&provider) {
+        return error_response(
+            StatusCode::NOT_FOUND,
+            "Provider model proxying is owned by K-brain",
+            &headers,
+        );
+    }
 
     let original_path_and_query = original_uri
         .path_and_query()
@@ -448,6 +449,10 @@ async fn handle_proxy(
     }
     apply_cors_headers(response.headers_mut(), &headers);
     response
+}
+
+fn is_allowed_proxy_provider(provider: &str) -> bool {
+    provider == "hub"
 }
 
 fn build_target_url(
@@ -747,6 +752,14 @@ fn should_forward_response_header(name: &HeaderName) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn allows_only_non_model_hub_proxy() {
+        assert!(is_allowed_proxy_provider("hub"));
+        for provider in ["codex", "gemini", "anthropic", "openai", "xai"] {
+            assert!(!is_allowed_proxy_provider(provider), "{provider} must stay K-brain-owned");
+        }
+    }
 
     #[test]
     fn builds_target_url_for_openai_v1_responses() {

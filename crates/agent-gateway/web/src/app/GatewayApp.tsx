@@ -75,8 +75,17 @@ import {
 } from "./chatEventUtils";
 import { HISTORY_LIST_PAGE_SIZE, PROTECTED_DRAFT_CONVERSATION } from "./constants";
 import { GatewayAppView } from "./GatewayAppView";
-import { createGatewayChatCommandActions } from "./gatewayChatCommandActions";
+import {
+  createGatewayChatCommandActions,
+  type QueuedEditSession,
+} from "./gatewayChatCommandActions";
 import { createGatewayConversationActions } from "./gatewayConversationActions";
+import {
+  clearGatewayConversationSelection,
+  loadGatewayConversationSelection,
+  resolveGatewayConversationRestoreTarget,
+  saveGatewayConversationSelection,
+} from "./gatewayConversationRestore";
 import {
   createOpenConversationInitial,
   createRefreshDisplayedConversationHistorySnapshot,
@@ -125,7 +134,12 @@ function useGatewayAppController() {
     login: handleLoginSubmit,
     clearSession,
   } = useGatewaySession(historyShareToken);
-  const { api, terminalClient, sftpClient, gitClient } = useGatewayClients(token);
+  const terminalIdentityRef = useRef<{ conversationId?: string; runId?: string } | null>(null);
+  const getTerminalIdentity = useCallback(() => terminalIdentityRef.current, []);
+  const { api, terminalClient, sftpClient, gitClient } = useGatewayClients(
+    token,
+    getTerminalIdentity,
+  );
   const [activeAgentId, setActiveAgentId] = useState(() => api?.getActiveAgent() ?? "");
   const activeAgentIdRef = useRef(activeAgentId);
   const activeAgentScope = activeAgentId || api?.getActiveAgent() || "";
@@ -285,7 +299,8 @@ function useGatewayAppController() {
   const queuedChatTurnsRef = useRef<ChatQueueItemSummary[]>([]);
   const chatQueueConversationIdRef = useRef("");
   const chatQueueRevisionRef = useRef(0);
-  const queuedChatEditSessionRef = useRef<{ itemId: string; revision: number } | null>(null);
+  const queuedChatEditSessionRef = useRef<QueuedEditSession | null>(null);
+  const queuedChatEditPendingRef = useRef(false);
   const selectedHistoryRef = useRef(selectedHistory);
   // Per-conversation runtime workdir (drafts have no persisted summary yet).
   const conversationWorkdirsRef = useRef<Map<string, string>>(new Map());
@@ -302,6 +317,8 @@ function useGatewayAppController() {
   } | null>(null);
   const displayedConversationBusyRef = useRef(false);
   const historyLoadSequenceRef = useRef(0);
+  const restoredConversationAgentRef = useRef("");
+  const restoringConversationRef = useRef<{ agentId: string; conversationId: string } | null>(null);
   const visibleConversationRevisionRef = useRef(0);
   const previousDisplayedConversationIdRef = useRef("");
   const pendingDisplayedConversationAutoBottomRef = useRef<string | null>(null);
@@ -323,6 +340,7 @@ function useGatewayAppController() {
     setConversationId(next.conversationId);
     setSelectedHistoryId(next.selectedHistoryId);
     setSelectedHistory(null);
+    setChatError(null);
   }, []);
 
   // --- Chat streaming infrastructure (Phase 4) -----------------------------
@@ -1005,6 +1023,25 @@ function useGatewayAppController() {
   // regardless of running state, which is what makes GUI queue auto-sends
   // race-free: the next run's events simply flow in).
   const displayedConversationId = resolveVisibleConversationId(selectedHistoryId, conversationId);
+  const terminalConversationId = displayedConversationId.trim();
+  const terminalActivity = terminalConversationId
+    ? activityStore.get(terminalConversationId)
+    : null;
+  const terminalActiveRun = terminalConversationId
+    ? transcriptStoreRegistry.peek(terminalConversationId)?.getSnapshot().activeRun
+    : null;
+  const terminalRunId = terminalActivity?.runId?.trim() || terminalActiveRun?.runId?.trim() || "";
+  const terminalIdentity = useMemo(() => {
+    if (
+      !terminalConversationId ||
+      isLocalDraftConversationId(terminalConversationId) ||
+      !terminalRunId
+    ) {
+      return null;
+    }
+    return { conversationId: terminalConversationId, runId: terminalRunId };
+  }, [terminalConversationId, terminalRunId]);
+  terminalIdentityRef.current = terminalIdentity;
 
   // 会话生效模型：本地 override > sidebar 行携带的持久化选择 > 全局默认。
   const selectionForConversation = useCallback(
@@ -1135,6 +1172,81 @@ function useGatewayAppController() {
 
   openInitialRef.current = openConversationInitial;
 
+  // Restore the last real conversation only after the authenticated client has
+  // selected an Agent. The existing open controller owns the history fetch and
+  // transcript replacement; this effect only supplies its initial target.
+  useEffect(() => {
+    const agentId = activeAgentScope.trim();
+    if (!api || !agentId || historyShareToken || restoredConversationAgentRef.current === agentId) {
+      return;
+    }
+    restoredConversationAgentRef.current = agentId;
+    const conversationIdValue = loadGatewayConversationSelection(agentId);
+    if (!conversationIdValue || isLocalDraftConversationId(conversationIdValue)) {
+      clearGatewayConversationSelection(agentId);
+      return;
+    }
+    restoringConversationRef.current = { agentId, conversationId: conversationIdValue };
+    openController.open(conversationIdValue, {
+      afterCommit: () => {
+        const pending = restoringConversationRef.current;
+        if (pending?.agentId === agentId && pending.conversationId === conversationIdValue) {
+          restoringConversationRef.current = null;
+        }
+      },
+    });
+  }, [activeAgentScope, api, historyShareToken, openController]);
+
+  useEffect(() => {
+    const pending = restoringConversationRef.current;
+    if (
+      conversationOpenState.phase !== "failed" ||
+      !pending ||
+      pending.conversationId !== conversationOpenState.conversationId
+    ) {
+      return;
+    }
+    restoringConversationRef.current = null;
+    clearGatewayConversationSelection(pending.agentId);
+    openController.cancel();
+    resetToFreshHomeConversation();
+  }, [conversationOpenState, openController, resetToFreshHomeConversation]);
+
+  // Persist only real conversations. Starting a new conversation explicitly
+  // clears this key, so the new-conversation button remains a new-conversation
+  // intent rather than becoming an implicit reload shortcut.
+  useEffect(() => {
+    const agentId = activeAgentScope.trim();
+    const conversationIdValue = displayedConversationId.trim();
+    if (
+      !agentId ||
+      !conversationIdValue ||
+      isLocalDraftConversationId(conversationIdValue) ||
+      historyShareToken
+    ) {
+      return;
+    }
+    const detailConversationId = selectedHistory?.conversation_id.trim();
+    const sessionId = resolveGatewayConversationRestoreTarget({
+      conversationId: conversationIdValue,
+      historyConversationId: selectedHistory?.conversation_id,
+      historySessionId:
+        detailConversationId === conversationIdValue
+          ? selectedHistory?.conversation?.session_id
+          : undefined,
+      sidebarSessionId: sidebarConversationsById.get(conversationIdValue)?.sessionId,
+    });
+    // Active first turns may precede history summaries; the relay persists their alias mapping.
+    if (!sessionId) return;
+    saveGatewayConversationSelection(agentId, sessionId);
+  }, [
+    activeAgentScope,
+    displayedConversationId,
+    historyShareToken,
+    selectedHistory,
+    sidebarConversationsById,
+  ]);
+
   const prepareChatRuntime = useGatewayRuntimePreparation({
     api,
     historyShareToken,
@@ -1169,6 +1281,7 @@ function useGatewayAppController() {
     branchInFlightRef,
     cacheVisibleComposerDraft,
     clearCachedComposerDraft,
+    clearPersistedConversationSelection: () => clearGatewayConversationSelection(activeAgentScope),
     composerDraftCacheRef,
     composerDraftOwnerRef,
     composerRef,
@@ -1344,6 +1457,7 @@ function useGatewayAppController() {
     setChatQueueRevision(0);
     resetProjectToolsRuntimeRef.current();
     workbenchClearRef.current();
+    restoredConversationAgentRef.current = "";
     resetToFreshHomeConversation();
   }, [
     activityStore,
@@ -1416,6 +1530,8 @@ function useGatewayAppController() {
       toast.dismiss();
       resetProjectToolsRuntimeRef.current();
       workbenchClearRef.current();
+      restoringConversationRef.current = null;
+      restoredConversationAgentRef.current = "";
       resetToFreshHomeConversation();
     },
     [
@@ -1478,6 +1594,7 @@ function useGatewayAppController() {
   const mentionApps = useMentionApps(workspaceResources.mcpServers, isAgentMode);
   const {
     cancelChat,
+    cancelQueuedChatEdit,
     commitQueuedChatEdit,
     editQueuedTurn,
     materializeComposerDraftForSend,
@@ -1512,6 +1629,8 @@ function useGatewayAppController() {
     prepareChatRuntime,
     protectedConversationRef,
     queuedChatEditSessionRef,
+    queuedChatEditPendingRef,
+    visibleConversationRevisionRef,
     refreshChatQueueSnapshot,
     resolveActiveAgentID,
     selectedHistoryIdRef,
@@ -1528,6 +1647,15 @@ function useGatewayAppController() {
     transcriptFollow,
     transcriptStoreRegistry,
   });
+
+  const cancelQueuedChatEditRef = useRef(cancelQueuedChatEdit);
+  cancelQueuedChatEditRef.current = cancelQueuedChatEdit;
+  useEffect(() => {
+    const session = queuedChatEditSessionRef.current;
+    if (session && session.conversationId !== displayedConversationId) {
+      void cancelQueuedChatEditRef.current();
+    }
+  }, [displayedConversationId]);
 
   const canShareHistory = Boolean(
     api &&
@@ -1687,6 +1815,7 @@ function useGatewayAppController() {
     composerRef,
     displayedConversationId,
     displayedConversationWorkdir,
+    terminalIdentity,
     isAgentMode,
     resetProjectToolsRuntimeRef,
     setRightDockOpen,
@@ -1989,6 +2118,7 @@ function useGatewayAppController() {
     canDropUpload,
     canShareHistory,
     cancelChat,
+    cancelQueuedChatEdit,
     changedFilesActions,
     chatError,
     chatProtocolIncompatibleMessage,

@@ -32,6 +32,12 @@ function loadChatHistory(invokeCalls) {
       },
     },
   });
+  const runtimeConnection = loader.loadModule("src/lib/kbrain/runtimeConnection.ts");
+  runtimeConnection.setKBrainRuntimeConnection({
+    baseUrl: DEFAULT_KBRAIN_URL,
+    token: "",
+    protocolVersion: "kbrain.agent.v1",
+  });
   return loader.loadModule("src/lib/chat/history/chatHistory.ts");
 }
 

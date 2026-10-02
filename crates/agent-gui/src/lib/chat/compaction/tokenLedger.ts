@@ -1,4 +1,4 @@
-import type { AssistantMessage, Context, Message } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Context, Message } from "@liveagent/app/lib/agentTypes";
 
 import {
   assistantAnchorTokens,

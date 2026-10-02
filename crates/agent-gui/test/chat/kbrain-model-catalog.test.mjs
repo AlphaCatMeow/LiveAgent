@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test, { after } from "node:test";
-import { fileURLToPath } from "node:url";
-import { transformSync } from "esbuild";
 import { createDomTestEnv } from "../helpers/dom-test-env.mjs";
 
 const historyWrites = [];
@@ -23,18 +21,7 @@ const { projectKBrainProviders, projectKBrainSettings, useKBrainCatalogSettings 
 const { useChatModelSelection } = loadModule("src/pages/chat/runtime/useChatModelSelection.ts");
 const { resolveEffectiveChatModelSelection } = loadModule("src/pages/chat/runtime/modelSelection.ts");
 
-function loadWithBackendEnv(path) {
-  const url = new URL(`../../${path}`, import.meta.url);
-  const code = transformSync(readFileSync(url, "utf8"), {
-    loader: "ts", format: "cjs", platform: "node",
-    define: { "import.meta.env": JSON.stringify({ VITE_KBRAIN_BACKEND: "true", VITE_KBRAIN_URL: "http://kbrain.test/", VITE_KBRAIN_TOKEN: "backend-token" }) },
-  }).code;
-  const module = { exports: {} };
-  new Function("require", "module", "exports", code)(specifier => loadModule(specifier, fileURLToPath(new URL(".", url))), module, module.exports);
-  return module.exports;
-}
-const backendCatalog = loadWithBackendEnv("src/lib/kbrain/catalog.ts");
-const backendSelection = loadWithBackendEnv("src/pages/chat/runtime/useChatModelSelection.ts");
+const runtimeConnection = loadModule("src/lib/kbrain/runtimeConnection.ts");
 
 function directSettings() {
   return normalizeSettings({
@@ -52,11 +39,13 @@ async function mount(run) {
   document.body.appendChild(container);
   const root = createRoot(container);
   const previousFetch = globalThis.fetch;
+  runtimeConnection.setKBrainRuntimeConnection({ baseUrl: "http://kbrain.test/", token: "backend-token", protocolVersion: "kbrain.agent.v1" });
   try { await run(root); }
   finally {
     await act(async () => root.unmount());
     container.remove();
     globalThis.fetch = previousFetch;
+    runtimeConnection.clearKBrainRuntimeConnection();
   }
 }
 
@@ -93,7 +82,7 @@ test("catalog projection keeps opaque backend IDs, deduplicates pairs and never 
   assert.equal(JSON.stringify(direct), before);
 });
 
-test("real catalog and selection hooks fetch /v1/models, share send's provider lookup and preserve direct settings", async () => {
+test("real catalog and selection hooks fetch /v1/models with the runtime connection", async () => {
   await mount(async root => {
     const request = deferred();
     const calls = [];
@@ -108,8 +97,8 @@ test("real catalog and selection hooks fetch /v1/models, share send's provider l
     function Page({ theme = direct.theme }) {
       const [selectedModel, setSelectedModel] = React.useState();
       const settings = React.useMemo(() => ({ ...direct, theme }), [theme]);
-      const catalog = backendCatalog.useKBrainCatalogSettings(settings);
-      const selection = backendSelection.useChatModelSelection({
+      const catalog = useKBrainCatalogSettings(settings);
+      const selection = useChatModelSelection({
         settings: catalog.settings,
         setSettings() { writes++; },
         t: key => key,
@@ -154,6 +143,7 @@ test("real catalog and selection hooks fetch /v1/models, share send's provider l
     assert.deepEqual(JSON.parse(historyWrites.at(-1).selectedModelJson), selection);
     assert.equal(writes, 0);
     assert.equal(JSON.stringify(direct), before);
+    assert.equal(snapshot.catalog.settings.customProviders[0].apiKey, "");
     const modelOptions = snapshot.selection.modelOptions;
     await act(async () => root.render(React.createElement(Page, { theme: "dark" })));
     assert.equal(snapshot.selection.modelOptions, modelOptions);
@@ -177,8 +167,8 @@ test("catalog failure and empty responses never fall back to direct providers; l
       if (url.startsWith("http://failed.test")) return new Response("offline", { status: 503 });
       return new Response("[]", { status: 200 });
     };
-    function Page({ baseUrl, enabled = true }) {
-      snapshot = useKBrainCatalogSettings(direct, { enabled, baseUrl });
+    function Page({ baseUrl }) {
+      snapshot = useKBrainCatalogSettings(direct, { enabled: true, baseUrl, token: "backend-token" });
       return null;
     }
     await act(async () => root.render(React.createElement(Page, { baseUrl: "http://old.test" })));
@@ -191,47 +181,34 @@ test("catalog failure and empty responses never fall back to direct providers; l
     await act(async () => root.render(React.createElement(Page, { baseUrl: "http://empty.test" })));
     assert.equal(snapshot.error, null);
     assert.deepEqual(snapshot.settings.customProviders, []);
-    await act(async () => root.render(React.createElement(Page, { enabled: false })));
-    assert.equal(snapshot.settings, direct);
-    assert.equal(snapshot.error, null);
   });
 });
 
-test("direct mode uses the real selection hook unchanged and does not fetch a catalog", async () => {
+test("catalog remains backend-owned without a direct-mode branch", async () => {
   await mount(async root => {
-    let fetches = 0, snapshot, settings = directSettings();
-    globalThis.fetch = async () => { fetches++; throw new Error("unexpected catalog fetch"); };
-    const rows = new Map();
+    let fetches = 0;
+    let snapshot;
+    const settings = directSettings();
+    globalThis.fetch = async () => {
+      fetches += 1;
+      return new Response(JSON.stringify({ models: refs }), { status: 200 });
+    };
     function Page() {
-      const catalog = useKBrainCatalogSettings(settings);
-      snapshot = { catalog, selection: useChatModelSelection({
-        settings: catalog.settings,
-        setSettings: updater => { settings = updater(settings); },
-        t: key => key,
-        sidebarStore: { peek: () => undefined },
-        sidebarConversationsById: rows,
-        currentConversationId: "direct",
-        currentConversationIdRef: { current: "direct" },
-        conversationRuntimeCacheRef: { current: new Map() },
-        updateConversationRuntimeEntry: (_id, updater) => updater({}),
-      }) };
+      snapshot = useKBrainCatalogSettings(settings);
       return null;
     }
     await act(async () => root.render(React.createElement(Page)));
-    assert.equal(snapshot.catalog.settings, settings);
-    assert.equal(snapshot.selection.hasModels, true);
-    assert.equal(snapshot.selection.activeSelectedModel.model, "local-model");
-    await act(async () => snapshot.selection.handleSelectModel({ customProviderId: "local-provider", model: "local-other" }));
-    assert.equal(settings.selectedModel.model, "local-other");
-    assert.equal(settings.customProviders[0].apiKey, "direct-secret");
-    assert.equal(fetches, 0);
+    assert.equal(snapshot.settings.customProviders.length, 2);
+    assert.equal(fetches, 1);
+    assert.equal(snapshot.settings.customProviders[0].apiKey, "");
+    assert.equal(snapshot.settings.customProviders[0].baseUrl, "");
   });
 });
 
 test("ChatPage projects once before model selection and send, without replacing its settings writer", () => {
   const source = readFileSync(new URL("../../src/pages/ChatPage.tsx", import.meta.url), "utf8");
   assert.match(source, /settings: directSettings,/);
-  assert.match(source, /const \{ settings, error: modelCatalogError \} = useKBrainCatalogSettings\(directSettings\)/);
+  assert.match(source, /const \{ settings, error: modelCatalogError \}\s*=\s*useKBrainCatalogSettings\(directSettings\)/);
   assert.match(source, /useChatModelSelection\(\{\s*settings,\s*setSettings,/);
   assert.match(source, /useSendChatTurn\(\{\s*settings,/);
   assert.match(source, /errorMessage: errorMessage \?\? modelCatalogError/);

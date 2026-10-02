@@ -1,6 +1,5 @@
 import { TrajectoryView } from "@liveagent/ui/components/trajectory/TrajectoryView";
 import type { TrajectoryHost } from "@liveagent/ui/contracts/trajectory";
-import { useLocale } from "@liveagent/ui/i18n/index";
 import {
   toTrajectoryLiveAssistantMessage,
   toTrajectoryMessages,
@@ -24,16 +23,6 @@ export function ConversationTrajectorySurface(props: {
   hasMoreMessages: boolean;
   loadEarlierMessages: () => void | Promise<void>;
 }) {
-  const { locale } = useLocale();
-  if (isKBrainBackendEnabled()) {
-    return (
-      <p className="p-4 text-sm text-muted-foreground" role="note">
-        {locale === "zh-CN"
-          ? "K-brain 模式尚不支持桌面轨迹视图；请在对话中查看后端工具调用与结果。"
-          : "Desktop trajectory view is not supported in K-brain mode. Backend tool calls and results are available in the conversation."}
-      </p>
-    );
-  }
   return <DesktopConversationTrajectorySurface {...props} />;
 }
 
@@ -79,7 +68,7 @@ function DesktopConversationTrajectorySurface(
       hasMoreMessages={props.hasMoreMessages}
       loadEarlierMessages={props.loadEarlierMessages}
       liveEvents={liveEvents}
-      liveOwnership="authoritative"
+      liveOwnership={isKBrainBackendEnabled() ? "observed" : "authoritative"}
       authoritativeRevision={authoritativeRevision}
     />
   );

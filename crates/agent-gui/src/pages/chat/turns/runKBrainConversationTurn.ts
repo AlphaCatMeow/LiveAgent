@@ -1,4 +1,4 @@
-import type { AssistantMessage, ToolCall, ToolResultMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ToolCall, ToolResultMessage } from "@liveagent/app/lib/agentTypes";
 import { appendMessagesToConversation } from "../../../lib/chat/conversation/conversationState";
 import { buildConversationStateFromWindow } from "../../../lib/chat/history/chatHistory";
 import {
@@ -8,15 +8,61 @@ import {
   collapseThinking,
   type LiveRound,
   updateLiveRound,
+  upsertHostedSearchToRound,
   upsertToolCallToRound,
 } from "../../../lib/chat/messages/uiMessages";
 import { getKBrainHistoryWindow } from "../../../lib/kbrain/history";
+import { getConfiguredKBrainConnection } from "../../../lib/kbrain/runtimeConnection";
 import { runKBrainTurn } from "../../../lib/kbrain/turn";
+import type {
+  KBrainQuestionAnswer,
+  KBrainQuestionRequest,
+  KBrainRunOptions,
+} from "../../../lib/kbrain/types";
+import { requestBackendQuestion } from "../../../lib/tools/askUserQuestionTools";
+import { createExitPlanModeTools } from "../../../lib/tools/planModeTools";
 import { requestToolApproval } from "../../../lib/tools/toolApproval";
 import type { RunAgentConversationTurnParams } from "./runAgentConversationTurn";
 import type { RunTextConversationTurnParams } from "./runTextConversationTurn";
 
 type Params = RunAgentConversationTurnParams | RunTextConversationTurnParams;
+
+function canonicalRunOptions(params: Params): KBrainRunOptions {
+  const agentMode = "effectiveWorkdir" in params;
+  const roots = [
+    {
+      path: agentMode ? params.effectiveWorkdir : (params.conversationCwd ?? ""),
+      access: "write" as const,
+    },
+    ...(agentMode
+      ? (params.additionalRoots ?? []).map((root) => ({ path: root.path, access: root.access }))
+      : []),
+  ].filter((root) => root.path.trim());
+  const configured = agentMode ? params.getToolPolicies?.() : undefined;
+  const policies = Object.fromEntries(
+    Object.entries(configured ?? {})
+      .filter(
+        ([name, policy]) =>
+          !name.startsWith("group:") &&
+          !name.startsWith("server:") &&
+          (policy === "ask" || policy === "allow" || policy === "deny"),
+      )
+      .sort(([left], [right]) => left.localeCompare(right)),
+  ) as Record<string, "ask" | "allow" | "deny">;
+  const safety = agentMode ? params.commandSafetyMode : undefined;
+  const reasoning = params.runtime.reasoning;
+  return {
+    mode: agentMode ? "agent" : "chat",
+    ...(reasoning ? { reasoning } : {}),
+    search: params.runtime.nativeWebSearchEnabled === true ? "enabled" : "disabled",
+    approval_policy: safety === "auto" ? "auto" : "ask",
+    ...(roots.length ? { workspace_roots: roots } : {}),
+    ...(Object.keys(policies).length ? { tools: { policies } } : {}),
+    ...(agentMode && params.planModeEnabled !== undefined
+      ? { plan_mode_enabled: params.planModeEnabled }
+      : {}),
+  };
+}
 
 export async function runKBrainConversationTurn(params: Params): Promise<void> {
   const round = 1;
@@ -36,7 +82,9 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
   const calls = new Map<string, ToolCall>();
   const approvalController = new AbortController();
   const cancelApprovals = () => approvalController.abort();
-  cancellation.userStop.signal.addEventListener("abort", cancelApprovals, { once: true });
+  cancellation.userStop.signal.addEventListener("abort", cancelApprovals, {
+    once: true,
+  });
   const update = (apply: (round: LiveRound) => LiveRound) => {
     params.batchLiveRoundsUpdate((previous) => {
       const rounds = previous.some((item) => item.round === round)
@@ -76,10 +124,13 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
       round,
     });
   };
-  const onToolResult = (call: ToolCall, result: ToolResultMessage) => {
-    results.set(call.id, result);
+  const projectToolResult = (call: ToolCall, result: ToolResultMessage) => {
+    const prior = results.get(call.id);
+    const enriched =
+      prior?.details && !result.details ? { ...result, details: prior.details } : result;
+    results.set(call.id, enriched);
     update((target) => ({
-      ...attachToolResultToRound(target, call, result),
+      ...attachToolResultToRound(target, call, enriched),
       runningToolCallIds: target.runningToolCallIds.filter((id) => id !== call.id),
     }));
     gatewayBridgeEvents.queueEvent({
@@ -91,13 +142,24 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
       round,
     });
   };
+  const onToolResult = (call: ToolCall, result: ToolResultMessage) => {
+    if (call.name === "ExitPlanMode" && !result.isError) {
+      const planTools = createExitPlanModeTools({ conversationId: params.conversationId });
+      void planTools
+        .executeToolCall(call)
+        .then((projected) => projectToolResult(call, { ...result, details: projected.details }));
+    } else projectToolResult(call, result);
+  };
   hookLifecycle.startAgent();
   hookLifecycle.startTurn(round);
   try {
+    const runtimeConnection = getConfiguredKBrainConnection();
     const assistant = await runKBrainTurn({
       conversationId: params.conversationId,
       sessionId: params.sessionId,
-      clientRequestId: params.trajectoryMessageId ?? crypto.randomUUID(),
+      clientRequestId:
+        params.clientRequestId?.trim() || params.trajectoryMessageId || crypto.randomUUID(),
+      turnId: user && "id" in user && typeof user.id === "string" ? user.id : undefined,
       cwd: params.conversationCwd,
       model: {
         provider: params.selectedModel.customProviderId || String(params.providerId),
@@ -105,9 +167,12 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
       },
       prompt,
       context,
+      options: canonicalRunOptions(params),
       signal: cancellation.userStop.signal,
-      baseUrl: import.meta.env?.VITE_KBRAIN_URL,
-      token: import.meta.env?.VITE_KBRAIN_TOKEN,
+      hook_policy: "backend",
+      hook_scope_id: params.conversationId,
+      baseUrl: runtimeConnection?.baseUrl,
+      token: runtimeConnection?.token,
       onTextDelta: (delta) => {
         update((target) => appendTextDeltaToRound(collapseThinking(target), delta));
         gatewayBridgeEvents.queueToken(delta, { round });
@@ -121,9 +186,29 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
           conversation_id: params.conversationId,
         });
       },
+      onHostedSearch: (search) => {
+        update((target) => upsertHostedSearchToRound(target, search));
+      },
       onToolCall,
       onToolResult,
       onStatus: status,
+      onQuestionRequest: async (
+        request: KBrainQuestionRequest,
+        signal?: AbortSignal,
+      ): Promise<KBrainQuestionAnswer[]> => {
+        const answers = await requestBackendQuestion({
+          toolCallId: request.tool_call_id,
+          conversationId: params.conversationId,
+          questions: request.questions,
+          deadlineAt: request.deadline_at,
+          signal,
+        });
+        return answers.map((answer) => ({
+          question_id: answer.questionId,
+          selected_label: answer.selectedLabel,
+          ...(answer.custom ? { custom: true } : {}),
+        }));
+      },
       onPermissionRequest: async (request) => {
         const settlement = await requestToolApproval({
           toolCallId: request.permission_id,
@@ -154,7 +239,12 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
             role: "toolResult",
             toolCallId: id,
             toolName: call.name,
-            content: [{ type: "text", text: subagent.error || subagent.report || subagent.status }],
+            content: [
+              {
+                type: "text",
+                text: subagent.error || subagent.report || subagent.status,
+              },
+            ],
             isError: !["done", "completed"].includes(subagent.status),
             timestamp: Date.now(),
           });

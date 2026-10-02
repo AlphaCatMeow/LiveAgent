@@ -1,4 +1,4 @@
-import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Message } from "@liveagent/app/lib/agentTypes";
 
 import type { StreamDebugLogger } from "../../debug/agentDebug";
 import { assistantMessageToText } from "../../providers/llm";

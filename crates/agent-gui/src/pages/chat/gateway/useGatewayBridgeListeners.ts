@@ -5,7 +5,7 @@ import { normalizeConversationMentionReferences } from "@liveagent/ui/lib/chat/m
 import { createUuid } from "@liveagent/ui/lib/shared/id";
 import { useEffect, useRef } from "react";
 import type { HistoryMessageRef } from "../../../lib/chat/conversation/conversationState";
-import { isKBrainBackendEnabled } from "../../../lib/host";
+import { isKBrainBackendEnabled, isTauriHost } from "../../../lib/host";
 import { type ChatRuntimeControls, normalizeChatRuntimeControls } from "../../../lib/settings";
 import { createTextComposerDraft } from "../composer/composerDraftText";
 import { createClarifyDeltaForwarder } from "./clarifyDeltaForwarder";
@@ -161,7 +161,7 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
   }
 
   useEffect(() => {
-    if (isKBrainBackendEnabled()) return;
+    if (isKBrainBackendEnabled() && !isTauriHost()) return;
     let disposed = false;
     let unlistenChatRequestReady: (() => void) | null = null;
     let unlistenChatRuntimeWake: (() => void) | null = null;

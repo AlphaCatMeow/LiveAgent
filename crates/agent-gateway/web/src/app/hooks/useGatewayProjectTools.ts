@@ -32,6 +32,7 @@ type UseGatewayProjectToolsOptions = {
   composerRef: MutableRefObject<MentionComposerHandle | null>;
   displayedConversationId: string;
   displayedConversationWorkdir: string;
+  terminalIdentity?: { conversationId?: string; runId?: string } | null;
   isAgentMode: boolean;
   resetProjectToolsRuntimeRef: MutableRefObject<() => void>;
   setRightDockOpen: Dispatch<SetStateAction<boolean>>;
@@ -50,6 +51,7 @@ export function useGatewayProjectTools({
   composerRef,
   displayedConversationId,
   displayedConversationWorkdir,
+  terminalIdentity,
   isAgentMode,
   resetProjectToolsRuntimeRef,
   setRightDockOpen,
@@ -102,6 +104,7 @@ export function useGatewayProjectTools({
     statusSessionId: status?.session_id,
     terminalProjectPath,
     terminalProjectPathKey,
+    terminalIdentity,
     rightDockFileTreeOpen,
     rightDockSshTunnelOpen,
   });

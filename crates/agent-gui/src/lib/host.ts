@@ -12,7 +12,7 @@ export function isTauriHost(): boolean {
 }
 
 export function isKBrainBackendEnabled(): boolean {
-  return import.meta.env?.VITE_KBRAIN_BACKEND === "true";
+  return true;
 }
 
 export function isKBrainBrowserHost(): boolean {

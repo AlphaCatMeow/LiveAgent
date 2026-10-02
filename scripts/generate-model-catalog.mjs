@@ -171,7 +171,7 @@ const CLIENT_SIDE_OFF_SECTIONS = new Set(["anthropic"]);
 // Facts where the upstream aggregator is missing or lags the provider's
 // protocol documentation, keyed "section/id". Kept tiny and documented.
 // claude-fable-5: adaptive thinking cannot be disabled (the API requires the
-// thinking block; pi-ai's catalog marks off:null) — the client-side-off rule
+// thinking block; the catalog marks off:null) — the client-side-off rule
 // above must not apply.
 // DeepSeek's Responses thinking guide documents the same none/low/high/max
 // ladder for both V4 models; models.dev currently omits low from V4 Pro.

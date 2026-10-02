@@ -61,6 +61,7 @@ test("provider model requests carry the stored provider identity to the desktop"
       models_url: "https://relay.example.com/models",
       provider_id: "provider-a",
       is_full_url: true,
+      request_format: "openai-completions",
     },
     "agent-1",
   );
@@ -76,6 +77,7 @@ test("provider model requests carry the stored provider identity to the desktop"
       modelsUrl: frame.payload.value.payload.value.modelsUrl,
       providerId: frame.payload.value.payload.value.providerId,
       isFullUrl: frame.payload.value.payload.value.isFullUrl,
+      requestFormat: frame.payload.value.payload.value.requestFormat,
     },
     {
       providerType: "codex",
@@ -85,6 +87,7 @@ test("provider model requests carry the stored provider identity to the desktop"
       modelsUrl: "https://relay.example.com/models",
       providerId: "provider-a",
       isFullUrl: true,
+      requestFormat: "openai-completions",
     },
   );
 });
@@ -563,6 +566,8 @@ test("encodeRequestFrame maps request types onto GatewayEnvelope arms", () => {
 
   const terminalFrame = decodeClientFrame(
     encodeRequestFrame("req-2", "terminal.create", {
+      conversation_id: "conversation-1",
+      run_id: "run-1",
       cwd: "/workspace",
       project_path_key: "/workspace",
       cols: 120,
@@ -571,6 +576,8 @@ test("encodeRequestFrame maps request types onto GatewayEnvelope arms", () => {
   );
   assert.equal(terminalFrame.payload.value.payload.case, "terminalRequest");
   assert.equal(terminalFrame.payload.value.payload.value.action, "create");
+  assert.equal(terminalFrame.payload.value.payload.value.conversationId, "conversation-1");
+  assert.equal(terminalFrame.payload.value.payload.value.runId, "run-1");
   assert.equal(terminalFrame.payload.value.payload.value.cols, 120);
 
   // chat.command 的 64 位字段在出站边界收窄为 bigint。
@@ -695,4 +702,68 @@ test("cua driver status requests carry the read-only action and decode the host 
     permissionsRequired: true,
     error: null,
   });
+});
+
+test("queue edit responses decode through the real adapter into native editor JSON fields", () => {
+  for (const uploadedFilesJson of [undefined, "", "[]", '[{"id":"file-1"}]']) {
+    const item = {
+      id: "queued-1", previewText: "edit me", fileCount: 0, createdAt: 1,
+      source: "webui", editable: true,
+      draftJson: JSON.stringify({ text: "edit me", segments: [{ type: "text", text: "edit me" }] }),
+      ...(uploadedFilesJson === undefined ? {} : { uploadedFilesJson }),
+    };
+    const decoded = decodeServerFrame(roundtrip(serverFrame({
+      requestId: "queue-edit", agentId: "kbrain",
+      agentResponse: { chatQueueResp: {
+        accepted: true, revision: "6", itemJson: JSON.stringify(item),
+        snapshotJson: JSON.stringify({ conversationId: "conv-1", revision: 6, items: [] }),
+      } },
+    })), { agentOnline: true });
+    const response = socketShared.normalizeChatQueueResponse(decoded.payload);
+    assert.equal(response.accepted, true);
+    assert.equal(response.item.id, "queued-1");
+    assert.equal(response.snapshot.revision, 6);
+    assert.equal(JSON.parse(response.item.draftJson).text, "edit me");
+    assert.deepEqual(JSON.parse(response.item.uploadedFilesJson), JSON.parse(uploadedFilesJson || "[]"));
+    const commit = decodeClientFrame(encodeRequestFrame("queue-commit", "chat_queue.edit_commit", {
+      conversation_id: "conv-1", item_id: response.item.id, revision: response.snapshot.revision,
+      draft_json: response.item.draftJson, uploaded_files_json: response.item.uploadedFilesJson,
+    }, "kbrain"));
+    assert.equal(commit.payload.value.payload.value.draftJson, response.item.draftJson);
+    assert.equal(commit.payload.value.payload.value.uploadedFilesJson, response.item.uploadedFilesJson);
+  }
+});
+
+test("queued command update decoded by the adapter settles the actual startup pipeline", async () => {
+  const { ChatCommandPipeline } = loader.loadModule("src/lib/chat/stream/chatCommandPipeline.ts");
+  const errors = [];
+  const pipeline = new ChatCommandPipeline({
+    getTranscriptStore: () => ({ removeOptimisticUserEntry() {}, appendLocalError: (message) => errors.push(message) }),
+  });
+  try {
+    await pipeline.submit({ conversationId: "conv-1", clientRequestId: "client-1", message: "queued", optimistic: false,
+      submit: async () => ({ runId: "run-1", conversationId: "conv-1", acceptedSeq: 1 }),
+    });
+    assert.equal(pipeline.hasPending("conv-1"), true);
+    const decoded = decodeServerFrame(roundtrip(serverFrame({ chatCommandUpdate: {
+      runId: "run-1", clientRequestId: "client-1", conversationId: "conv-1", phase: "queued_in_gui",
+    } })), { agentOnline: true });
+    pipeline.handleCommandUpdate({ runId: decoded.payload.run_id, clientRequestId: decoded.payload.client_request_id,
+      conversationId: decoded.payload.conversation_id, phase: decoded.payload.phase });
+    assert.equal(pipeline.hasPending("conv-1"), false);
+    assert.deepEqual(errors, []);
+  } finally {
+    pipeline.reset();
+  }
+});
+
+test("queue edit cancel preserves the original conversation and removed item identity", () => {
+  const encoded = decodeClientFrame(encodeRequestFrame("cancel-edit", "chat_queue.edit_cancel", {
+    conversation_id: "conversation-original",
+    item_id: "removed-queue-item",
+  }, "kbrain"));
+  assert.equal(encoded.agentId, "kbrain");
+  assert.equal(encoded.payload.value.payload.value.action, "edit_cancel");
+  assert.equal(encoded.payload.value.payload.value.conversationId, "conversation-original");
+  assert.equal(encoded.payload.value.payload.value.itemId, "removed-queue-item");
 });

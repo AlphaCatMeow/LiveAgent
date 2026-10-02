@@ -1,4 +1,4 @@
-import type { Context, UserMessage } from "@earendil-works/pi-ai";
+import type { Context, UserMessage } from "@liveagent/app/lib/agentTypes";
 import { invoke } from "@liveagent/app/shims/tauriCore";
 import type {
   MentionComposerDraft,
@@ -44,7 +44,6 @@ import {
 } from "../../../lib/chat/conversation/run";
 import { createTurnCancellation } from "../../../lib/chat/conversation/turnCancellation";
 import type { ChatHistorySummary } from "../../../lib/chat/history/chatHistory";
-import type { MemoryExtractionStatusKey } from "../../../lib/chat/memory/extractionEngine";
 import {
   BRANCH_CONVERSATION_DEFAULT_TITLE,
   buildFallbackConversationTitle,
@@ -74,7 +73,6 @@ import {
   type SelectedModel,
   serializeSelectedModelJson,
   strictestCommandSafetyMode,
-  updateMemorySettings,
   updateSkills,
   type WorkspaceProject,
   workspaceProjectPathKey,
@@ -96,7 +94,6 @@ import {
   releaseTrajectoryRecorder,
   resolveTrajectoryTurnNumber,
   trajectorySlotCapture,
-  updateTrajectoryRecorderSegment,
 } from "../../../lib/trajectory/recorderRegistry";
 import { listWorkspaceRootGrants } from "../../../lib/workspaceRootGrants";
 import { asErrorMessage } from "../chatPageUtils";
@@ -129,21 +126,12 @@ import {
   settleChatRunFinalization,
   trackTerminalHistoryPersist,
 } from "./chatRunFinalization";
-import {
-  buildPreparedContext as buildPreparedConversationContext,
-  buildResumeContext as buildResumeConversationContext,
-} from "./conversationContextBuilders";
+import { buildPreparedContext as buildPreparedConversationContext } from "./conversationContextBuilders";
 import { startConversationTitleJob } from "./conversationTitleJob";
 import {
   type EffectiveChatModelSelection,
   resolveEffectiveChatModelSelection,
 } from "./modelSelection";
-import {
-  buildModelFailoverPlan,
-  resolveConversationTitleModelSelection,
-  resolveMemorySummaryModelSelection,
-  selectedModelsMatch,
-} from "./providerRuntimeConfig";
 
 type LiveTranscriptController = ReturnType<typeof useLiveTranscriptController>;
 type ChatPageRuntimeStore = ReturnType<typeof useChatPageRuntimeStore>;
@@ -192,7 +180,6 @@ type UseSendChatTurnParams = {
     uploads: PendingUploadedFile[],
   ) => void;
   getConversationLiveTranscriptStore: LiveTranscriptController["getConversationLiveTranscriptStore"];
-  getCompactionController: LiveTranscriptController["getCompactionController"];
   clearAbortSnapshot: LiveTranscriptController["clearAbortSnapshot"];
   getAbortSnapshot: LiveTranscriptController["getAbortSnapshot"];
   resetLiveTranscript: LiveTranscriptController["resetLiveTranscript"];
@@ -265,7 +252,6 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     getPendingUploadsForConversation,
     setPendingUploadsForConversation,
     getConversationLiveTranscriptStore,
-    getCompactionController,
     clearAbortSnapshot,
     getAbortSnapshot,
     resetLiveTranscript,
@@ -335,7 +321,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
   }) {
     const capabilities = liveAgentRuntimeCapabilities();
     if (!capabilities.gatewayMirror && overrides?.gatewayBridgeRequestOverride) {
-      setErrorMessage("LiveAgent Gateway chat requests are unavailable in K-brain mode.");
+      setErrorMessage("LiveAgent Gateway chat requests are unavailable on this host.");
       return false;
     }
     const overrideConversationId = overrides?.conversationIdOverride?.trim() ?? "";
@@ -526,67 +512,6 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
         : { ...prev, selectedModel },
     );
     const providerConfig = createProviderRuntimeConfig(provider, model, runtimeControls);
-    // cc-switch style auto-failover plan for this turn (shared by the agent
-    // and text runtimes). The switch callback makes the winning fallback the
-    // conversation's selection so follow-up turns start on the healthy
-    // provider directly.
-    const failoverPlan =
-      providerConfig.backend === "direct"
-        ? buildModelFailoverPlan(settings, effectiveSelectedModel, runtimeControls)
-        : undefined;
-    const failoverParams = failoverPlan
-      ? {
-          config: failoverPlan.config,
-          primary: failoverPlan.primary,
-          fallbacks: failoverPlan.fallbacks,
-          onSwitched: (event: {
-            target: { selectedModel: SelectedModel } | null;
-            round: number;
-            errorMessage: string;
-          }) => {
-            const nextSelectedModel =
-              event.target?.selectedModel ?? failoverPlan.primary.selectedModel;
-            updateConversationRuntimeEntry(conversationId, (prev) =>
-              selectedModelsMatch(prev.selectedModel, nextSelectedModel)
-                ? prev
-                : { ...prev, selectedModel: { ...prev.selectedModel, ...nextSelectedModel } },
-            );
-          },
-        }
-      : undefined;
-    // Frontend memory extraction and its model override are direct-only.
-    const memorySummaryModelSelection =
-      providerConfig.backend === "direct" ? resolveMemorySummaryModelSelection(settings) : null;
-    const memoryExtractionModel = memorySummaryModelSelection
-      ? {
-          providerId: memorySummaryModelSelection.providerId,
-          model: memorySummaryModelSelection.model,
-          runtime: createProviderRuntimeConfig(
-            memorySummaryModelSelection.provider,
-            memorySummaryModelSelection.model,
-            runtimeControls,
-          ),
-          selectedModel: memorySummaryModelSelection.selectedModel,
-        }
-      : undefined;
-    const handleMemoryExtractionModelFailure = memoryExtractionModel
-      ? (failedModel: { selectedModel?: SelectedModel }) => {
-          const failedSelectedModel = failedModel.selectedModel;
-          setSettings((prev) => {
-            if (!selectedModelsMatch(prev.memory.summaryModel, failedSelectedModel)) {
-              return prev;
-            }
-            return updateMemorySettings(prev, { summaryModel: undefined });
-          });
-        }
-      : undefined;
-    const memoryExtractionStatusText = (
-      key: MemoryExtractionStatusKey,
-      counts: { accepted: number; rejected: number },
-    ) =>
-      t(`chat.memoryExtraction.${key}`)
-        .replace("{accepted}", String(counts.accepted))
-        .replace("{rejected}", String(counts.rejected));
     const runtimeModel = createModelFromConfig(
       providerId,
       model,
@@ -690,7 +615,6 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       workdir: historyCwd,
     }));
     const transcriptStore = getConversationLiveTranscriptStore(conversationId);
-    const compaction = getCompactionController(conversationId);
     const isConversationVisible = () => currentConversationIdRef.current === conversationId;
     // 轮次级取消：会话 abort controller 只注册 userStop 一次；每个 LLM 请求
     // （主请求/压缩摘要/标题任务）各自派生子 scope，杜绝 abort 换代丢停止的窗口。
@@ -708,14 +632,6 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       conversationId,
       executionMode: effectiveExecutionMode,
       streamKind: "conversation_recovery",
-      providerId,
-      model,
-    });
-    const compactionDebugLogger = createStreamDebugLogger({
-      enabled: effectiveIsAgentDevExecutionMode,
-      conversationId,
-      executionMode: effectiveExecutionMode,
-      streamKind: "conversation_compaction",
       providerId,
       model,
     });
@@ -742,18 +658,8 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
 
     let titlePromise: Promise<string | null> | null = null;
     if (isFirstTurn || isBranchDefaultTitle) {
-      const titleModelSelection =
-        providerConfig.backend === "direct"
-          ? resolveConversationTitleModelSelection(settings, effectiveSelectedModel)
-          : effectiveSelectedModel;
-      const titleProviderConfig =
-        providerConfig.backend === "direct"
-          ? createProviderRuntimeConfig(
-              titleModelSelection.provider,
-              titleModelSelection.model,
-              runtimeControls,
-            )
-          : providerConfig;
+      const titleModelSelection = effectiveSelectedModel;
+      const titleProviderConfig = providerConfig;
       titlePromise = startConversationTitleJob({
         providerId: titleModelSelection.providerId,
         model: titleModelSelection.model,
@@ -807,7 +713,6 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     let initialPersistPromise: Promise<boolean> | null = null;
     let terminalHistoryPersistPromise: Promise<boolean> | null = null;
     let runCleanupPromise: Promise<void> = Promise.resolve();
-    let compactionBound = false;
     let runStopRequestVersion: number | null = null;
 
     function registerGatewayRuntimeRun(state: GatewayRuntimeSnapshotState) {
@@ -1013,10 +918,6 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       requestRemoteGatewayCancellation();
       gatewayBridgeEvents.emitError("Cancelled", conversationId);
       releaseConversationRunUi();
-      if (compactionBound) {
-        compaction.unbindTurn();
-        compactionBound = false;
-      }
       clearAbortSnapshot(transcriptStore);
       await finalizeConversationRun("cancelled");
       clearConversationStopHandler(conversationId, handleConversationStop);
@@ -1284,15 +1185,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       return true;
     }
     acknowledgeGatewayRunStarted();
-    const memoryRuntime = capabilities.frontendContext
-      ? await Promise.all([
-          import("../../../lib/chat/memory/injectionController"),
-          import("../../../lib/memory/prompts/injection"),
-        ])
-      : null;
-    const memoryTurnInjection = memoryRuntime?.[0].memoryTurnInjection;
     let skillsPrompt = "";
-    let memoryPrompt = "";
     /** 本轮 `/skill-name` 显式提及块;没有提及时恒为空串,不会挂出任何内容。 */
     let explicitSkillMentionBlock = "";
     let skillsRootDirForTools = skillsRootDir;
@@ -1325,34 +1218,12 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
           },
         )
       : undefined;
-    // 压缩有四条触发路径，逐个调用点埋点必漏；订阅控制器生命周期一次覆盖全部。
-    // manual 发生在两轮之间，不属于任何 turn。
-    if (trajectoryRecording)
-      compaction.setObserver({
-        onStart: ({ trigger }) => {
-          trajectoryRecording.recorder.compactionStart({ standalone: trigger === "manual" });
-        },
-        onEnd: ({ trigger, status, tokensBefore, tokensAfter, newSegmentIndex, error }) => {
-          trajectoryRecording.recorder.compactionEnd({
-            status,
-            standalone: trigger === "manual",
-            ...(tokensBefore === undefined ? {} : { tokensBefore }),
-            ...(tokensAfter === undefined ? {} : { tokensAfter }),
-            ...(error === undefined ? {} : { error }),
-          });
-          if (status === "complete" && newSegmentIndex !== undefined) {
-            updateTrajectoryRecorderSegment(conversationId, newSegmentIndex);
-          }
-        },
-      });
-
     function buildPreparedContext(
       state: ConversationViewState,
       tools?: Context["tools"],
       options?: {
         includeAbortedMessages?: boolean;
         includeUploadedFilesMetadata?: boolean;
-        includeMemoryTurnUpdates?: boolean;
       },
     ): Context {
       if (!capabilities.frontendContext) {
@@ -1364,123 +1235,13 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
         tools,
         activeAgentPrompt: effectiveAgentPrompt,
         skillsPrompt,
-        memoryPrompt,
-        // 每次组装都现取:增量块按消息 id 绑定,已挂上的块在后续轮次原样重放,
-        // 历史区间的字节因此保持稳定。
-        // 只有发给主模型的上下文才需要增量块;记忆抽取这类复用同一份消息的旁路
-        // 必须显式关掉,否则块里的索引行会被当成用户说的话再抽一遍。
-        memoryTurnUpdates:
-          options?.includeMemoryTurnUpdates === false
-            ? null
-            : memoryTurnInjection?.getMessageUpdates(conversationId),
         // 显式提及块与 memory 增量同一个口径:同样是合成出来的上下文,不能被
         // 记忆抽取这类旁路当成用户说的话再抽一遍。
-        skillMentionUpdates:
-          options?.includeMemoryTurnUpdates === false
-            ? null
-            : skillMentionInjection.getMessageUpdates(conversationId),
-        includeAbortedMessages: options?.includeAbortedMessages,
-        includeUploadedFilesMetadata: options?.includeUploadedFilesMetadata,
-        captureSlots: trajectorySlotCapture(conversationId),
-      });
-    }
-
-    function buildResumeContext(
-      state: ConversationViewState,
-      resumeMessage?: UserMessage,
-      tools?: Context["tools"],
-      options?: { includeAbortedMessages?: boolean; includeUploadedFilesMetadata?: boolean },
-    ): Context {
-      return buildResumeConversationContext({
-        state,
-        resumeMessage,
-        tools,
-        activeAgentPrompt: effectiveAgentPrompt,
-        skillsPrompt,
-        memoryPrompt,
-        memoryTurnUpdates: memoryTurnInjection?.getMessageUpdates(conversationId),
         skillMentionUpdates: skillMentionInjection.getMessageUpdates(conversationId),
         includeAbortedMessages: options?.includeAbortedMessages,
         includeUploadedFilesMetadata: options?.includeUploadedFilesMetadata,
         captureSlots: trajectorySlotCapture(conversationId),
       });
-    }
-
-    if (capabilities.frontendContext) {
-      compaction.bindTurn({
-        providerId,
-        model,
-        runtime: providerConfig,
-        cancellation,
-        debugLogger: compactionDebugLogger,
-        complete:
-          providerConfig.backend === "kbrain"
-            ? async () => {
-                throw new Error("Frontend compaction is unavailable in K-brain mode.");
-              }
-            : undefined,
-        buildPreparedContext,
-        buildResumeContext,
-        presend: {
-          baseState: baseConversationState,
-          pendingUserText: content,
-          composerText: content,
-          uploadedFiles,
-          composeAppliedState: (state) => appendMessagesToConversation(state, [pendingUserMessage]),
-        },
-        sinks: {
-          applyState: applyConversationState,
-          applyStateMidRun: rebaseConversationStateDuringRun,
-          publishStatus: (status) =>
-            updateConversationRuntimeEntry(conversationId, (prev) => ({
-              ...prev,
-              compactionStatus: status,
-            })),
-          setBridgeToolStatus: updateGatewayBridgeToolStatus,
-          queueCheckpoint: (state, contextUsageTokens) =>
-            gatewayBridgeEvents.queueCheckpoint(state, contextUsageTokens),
-          persist: (state) =>
-            persistConversation({
-              conversationId,
-              sessionId,
-              providerId,
-              model,
-              selectedModel,
-              cwd: historyCwd,
-              state,
-              fallbackTitle,
-              createdAt,
-              titlePromise,
-            }),
-          restoreComposer: (composerText, restoredUploads) => {
-            if (isConversationVisible() && typeof composerText === "string") {
-              composerRef.current?.setText(composerText);
-              composerRef.current?.focus();
-            }
-            setPendingUploadsForConversation(conversationId, restoredUploads);
-          },
-          persistRollback: async (state) => {
-            abortedConversationCommitted = true;
-            await persistConversationWithHistorySync({
-              conversationId,
-              sessionId,
-              providerId,
-              model,
-              selectedModel,
-              cwd: historyCwd,
-              state,
-              fallbackTitle,
-              createdAt,
-              titlePromise,
-            });
-          },
-          // 压缩把携带 memory 增量块的 user 消息移出 active segment,增量对模型
-          // 永久不可见;丢弃注入状态,下一轮把 fresh 快照重冻结进 system 段 ——
-          // 压缩本来就要重建前缀,这次重冻结免费。
-          onCompacted: () => memoryTurnInjection?.invalidate(conversationId),
-        },
-      });
-      compactionBound = true;
     }
 
     // Optionally append skills metadata to system prompt (progressive disclosure).
@@ -1554,36 +1315,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       });
     }
 
-    // memory 索引每轮都可能变(模型刚写完一条,下一轮索引就跟着变)。整块塞进
-    // system prompt 会让 system 段跟着漂,把整条缓存前缀连同全部历史一起顶掉。
-    // 因此只有首轮走 system prompt(那时它本就是稳定前缀的一部分),之后 system
-    // 段冻结,变化改挂到当轮 user 消息尾部 —— 复用 pi-ai 已经打在最后一条 user
-    // 消息上的那个断点,不额外占用 Anthropic 的 4 个 cache_control 名额。
-    if (memoryRuntime && memoryTurnInjection) {
-      const { buildMemoryOverviewSection } = memoryRuntime[1];
-      let memoryOverview: string | null = null;
-      try {
-        memoryOverview = await buildMemoryOverviewSection(effectiveWorkdir);
-      } catch (error) {
-        console.warn("Failed to build memory overview prompt", error);
-        // null 表示这轮没读到,基线维持原样;空串是「一条记忆都没有」,属于正常内容。
-        memoryOverview = null;
-      }
-      if (await finishRequestedStopBeforeRuntime()) {
-        return true;
-      }
-      // 放在停止检查之后:这一轮被停掉时请求根本没发出去,提前推进基线会让下一轮
-      // 漏报这次变化。
-      memoryPrompt = memoryTurnInjection.planTurn({
-        conversationId,
-        messageId: pendingUserMessage.id,
-        overview: memoryOverview,
-        // project 段随 workdir 换血,增量 diff 无法保真表达;基线记录冻结时的
-        // workdir,切换时由 planTurn 触发重冻结。
-        workdir: effectiveWorkdir,
-      }).systemText;
-      // 同样放在停止检查之后:这一轮被停掉时消息根本没发出去,提前记账只会给一个
-      // 永远对不上的消息 id 留下垃圾块。空块不会创建任何状态。
+    if (capabilities.frontendContext) {
       skillMentionInjection.record({
         conversationId,
         messageId: pendingUserMessage.id,
@@ -1699,13 +1431,6 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       }));
     }
 
-    function rebaseConversationStateDuringRun(nextState: ConversationViewState) {
-      // Once a compaction/prune result is committed into visible history, the
-      // corresponding live transcript becomes stale and must be cleared.
-      applyConversationState(nextState);
-      resetLiveTranscript(transcriptStore);
-    }
-
     // Run 级任务清单存储:先落盘、成功后才应用到运行时状态,失败时状态从未
     // 变更(无需回滚)。持久化走非终态通道——中途任务写盘失败只属于本次工具
     // 调用(模型收到错误可重试),绝不能点亮 terminalHistoryPersistFailed 把
@@ -1741,16 +1466,11 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
             providerId,
             model,
             runtime: providerConfig,
-            failover: failoverParams,
             runtimeModel,
             selectedModel,
-            memoryExtractionModel,
-            onMemoryExtractionModelFailure: handleMemoryExtractionModelFailure,
-            memoryExtractionStatusText,
             effectiveWorkdir,
             additionalRoots,
             effectiveSkillsEnabled,
-            showSilentMemoryExtraction: effectiveIsAgentDevExecutionMode,
             skillsRootDir: skillsRootDirForTools,
             skillAccessPolicy: skillAccessPolicyForTools,
             onManagedSkillsChanged: (change) => {
@@ -1798,6 +1518,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
               }
             },
             sessionId,
+            clientRequestId: gatewayBridgeRequest?.clientRequestId,
             taskStateStore,
             conversationId,
             referencedConversations,
@@ -1814,7 +1535,6 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
             getNextConversationState: () => nextConversationState,
             applyConversationState,
             buildPreparedContext,
-            compaction,
             cancellation,
             resetLiveTranscript,
             settleLiveTranscript,
@@ -1841,13 +1561,10 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
             providerId,
             model,
             runtime: providerConfig,
-            failover: failoverParams,
             runtimeModel,
             selectedModel,
-            memoryExtractionModel,
-            onMemoryExtractionModelFailure: handleMemoryExtractionModelFailure,
-            memoryExtractionStatusText,
             sessionId,
+            clientRequestId: gatewayBridgeRequest?.clientRequestId,
             conversationId,
             conversationCwd,
             historyCwd,
@@ -1862,7 +1579,6 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
             getNextConversationState: () => nextConversationState,
             applyConversationState,
             buildPreparedContext,
-            compaction,
             cancellation,
             resetLiveTranscript,
             settleLiveTranscript,
@@ -1893,10 +1609,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
         hookScope.cancel();
         requestRemoteGatewayCancellation();
         runCleanupPromise = (async () => {
-          const rolledBack = await compaction.handleTurnAbort();
-          if (!rolledBack) {
-            commitVisibleAbortedConversation();
-          }
+          commitVisibleAbortedConversation();
           if (shouldCreatePendingHistoryItem && !abortedConversationCommitted) {
             sidebarStore.removeLocal(conversationId);
           }
@@ -1911,10 +1624,6 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       }
     } finally {
       releaseConversationRunUi();
-      if (compactionBound) {
-        compaction.unbindTurn();
-        compactionBound = false;
-      }
       hookLifecycle.endAgent();
       hookScope.close();
       clearAbortSnapshot(transcriptStore);

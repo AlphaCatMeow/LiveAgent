@@ -5,16 +5,28 @@ import {
   buildGatewaySettingsSyncUpdatePayload,
 } from "@liveagent/ui/lib/settings/sync";
 import { type Locale, normalizeLocale } from "../../i18n/config";
-import { isKBrainBrowserHost } from "../host";
+import { isKBrainBackendEnabled, isKBrainBrowserHost } from "../host";
+import { createKBrainClient } from "../kbrain/client";
+import { fromKBrainMcpSettings, toKBrainMcpSettings } from "../kbrain/mcp";
+import { createKBrainPromptClient, type KBrainPromptSnapshot } from "../kbrain/prompts";
+import {
+  appProvidersFromKBrain,
+  kBrainSettingsUpdateFromAppSettings,
+  kBrainSettingsUpdateFromLegacyProviders,
+  loadKBrainProviderSettings,
+  saveKBrainProviderSettings,
+} from "../kbrain/providerSettings";
 import { SettingsStorageError, type SettingsStorageErrorCode } from "./errors";
 import {
   type AppSettings,
   type ChatRuntimeControls,
   type CloseWindowBehavior,
+  type CustomProvider,
   getDefaultSettings,
   normalizeChatRuntimeControls,
   normalizeChatTranscriptSettings,
   normalizeCloseWindowBehavior,
+  normalizeCustomProvider,
   normalizeFontFamily,
   normalizeFontScaleSettings,
   normalizeRightDockSettings,
@@ -27,6 +39,7 @@ import {
   type SelectedModel,
   type SkillsSettings,
   type Theme,
+  workspaceProjectPathKey,
 } from "./index";
 
 const LOCAL_UI_SETTINGS_STORAGE_KEY = "liveagent.ui-settings.v1";
@@ -70,6 +83,7 @@ type SshPatchApplyResponse = {
 };
 
 export type PersistSettingsResult = {
+  customProviders?: AppSettings["customProviders"];
   ssh?: AppSettings["ssh"];
   stt?: AppSettings["stt"];
   conflict?: "ssh_settings_changed";
@@ -246,6 +260,26 @@ function settingsObject(input: unknown): Record<string, unknown> {
     : {};
 }
 
+function readLegacyBrowserSnapshot(): Record<string, unknown> {
+  try {
+    const browserRaw = localStorage.getItem(BROWSER_SETTINGS_STORAGE_KEY);
+    const localRaw = localStorage.getItem(LOCAL_UI_SETTINGS_STORAGE_KEY);
+    return {
+      ...settingsObject(localRaw ? JSON.parse(localRaw) : undefined),
+      ...settingsObject(browserRaw ? JSON.parse(browserRaw) : undefined),
+    };
+  } catch {
+    return {};
+  }
+}
+
+function normalizeLegacyProviders(input: unknown): AppSettings["customProviders"] {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((provider) => normalizeCustomProvider(provider))
+    .filter((provider) => provider.id.trim().length > 0);
+}
+
 function browserUiSettings(input: unknown) {
   const raw = settingsObject(input);
   const system = settingsObject(raw.system);
@@ -327,6 +361,93 @@ function writeBrowserPersistedSettings(settings: AppSettings): void {
   }
 }
 
+function systemForNativePersistence(system: AppSettings["system"]): AppSettings["system"] {
+  if (isKBrainBackendEnabled()) {
+    const workspaceResourceSettings = Object.fromEntries(
+      Object.entries(system.workspaceResourceSettings).map(([path, entry]) => {
+        const {
+          projectPrompt: _projectPrompt,
+          projectPromptStrategy: _projectPromptStrategy,
+          ...nativeEntry
+        } = entry;
+        return [path, nativeEntry];
+      }),
+    ) as AppSettings["system"]["workspaceResourceSettings"];
+    return { ...system, workspaceResourceSettings };
+  }
+  return system;
+}
+
+function promptTemplatesFromKBrain(snapshot: KBrainPromptSnapshot): AppSettings["agents"] {
+  return (Array.isArray(snapshot.globalTemplates) ? snapshot.globalTemplates : []).map(
+    (template) => ({
+      id: template.id,
+      name: template.name,
+      description: template.description ?? "",
+      prompt: template.prompt,
+      enabled: template.enabled === true,
+    }),
+  );
+}
+
+async function loadKBrainPromptSettings(
+  workdirs: string[],
+): Promise<{ agents: AppSettings["agents"]; projects: Record<string, unknown> }> {
+  const client = createKBrainPromptClient();
+  const global = await client.get();
+  const projects: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(global.projectPrompts ?? {})) {
+    const project = value ?? {};
+    const path =
+      typeof project.workdir === "string" && project.workdir.trim() ? project.workdir : key;
+    projects[workspaceProjectPathKey(path)] = {
+      projectPrompt: typeof project.prompt === "string" ? project.prompt : "",
+      projectPromptStrategy: project.strategy === "replace" ? "replace" : "append",
+    };
+  }
+  for (const workdir of [...new Set(workdirs.map((value) => value.trim()).filter(Boolean))]) {
+    const key = workspaceProjectPathKey(workdir);
+    if (projects[key]) continue;
+    try {
+      const snapshot = await client.get(workdir);
+      projects[key] = {
+        projectPrompt: snapshot.projectPrompt,
+        projectPromptStrategy: snapshot.projectPromptStrategy,
+      };
+    } catch (error) {
+      if ((error as { status?: number }).status !== 400) throw error;
+    }
+  }
+  return { agents: promptTemplatesFromKBrain(global), projects };
+}
+
+function applyKBrainProjectPrompts(
+  system: AppSettings["system"],
+  projects: Record<string, unknown>,
+): AppSettings["system"] {
+  const workspaceResourceSettings: AppSettings["system"]["workspaceResourceSettings"] =
+    Object.fromEntries(
+      Object.entries(system.workspaceResourceSettings).map(([path, entry]) => [
+        workspaceProjectPathKey(path),
+        { ...entry, projectPrompt: "", projectPromptStrategy: "append" as const },
+      ]),
+    );
+  for (const [path, value] of Object.entries(projects)) {
+    const workdir = workspaceProjectPathKey(path);
+    const current = workspaceResourceSettings[workdir];
+    const prompt =
+      value && typeof value === "object"
+        ? (value as { projectPrompt?: unknown; projectPromptStrategy?: unknown })
+        : {};
+    workspaceResourceSettings[workdir] = {
+      ...current,
+      projectPrompt: typeof prompt.projectPrompt === "string" ? prompt.projectPrompt : "",
+      projectPromptStrategy: prompt.projectPromptStrategy === "replace" ? "replace" : "append",
+    } as AppSettings["system"]["workspaceResourceSettings"][string];
+  }
+  return { ...system, workspaceResourceSettings };
+}
+
 function applyDefaultWorkdirToSystem(system: unknown, defaultWorkdir: string): unknown {
   if (!defaultWorkdir) return system;
   const obj =
@@ -345,11 +466,84 @@ export type PersistedSettingsLoadResult = {
   defaultWorkdir: string;
 };
 
-export async function loadPersistedSettingsWithDefaults(): Promise<PersistedSettingsLoadResult> {
-  if (isKBrainBrowserHost()) {
-    return { settings: readBrowserPersistedSettings(), defaultWorkdir: "" };
+async function loadAndMaybeImportKBrainProviders(
+  legacyProviders: readonly CustomProvider[],
+  legacySelectedModel?: AppSettings["selectedModel"],
+) {
+  const backend = await loadKBrainProviderSettings();
+  const backendProviders = appProvidersFromKBrain(backend);
+  const backendIds = new Set(backendProviders.map((provider) => provider.id));
+  const missingLegacyProviders = legacyProviders.filter((provider) => !backendIds.has(provider.id));
+  if (missingLegacyProviders.length === 0) {
+    return { document: backend, providers: backendProviders };
   }
+  const mergedProviders = [...backendProviders, ...missingLegacyProviders];
+  const backendSelectedModel =
+    backend.defaultProvider && backend.defaultModel
+      ? { customProviderId: backend.defaultProvider, model: backend.defaultModel }
+      : legacySelectedModel;
+  const imported = await saveKBrainProviderSettings(
+    kBrainSettingsUpdateFromLegacyProviders(
+      backendProviders,
+      mergedProviders,
+      backendSelectedModel,
+    ),
+  );
+  return { document: imported, providers: appProvidersFromKBrain(imported) };
+}
+
+export async function loadPersistedSettingsWithDefaults(): Promise<PersistedSettingsLoadResult> {
   const defaults = getDefaultSettings();
+  let kbrainSettings: Awaited<ReturnType<typeof loadAndMaybeImportKBrainProviders>>;
+  try {
+    const legacyBrowser = isKBrainBrowserHost() ? readLegacyBrowserSnapshot() : {};
+    const legacyNative = isKBrainBrowserHost()
+      ? []
+      : normalizeLegacyProviders(
+          (
+            await invokeSettingsCommand<PersistedSettingsResponse>(
+              "load_failed",
+              "settings_load_all",
+            )
+          )?.providers,
+        );
+    const legacyProviders =
+      legacyNative.length > 0 ? legacyNative : normalizeLegacyProviders(legacyBrowser.providers);
+    const legacySelectedModel = normalizeSelectedModel(
+      isKBrainBrowserHost() ? legacyBrowser.selectedModel : undefined,
+    );
+    kbrainSettings = await loadAndMaybeImportKBrainProviders(legacyProviders, legacySelectedModel);
+  } catch (error) {
+    throw new SettingsStorageError("load_failed", error);
+  }
+  const customProviders = kbrainSettings.providers;
+  const selectedModel =
+    kbrainSettings.document.defaultProvider && kbrainSettings.document.defaultModel
+      ? {
+          customProviderId: kbrainSettings.document.defaultProvider,
+          model: kbrainSettings.document.defaultModel,
+        }
+      : undefined;
+  if (isKBrainBrowserHost()) {
+    const local = readBrowserPersistedSettings();
+    let promptSettings: { agents: AppSettings["agents"]; projects: Record<string, unknown> };
+    try {
+      promptSettings = await loadKBrainPromptSettings([local.system.workdir]);
+    } catch (error) {
+      throw new SettingsStorageError("load_failed", error);
+    }
+    const browserSettings = normalizeSettings({
+      ...local,
+      customProviders,
+      selectedModel,
+      agents: promptSettings.agents,
+      system: applyKBrainProjectPrompts(local.system, promptSettings.projects),
+    });
+    return {
+      settings: await loadKBrainMcpSettings(browserSettings),
+      defaultWorkdir: "",
+    };
+  }
   const localUi = readLocalUiSettings();
   const persisted = await invokeSettingsCommand<PersistedSettingsResponse>(
     "load_failed",
@@ -357,13 +551,13 @@ export async function loadPersistedSettingsWithDefaults(): Promise<PersistedSett
   );
   const defaultWorkdir = normalizeDefaultWorkdir(persisted?.defaultWorkdir);
 
-  const settings = normalizeSettings({
+  let settings = normalizeSettings({
     system: applyDefaultWorkdirToSystem(
       persisted?.system ?? defaults.system,
       defaultWorkdir,
     ) as AppSettings["system"],
-    customProviders: (persisted?.providers ??
-      defaults.customProviders) as AppSettings["customProviders"],
+    // K-brain is authoritative for provider records on both browser and native hosts.
+    customProviders,
     mcp: (persisted?.mcp ?? defaults.mcp) as AppSettings["mcp"],
     agents: (persisted?.agents ?? defaults.agents) as AppSettings["agents"],
     ssh: (persisted?.ssh ?? defaults.ssh) as AppSettings["ssh"],
@@ -374,7 +568,7 @@ export async function loadPersistedSettingsWithDefaults(): Promise<PersistedSett
     chatRuntimeControls: localUi.chatRuntimeControls,
     customSettings: localUi.customSettings,
     updates: localUi.updates,
-    selectedModel: localUi.selectedModel,
+    selectedModel,
     // SQLite is the source of truth (shared with the WebUI via gateway sync);
     // the localStorage copy only migrates pre-SQLite installs forward.
     modelFailover: (persisted?.modelFailover ??
@@ -385,6 +579,24 @@ export async function loadPersistedSettingsWithDefaults(): Promise<PersistedSett
     closeWindowBehavior: localUi.closeWindowBehavior,
   });
 
+  if (isKBrainBackendEnabled()) {
+    try {
+      const workdirs = [
+        settings.system.workdir,
+        ...settings.system.workspaceProjects.map((project) => project.path),
+      ];
+      const promptSettings = await loadKBrainPromptSettings(workdirs);
+      settings = normalizeSettings({
+        ...settings,
+        agents: promptSettings.agents,
+        system: applyKBrainProjectPrompts(settings.system, promptSettings.projects),
+      });
+    } catch (error) {
+      throw new SettingsStorageError("load_failed", error);
+    }
+  }
+
+  settings = await loadKBrainMcpSettings(settings);
   return {
     settings: {
       ...settings,
@@ -398,35 +610,108 @@ export async function loadPersistedSettings(): Promise<AppSettings> {
   return (await loadPersistedSettingsWithDefaults()).settings;
 }
 
+let failedProviderSave: AppSettings | undefined;
+
+function projectPromptFields(settings: AppSettings, path: string) {
+  const entry = settings.system.workspaceResourceSettings[path];
+  return {
+    prompt: entry?.projectPrompt ?? "",
+    strategy: entry?.projectPromptStrategy ?? "append",
+  } as const;
+}
+
+async function loadKBrainMcpSettings(settings: AppSettings): Promise<AppSettings> {
+  if (!isKBrainBackendEnabled()) return settings;
+  try {
+    const document = await createKBrainClient().getMcpSettings();
+    return normalizeSettings({
+      ...settings,
+      mcp: fromKBrainMcpSettings(document, settings.mcp),
+    });
+  } catch (error) {
+    throw new SettingsStorageError("load_failed", error);
+  }
+}
+
+async function persistKBrainPrompts(prev: AppSettings, next: AppSettings): Promise<void> {
+  const client = createKBrainPromptClient();
+  if (hasChanged(prev.agents, next.agents)) {
+    await client.replaceTemplates(next.agents);
+  }
+  const paths = new Set([
+    ...Object.keys(prev.system.workspaceResourceSettings),
+    ...Object.keys(next.system.workspaceResourceSettings),
+  ]);
+  for (const path of paths) {
+    const before = projectPromptFields(prev, path);
+    const after = projectPromptFields(next, path);
+    if (!hasChanged(before, after)) continue;
+    await client.setProject(path, after.prompt, after.strategy);
+  }
+}
+
 export async function persistSettings(
   prev: AppSettings,
   next: AppSettings,
 ): Promise<PersistSettingsResult> {
   const tasks: Promise<unknown>[] = [];
   const result: PersistSettingsResult = {};
+  const providersChanged =
+    hasChanged(prev.customProviders, next.customProviders) ||
+    hasChanged(prev.selectedModel ?? null, next.selectedModel ?? null);
+  if (providersChanged || failedProviderSave) {
+    const baseline = failedProviderSave ?? prev;
+    try {
+      const document = await saveKBrainProviderSettings(
+        kBrainSettingsUpdateFromAppSettings(baseline, next),
+      );
+      result.customProviders = appProvidersFromKBrain(document);
+      failedProviderSave = undefined;
+    } catch (error) {
+      failedProviderSave = baseline;
+      throw new SettingsStorageError("save_failed", error);
+    }
+  }
+
+  if (
+    isKBrainBackendEnabled() &&
+    (hasChanged(prev.agents, next.agents) ||
+      hasChanged(prev.system.workspaceResourceSettings, next.system.workspaceResourceSettings))
+  ) {
+    tasks.push(
+      persistKBrainPrompts(prev, next).catch((error) => {
+        throw new SettingsStorageError("save_failed", error);
+      }),
+    );
+  }
+
+  if (isKBrainBackendEnabled() && hasChanged(prev.mcp, next.mcp)) {
+    tasks.push(
+      createKBrainClient()
+        .updateMcpSettings(toKBrainMcpSettings(next.mcp))
+        .catch((error) => {
+          throw new SettingsStorageError("save_failed", error);
+        }),
+    );
+  }
 
   if (isKBrainBrowserHost()) {
     writeBrowserPersistedSettings(next);
+    await Promise.all(tasks);
     return result;
   }
 
-  if (hasChanged(prev.customProviders, next.customProviders)) {
-    tasks.push(
-      invokeSettingsCommand("save_failed", "settings_save_providers", {
-        payload: next.customProviders,
-      }),
-    );
-  }
-
-  if (hasChanged(prev.system, next.system)) {
+  if (
+    hasChanged(systemForNativePersistence(prev.system), systemForNativePersistence(next.system))
+  ) {
     tasks.push(
       invokeSettingsCommand("save_failed", "settings_save_system", {
-        payload: next.system,
+        payload: systemForNativePersistence(next.system),
       }),
     );
   }
 
-  if (hasChanged(prev.mcp, next.mcp)) {
+  if (!isKBrainBackendEnabled() && hasChanged(prev.mcp, next.mcp)) {
     tasks.push(
       invokeSettingsCommand("save_failed", "settings_save_mcp", {
         payload: next.mcp,
@@ -434,7 +719,7 @@ export async function persistSettings(
     );
   }
 
-  if (hasChanged(prev.agents, next.agents)) {
+  if (!isKBrainBackendEnabled() && hasChanged(prev.agents, next.agents)) {
     tasks.push(
       invokeSettingsCommand("save_failed", "settings_save_agents", {
         payload: next.agents,

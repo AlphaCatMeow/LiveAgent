@@ -11,8 +11,8 @@ import {
 // 数据来自 catalog.generated.ts（构建期由 scripts/generate-model-catalog.mjs
 // 对 OpenAI 采用 Codex models.json 优先、models.dev 补充，其余供应商来自
 // models.dev；由 update-model-catalog.yml 定时刷新）。本文件与生成文件均由共享包提供。
-// 思考档位/API 选择/compat 等请求路径行为不归这里管——那些是流式运行时
-// （pi-ai）的领域；这里只回答"这个模型的窗口/输出上限与输入模态是什么"。
+// 思考档位/API 选择/compat 等请求路径行为不归这里管——这些属于流式运行时；
+// 这里只回答"这个模型的窗口/输出上限与输入模态是什么"。
 
 export { MODEL_CATALOG, MODEL_CATALOG_SNAPSHOT_DATE } from "./catalog.generated";
 export type { CatalogInputModality, CatalogModelEntry, CatalogProviderId };
@@ -199,13 +199,26 @@ export function extractProviderDeclaredLimits(
       ? (obj.top_provider as Record<string, unknown>)
       : undefined;
 
+  const hasCamelCaseProviderLimits =
+    obj.maxOutputTokens != null ||
+    topProvider?.maxOutputTokens != null ||
+    topProvider?.maxOutputToken != null;
   const contextWindow =
-    asPositiveInt(obj.context_length) ?? asPositiveInt(topProvider?.context_length);
+    asPositiveInt(obj.context_length) ??
+    asPositiveInt(topProvider?.context_length) ??
+    (hasCamelCaseProviderLimits ? asPositiveInt(obj.contextWindow) : undefined) ??
+    (hasCamelCaseProviderLimits ? asPositiveInt(obj.context_window) : undefined) ??
+    (hasCamelCaseProviderLimits ? asPositiveInt(topProvider?.contextWindow) : undefined) ??
+    (hasCamelCaseProviderLimits ? asPositiveInt(topProvider?.context_window) : undefined);
   if (!contextWindow) return undefined;
 
   const maxOutputToken =
     asPositiveInt(topProvider?.max_completion_tokens) ??
     asPositiveInt(obj.max_completion_tokens) ??
+    asPositiveInt(topProvider?.maxOutputTokens) ??
+    asPositiveInt(topProvider?.maxOutputToken) ??
+    asPositiveInt(obj.maxOutputTokens) ??
+    asPositiveInt(obj.maxOutputToken) ??
     // 部分中转商不单独公布输出上限，仅给窗口——按目录同一规则钳到保守预留值。
     normalizeModelLimits({ contextWindow, maxOutputToken: contextWindow }).maxOutputToken;
 

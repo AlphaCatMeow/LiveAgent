@@ -18,12 +18,12 @@ export const EN_US_SETTINGS_TRANSLATIONS = {
   "settings.toolPolicy.allow": "Allow",
   "settings.toolPolicy.ask": "Ask",
   "settings.toolPolicy.deny": "Deny",
-  "settings.navProviders": "Providers",
+  "settings.navProviders": "Provider settings",
   "settings.kbrainDeleteProvider": "Delete provider",
   "settings.kbrainClearApiKey": "Clear API key",
   "settings.kbrainAddProvider": "Add provider",
-  "settings.navKBrain": "K-brain model settings",
-  "settings.kbrainTitle": "K-brain model settings",
+  "settings.navKBrain": "Provider settings",
+  "settings.kbrainTitle": "Provider settings",
   "settings.kbrainDescription":
     "Credentials stay in K-brain. This page never calls a provider directly.",
   "settings.kbrainLoading": "Loading K-brain settings…",
@@ -102,6 +102,13 @@ export const EN_US_SETTINGS_TRANSLATIONS = {
   "settings.memorySummaryModelFollow": "Follow conversation model",
   "settings.memoryModelNone": "No selection",
   "settings.memoryModelEmpty": "No models are configured for the current provider.",
+  "settings.memoryBackendOwned": "Memory execution is owned by K-brain.",
+  "settings.memoryBackendManaged":
+    "Memory is managed by the K-brain backend; local memory actions are unavailable.",
+  "settings.skillsBackendManaged":
+    "Skills are managed by the K-brain backend; local scanning and editing are unavailable.",
+  "settings.memoryOrganizerUnsupported":
+    "This UI does not support K-brain memory organization or extraction settings. Configure memory in K-brain; no local model or background organizer runs here.",
   "settings.memoryOrganizerTitle": "Memory organization",
   "settings.memoryOrganizerToggle": "Enable memory organization",
   "settings.memoryOrganizerSchedule": "Schedule",
@@ -1065,6 +1072,7 @@ export const EN_US_SETTINGS_TRANSLATIONS = {
   "settings.cronViewClose": "Close",
   "settings.cronViewRunNow": "Run once now",
   "settings.cronViewRunningNow": "Task running",
+  "settings.cronViewCancelRun": "Stop task",
   "settings.cronViewRunNowFailed": "Failed to run task",
   "settings.cronViewRunNowTimeout":
     "Timed out waiting for this run; check the execution logs before retrying",
@@ -1086,6 +1094,7 @@ export const EN_US_SETTINGS_TRANSLATIONS = {
   "settings.cronViewLogSuccess": "Success",
   "settings.cronViewLogFailed": "Failed",
   "settings.cronViewLogExpired": "Expired",
+  "settings.cronViewLogCancelled": "Cancelled",
   "settings.cronViewLogRunning": "Running",
   "settings.cronViewLogsLoadFailed": "Failed to load logs",
   "settings.cronScheduleError": "Schedule error",

@@ -1,4 +1,4 @@
-import type { Message } from "@earendil-works/pi-ai";
+import type { Message } from "@liveagent/app/lib/agentTypes";
 
 /**
  * 机器维护的“已触碰文件”账本。压缩会把旧消息折叠成 LLM 摘要，摘要里的

@@ -200,6 +200,12 @@ async function withTitleHttpFixture(t, callback) {
       },
     },
   });
+  const runtimeConnection = loader.loadModule("src/lib/kbrain/runtimeConnection.ts");
+  runtimeConnection.setKBrainRuntimeConnection({
+    baseUrl: "http://127.0.0.1:47321",
+    token: "",
+    protocolVersion: "kbrain.agent.v1",
+  });
   const { startConversationTitleJob } = loader.loadModule("src/pages/chat/runtime/conversationTitleJob.ts");
   const { useConversationHistoryActions } = loader.loadModule("src/pages/chat/history/useConversationHistoryActions.ts");
   const { createConversationStateFromContext } = loader.loadModule("src/lib/chat/conversation/conversationState.ts");

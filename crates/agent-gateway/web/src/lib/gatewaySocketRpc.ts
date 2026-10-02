@@ -715,18 +715,32 @@ export class GatewayWebSocketRpcClient extends GatewayWebSocketTransport {
     );
   }
 
-  async listTerminals(projectPathKey?: string): Promise<TerminalSession[]> {
-    const projectKey = projectPathKey?.trim() ?? "";
-    const response = await this.requestWithRecovery<RawTerminalResponse>(
-      "terminal.list",
-      projectKey ? { project_path_key: projectKey } : {},
-    );
+  async listTerminals(
+    params?:
+      | string
+      | {
+          projectPathKey?: string;
+          conversationId?: string;
+          runId?: string;
+        },
+  ): Promise<TerminalSession[]> {
+    const options = typeof params === "string" ? { projectPathKey: params } : params;
+    const projectKey = options?.projectPathKey?.trim() ?? "";
+    const conversationId = options?.conversationId?.trim() ?? "";
+    const runId = options?.runId?.trim() ?? "";
+    const response = await this.requestWithRecovery<RawTerminalResponse>("terminal.list", {
+      ...(projectKey ? { project_path_key: projectKey } : {}),
+      ...(conversationId ? { conversation_id: conversationId } : {}),
+      ...(runId ? { run_id: runId } : {}),
+    });
     return (response.sessions ?? []).map(normalizeTerminalSession);
   }
 
   async createTerminal(params: {
     cwd: string;
     projectPathKey: string;
+    conversationId?: string;
+    runId?: string;
     shell?: string;
     title?: string;
     cols?: number;
@@ -1383,6 +1397,7 @@ export class GatewayWebSocketRpcClient extends GatewayWebSocketTransport {
     providerId = "",
     isFullUrl?: boolean,
     customHeaders?: readonly { key: string; value: string }[],
+    requestFormat?: string,
   ): Promise<unknown> {
     return this.requestWithRecovery("provider.models", {
       type,
@@ -1393,6 +1408,7 @@ export class GatewayWebSocketRpcClient extends GatewayWebSocketTransport {
       provider_id: providerId,
       is_full_url: isFullUrl,
       custom_headers: customHeaders,
+      request_format: requestFormat,
     });
   }
 

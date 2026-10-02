@@ -3165,6 +3165,21 @@ test("provider-declared limits from a fresh /v1/models response are always tagge
   assert.equal(declared.limitsSource, "provider");
 });
 
+test("K-brain model discovery limits accept camelCase response fields", () => {
+  const declared = settings.normalizeProviderModelConfig(
+    {
+      id: "kbrain-model",
+      contextWindow: 200_000,
+      maxOutputTokens: 64_000,
+      maxOutputToken: 32_000,
+    },
+    "codex",
+  );
+  assert.equal(declared.contextWindow, 200_000);
+  assert.equal(declared.maxOutputToken, 64_000);
+  assert.equal(declared.limitsSource, "provider");
+});
+
 test("persisted degenerate limits are repaired at normalize time for every provider", () => {
   // 坏目录数据落库期间加入的模型：读侧修复，不需要用户重新添加。
   const repaired = settings.normalizeProviderModelConfig(

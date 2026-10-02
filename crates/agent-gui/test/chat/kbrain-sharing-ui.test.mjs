@@ -1,8 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test, { after } from "node:test";
-import { fileURLToPath } from "node:url";
-import { transformSync } from "esbuild";
 import { createDomTestEnv } from "../helpers/dom-test-env.mjs";
 
 const conversation = {
@@ -47,18 +44,9 @@ const { React, act, createRoot, loadModule } = env;
 const { HistoryShareModal } = loadModule("@liveagent/ui/components/chat/HistoryShareModal.tsx");
 const { SharedHistoryManagerModal } = loadModule("@liveagent/ui/components/chat/SharedHistoryManagerModal.tsx");
 
-function loadWithEnv(path, values) {
-  const url = new URL(`../../${path}`, import.meta.url);
-  const code = transformSync(readFileSync(url, "utf8"), {
-    loader: "ts", format: "cjs", platform: "node",
-    define: { "import.meta.env": JSON.stringify(values) },
-  }).code;
-  const module = { exports: {} };
-  new Function("require", "module", "exports", code)(
-    specifier => loadModule(specifier, fileURLToPath(new URL(".", url))), module, module.exports,
-  );
-  return module.exports;
-}
+const runtimeConnection = loadModule("src/lib/kbrain/runtimeConnection.ts");
+const { useSharedHistory } = loadModule("src/pages/chat/history/useSharedHistory.ts");
+const { useGatewayStatus } = loadModule("src/pages/chat/gateway/useGatewayStatus.ts");
 
 async function mount(values, run, { online = false } = {}) {
   for (const entries of Object.values(calls)) entries.length = 0;
@@ -68,8 +56,10 @@ async function mount(values, run, { online = false } = {}) {
   Object.defineProperty(navigator, "clipboard", {
     configurable: true, value: { async writeText(text) { calls.copied.push(text); } },
   });
-  const { useSharedHistory } = loadWithEnv("src/pages/chat/history/useSharedHistory.ts", values);
-  const { useGatewayStatus } = loadWithEnv("src/pages/chat/gateway/useGatewayStatus.ts", values);
+  runtimeConnection.setKBrainRuntimeConnection({
+    baseUrl: values.VITE_KBRAIN_URL ?? "http://127.0.0.1:47321",
+    token: "sharing-token", protocolVersion: "kbrain.agent.v1",
+  });
   const rows = new Map([[conversation.id, { ...conversation }]]);
   const sidebarStore = { peek: id => rows.get(id), upsertLocal: row => rows.set(row.id, row) };
   let snapshot;
@@ -120,6 +110,7 @@ async function mount(values, run, { online = false } = {}) {
   } finally {
     await act(async () => root.unmount());
     host.remove();
+    runtimeConnection.clearKBrainRuntimeConnection();
   }
 }
 
@@ -128,7 +119,7 @@ for (const [name, baseUrl, expected] of [
   ["configured backend URL", "http://kbrain.test:48123/proxy/", "http://kbrain.test:48123/proxy/share/public-token"],
 ]) {
   test(`K-brain sharing uses ${name}, enables/disables and copies in both shipped dialogs without gateway calls`, async () => {
-    await mount({ VITE_KBRAIN_BACKEND: "true", VITE_KBRAIN_URL: baseUrl }, async ({ host, click, rows, snapshot }) => {
+    await mount({ VITE_KBRAIN_URL: baseUrl }, async ({ host, click, rows, snapshot }) => {
       assert.equal(snapshot().canShareHistory, true, "disabled legacy Remote must not gate K-brain sharing");
       await click('[data-action="share"]');
       assert.deepEqual(calls.get, [conversation.id]);
@@ -161,7 +152,7 @@ for (const [name, baseUrl, expected] of [
 }
 
 test("K-brain share mutation errors are rendered without claiming success", async () => {
-  await mount({ VITE_KBRAIN_BACKEND: "true" }, async ({ host, click, snapshot }) => {
+  await mount({}, async ({ host, click, snapshot }) => {
     await click('[data-action="share"]');
     mutationError = "Backend share unavailable";
     await click('[aria-label="开启分享"]');
@@ -172,24 +163,12 @@ test("K-brain share mutation errors are rendered without claiming success", asyn
   });
 });
 
-test("direct sharing still requires an online Remote Gateway", async () => {
+test("default K-brain sharing never requires Remote Gateway readiness", async () => {
   await mount({}, async ({ host, snapshot }) => {
-    assert.equal(host.querySelector('[data-action="share"]').disabled, true);
-    assert.equal(snapshot().canShareHistory, false);
-    assert.equal(snapshot().shareBackendUrl, undefined);
-    assert.deepEqual(calls.invoke, ["gateway_status"]);
-    assert.deepEqual(calls.listen, ["gateway:status"]);
+    assert.equal(host.querySelector('[data-action="share"]').disabled, false);
+    assert.equal(snapshot().canShareHistory, true);
+    assert.match(snapshot().shareBackendUrl, /127\.0\.0\.1:47321/);
+    assert.deepEqual(calls.invoke, []);
+    assert.deepEqual(calls.listen, []);
   });
-});
-
-test("direct sharing retains gateway URL/port and gateway refresh behavior", async () => {
-  await mount({ VITE_KBRAIN_URL: "http://unused-kbrain.test" }, async ({ click }) => {
-    await click('[data-action="share"]');
-    await click('[aria-label="开启分享"]');
-    await click('[aria-label="复制链接"]');
-    assert.deepEqual(calls.copied, ["https://legacy.invalid:9443/share/public-token"]);
-    assert.deepEqual(calls.invoke, ["gateway_status", "gateway_status", "gateway_status"]);
-    await click('[aria-label="关闭分享"]');
-    assert.deepEqual(calls.set.map(call => call.enabled), [true, false]);
-  }, { online: true });
 });

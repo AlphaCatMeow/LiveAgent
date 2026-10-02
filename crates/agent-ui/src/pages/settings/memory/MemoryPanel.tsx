@@ -38,11 +38,14 @@ import { Tabs, TabsList, TabsTrigger } from "@liveagent/ui/components/ui/tabs";
 import { Textarea } from "@liveagent/ui/components/ui/textarea";
 import { toast } from "@liveagent/ui/components/ui/toast-manager";
 import { useLocale } from "@liveagent/ui/i18n/index";
-import { buildModelOptions } from "@liveagent/ui/lib/models/modelOptions";
 import { cn } from "@liveagent/ui/lib/shared/utils";
 import { useMemo, useState } from "react";
 import type { MemoryMeta } from "../../../lib/memory/api";
 import { MEMORY_TYPES, type MemoryType } from "../../../lib/memory/schema";
+import {
+  getResourceHostCapabilities,
+  type ResourceHostCapabilities,
+} from "../../../lib/resourceHost";
 import { ConfirmDeletePopover } from "../shared";
 import { MemorySettingsDrawer } from "./MemorySettingsDrawer";
 import {
@@ -50,7 +53,6 @@ import {
   entryTitle,
   fallbackScopeQuotas,
   formatTime,
-  type MemoryModelOption,
   type MemoryTab,
   matchesFilter,
   memoryScopeLabel,
@@ -73,6 +75,7 @@ export function MemoryPanel(props: {
   workdir?: string;
   settings: AppSettings;
   setSettings: (updater: (prev: AppSettings) => AppSettings) => void;
+  resourceHost?: ResourceHostCapabilities;
 }) {
   const { t } = useLocale();
   const workdir = props.workdir?.trim() || undefined;
@@ -82,6 +85,7 @@ export function MemoryPanel(props: {
   const [settingsDrawerOpen, setSettingsDrawerOpen] = useState(false);
   const [refreshState, setRefreshState] = useState<"idle" | "refreshing">("idle");
   const [draft, setDraft] = useState<MemoryCreateDraft>(EMPTY_CREATE_DRAFT);
+  const resourceHost = props.resourceHost ?? getResourceHostCapabilities();
   const {
     entries,
     quota,
@@ -100,23 +104,16 @@ export function MemoryPanel(props: {
     acceptSelected,
     deleteSelected,
     wipeAll,
-    watchOrganizerRun,
-  } = useMemoryPanelData({ workdir, t });
-
-  const modelOptions = useMemo<MemoryModelOption[]>(
-    () =>
-      buildModelOptions(props.settings).map((option) => ({
-        value: option.value,
-        label: option.label,
-        providerName: option.providerName,
-        providerId: option.providerId,
-        providerType: option.providerType,
-      })),
-    [props.settings],
-  );
+    backendManaged: observedBackendManaged,
+  } = useMemoryPanelData({
+    workdir,
+    t,
+    backendManaged: resourceHost.memoryBackendManaged,
+  });
+  const backendManaged = resourceHost.memoryBackendManaged || observedBackendManaged;
 
   async function handleRefresh() {
-    if (refreshState !== "idle") return;
+    if (backendManaged || refreshState !== "idle") return;
     setRefreshState("refreshing");
     try {
       const refreshed = await reload();
@@ -237,6 +234,7 @@ export function MemoryPanel(props: {
 
   function renderFlatEntries(items: MemoryMeta[], emptyKey: string) {
     if (items.length === 0) {
+      if (loading || error || backendManaged) return null;
       return (
         <div
           className={cn(
@@ -284,10 +282,10 @@ export function MemoryPanel(props: {
 
               <RefreshButton
                 aria-busy={loading || refreshState === "refreshing"}
+                disabled={backendManaged || loading || refreshState !== "idle"}
                 variant="outline"
                 size="sm"
                 onClick={() => void handleRefresh()}
-                disabled={loading || refreshState !== "idle"}
               >
                 <RefreshCw
                   className={cn(
@@ -299,6 +297,7 @@ export function MemoryPanel(props: {
               </RefreshButton>
               <Button
                 size="sm"
+                disabled={backendManaged}
                 onClick={() => {
                   setDraft({
                     ...EMPTY_CREATE_DRAFT,
@@ -314,6 +313,7 @@ export function MemoryPanel(props: {
               <Button
                 variant="outline"
                 size="icon-sm"
+                disabled={backendManaged}
                 title={t("settings.memoryOpenSettings")}
                 aria-label={t("settings.memoryOpenSettings")}
                 onClick={() => setSettingsDrawerOpen(true)}
@@ -373,7 +373,12 @@ export function MemoryPanel(props: {
               {t("settings.memoryQuotaWarningMessage")}
             </div>
           ) : null}
-          {error ? (
+          {backendManaged ? (
+            <SettingsNotice variant="warning" className="mt-3">
+              {t("settings.memoryBackendManaged")}
+            </SettingsNotice>
+          ) : null}
+          {error && !backendManaged ? (
             <SettingsNotice variant="multiline-error" className="mt-3">
               {error}
             </SettingsNotice>
@@ -452,14 +457,16 @@ export function MemoryPanel(props: {
               ) : tab === "journal" ? (
                 renderFlatEntries(dailyEntries, "settings.memoryNoJournalEntries")
               ) : projectGroups.length === 0 ? (
-                <div
-                  className={cn(
-                    "rounded-lg bg-settings-tile px-4 py-8",
-                    "text-center text-xs text-muted-foreground",
-                  )}
-                >
-                  {t("settings.memoryNoProjectEntries")}
-                </div>
+                loading || error || backendManaged ? null : (
+                  <div
+                    className={cn(
+                      "rounded-lg bg-settings-tile px-4 py-8",
+                      "text-center text-xs text-muted-foreground",
+                    )}
+                  >
+                    {t("settings.memoryNoProjectEntries")}
+                  </div>
+                )
               ) : (
                 <div className="space-y-2">
                   {projectGroups.map((group) => (
@@ -535,7 +542,7 @@ export function MemoryPanel(props: {
                           variant="outline"
                           size="sm"
                           onClick={acceptSelected}
-                          disabled={saving}
+                          disabled={backendManaged || saving}
                         >
                           <Check className="size-3.5" />
                           {t("settings.memoryAccept")}
@@ -552,7 +559,7 @@ export function MemoryPanel(props: {
                             onClick={open}
                             variant="ghost"
                             size="icon-sm"
-                            disabled={saving}
+                            disabled={backendManaged || saving}
                             aria-label={t("settings.memoryDelete")}
                           >
                             <Trash2 className="size-3.5" />
@@ -615,7 +622,7 @@ export function MemoryPanel(props: {
 
                 <div className="shrink-0 border-t border-border/40 p-4">
                   <div className="flex justify-end gap-3">
-                    <Button size="sm" onClick={saveSelected} disabled={saving}>
+                    <Button size="sm" onClick={saveSelected} disabled={backendManaged || saving}>
                       {t("settings.memorySave")}
                     </Button>
                   </div>
@@ -748,14 +755,14 @@ export function MemoryPanel(props: {
                 variant="outline"
                 size="sm"
                 onClick={() => setShowCreate(false)}
-                disabled={saving}
+                disabled={backendManaged || saving}
               >
                 {t("settings.memoryCancel")}
               </Button>
               <Button
                 size="sm"
                 onClick={handleCreateEntry}
-                disabled={saving || !draft.slug.trim() || !draft.body.trim()}
+                disabled={backendManaged || saving || !draft.slug.trim() || !draft.body.trim()}
               >
                 {t("settings.memorySave")}
               </Button>
@@ -767,18 +774,12 @@ export function MemoryPanel(props: {
       {settingsDrawerOpen ? (
         <MemorySettingsDrawer
           storagePath={pathsInfo?.root ?? "~/.liveagent/memory"}
-          modelOptions={modelOptions}
-          settings={props.settings}
-          setSettings={props.setSettings}
           workdir={workdir}
           saving={saving}
           t={t}
           onClose={() => setSettingsDrawerOpen(false)}
           onRequestWipe={wipeAll}
-          onOrganizerRunQueued={(runId) => watchOrganizerRun(runId)}
-          onMemoryChanged={() => {
-            void reload();
-          }}
+          backendManaged={backendManaged}
         />
       ) : null}
     </>

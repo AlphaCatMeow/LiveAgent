@@ -1,14 +1,61 @@
+import type { CustomProvider, ProviderModelConfig } from "../settings";
+
 export const KBRAIN_PROTOCOL_VERSION = "kbrain.agent.v1" as const;
 
 export type KBrainModelRef = {
   provider: string;
   model: string;
+  name?: string;
+  ownedBy?: string;
+  contextWindow?: number;
+  maxOutputTokens?: number;
+  maxOutputToken?: number;
+  vision?: boolean;
+  inputModalities?: string[];
+};
+
+export type KBrainSettingsModel = Partial<ProviderModelConfig> & {
+  id: string;
+  provider?: string;
+  name?: string;
+  maxOutputTokens?: number;
+  vision?: boolean;
+};
+
+export type KBrainSettingsProvider = Omit<Partial<CustomProvider>, "models"> & {
+  id: string;
+  name: string;
+  api?: string;
+  models: KBrainSettingsModel[];
+};
+
+export type KBrainSettingsDocument = {
+  version?: string;
+  mode?: "kbrain";
+  defaultModel?: string;
+  defaultProvider?: string;
+  providers: KBrainSettingsProvider[];
+  models?: KBrainSettingsModel[];
+};
+
+export type KBrainProviderUpdate = Omit<CustomProvider, "apiKey"> & {
+  apiKey?: string;
+  clearApiKey?: boolean;
+};
+
+export type KBrainSettingsUpdate = {
+  defaultModel?: string;
+  defaultProvider?: string;
+  providers: KBrainProviderUpdate[];
+  deleteProviders?: string[];
 };
 
 export type KBrainContentBlock = {
-  type: "text" | "thinking" | "image";
+  type: "text" | "thinking" | "image" | "file";
   text?: string;
   image_url?: string;
+  file_url?: string;
+  filename?: string;
   mime_type?: string;
 };
 
@@ -22,6 +69,7 @@ export type KBrainMessage = {
   model?: string;
   provider?: string;
   usage?: KBrainUsage;
+  hosted_search?: KBrainHostedSearch[];
   stop_reason?: string;
   created_at?: string;
 };
@@ -38,6 +86,48 @@ export type KBrainToolResult = {
   output: string;
   failed?: boolean;
   cancelled?: boolean;
+};
+
+export type KBrainQuestionOption = {
+  label: string;
+  description?: string;
+  recommended?: boolean;
+};
+
+export type KBrainQuestion = {
+  id: string;
+  header?: string;
+  prompt: string;
+  options: KBrainQuestionOption[];
+  multiple?: boolean;
+};
+
+export type KBrainQuestionRequest = {
+  question_id: string;
+  tool_call_id: string;
+  run_id: string;
+  deadline_at: number;
+  questions: KBrainQuestion[];
+};
+
+export type KBrainQuestionAnswer = {
+  question_id: string;
+  selected_label: string;
+  custom?: boolean;
+};
+
+export type KBrainHostedSearch = {
+  type: "hostedSearch";
+  id: string;
+  provider?: string;
+  status: "searching" | "completed" | "failed";
+  queries: string[];
+  sources: {
+    url: string;
+    title?: string;
+    sourceType?: "source" | "citation";
+  }[];
+  error?: string;
 };
 
 export type KBrainUsage = {
@@ -163,13 +253,28 @@ export type KBrainUpdateSessionRequest = {
   model?: KBrainModelRef;
 };
 
+export type KBrainRunOptions = {
+  reasoning?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+  mode?: "chat" | "agent";
+  search?: "disabled" | "enabled";
+  approval_policy?: "ask" | "auto" | "deny";
+  workspace_roots?: Array<{ path: string; access: "read" | "write" }>;
+  tools?: { policies?: Record<string, "ask" | "allow" | "deny"> };
+  plan_mode_enabled?: boolean;
+};
+
 export type KBrainPromptRequest = {
   conversation_id: string;
   client_request_id: string;
+  turn_id?: string;
   prompt: string;
   content?: KBrainContentBlock[];
   model?: KBrainModelRef;
   resume_message_id?: string;
+  options?: KBrainRunOptions;
+  hook_policy?: "backend";
+  hook_scope_id?: string;
+  stop_requested?: boolean;
 };
 
 export type KBrainRunAccepted = {
@@ -177,6 +282,11 @@ export type KBrainRunAccepted = {
   conversation_id: string;
   run_id: string;
   accepted_seq: number;
+};
+
+export type KBrainCompactAccepted = KBrainRunAccepted & {
+  status: "accepted" | "completed" | "failed" | "cancelled";
+  revision?: string;
 };
 
 export type KBrainTextGenerateRequest = {

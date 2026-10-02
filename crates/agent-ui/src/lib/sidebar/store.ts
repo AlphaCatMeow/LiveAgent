@@ -177,6 +177,7 @@ export function createSidebarStore(
   let loadMoreRequestToken: symbol | null = null;
   let workdirsInFlight = false;
   let workdirsQueued = false;
+  let workdirsRequestSeq = 0;
   let wasDisconnected = false;
   let unsubscribeEvents: (() => void) | null = null;
   let unsubscribeConnection: (() => void) | null = null;
@@ -672,11 +673,12 @@ export function createSidebarStore(
     try {
       do {
         workdirsQueued = false;
-        const seq = requestSeq;
+        // Workdirs are global; conversation scope changes cannot invalidate them.
+        const seq = workdirsRequestSeq;
         try {
           const workdirs = await backend.listWorkdirs();
-          if (seq !== requestSeq || startCount === 0) {
-            return;
+          if (seq !== workdirsRequestSeq || startCount === 0) {
+            continue;
           }
           let workdirActivity = snapshot.workdirActivity;
           for (const workdir of workdirs) {
@@ -684,6 +686,7 @@ export function createSidebarStore(
           }
           commit({ workdirs, workdirActivity });
         } catch {
+          if (seq !== workdirsRequestSeq) continue;
           // Workdir summaries are auxiliary (project ordering/activity); the
           // conversation list and the next scheduled refresh are unaffected.
           return;
@@ -920,6 +923,7 @@ export function createSidebarStore(
       }
       queuedListRequest = null;
       loadMoreRequestToken = null;
+      workdirsRequestSeq++;
       workdirsQueued = false;
       wasDisconnected = false;
     },

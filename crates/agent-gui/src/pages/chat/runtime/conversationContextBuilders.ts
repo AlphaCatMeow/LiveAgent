@@ -1,14 +1,11 @@
-import type { Context, UserMessage } from "@earendil-works/pi-ai";
+import type { Context, UserMessage } from "@liveagent/app/lib/agentTypes";
 
 import {
   buildRequestContext,
   type ConversationViewState,
 } from "../../../lib/chat/conversation/conversationState";
 import type { SkillMentionUpdateMap } from "../../../lib/chat/skills/mentionInjection";
-import {
-  attachMemoryTurnUpdates,
-  type MemoryTurnUpdateMap,
-} from "../../../lib/memory/prompts/turnInjection";
+import { attachSkillMentionUpdates } from "../../../lib/chat/skills/mentionInjection";
 import { appendSystemPrompt } from "./chatPageRuntime";
 
 export type ConversationContextBuildOptions = {
@@ -71,8 +68,6 @@ export function buildPreparedContext(params: {
   tools?: Context["tools"];
   activeAgentPrompt: string;
   skillsPrompt: string;
-  memoryPrompt?: string;
-  memoryTurnUpdates?: MemoryTurnUpdateMap | null;
   skillMentionUpdates?: SkillMentionUpdateMap | null;
   includeAbortedMessages?: boolean;
   includeUploadedFilesMetadata?: boolean;
@@ -90,7 +85,6 @@ export function buildPreparedContext(params: {
     ...(typeof withTools.systemPrompt === "string" ? { base: withTools.systemPrompt } : {}),
     ...(params.activeAgentPrompt ? { agent: params.activeAgentPrompt } : {}),
     ...(params.skillsPrompt ? { skills: params.skillsPrompt } : {}),
-    ...(params.memoryPrompt ? { memory: params.memoryPrompt } : {}),
   });
 
   let systemPrompt = withTools.systemPrompt;
@@ -100,17 +94,9 @@ export function buildPreparedContext(params: {
   if (params.skillsPrompt) {
     systemPrompt = appendSystemPrompt(systemPrompt, params.skillsPrompt);
   }
-  if (params.memoryPrompt) {
-    systemPrompt = appendSystemPrompt(systemPrompt, params.memoryPrompt);
-  }
-
-  // memory 的动态部分挂在对应 user 消息尾部,而不是继续往 system 段里塞:
-  // system 段一变,整条缓存前缀连同全部历史一起作废。
-  // skills 的「显式提及」同理:它只对当轮有效,留在 system 段等于一次输入连废
-  // 两次前缀。两者都走同一个挂载口径,顺序固定(memory 在前、skills 在后),
-  // 已挂上的块在后续轮次原样重放,历史区间的字节才保持稳定。
-  const withMemory = attachMemoryTurnUpdates(withTools.messages, params.memoryTurnUpdates);
-  const messages = attachMemoryTurnUpdates(withMemory, params.skillMentionUpdates);
+  const messages = params.skillMentionUpdates
+    ? attachSkillMentionUpdates(withTools.messages, params.skillMentionUpdates)
+    : withTools.messages;
   const withMessages = messages === withTools.messages ? withTools : { ...withTools, messages };
 
   return typeof systemPrompt === "string"
@@ -127,8 +113,6 @@ export function buildResumeContext(params: {
   tools?: Context["tools"];
   activeAgentPrompt: string;
   skillsPrompt: string;
-  memoryPrompt?: string;
-  memoryTurnUpdates?: MemoryTurnUpdateMap | null;
   skillMentionUpdates?: SkillMentionUpdateMap | null;
   includeAbortedMessages?: boolean;
   includeUploadedFilesMetadata?: boolean;

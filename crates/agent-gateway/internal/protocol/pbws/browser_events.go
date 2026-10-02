@@ -215,6 +215,10 @@ func (c *browserConn) handleWorkspaceSubscribe(requestID, agentID string, req *g
 	}
 	requestedAgentID := strings.TrimSpace(agentID)
 	resolvedAgentID, err := c.sm.ResolveAgentID(requestedAgentID)
+	var ownerCleanup func()
+	if err != nil && errors.Is(err, session.ErrAgentOffline) {
+		resolvedAgentID, _, ownerCleanup, err = c.sm.EnsureLocalWorkspaceActivityOwner(requestedAgentID, workdir)
+	}
 	if err != nil {
 		_ = c.sendLocalError(requestID, errorMessage(err))
 		return
@@ -222,6 +226,13 @@ func (c *browserConn) handleWorkspaceSubscribe(requestID, agentID string, req *g
 	subKey := requestedAgentID + "\x00" + workdir
 
 	events, cancel := c.sm.SubscribeWorkspaceActivity(resolvedAgentID, workdir)
+	if ownerCleanup != nil {
+		baseCancel := cancel
+		cancel = func() {
+			baseCancel()
+			ownerCleanup()
+		}
+	}
 	sub := &workspaceSubscription{
 		cancel: cancel,
 		done:   make(chan struct{}),

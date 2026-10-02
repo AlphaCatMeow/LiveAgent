@@ -1,35 +1,60 @@
-// 平台传输适配层:GUI 端用量查询直接走 Tauri invoke,由桌面端执行 API-only 查询。
-// 共享的状态归约/协调器/hook 逻辑在 usageQueryCore.ts(两端字节镜像),本文件只放平台差异。
-
-import { invoke } from "@liveagent/app/shims/tauriCore";
+// K-brain owns provider credentials and usage execution. The GUI sends only provider IDs
+// and draft metadata to the canonical local backend; vendor endpoints are never browser-facing.
 import {
   type ProviderUsageResult,
   type UsageQueryProvider,
   useProviderUsageWithQuery,
 } from "@liveagent/ui/lib/providers/usageQueryCore";
+import { getConfiguredKBrainConnection } from "../kbrain/runtimeConnection";
 import type { UsageQueryConfig } from "../settings";
 
 export * from "@liveagent/ui/lib/providers/usageQueryCore";
+
+async function requestProviderUsage<T>(path: string, body: unknown): Promise<T> {
+  const connection = getConfiguredKBrainConnection();
+  if (!connection) throw new Error("K-brain backend connection is not ready");
+  const response = await fetch(`${connection.baseUrl.replace(/\/+$/, "")}${path}`, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      ...(connection.token ? { Authorization: `Bearer ${connection.token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const raw = await response.text();
+    let message = raw.trim();
+    try {
+      const parsed = JSON.parse(raw) as { error?: string };
+      message = parsed.error || message;
+    } catch {
+      // Keep non-JSON backend errors readable.
+    }
+    throw new Error(message || `K-brain provider usage failed (${response.status})`);
+  }
+  return (await response.json()) as T;
+}
 
 export async function queryProviderUsage(
   providerId: string,
   refresh: boolean,
 ): Promise<ProviderUsageResult | null> {
-  return invoke<ProviderUsageResult>("provider_usage_query", { providerId, refresh });
+  return requestProviderUsage<ProviderUsageResult | null>(
+    `/v1/providers/${encodeURIComponent(providerId)}/usage`,
+    { refresh },
+  );
 }
 
-/**
- * 「测试查询」:按编辑器草稿配置试查询——忽略启用开关、不落库、不进缓存。
- * WebUI 草稿的秘密为脱敏空串,靠 *Configured 标志让桌面端沿用已存密钥。
- */
+/** Test a complete editor draft without changing persisted settings or the backend cache. */
 export async function testProviderUsage(
   providerId: string,
   config: UsageQueryConfig,
 ): Promise<ProviderUsageResult | null> {
-  return invoke<ProviderUsageResult>("provider_usage_test", {
-    providerId,
-    configJson: JSON.stringify(config),
-  });
+  return requestProviderUsage<ProviderUsageResult | null>(
+    `/v1/providers/${encodeURIComponent(providerId)}/usage/test`,
+    { config },
+  );
 }
 
 export function useProviderUsage(providers: readonly UsageQueryProvider[]) {

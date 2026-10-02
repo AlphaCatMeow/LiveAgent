@@ -17,6 +17,8 @@ import {
   listSharedChatHistory,
   setChatHistoryShare,
 } from "../../../lib/chat/history/chatHistory";
+import { isKBrainBackendEnabled } from "../../../lib/host";
+import { getConfiguredKBrainConnection } from "../../../lib/kbrain/runtimeConnection";
 import type { AppSettings } from "../../../lib/settings";
 import { asErrorMessage } from "../chatPageUtils";
 import type { GatewayRuntimeStatus } from "../gateway/gatewayRuntimeStatusModel";
@@ -45,9 +47,9 @@ export function useSharedHistory(params: UseSharedHistoryParams) {
     setErrorMessage,
   } = params;
 
-  const kBrainBackendEnabled = import.meta.env?.VITE_KBRAIN_BACKEND === "true";
+  const kBrainBackendEnabled = isKBrainBackendEnabled();
   const shareBackendUrl = kBrainBackendEnabled
-    ? (import.meta.env?.VITE_KBRAIN_URL ?? "http://127.0.0.1:47321")
+    ? getConfiguredKBrainConnection()?.baseUrl
     : undefined;
   const [shareConversation, setShareConversation] = useState<ChatHistorySummary | null>(null);
   const [shareStatus, setShareStatus] = useState<ChatHistoryShareStatus | null>(null);
@@ -241,7 +243,7 @@ export function useSharedHistory(params: UseSharedHistoryParams) {
       .finally(() => {
         setSharedManagerGatewayUrlLoading(false);
       });
-  }, [setRemoteRuntimeStatus]);
+  }, [setRemoteRuntimeStatus, kBrainBackendEnabled]);
 
   const handleOpenShareModal = useCallback(
     (conversation: ChatHistorySummary) => {

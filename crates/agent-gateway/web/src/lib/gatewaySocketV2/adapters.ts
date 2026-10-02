@@ -422,6 +422,8 @@ function agentRequestPayload(type: string, body: J): GatewayEnvelope["payload"] 
       case: "terminalRequest",
       value: create(TerminalRequestSchema, {
         action: type.slice("terminal.".length),
+        conversationId: trimStr(body.conversation_id),
+        runId: trimStr(body.run_id),
         sessionId: trimStr(body.session_id),
         projectPathKey: trimStr(body.project_path_key),
         cwd: trimStr(body.cwd),
@@ -635,6 +637,7 @@ function agentRequestPayload(type: string, body: J): GatewayEnvelope["payload"] 
                 ),
               })
             : undefined,
+          requestFormat: trimStr(body.request_format),
         }),
       };
     case "provider.usage.query":

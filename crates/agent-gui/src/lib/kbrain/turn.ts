@@ -4,16 +4,23 @@ import type {
   Message,
   ToolCall,
   ToolResultMessage,
-} from "@earendil-works/pi-ai";
+} from "@liveagent/app/lib/agentTypes";
+import type { HostedSearchBlock } from "@liveagent/ui/lib/chat/hostedSearch";
 import type { ConversationViewState } from "../chat/conversation/conversationState";
 import { appendMessagesToConversation } from "../chat/conversation/conversationState";
 import { createKBrainClient } from "./client";
 import { getKBrainSessionId, setKBrainSessionId } from "./mapping";
+import { questionResultDetails } from "./questions";
+import { getConfiguredKBrainConnection } from "./runtimeConnection";
 import type {
   KBrainContentBlock,
   KBrainEvent,
+  KBrainHostedSearch,
   KBrainMessage,
   KBrainModelRef,
+  KBrainQuestionAnswer,
+  KBrainQuestionRequest,
+  KBrainRunOptions,
   KBrainSubagent,
   KBrainToolCall,
   KBrainToolResult,
@@ -25,6 +32,8 @@ type CanonicalInputPart = {
   thinking?: string;
   data?: string;
   mimeType?: string;
+  filename?: string;
+  url?: string;
 };
 
 function imageDataUri(data: string, mimeType: string): string {
@@ -38,10 +47,17 @@ function canonicalContent(content: string | readonly CanonicalInputPart[]): KBra
     if (part.type === "text" && part.text) blocks.push({ type: "text", text: part.text });
     else if (part.type === "thinking" && part.thinking)
       blocks.push({ type: "thinking", text: part.thinking });
-    else if (part.type === "image" && part.data && part.mimeType) {
+    else if (part.type === "image" && (part.data || part.url) && part.mimeType) {
       blocks.push({
         type: "image",
-        image_url: imageDataUri(part.data, part.mimeType),
+        image_url: part.url ?? imageDataUri(part.data ?? "", part.mimeType),
+        mime_type: part.mimeType,
+      });
+    } else if (part.type === "file" && (part.data || part.url) && part.mimeType) {
+      blocks.push({
+        type: "file",
+        file_url: part.url ?? imageDataUri(part.data ?? "", part.mimeType),
+        ...(part.filename ? { filename: part.filename } : {}),
         mime_type: part.mimeType,
       });
     }
@@ -58,7 +74,7 @@ function canonicalMessage(message: Message): KBrainMessage | null {
     const id = (message as Message & { id?: unknown }).id;
     return {
       role: "user",
-      content: canonicalContent(message.content),
+      content: canonicalContent(message.content as readonly CanonicalInputPart[]),
       ...(typeof id === "string" && id.trim() ? { id: id.trim() } : {}),
     };
   }
@@ -75,7 +91,11 @@ function canonicalMessage(message: Message): KBrainMessage | null {
       ),
       tool_calls: toolCalls
         .filter((call) => !isSyntheticSubagentId(call.id) && call.name !== "subagent")
-        .map((call) => ({ id: call.id, name: call.name, arguments: call.arguments })),
+        .map((call) => ({
+          id: call.id,
+          name: call.name,
+          arguments: call.arguments,
+        })),
       model: message.model,
       provider: message.provider,
       stop_reason: message.stopReason,
@@ -84,7 +104,7 @@ function canonicalMessage(message: Message): KBrainMessage | null {
   if (isSyntheticSubagentId(message.toolCallId)) return null;
   return {
     role: "tool",
-    content: canonicalContent(message.content),
+    content: canonicalContent(message.content as unknown as readonly CanonicalInputPart[]),
     tool_call_id: message.toolCallId,
     name: message.toolName,
   };
@@ -93,7 +113,10 @@ function canonicalMessage(message: Message): KBrainMessage | null {
 export function contextToKBrainMessages(context: Context): KBrainMessage[] {
   const messages: KBrainMessage[] = [];
   if (context.systemPrompt?.trim())
-    messages.push({ role: "system", content: [{ type: "text", text: context.systemPrompt }] });
+    messages.push({
+      role: "system",
+      content: [{ type: "text", text: context.systemPrompt }],
+    });
   for (const message of context.messages) {
     const canonical = canonicalMessage(message);
     if (canonical) messages.push(canonical);
@@ -111,11 +134,16 @@ export type KBrainTurnParams = {
   signal: AbortSignal;
   onTextDelta: (text: string) => void;
   onThinkingDelta: (text: string) => void;
+  onHostedSearch?: (search: KBrainHostedSearch) => void;
   onToolCall: (call: ToolCall) => void;
   onToolResult: (call: ToolCall, result: ToolResultMessage) => void;
   onSubagent?: (subagent: KBrainSubagent) => void;
   onStatus?: (status: string | null) => void;
   content?: KBrainContentBlock[];
+  onQuestionRequest?: (
+    request: KBrainQuestionRequest,
+    signal?: AbortSignal,
+  ) => Promise<KBrainQuestionAnswer[]>;
   onPermissionRequest?: (
     request: {
       permission_id: string;
@@ -131,7 +159,11 @@ export type KBrainTurnParams = {
   token?: string;
   fetch?: typeof globalThis.fetch;
   clientRequestId?: string;
+  turnId?: string;
   resumeMessageId?: string;
+  options?: KBrainRunOptions;
+  hook_policy?: "backend";
+  hook_scope_id?: string;
 };
 
 const api = "kbrain.agent.v1" as AssistantMessage["api"];
@@ -168,6 +200,7 @@ function toolResult(result: KBrainToolResult): ToolResultMessage {
     toolCallId: result.id,
     toolName: result.name ?? "tool",
     content: [{ type: "text", text: result.output }],
+    details: questionResultDetails(result.name, result.output),
     isError: result.failed === true || result.cancelled === true,
     timestamp: Date.now(),
   };
@@ -184,6 +217,16 @@ function finalContent(
     if (block.type === "text" && block.text) content.push({ type: "text", text: block.text });
     else if (block.type === "thinking" && block.text)
       content.push({ type: "thinking", thinking: block.text });
+  }
+  for (const search of message?.hosted_search ?? []) {
+    content.push({
+      type: "hostedSearch",
+      id: search.id,
+      provider: search.provider,
+      status: search.status,
+      queries: search.queries,
+      sources: search.sources,
+    } as HostedSearchBlock);
   }
   for (const call of message?.tool_calls ?? []) content.push(toolCall(call));
   const hasThinking = content.some(
@@ -297,9 +340,12 @@ function fallbackRequestId(params: KBrainTurnParams) {
 }
 
 export async function runKBrainTurn(params: KBrainTurnParams): Promise<AssistantMessage> {
+  const runtimeConnection = getConfiguredKBrainConnection();
+  const baseUrl = params.baseUrl ?? runtimeConnection?.baseUrl;
+  const token = params.token ?? runtimeConnection?.token;
   const client = createKBrainClient({
-    baseUrl: params.baseUrl,
-    token: params.token,
+    baseUrl,
+    token,
     fetch: params.fetch,
   });
   const model = params.model;
@@ -311,16 +357,20 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
     params.resumeMessageId?.trim() ||
     (tail?.role === "user" && tail.kbrainEditPending === true ? tail.id : undefined);
   let kbrainSessionId =
-    getKBrainSessionId(params.conversationId, params.baseUrl) ??
-    legacySessionId(params.conversationId, params.baseUrl, params.sessionId) ??
+    getKBrainSessionId(params.conversationId, baseUrl) ??
+    legacySessionId(params.conversationId, baseUrl, params.sessionId) ??
     "";
   const createSession = async () => {
     resumeMessageId = undefined;
     const history = contextToKBrainMessages(params.context);
     const last = history.at(-1);
     if (last && isCurrentPromptMessage(last, params.prompt, promptContent)) history.pop();
-    const created = await client.createSession({ cwd: params.cwd, model, messages: history });
-    setKBrainSessionId(params.conversationId, created.id, params.baseUrl);
+    const created = await client.createSession({
+      cwd: params.cwd,
+      model,
+      messages: history,
+    });
+    setKBrainSessionId(params.conversationId, created.id, baseUrl);
     return created.id;
   };
   throwIfAborted(params.signal);
@@ -331,9 +381,13 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
     client.startRun({
       conversation_id: kbrainSessionId,
       client_request_id: clientRequestId,
+      ...(params.turnId ? { turn_id: params.turnId } : {}),
       prompt: params.prompt,
       ...(promptContent.length ? { content: promptContent } : {}),
       model,
+      ...(params.options ? { options: params.options } : {}),
+      ...(params.hook_policy ? { hook_policy: params.hook_policy } : {}),
+      ...(params.hook_scope_id ? { hook_scope_id: params.hook_scope_id } : {}),
       ...(resumeMessageId ? { resume_message_id: resumeMessageId } : {}),
     });
   let accepted: Awaited<ReturnType<typeof client.startRun>>;
@@ -362,10 +416,13 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
   let sawTerminal = false;
   let permissionFailure: Error | undefined;
   const pendingPermissions = new Set<AbortController>();
+  const pendingQuestions = new Map<string, AbortController>();
   const streamAbortController = new AbortController();
   const cancelPendingPermissions = () => {
     for (const controller of pendingPermissions) controller.abort();
     pendingPermissions.clear();
+    for (const controller of pendingQuestions.values()) controller.abort();
+    pendingQuestions.clear();
   };
   const abortStream = () => streamAbortController.abort();
   params.signal.addEventListener("abort", abortStream, { once: true });
@@ -395,6 +452,11 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
           thinking += delta;
           params.onThinkingDelta(delta);
         }
+        break;
+      }
+      case "assistant.sources": {
+        const search = eventPayload<KBrainHostedSearch>(event);
+        if (search?.type === "hostedSearch" && search.id) params.onHostedSearch?.(search);
         break;
       }
       case "tool.call": {
@@ -436,8 +498,83 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
         break;
       }
       case "tool.status": {
-        const payload = eventPayload<{ status?: string | null; text?: string | null }>(event);
+        const payload = eventPayload<{
+          status?: string | null;
+          text?: string | null;
+        }>(event);
         params.onStatus?.(payload?.status ?? payload?.text ?? null);
+        break;
+      }
+      case "question.requested": {
+        const request = eventPayload<KBrainQuestionRequest>(event);
+        const onQuestionRequest = params.onQuestionRequest;
+        if (!request || !onQuestionRequest) {
+          permissionFailure = new Error(
+            "K-brain requested a question but no question callback is configured",
+          );
+          streamAbortController.abort();
+          return;
+        }
+        params.onStatus?.("Waiting for your answer…");
+        const questionController = new AbortController();
+        if (request.run_id !== accepted.run_id || !request.question_id || !request.tool_call_id)
+          throw new Error("Question identity mismatch");
+        if (pendingQuestions.has(request.question_id)) break;
+        const call: ToolCall = {
+          type: "toolCall",
+          id: request.tool_call_id,
+          name: "AskUserQuestion",
+          arguments: {
+            questions: request.questions,
+            __askUserQuestionDeadlineAt: request.deadline_at,
+          },
+        };
+        calls.set(call.id, call);
+        params.onToolCall(call);
+        pendingQuestions.set(request.question_id, questionController);
+        void Promise.resolve()
+          .then(() => onQuestionRequest(request, questionController.signal))
+          .then((answers) => {
+            if (questionController.signal.aborted) return;
+            return client.resolveQuestion(
+              kbrainSessionId,
+              request.question_id,
+              accepted.run_id,
+              answers,
+            );
+          })
+          .catch((error) => {
+            if (questionController.signal.aborted) return;
+            permissionFailure = error instanceof Error ? error : new Error(String(error));
+            params.onStatus?.(null);
+            streamAbortController.abort();
+          })
+          .finally(() => pendingQuestions.delete(request.question_id));
+        break;
+      }
+      case "question.resolved": {
+        const resolution = eventPayload<{
+          question_id: string;
+          tool_call_id: string;
+          run_id: string;
+        }>(event);
+        if (resolution) {
+          if (resolution.run_id !== accepted.run_id || !resolution.tool_call_id)
+            throw new Error("Question resolution identity mismatch");
+          pendingQuestions.get(resolution.question_id)?.abort();
+          pendingQuestions.delete(resolution.question_id);
+          const call = calls.get(resolution.tool_call_id);
+          if (call)
+            params.onToolResult(
+              call,
+              toolResult({
+                id: call.id,
+                name: "AskUserQuestion",
+                output: JSON.stringify(resolution),
+              }),
+            );
+        }
+        params.onStatus?.(null);
         break;
       }
       case "permission.requested": {
@@ -561,10 +698,19 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
     errorMessage ??= "K-brain run completed without an assistant message";
   }
 
-  const content = finalContent(finalMessage, text, thinking, calls);
+  let content = finalContent(finalMessage, text, thinking, calls);
   if (terminal === "stop" && content.length === 0) {
     terminal = "error";
     errorMessage ??= "K-brain run completed without an assistant result";
+  }
+  if (content.length === 0 && (terminal === "error" || terminal === "aborted")) {
+    content = [
+      {
+        type: "text",
+        text:
+          errorMessage ?? (terminal === "aborted" ? "K-brain turn aborted" : "K-brain run failed"),
+      },
+    ];
   }
 
   const message: AssistantMessage = {

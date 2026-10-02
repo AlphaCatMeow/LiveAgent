@@ -1,4 +1,8 @@
 import {
+  providerSupportsNativeWebSearch,
+  resolveProviderApi,
+} from "@liveagent/ui/lib/providers/providerCapabilities";
+import {
   type ChatRuntimeControls,
   type CustomProvider,
   findProviderModelConfig,
@@ -8,7 +12,7 @@ import {
 import type { ProviderRuntimeBackend, ProviderRuntimeConfig } from "./types";
 
 export function getProviderRuntimeBackend(): ProviderRuntimeBackend {
-  return import.meta.env?.VITE_KBRAIN_BACKEND === "true" ? "kbrain" : "direct";
+  return "kbrain";
 }
 
 /**
@@ -28,15 +32,14 @@ export function createProviderRuntimeConfig(
   const controls = normalizeChatRuntimeControlsForProvider(controlsInput, reasoningParams);
   const reasoningSupported = getChatRuntimeReasoningLevelsForProvider(reasoningParams).length > 0;
   const backend = getProviderRuntimeBackend();
-  const direct = backend === "direct";
   return {
     backend,
     // K-brain owns upstream routing and credentials, including header/query secrets.
-    backendModelProvider: backend === "kbrain" ? provider.id : undefined,
-    baseUrl: direct ? provider.baseUrl : "",
-    isFullUrl: direct && provider.isFullUrl,
-    apiKey: direct ? provider.apiKey : "",
-    customHeaders: direct ? provider.customHeaders : undefined,
+    backendModelProvider: provider.id,
+    baseUrl: "",
+    isFullUrl: false,
+    apiKey: "",
+    customHeaders: undefined,
     requestFormat: provider.requestFormat,
     reasoning: reasoningSupported
       ? controls.thinkingEnabled
@@ -46,7 +49,12 @@ export function createProviderRuntimeConfig(
     promptCachingEnabled: provider.promptCachingEnabled,
     promptCacheHintMode: provider.promptCacheHintMode,
     promptCacheRetention: provider.promptCacheRetention,
-    nativeWebSearchEnabled: controls.nativeWebSearchEnabled,
+    nativeWebSearchEnabled:
+      controls.nativeWebSearchEnabled &&
+      providerSupportsNativeWebSearch(
+        provider.type,
+        resolveProviderApi(provider.type, provider.requestFormat),
+      ),
     useSystemProxy: provider.useSystemProxy,
     ...(provider.retryPolicy ? { retryPolicy: provider.retryPolicy } : {}),
     modelConfig: findProviderModelConfig(provider, model),

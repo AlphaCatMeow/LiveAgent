@@ -244,10 +244,20 @@ export type GatewayWebSocketClientLike = {
     expectedSizeBytes?: number;
   }): Promise<SftpActionResponse>;
   terminalShellOptions(): Promise<TerminalShellOptions>;
-  listTerminals(projectPathKey?: string): Promise<TerminalSession[]>;
+  listTerminals(
+    params?:
+      | string
+      | {
+          projectPathKey?: string;
+          conversationId?: string;
+          runId?: string;
+        },
+  ): Promise<TerminalSession[]>;
   createTerminal(params: {
     cwd: string;
     projectPathKey: string;
+    conversationId?: string;
+    runId?: string;
     shell?: string;
     title?: string;
     cols?: number;
@@ -415,6 +425,7 @@ export type GatewayWebSocketClientLike = {
     providerId?: string,
     isFullUrl?: boolean,
     customHeaders?: readonly { key: string; value: string }[],
+    requestFormat?: string,
   ): Promise<unknown>;
   providerUsageQuery<T = unknown>(providerId: string, refresh: boolean): Promise<T>;
   providerUsageTest<T = unknown>(providerId: string, configJson: string): Promise<T>;

@@ -145,6 +145,9 @@ export const ComposerModelControls = memo(function ComposerModelControls(
     onOpenSettings,
     onChatRuntimeControlsChange,
   } = props;
+  const nativeWebSearchSupported =
+    modelOptions.find((option) => option.value === selectedValue)?.nativeWebSearchSupported ===
+    true;
   const { t } = useLocale();
   const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState("");
@@ -381,8 +384,8 @@ export const ComposerModelControls = memo(function ComposerModelControls(
                 <span>{t("chat.runtime.webSearch")}</span>
                 <Switch
                   id={`${executionModeRadioName}-web`}
-                  checked={chatRuntimeControls.nativeWebSearchEnabled}
-                  disabled={disabled}
+                  checked={nativeWebSearchSupported && chatRuntimeControls.nativeWebSearchEnabled}
+                  disabled={disabled || !nativeWebSearchSupported}
                   aria-label={t("chat.runtime.webSearch")}
                   onCheckedChange={(checked) =>
                     onChatRuntimeControlsChange({ nativeWebSearchEnabled: checked })

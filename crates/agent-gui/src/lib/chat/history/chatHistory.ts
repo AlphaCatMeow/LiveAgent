@@ -1,4 +1,4 @@
-import type { Message } from "@earendil-works/pi-ai";
+import type { Message } from "@liveagent/app/lib/agentTypes";
 import { invoke } from "@liveagent/app/shims/tauriCore";
 import {
   branchKBrainHistory,
@@ -13,6 +13,7 @@ import {
   setKBrainHistoryShare,
 } from "../../kbrain/history";
 import { getKBrainSessionId } from "../../kbrain/mapping";
+import { getConfiguredKBrainConnection } from "../../kbrain/runtimeConnection";
 import { getProviderRuntimeBackend } from "../../providers/runtime/providerRuntimeConfig";
 import { parseTaskListState } from "../../tools/taskState";
 import { normalizeConversationSystemPrompt } from "../context/systemPrompt";
@@ -702,7 +703,7 @@ async function writeConversationRuntime(
       providerId: conversation.providerId,
       model: conversation.model,
       sessionId:
-        getKBrainSessionId(conversation.id, import.meta.env?.VITE_KBRAIN_URL) ??
+        getKBrainSessionId(conversation.id, getConfiguredKBrainConnection()?.baseUrl) ??
         conversation.sessionId,
       cwd: conversation.cwd,
       selectedModelJson: conversation.selectedModelJson,

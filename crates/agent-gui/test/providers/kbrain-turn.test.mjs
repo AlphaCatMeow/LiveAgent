@@ -95,6 +95,7 @@ test("context conversion preserves canonical image blocks and the turn uses only
       content: [
         { type: "text", text: "look" },
         { type: "image", data: "abc123", mimeType: "image/png" },
+        { type: "file", data: "cGRm", mimeType: "application/pdf", filename: "report.pdf" },
       ],
       timestamp: 1,
     }],
@@ -102,6 +103,7 @@ test("context conversion preserves canonical image blocks and the turn uses only
   assert.deepEqual(messages[1].content, [
     { type: "text", text: "look" },
     { type: "image", image_url: "data:image/png;base64,abc123", mime_type: "image/png" },
+    { type: "file", file_url: "data:application/pdf;base64,cGRm", filename: "report.pdf", mime_type: "application/pdf" },
   ]);
 
   const calls = [];
@@ -123,6 +125,9 @@ test("context conversion preserves canonical image blocks and the turn uses only
   });
   assert.equal(result.stopReason, "stop");
   assert.equal(result.content[0].text, "hi");
+  const runCall = calls.find(({ url }) => url.pathname.endsWith("/runs"));
+  assert.ok(runCall, "the turn should post a run to K-brain");
+  assert.equal(JSON.parse(runCall.init.body).client_request_id, "stable-request-id");
   assert.equal(calls.every(({ url }) => url.hostname === "kbrain.test"), true);
 });
 

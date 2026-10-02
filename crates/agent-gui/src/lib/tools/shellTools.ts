@@ -1,4 +1,4 @@
-import type { Tool, ToolCall, ToolResultMessage } from "@earendil-works/pi-ai";
+import type { Tool, ToolCall, ToolResultMessage } from "@liveagent/app/lib/agentTypes";
 import { invoke } from "@liveagent/app/shims/tauriCore";
 import { createUuid } from "@liveagent/ui/lib/shared/id";
 import { type TProperties, Type } from "typebox";

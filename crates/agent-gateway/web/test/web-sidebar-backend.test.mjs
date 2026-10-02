@@ -180,12 +180,14 @@ test("listConversations normalizes items/workdirs and hydrates the activity stor
   assert.equal(activityStore.isRunning("c2"), true);
   assert.equal(activityStore.isRunning("c1"), false);
 
-  // Unscoped scope maps to cwdEmpty; none never hits the wire.
+  // Remote all scope is unfiltered; none never hits the wire.
+  await backend.listConversations(1, 80, { kind: "all" });
+  assert.equal(state.calls.list[1].filter, undefined);
   await backend.listConversations(1, 80, { kind: "unscoped" });
-  assert.deepEqual(state.calls.list[1].filter, { cwdEmpty: true });
+  assert.deepEqual(state.calls.list[2].filter, { cwdEmpty: true });
   const emptyPage = await backend.listConversations(1, 80, { kind: "none" });
   assert.deepEqual(emptyPage, { items: [], totalCount: 0 });
-  assert.equal(state.calls.list.length, 2);
+  assert.equal(state.calls.list.length, 3);
 
   state.workdirs = [
     { path: "/tmp/p", conversationCount: 2, updatedAt: SECONDS },

@@ -92,6 +92,11 @@ func vetAgentRequest(sm session.AgentView, env *gatewayv2.GatewayEnvelope) error
 	case *gatewayv2.GatewayEnvelope_TerminalRequest:
 		req := payload.TerminalRequest
 		action := strings.TrimSpace(req.GetAction())
+		if req.GetConversationId() != "" || req.GetRunId() != "" {
+			if err := vetCanonicalTerminal(req); err != nil {
+				return err
+			}
+		}
 		if !shared.TerminalRequestAllowed(sm, action, strings.TrimSpace(req.GetSessionId())) {
 			return errors.New(shared.TerminalPermissionError(action))
 		}
@@ -284,4 +289,19 @@ func clampHistoryList(req *gatewayv2.HistoryListRequest) {
 	} else if req.GetPageSize() > maxHistoryListLimit {
 		req.PageSize = maxHistoryListLimit
 	}
+}
+
+func vetCanonicalTerminal(req *gatewayv2.TerminalRequest) error {
+	if strings.TrimSpace(req.GetConversationId()) == "" || strings.TrimSpace(req.GetRunId()) == "" {
+		return errors.New("terminal run identity requires conversation_id and run_id")
+	}
+	switch req.GetAction() {
+	case "create", "start", "read", "snapshot", "attach", "input", "resize", "rename", "close", "list", "close_project", "shell_options":
+	default:
+		return errors.New("invalid local canonical terminal action")
+	}
+	if len(req.GetData()) > 65536 || req.GetCols() > 65535 || req.GetRows() > 65535 {
+		return errors.New("terminal payload exceeds limits")
+	}
+	return nil
 }

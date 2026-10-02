@@ -4,7 +4,7 @@ import type {
   Tool,
   ToolCall,
   ToolResultMessage,
-} from "@earendil-works/pi-ai";
+} from "@liveagent/app/lib/agentTypes";
 import { invoke } from "@liveagent/app/shims/tauriCore";
 import { invokeFs, isFsBackendError } from "@liveagent/ui/lib/tools/fsBackend";
 import { type TProperties, Type } from "typebox";

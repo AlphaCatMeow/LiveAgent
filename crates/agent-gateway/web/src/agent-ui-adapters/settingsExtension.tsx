@@ -1,5 +1,9 @@
 import { MonitorSmartphone } from "@liveagent/ui/components/IconSet";
 import type { SettingsSectionDefinition, UiExtensionSlots } from "@liveagent/ui/contracts/registry";
+import {
+  configureResourceHostCapabilities,
+  nativeResourceHostCapabilities,
+} from "@liveagent/ui/lib/resourceHost";
 import { DevicesSection } from "../pages/settings/DevicesSection";
 import type { SettingsPageProps } from "../pages/settings/types";
 
@@ -27,3 +31,7 @@ export function createSettingsExtension(props: SettingsPageProps): {
     ],
   };
 }
+
+configureResourceHostCapabilities(nativeResourceHostCapabilities);
+
+export const settingsHostAdapter = { isKbrain: false as const };

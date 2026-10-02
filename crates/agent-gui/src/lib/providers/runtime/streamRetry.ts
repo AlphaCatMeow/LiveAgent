@@ -1,10 +1,55 @@
-import {
-  type AssistantMessage,
-  type AssistantMessageEvent,
-  type AssistantMessageEventStream,
-  createAssistantMessageEventStream,
-  isRetryableAssistantError,
-} from "@earendil-works/pi-ai";
+import type {
+  AssistantMessage,
+  AssistantMessageEvent,
+  AssistantMessageEventStream,
+} from "@liveagent/app/lib/agentTypes";
+
+function createAssistantMessageEventStream(): AssistantMessageEventStream & {
+  push(event: AssistantMessageEvent): void;
+  end(message?: AssistantMessage): void;
+} {
+  const queue: AssistantMessageEvent[] = [];
+  const waiters: Array<(result: IteratorResult<AssistantMessageEvent>) => void> = [];
+  let ended = false;
+  let finalMessage: AssistantMessage | undefined;
+  const next = (): Promise<IteratorResult<AssistantMessageEvent>> => {
+    const event = queue.shift();
+    if (event) return Promise.resolve({ value: event, done: false });
+    if (ended) return Promise.resolve({ value: undefined, done: true });
+    return new Promise((resolve) => waiters.push(resolve));
+  };
+  const stream = {
+    [Symbol.asyncIterator]() {
+      return { next };
+    },
+    result: async () => {
+      while (!ended) await new Promise((resolve) => setTimeout(resolve, 0));
+      if (finalMessage) return finalMessage;
+      throw new Error("Assistant stream ended without a result");
+    },
+    push(event: AssistantMessageEvent) {
+      if (ended) return;
+      const waiter = waiters.shift();
+      if (waiter) waiter({ value: event, done: false });
+      else queue.push(event);
+    },
+    end(message?: AssistantMessage) {
+      if (ended) return;
+      finalMessage = message;
+      ended = true;
+      while (waiters.length) waiters.shift()?.({ value: undefined, done: true });
+    },
+  };
+  return stream;
+}
+
+function isRetryableAssistantError(message: AssistantMessage | undefined): boolean {
+  const text = message?.errorMessage ?? "";
+  return /\b(?:408|409|425|429|500|502|503|504|524)\b|timeout|temporar|overloaded|rate.?limit/i.test(
+    text,
+  );
+}
+
 import { RETRYABLE_PRESET_HTTP_STATUS_CODES } from "@liveagent/ui/lib/settings/types";
 
 export type { RetryAttemptRecord } from "@liveagent/ui/lib/chat/retryAttempts";
@@ -16,12 +61,11 @@ const STREAM_RETRY_BASE_DELAY_MS = 200;
 const STREAM_RETRY_BACKOFF_FACTOR = 2;
 
 /**
- * Extra retry classification layered on top of pi-ai's `isRetryableAssistantError`.
+ * Extra retry classification for the local K-brain stream wrapper.
  * Driven by the user's global retry-error settings (see `RetryErrorSettings`):
- * - `statusCodes`: HTTP status codes (preset toggles) the user wants retried
- *   beyond pi-ai's hardcoded set (which already covers 429/500/502/503/504/524).
+ * - `statusCodes`: HTTP status codes (preset toggles) the user wants retried.
  * - `patterns`: free-text substrings matched case-insensitively against the error
- *   message, for relay/gateway wording pi-ai doesn't recognize.
+ *   message, for relay/gateway wording the default classifier does not recognize.
  *
  * The default module extension enables every preset code (Cloudflare 520-527),
  * so relays self-heal out of the box (#608) even before the settings
@@ -63,9 +107,8 @@ function buildStatusCodePattern(codes: readonly number[]): RegExp | undefined {
 
 /**
  * Whether a failed assistant message matches the LiveAgent retry extension
- * (preset HTTP status codes + user-defined substrings), independently of
- * pi-ai's `isRetryableAssistantError`. Does not re-check pi-ai's own patterns
- * — callers OR the two together so the union is retryable.
+ * (preset HTTP status codes + user-defined substrings). The stream wrapper
+ * combines this extension with its built-in transient-error classifier.
  */
 export function isExtensionRetryableError(
   message: AssistantMessage | undefined,
@@ -180,7 +223,7 @@ function sleepWithAbort(ms: number, signal: AbortSignal | undefined): Promise<vo
  * Events are buffered per attempt until the first content-bearing event
  * ("committed": text_delta / thinking_delta / toolcall_start) is observed. An
  * attempt that ends in error before committing, classified retryable by
- * pi-ai's `isRetryableAssistantError`, is discarded wholesale and replaced by
+ * the built-in transient-error classifier, is discarded wholesale and replaced by
  * a fresh `factory()` call after a codex-style backoff — the caller never
  * sees the failed attempt's events. Once committed, or once retries are
  * exhausted/disabled, events pass straight through untouched. `onRetry` /
@@ -190,10 +233,8 @@ function sleepWithAbort(ms: number, signal: AbortSignal | undefined): Promise<vo
  * attempt's transport error.
  *
  * The pump below runs eagerly (not gated on the returned stream being
- * iterated) because pi-ai's own stream factories start their network work as
- * soon as they're called, independent of consumer iteration — some callers
- * only await `.result()` without ever iterating events, and that pattern must
- * keep working through this wrapper.
+ * iterated) because some callers only await `.result()` without ever iterating
+ * events, and that pattern must keep working through this wrapper.
  */
 export function withStreamRetry(
   factory: () => AssistantMessageEventStream,
@@ -235,9 +276,9 @@ export function withStreamRetry(
 
       if (terminal?.type === "error" && !committed && !disabled && attempt < maxAttempts) {
         const failedMessage = terminalMessage(terminal);
-        // pi-ai's classifier first (preserves its non-retryable quota/billing
-        // guard), then LiveAgent's extension: preset HTTP status codes (Cloudflare
-        // 520-527 for relays, #608) + user-defined substrings from settings.
+        // Apply the built-in transient-error classifier first, then LiveAgent's
+        // extension: preset HTTP status codes (Cloudflare 520-527 for relays,
+        // #608) plus user-defined substrings from settings.
         if (
           isRetryableAssistantError(failedMessage) ||
           isExtensionRetryableError(failedMessage, options?.retryExtension)

@@ -7,6 +7,7 @@ const loader = createTsModuleLoader();
 const mapping = loader.loadModule("src/lib/kbrain/mapping.ts");
 const history = loader.loadModule("src/lib/kbrain/history.ts");
 const DEFAULT_KBRAIN_URL = "http://127.0.0.1:47321";
+const runtimeConnection = loader.loadModule("src/lib/kbrain/runtimeConnection.ts");
 
 function installStorage() {
   const values = new Map();
@@ -44,6 +45,7 @@ async function withHttpFixture(handler, callback) {
   const address = server.address();
   const fixtureUrl = `http://127.0.0.1:${address.port}`;
   const originalFetch = globalThis.fetch;
+  runtimeConnection.setKBrainRuntimeConnection({ baseUrl: DEFAULT_KBRAIN_URL, token: "", protocolVersion: "kbrain.agent.v1" });
   globalThis.fetch = (input, init) => {
     const url = new URL(String(input));
     if (url.origin === DEFAULT_KBRAIN_URL) {
@@ -56,6 +58,7 @@ async function withHttpFixture(handler, callback) {
     return await callback(fixtureUrl);
   } finally {
     globalThis.fetch = originalFetch;
+    runtimeConnection.clearKBrainRuntimeConnection();
     await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
 }
@@ -154,10 +157,38 @@ test("invalid or null K-brain models fail before any HTTP request", async () => 
   });
 });
 
+test("HTTP history restoration preserves cancelled, truncated and tool-use assistant states", async () => {
+  installStorage();
+  const reasons = ["cancelled", "length", "tool_use", "error", "stop"];
+  const session = makeSession({
+    tasks: [],
+    messages: reasons.map((reason, index) => ({
+      id: `a-${index}`, role: "assistant", stop_reason: reason,
+      content: [{ type: "text", text: `response ${reason}` }],
+      provider: "fixture", model: "fixture-model",
+    })),
+    message_count: reasons.length,
+  });
+  await withHttpFixture(async (request, response) => {
+    assert.equal(request.method, "GET");
+    assert.match(request.url, /^\/v1\/sessions\/remote-session\/history\?/);
+    sendJson(response, {
+      session, revision: session.revision, oldest_offset: 0, has_more_before: false,
+      total_message_count: session.messages.length, active_messages: session.messages,
+    });
+  }, async () => {
+    mapping.setKBrainSessionId("stop-reasons", session.id);
+    const restored = await history.getKBrainHistoryWindow("stop-reasons");
+    const expected = ["aborted", "length", "toolUse", "error", "stop"];
+    assert.deepEqual(restored.activeSegment.messages.map((message) => message.stopReason), expected);
+    assert.deepEqual(restored.segments.flatMap((segment) => segment.messages.map((message) => message.stopReason)), expected);
+    assert.deepEqual(restored.activeSegment.messages.map((message) => message.responseId), reasons.map((_, index) => `a-${index}`));
+  });
+});
+
 test("task projections are counted once on newest windows while full active context stays intact", async () => {
   installStorage();
   const session = makeSession();
-  mapping.setKBrainSessionId("task-local", session.id);
   await withHttpFixture(async (request, response) => {
     const url = new URL(request.url, DEFAULT_KBRAIN_URL);
     const earlier = url.searchParams.has("before_offset");
@@ -168,6 +199,7 @@ test("task projections are counted once on newest windows while full active cont
       ...(url.searchParams.get("include_active") === "true" ? { active_messages: session.messages } : {}),
     });
   }, async () => {
+    mapping.setKBrainSessionId("task-local", session.id);
     const tail = await history.getKBrainHistoryWindow("task-local", { maxMessages: 1 });
     assert.equal(tail.activeSegment.messages.length, 4);
     assert.equal(tail.meta.totalMessageCount, 4);

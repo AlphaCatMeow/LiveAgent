@@ -557,13 +557,15 @@ export function parseJsonPayload<T>(raw: string | undefined, fallback: T): T {
 
 export function normalizeChatQueueResponse(input: RawChatQueueResponse): ChatQueueResponse {
   const normalized = input as RawChatQueueResponse & Partial<ChatQueueResponse>;
+  const item =
+    normalized.item ?? parseJsonPayload<ChatQueueResponse["item"]>(input.item_json, undefined);
   return {
     accepted: input.accepted === true,
     message: input.message,
     snapshot:
       normalized.snapshot ??
       parseJsonPayload<ChatQueueSnapshot | undefined>(input.snapshot_json, undefined),
-    item: normalized.item ?? parseJsonPayload(input.item_json, undefined),
+    item: item ? { ...item, uploadedFilesJson: item.uploadedFilesJson?.trim() || "[]" } : undefined,
     errorCode: normalized.errorCode ?? input.error_code,
     revision: input.revision,
   };

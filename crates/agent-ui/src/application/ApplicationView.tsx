@@ -1,5 +1,6 @@
 import type { AppSettings } from "@liveagent/app/lib/settings";
 import type { CSSProperties, HTMLAttributes, ReactNode, Ref } from "react";
+import type { ResourceHostCapabilities } from "../lib/resourceHost";
 import type { SidebarShortcutId } from "../lib/settings/sidebarShortcuts";
 import { cn } from "../lib/shared/utils";
 import type { SkillSummary } from "../lib/skills/index";
@@ -20,6 +21,7 @@ type ApplicationViewProps = {
   settings: AppSettings;
   setSettings: (updater: (prev: AppSettings) => AppSettings) => void;
   isAgentMode: boolean;
+  resourceHost?: ResourceHostCapabilities;
   initialSkills?: SkillSummary[];
   initialSkillsRootDir?: string;
   className?: string;
@@ -35,6 +37,7 @@ export function ApplicationView(props: ApplicationViewProps) {
     settings,
     setSettings,
     isAgentMode,
+    resourceHost,
     initialSkills,
     initialSkillsRootDir,
     className,
@@ -50,6 +53,7 @@ export function ApplicationView(props: ApplicationViewProps) {
       <SkillsHubPage
         settings={settings}
         setSettings={setSettings}
+        resourceHost={resourceHost}
         initialSkills={initialSkills}
         initialRootDir={initialSkillsRootDir}
         isAgentMode={isAgentMode}
@@ -65,6 +69,7 @@ export function ApplicationView(props: ApplicationViewProps) {
         resource={activeView === "memory-hub" ? "memory" : "cron"}
         settings={settings}
         setSettings={setSettings}
+        resourceHost={resourceHost}
       />
     );
   } else {

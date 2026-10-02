@@ -1,4 +1,4 @@
-import type { AssistantMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage } from "@liveagent/app/lib/agentTypes";
 import { HOOK_EVENT_TRANSLATION_KEYS } from "@liveagent/ui/lib/automation/index";
 import type { HookRunWarning } from "../../../lib/automation/hookRunner";
 import type { CompactionStatus } from "../../../lib/chat/compaction/types";

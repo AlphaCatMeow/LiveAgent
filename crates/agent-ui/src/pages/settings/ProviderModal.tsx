@@ -1,3 +1,7 @@
+import {
+  discoverProviderModels,
+  providerCredentialsRedacted,
+} from "@liveagent/adapters/providerSettings";
 import { testProviderUsage, type UsageData } from "@liveagent/app/lib/providers/usageQuery";
 import {
   type CodexRequestFormat,
@@ -32,6 +36,7 @@ import {
   createModelOrderSnapshot,
   findNewModelIds,
 } from "@liveagent/ui/lib/providers/modelVendor";
+import { isGatewayWebuiRuntime } from "@liveagent/ui/lib/runtimeEnv";
 import {
   applyModelInputModalitiesMode,
   applyModelsActiveState,
@@ -42,10 +47,8 @@ import {
   createDraftModelConfig,
   createUsageQueryDraft,
   detectCodingPlanProvider,
-  fetchModelsFromApi,
   getModelInputModalitiesMode,
   getPersistedUsageQueryProviderId,
-  isGatewayWebuiRuntime,
   type ModelInputModalitiesMode,
   matchBalanceProviders,
   mergeFetchedModels,
@@ -133,7 +136,9 @@ function useProviderModalController({
   const isGatewayWebui = isGatewayWebuiRuntime();
   const initialApiKey = initialData?.apiKey ?? "";
   const initialUsesRedactedApiKey =
-    isGatewayWebui && initialApiKey.trim() === "" && initialData?.apiKeyConfigured === true;
+    providerCredentialsRedacted &&
+    initialApiKey.trim() === "" &&
+    initialData?.apiKeyConfigured === true;
   const [name, setName] = useState(initialData?.name ?? "");
   const [baseUrl, setBaseUrl] = useState(initialData?.baseUrl ?? "");
   const [isFullUrl, setIsFullUrl] = useState(initialData?.isFullUrl ?? false);
@@ -209,7 +214,7 @@ function useProviderModalController({
   const [usageQuery, setUsageQuery] = useState(() => {
     const draft = createUsageQueryDraft(
       initialData?.usageQuery ?? getDefaultUsageQueryConfig(),
-      isGatewayWebui,
+      providerCredentialsRedacted,
     );
     // general/newapi 是可编辑脚本预设:脚本为空的存量配置打开时即在编辑器填充预设。
     return applyUsageQueryModePreset(draft, draft.mode);
@@ -249,7 +254,7 @@ function useProviderModalController({
   const apiKeyIsRedactedDisplay = initialUsesRedactedApiKey && apiKey === REDACTED_API_KEY_DISPLAY;
   const apiKeyForRequest = apiKeyIsRedactedDisplay ? "" : apiKey.trim();
   const canReuseStoredApiKey =
-    isGatewayWebui &&
+    providerCredentialsRedacted &&
     apiKeyIsRedactedDisplay &&
     Boolean(initialData?.id) &&
     initialData?.apiKeyConfigured === true &&
@@ -316,7 +321,11 @@ function useProviderModalController({
       setFetchingModels(true);
       setFetchError(null);
       try {
-        const list = await fetchModelsFromApi(providerType, url, key, {
+        const list = await discoverProviderModels({
+          type: providerType,
+          requestFormat,
+          baseUrl: url,
+          apiKey: key,
           useSystemProxy,
           isFullUrl,
           modelsUrl: providerType === "gemini" ? "" : modelsUrl,
@@ -334,7 +343,15 @@ function useProviderModalController({
         if (generation === modelFetchGeneration.current) setFetchingModels(false);
       }
     },
-    [effectiveCustomHeaders, initialData?.id, isFullUrl, modelsUrl, providerType, useSystemProxy],
+    [
+      effectiveCustomHeaders,
+      initialData?.id,
+      isFullUrl,
+      modelsUrl,
+      providerType,
+      requestFormat,
+      useSystemProxy,
+    ],
   );
 
   useEffect(() => {
@@ -713,10 +730,7 @@ function useProviderModalController({
       isFullUrl,
       modelsUrl: providerType === "gemini" ? undefined : modelsUrl.trim() || undefined,
       apiKey: nextApiKey,
-      apiKeyConfigured:
-        nextApiKey.length > 0 ||
-        apiKeyIsRedactedDisplay ||
-        (isGatewayWebui && initialData?.apiKeyConfigured === true),
+      apiKeyConfigured: nextApiKey.length > 0 || apiKeyIsRedactedDisplay,
       customHeaders,
       models: nextModels,
       modelOrder,
@@ -745,7 +759,7 @@ function useProviderModalController({
       nativeWebSearchEnabled: initialData?.nativeWebSearchEnabled ?? true,
       useSystemProxy,
       retryPolicy: serializeStreamRetryPolicy(),
-      usageQuery: serializeUsageQueryDraft(usageQuery, isGatewayWebui),
+      usageQuery: serializeUsageQueryDraft(usageQuery, providerCredentialsRedacted),
     });
     requestClose();
   }
@@ -757,7 +771,7 @@ function useProviderModalController({
     try {
       // 测试永远以编辑器里的草稿为准(忽略启用开关,不落库、不进缓存);
       // 秘密占位符经 serialize 还原为空串,由桌面端按 *Configured 沿用已存密钥。
-      const draft = serializeUsageQueryDraft(usageQuery, isGatewayWebui);
+      const draft = serializeUsageQueryDraft(usageQuery, providerCredentialsRedacted);
       const result = await testProviderUsage(persistedUsageQueryProviderId, draft);
       if (usageQueryTestSeqRef.current !== seq) return;
       if (result?.error) {

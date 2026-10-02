@@ -250,21 +250,10 @@ export function getDefaultModelFailoverSettings(): ModelFailoverSettings {
   };
 }
 
-/**
- * Cloudflare 5xx status codes that relays surface when their origin
- * errors. pi-ai's `isRetryableAssistantError` already retries 524; these are
- * the rest of Cloudflare's transient 5xx family (#608). Offered as toggleable
- * presets in the settings UI; the runtime retries any error message that
- * contains the code as a standalone number.
- */
+/** Cloudflare transient-error presets exposed by the retry settings UI. */
 export const RETRYABLE_PRESET_HTTP_STATUS_CODES = [520, 521, 522, 523, 525, 526, 527] as const;
 
-/**
- * User-defined retry-error classification, layered on top of pi-ai's
- * `isRetryableAssistantError`. Lets users decide which errors the stream-retry
- * loop should treat as transient (#608) — preset Cloudflare 5xx toggles plus
- * free-text substrings for relay/gateway wording pi-ai doesn't recognize.
- */
+/** User-configured status codes and text patterns for transient errors. */
 export type RetryErrorSettings = {
   /**
    * HTTP status codes (from `RETRYABLE_PRESET_HTTP_STATUS_CODES`) the user has

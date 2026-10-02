@@ -40,6 +40,8 @@ include!("trajectory_lifecycle.rs");
 include!("trajectory_window.rs");
 include!("trajectory_subagents.rs");
 include!("commands.rs");
+include!("migration.rs");
+include!("migration_tests.rs");
 include!("replace.rs");
 include!("branch.rs");
 include!("delete.rs");

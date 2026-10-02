@@ -262,7 +262,10 @@ export function MemoryPanel(props: {
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0 truncate text-xs font-semibold">{entryTitle(entry)}</div>
           {isPendingReview(entry) ? (
-            <Badge size="compact" className={cn("ml-auto", PENDING_REVIEW_FILL, PENDING_REVIEW_TEXT)}>
+            <Badge
+              size="compact"
+              className={cn("ml-auto", PENDING_REVIEW_FILL, PENDING_REVIEW_TEXT)}
+            >
               {t("settings.memoryUnreviewed")}
             </Badge>
           ) : null}

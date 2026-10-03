@@ -783,7 +783,10 @@ export async function fetchModelsFromApi(
 
     let response: Response;
     try {
-      response = await fetch(requestUrl, { headers: proxyRequest.headers });
+      // 桌面端走本地反代时，同类型供应商的请求 URL 完全相同（/proxy/<type>/v1/models），
+      // 上游 origin 只在请求头里。上游若返回可缓存的响应头，WebView 会按 URL 把别家的
+      // 模型列表直接当缓存返回（#885）。模型列表必须每次都拿到这一家的实时结果。
+      response = await fetch(requestUrl, { headers: proxyRequest.headers, cache: "no-store" });
     } catch (error) {
       failures.push({
         status: null,

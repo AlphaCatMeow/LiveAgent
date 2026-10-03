@@ -270,10 +270,9 @@ export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
 
   async function listModels(): Promise<KBrainModelRef[]> {
     const result = await request<{ models?: KBrainModelRef[] } | KBrainModelRef[]>("/v1/models", {
-      // The catalog changes immediately after provider/model imports. A WebView
-      // cache entry from the first empty catalog must not survive that update.
+      // The catalog changes immediately after provider/model imports. Request cache
+      // mode avoids stale WebView entries without adding a CORS-preflight header.
       cache: "no-store",
-      headers: { "Cache-Control": "no-cache, no-store, must-revalidate" },
     });
     return Array.isArray(result) ? result : (result.models ?? []);
   }
@@ -289,7 +288,6 @@ export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
       // OpenAI-compatible endpoints). Never let WebView HTTP caching reuse a
       // model list from another upstream.
       cache: "no-store",
-      headers: { "Cache-Control": "no-cache, no-store, must-revalidate" },
       body: JSON.stringify(input),
     });
   }

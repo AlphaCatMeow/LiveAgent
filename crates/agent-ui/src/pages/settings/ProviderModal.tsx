@@ -1,6 +1,7 @@
 import {
   discoverProviderModels,
   providerCredentialsRedacted,
+  revealStoredProviderApiKey,
 } from "@liveagent/adapters/providerSettings";
 import { testProviderUsage, type UsageData } from "@liveagent/app/lib/providers/usageQuery";
 import {
@@ -229,6 +230,12 @@ function useProviderModalController({
   const [modelSearch, setModelSearch] = useState("");
   const [editingModel, setEditingModel] = useState<ModelEditDraft | null>(null);
   const [showApiKey, setShowApiKey] = useState(false);
+  // Plaintext read back from the backend on demand. While the field still holds exactly this
+  // value it counts as unchanged, so saving never replaces a stored reference such as
+  // ${OPENAI_API_KEY} with its resolved value.
+  const [revealedApiKey, setRevealedApiKey] = useState<string | null>(null);
+  const [revealingApiKey, setRevealingApiKey] = useState(false);
+  const [revealApiKeyError, setRevealApiKeyError] = useState<string | null>(null);
   const [activePanel, setActivePanel] = useState<ProviderDialogPanel>("general");
   const [headerValidationSubmitted, setHeaderValidationSubmitted] = useState(false);
 
@@ -252,15 +259,41 @@ function useProviderModalController({
   modelOrderRef.current = modelOrder;
   activeModelsRef.current = activeModels;
   const apiKeyIsRedactedDisplay = initialUsesRedactedApiKey && apiKey === REDACTED_API_KEY_DISPLAY;
-  const apiKeyForRequest = apiKeyIsRedactedDisplay ? "" : apiKey.trim();
+  const apiKeyIsStoredValue =
+    apiKeyIsRedactedDisplay || (revealedApiKey !== null && apiKey === revealedApiKey);
+  const apiKeyForRequest = apiKeyIsStoredValue ? "" : apiKey.trim();
   const canReuseStoredApiKey =
     providerCredentialsRedacted &&
-    apiKeyIsRedactedDisplay &&
+    apiKeyIsStoredValue &&
     Boolean(initialData?.id) &&
     initialData?.apiKeyConfigured === true &&
     baseUrl.trim() === (initialData.baseUrl ?? "").trim() &&
     modelsUrl.trim() === (providerType === "gemini" ? "" : (initialData.modelsUrl ?? "").trim()) &&
     useSystemProxy === (initialData.useSystemProxy ?? false);
+  const toggleShowApiKey = useCallback(async () => {
+    if (showApiKey) {
+      setShowApiKey(false);
+      return;
+    }
+    setRevealApiKeyError(null);
+    if (!apiKeyIsRedactedDisplay || !initialData?.id || isGatewayWebui) {
+      setShowApiKey(true);
+      return;
+    }
+    setRevealingApiKey(true);
+    try {
+      const stored = await revealStoredProviderApiKey(initialData.id);
+      if (stored !== null) {
+        setRevealedApiKey(stored);
+        setApiKey(stored);
+      }
+      setShowApiKey(true);
+    } catch (err) {
+      setRevealApiKeyError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRevealingApiKey(false);
+    }
+  }, [apiKeyIsRedactedDisplay, initialData?.id, isGatewayWebui, showApiKey]);
   const persistedUsageQueryProviderId = getPersistedUsageQueryProviderId(initialData);
   const { confirm: requestUsageQueryConfirm, dialog: usageQueryConfirmDialog } = useConfirmDialog();
   const [usageQueryTest, setUsageQueryTest] = useState<{
@@ -722,7 +755,7 @@ function useProviderModalController({
       if (!confirmed) return;
       setCustomUsageQueryConfirmed(true);
     }
-    const nextApiKey = apiKeyIsRedactedDisplay ? "" : apiKey.trim();
+    const nextApiKey = apiKeyIsStoredValue ? "" : apiKey.trim();
     onSave({
       name: name.trim(),
       type: providerType,
@@ -730,7 +763,7 @@ function useProviderModalController({
       isFullUrl,
       modelsUrl: providerType === "gemini" ? undefined : modelsUrl.trim() || undefined,
       apiKey: nextApiKey,
-      apiKeyConfigured: nextApiKey.length > 0 || apiKeyIsRedactedDisplay,
+      apiKeyConfigured: nextApiKey.length > 0 || apiKeyIsStoredValue,
       customHeaders,
       models: nextModels,
       modelOrder,
@@ -958,6 +991,9 @@ function useProviderModalController({
     setPromptCachingEnabled,
     setRequestFormat,
     setShowApiKey,
+    toggleShowApiKey,
+    revealingApiKey,
+    revealApiKeyError,
     setShowUsageVariableApiKey,
     setStreamRetryCountInput,
     setStreamRetryMode,

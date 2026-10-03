@@ -193,7 +193,10 @@ export function ProviderModalView({ viewModel }: { viewModel: ProviderModalViewM
     setPromptCacheRetention,
     setPromptCachingEnabled,
     setRequestFormat,
-    setShowApiKey,
+    setShowApiKey: _setShowApiKey,
+    toggleShowApiKey,
+    revealingApiKey,
+    revealApiKeyError,
     setShowUsageVariableApiKey,
     setStreamRetryCountInput,
     setStreamRetryMode,
@@ -399,7 +402,8 @@ export function ProviderModalView({ viewModel }: { viewModel: ProviderModalViewM
                         variant="ghost"
                         size="icon-sm"
                         className="absolute right-1 top-1/2 -translate-y-1/2 text-muted-foreground hover:bg-transparent hover:text-foreground"
-                        onClick={() => setShowApiKey((prev) => !prev)}
+                        onClick={() => void toggleShowApiKey()}
+                        disabled={revealingApiKey}
                         title={showApiKey ? t("settings.hideApiKey") : t("settings.showApiKey")}
                         aria-label={
                           showApiKey ? t("settings.hideApiKey") : t("settings.showApiKey")
@@ -408,6 +412,9 @@ export function ProviderModalView({ viewModel }: { viewModel: ProviderModalViewM
                         {showApiKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                       </Button>
                     </div>
+                    {revealApiKeyError ? (
+                      <p className="text-xs text-destructive">{revealApiKeyError}</p>
+                    ) : null}
                   </div>
                   {providerType === "codex" ? (
                     <FormField>

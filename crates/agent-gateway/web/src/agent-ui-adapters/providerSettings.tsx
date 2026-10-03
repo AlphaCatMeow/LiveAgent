@@ -44,3 +44,8 @@ export function ProviderSettingsExtension(_props: {
 }
 
 export const providerCredentialsRedacted = true;
+
+/** WebUI 永不下发明文 API Key：远程端没有查看已保存密钥的入口。 */
+export async function revealStoredProviderApiKey(_providerId: string): Promise<string | null> {
+  return null;
+}

@@ -9,6 +9,7 @@ import {
   type KBrainHistoryResponse,
   type KBrainModelRef,
   type KBrainPromptRequest,
+  type KBrainProviderSecrets,
   type KBrainQuestionAnswer,
   type KBrainRunAccepted,
   type KBrainSession,
@@ -291,6 +292,14 @@ export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
       headers: { "Cache-Control": "no-cache, no-store, must-revalidate" },
       body: JSON.stringify(input),
     });
+  }
+
+  /** Explicit opt-in read of stored credentials; the settings document always redacts them. */
+  async function revealProviderSecrets(providerId: string): Promise<KBrainProviderSecrets> {
+    return request<KBrainProviderSecrets>(
+      `/v1/settings/providers/${encodeURIComponent(providerId)}/secrets`,
+      { method: "POST", body: JSON.stringify({ confirm: true }) },
+    );
   }
 
   async function getSettings(): Promise<KBrainSettingsDocument> {
@@ -685,6 +694,7 @@ export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
     listSessions,
     listModels,
     discoverProviderModels,
+    revealProviderSecrets,
     getSettings,
     updateSettings,
     getMcpSettings,

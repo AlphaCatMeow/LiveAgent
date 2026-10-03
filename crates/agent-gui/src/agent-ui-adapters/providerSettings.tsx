@@ -56,6 +56,15 @@ export async function discoverProviderModels(
 
 export const providerCredentialsRedacted = true;
 
+/**
+ * Reads the stored provider API key back from the local K-brain backend. Only called on an
+ * explicit user action (the eye button); returns null when nothing is stored.
+ */
+export async function revealStoredProviderApiKey(providerId: string): Promise<string | null> {
+  const secrets = await createKBrainClient().revealProviderSecrets(providerId);
+  return secrets.apiKey?.trim() ? secrets.apiKey : null;
+}
+
 type CcsProviderImportItem = {
   sourceId: string;
   appType: string;

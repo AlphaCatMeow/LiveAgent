@@ -29,6 +29,12 @@ export type KBrainSettingsProvider = Omit<Partial<CustomProvider>, "models"> & {
   models: KBrainSettingsModel[];
 };
 
+/** Response of POST /v1/settings/providers/{id}/secrets (resolved plaintext). */
+export type KBrainProviderSecrets = {
+  apiKey?: string;
+  usageQuery?: { apiKey?: string; accessToken?: string; secretAccessKey?: string };
+};
+
 export type KBrainSettingsDocument = {
   version?: string;
   mode?: "kbrain";

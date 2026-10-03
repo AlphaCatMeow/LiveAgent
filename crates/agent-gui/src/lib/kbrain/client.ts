@@ -272,8 +272,10 @@ export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
     const result = await request<{ models?: KBrainModelRef[] } | KBrainModelRef[]>("/v1/models", {
       // The catalog changes immediately after provider/model imports. A WebView
       // cache entry from the first empty catalog must not survive that update.
+      // cache:"no-store" is a fetch option and adds no request header. Do not add a
+      // Cache-Control header: K-brain's CORS preflight only allows Authorization,
+      // Content-Type and Accept, so the WebView would block the request entirely.
       cache: "no-store",
-      headers: { "Cache-Control": "no-cache, no-store, must-revalidate" },
     });
     return Array.isArray(result) ? result : (result.models ?? []);
   }
@@ -288,8 +290,10 @@ export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
       // Provider IDs can share the same proxy path (for example multiple /v1
       // OpenAI-compatible endpoints). Never let WebView HTTP caching reuse a
       // model list from another upstream.
+      // cache:"no-store" is a fetch option and adds no request header. Do not add a
+      // Cache-Control header: K-brain's CORS preflight only allows Authorization,
+      // Content-Type and Accept, so the WebView would block the request entirely.
       cache: "no-store",
-      headers: { "Cache-Control": "no-cache, no-store, must-revalidate" },
       body: JSON.stringify(input),
     });
   }

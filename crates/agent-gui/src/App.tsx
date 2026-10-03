@@ -257,6 +257,7 @@ export default function App() {
 
   const saveSequenceRef = useRef(0);
   const saveChainRef = useRef<Promise<unknown>>(Promise.resolve());
+  const gatewaySyncChainRef = useRef<Promise<void>>(Promise.resolve());
   const defaultWorkdirRef = useRef("");
   // Mirrors `settings` so setSettings/queueSettingsSave can read the latest value
   // synchronously without passing a (side-effecting) function into setSettingsState —
@@ -483,7 +484,20 @@ export default function App() {
             throw new SettingsStorageError(persistResult.conflict);
           }
           if (publishSync) {
-            await publishGatewaySettingsSync(publishTarget);
+            // Gateway synchronization is a secondary broadcast. Keep it ordered, but do not
+            // hold the local config write queue on a slow or temporarily unavailable Gateway.
+            gatewaySyncChainRef.current = gatewaySyncChainRef.current
+              .catch(() => undefined)
+              .then(() => publishGatewaySettingsSync(publishTarget))
+              .catch((error) => {
+                if (saveSequenceRef.current === saveSequence) {
+                  console.error("publish gateway settings sync failed", error);
+                  setSettingsSaveState({
+                    status: "error",
+                    message: getSettingsErrorMessage(error, fallback, next.locale, translate),
+                  });
+                }
+              });
           }
         })
         .then(() => {

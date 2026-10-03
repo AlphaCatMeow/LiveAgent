@@ -4,6 +4,7 @@ import type { SidebarShortcutId } from "../lib/settings/sidebarShortcuts";
 import { cn } from "../lib/shared/utils";
 import type { SkillSummary } from "../lib/skills/index";
 import { McpHubPage } from "../pages/mcp-hub/McpHubPage";
+import { PlanningPage } from "../pages/planning/PlanningPage";
 import { ResourceManagementPage } from "../pages/resources/ResourceManagementPage";
 import { SkillsHubPage } from "../pages/skills-hub/SkillsHubPage";
 
@@ -27,6 +28,8 @@ type ApplicationViewProps = {
   chatStyle?: CSSProperties;
   chat: ApplicationChatViewProps;
   workspaceOverlays?: ReactNode;
+  /** Lets hub pages jump to another view (e.g. schedule → scheduled tasks). */
+  onOpenView?: (view: ApplicationViewId) => void;
 };
 
 export function ApplicationView(props: ApplicationViewProps) {
@@ -42,10 +45,13 @@ export function ApplicationView(props: ApplicationViewProps) {
     chatStyle,
     chat,
     workspaceOverlays,
+    onOpenView,
   } = props;
 
   let content: ReactNode;
-  if (activeView === "skills-hub") {
+  if (activeView === "planning-hub") {
+    content = <PlanningPage onOpenCron={onOpenView ? () => onOpenView("cron-hub") : undefined} />;
+  } else if (activeView === "skills-hub") {
     content = (
       <SkillsHubPage
         settings={settings}

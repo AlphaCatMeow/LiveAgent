@@ -66,6 +66,10 @@ const ChatPage = lazy(async () => ({ default: (await loadChatPage()).ChatPage })
 const SettingsPage = lazy(async () => ({
   default: (await import("@liveagent/ui/pages/settings/SettingsPage")).SettingsPage,
 }));
+const PlanningSubscriptionRunner = lazy(async () => ({
+  default: (await import("./components/planning/PlanningSubscriptionRunner"))
+    .PlanningSubscriptionRunner,
+}));
 const CronPromptRunner = lazy(async () => ({
   default: (await import("./components/cron/CronPromptRunner")).CronPromptRunner,
 }));
@@ -628,6 +632,13 @@ export default function App() {
 
   const localeContextValue = useLocaleContextValue(settings.locale);
 
+  useEffect(() => {
+    // Calendar reminder notifications are shown by the backend, which has no UI locale.
+    void invoke("planning_set_labels", {
+      notificationTitle: translate("planner.notificationTitle", settings.locale),
+    }).catch(() => {});
+  }, [settings.locale]);
+
   const appUpdateMessages = useMemo(
     () => ({
       checkFailed: translate("settings.aboutUpdateCheckFailed", settings.locale),
@@ -742,6 +753,7 @@ export default function App() {
         {backgroundHostsReady ? (
           <Suspense fallback={null}>
             <CronPromptRunner settings={settings} />
+            <PlanningSubscriptionRunner />
             <MemoryOrganizerHost settings={settings} setSettings={setSettings} />
           </Suspense>
         ) : null}

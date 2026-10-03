@@ -1,0 +1,846 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { HubHeader } from "../../components/hub/HubChrome";
+import { SettingsNotice } from "../../components/settings/SettingsNotice";
+import { Button } from "../../components/ui/button";
+import { EmptyState } from "../../components/ui/empty-state";
+import { Skeleton } from "../../components/ui/skeleton";
+import { useIsMobile } from "../../hooks/use-mobile";
+import { cronVirtualEvents, isCronEvent, withCronLayer } from "../../lib/planning/cronLayer";
+import { localizePlanningError, planningLunarAvailable } from "../../lib/planning/i18n";
+import type { LayerRef } from "../../lib/planning/layers";
+import { planningStore, usePlanning } from "../../lib/planning/store";
+import {
+  addDays,
+  calendarWeekStart,
+  dayStart,
+  HOUR,
+  MINUTE,
+  monthDays,
+  zonedParts,
+} from "../../lib/planning/time";
+import type { EventTime, PlanningEvent, Todo } from "../../lib/planning/types";
+import { AgendaView } from "./AgendaView";
+import { CalendarImport } from "./CalendarImport";
+import { CronEventPreview } from "./CronEventPreview";
+import { HOUR_HEIGHT, useCalendarPreferences } from "./calendarDisplay";
+import { EventPreview } from "./EventPreview";
+import { LayerManager } from "./LayerManager";
+import { MonthGrid } from "./MonthGrid";
+import { type EditorTarget, PlanningEditor } from "./PlanningEditor";
+import { PlanningSearch } from "./PlanningSearch";
+import { LayerChecklist, PlanningSidebar, type TaskFilter } from "./PlanningSidebar";
+import { type PlanningMode, PlanningToolbar, type PlanningView } from "./PlanningToolbar";
+import { PlanningTrash } from "./PlanningTrash";
+import { QuickCreate, type QuickKind } from "./QuickCreate";
+import { dayOffset, firstDay, seriesTime, shiftRuleDays } from "./recurrence";
+import { type SeriesScope, useSeriesScope } from "./SeriesScopeDialog";
+import { ShortcutHelp } from "./ShortcutHelp";
+import { TaskListDialog } from "./TaskListDialog";
+import { TaskPanel } from "./TaskPanel";
+import { TasksBoard } from "./TasksBoard";
+import { type PlanningDragStart, TimeGrid } from "./TimeGrid";
+import { useCronOccurrences } from "./useCronOccurrences";
+import { usePlanningT } from "./usePlanningT";
+import "./planning.css";
+
+/** A reversible change offered in the bottom bar; hovering or focusing it pauses the timer. */
+type Undo = {
+  message: string;
+  revert(): Promise<unknown>;
+  expiresAt: number;
+  /** Milliseconds left while paused. */
+  paused?: number;
+};
+const UNDO_MS = 10_000;
+export function PlanningPage({
+  onOpenCron,
+}: {
+  /** Opens the scheduled-task page; without it the cron preview hides the jump button. */
+  onOpenCron?: () => void;
+} = {}) {
+  const isMobile = useIsMobile();
+  const [surface, setSurface] = useState<HTMLElement | null>(null);
+  const [width, setWidth] = useState(() => window.innerWidth);
+  useEffect(() => {
+    if (!surface) return;
+    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
+    observer.observe(surface);
+    return () => observer.disconnect();
+  }, [surface]);
+  // Below these widths the side panels are left out so the calendar keeps its minimum width;
+  // in between both panels slim down (see .is-snug) so sidebar, calendar and tasks all fit.
+  const compact = width < 900;
+  const sidebarInline = width >= 1100;
+  const snug = width < 1440;
+  const state = usePlanning();
+  const snapshot = state.snapshot;
+  const zone = snapshot?.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const today = zonedParts(Date.now(), zone).date;
+  const [interaction, setInteraction] = useState(false);
+  const [nowRequest, setNowRequest] = useState(0);
+  const [hoverDay, setHoverDay] = useState<string | null>(null);
+  const { t, locale } = usePlanningT();
+  const [storedPreferences, setPreferences] = useCalendarPreferences();
+  // Lunar dates only exist in the Chinese UI; the stored choice is kept for when it returns.
+  const preferences = useMemo(
+    () => ({
+      ...storedPreferences,
+      showLunar: storedPreferences.showLunar && planningLunarAvailable(locale),
+    }),
+    [storedPreferences, locale],
+  );
+  const hidden = useMemo(
+    () => new Set(storedPreferences.hiddenLayers[state.scope] ?? []),
+    [storedPreferences.hiddenLayers, state.scope],
+  );
+  const [date, setDate] = useState(today);
+  const view: PlanningView = isMobile && preferences.view === "week" ? "day" : preferences.view;
+  const setView = (next: PlanningView) => setPreferences({ view: next });
+  const [mode, setMode] = useState<PlanningMode>("calendar");
+  const [taskFilter, setTaskFilter] = useState<TaskFilter>("all");
+  const [creatingList, setCreatingList] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [preview, setPreview] = useState<{ event: PlanningEvent; anchor: HTMLElement } | null>(
+    null,
+  );
+  const [editor, setEditor] = useState<EditorTarget | null>(null);
+  // Clicking or dragging on the grid opens Google's quick-create card beside a draft block.
+  const [quick, setQuick] = useState<{
+    kind: QuickKind;
+    time: EventTime;
+    title: string;
+    anchor?: Element;
+  } | null>(null);
+  const [draftElement, setDraftElement] = useState<HTMLElement | null>(null);
+  // The 「日历与列表」 manager; a LayerRef opens it on that row.
+  const [calendarsOpen, setCalendarsOpen] = useState<LayerRef | boolean>(false);
+  const [todoDrag, setTodoDrag] = useState<PlanningDragStart | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [undo, setUndo] = useState<Undo | null>(null);
+  const [clock, setClock] = useState(Date.now());
+  const days = useMemo(() => {
+    const all =
+      view === "day"
+        ? [date]
+        : view === "agenda"
+          ? Array.from({ length: 60 }, (_, i) => addDays(date, i))
+          : view === "month"
+            ? monthDays(date, preferences.weekStartsOn, false)
+            : Array.from({ length: 7 }, (_, i) =>
+                addDays(calendarWeekStart(date, preferences.weekStartsOn), i),
+              );
+    return view === "week" && !preferences.showWeekends
+      ? all.filter((d) => ![0, 6].includes(new Date(`${d}T12:00:00Z`).getUTCDay()))
+      : all;
+  }, [date, view, preferences.weekStartsOn, preferences.showWeekends]);
+  // "Create" (button or C) starts a quick-create draft at the current time, like dragging on
+  // the grid. Day/week views show the draft block; other views anchor the card elsewhere.
+  const pendingCreate = useRef<QuickKind | null>(null);
+  const quickClosedAt = useRef(0);
+  const nowDraft = (kind: QuickKind) => {
+    const startAt = Math.floor(Date.now() / (15 * MINUTE)) * 15 * MINUTE;
+    const time: EventTime = { kind: "timed", startAt, endAt: startAt + HOUR, timeZone: zone };
+    // With "working hours only" the current time may sit outside the drawn range; then there is
+    // no draft block to anchor to, so fall back to the Create button like other views.
+    const hour = Number(zonedParts(startAt, zone).time.slice(0, 2));
+    const visibleHour =
+      !preferences.workHoursOnly || (hour >= preferences.workStart && hour < preferences.workEnd);
+    const grid =
+      mode === "calendar" &&
+      (view === "day" || view === "week") &&
+      days.includes(today) &&
+      visibleHour;
+    const anchor = grid
+      ? undefined
+      : ((mode === "calendar" && view === "month"
+          ? document.querySelector(`[data-planning-all-day="${today}"]`)
+          : null) ??
+        document.querySelector("[data-planning-create]") ??
+        surface ??
+        undefined);
+    return { kind, time, title: "", anchor };
+  };
+  const createNow = (kind: QuickKind) => {
+    setNowRequest((n) => n + 1);
+    if (mode === "calendar" && !days.includes(today)) {
+      pendingCreate.current = kind;
+      setDate(today);
+    } else setQuick(nowDraft(kind));
+  };
+  // A draft belongs to the visible range; navigating away discards it like Google does.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset when the range or mode changes
+  useEffect(() => {
+    const kind = pendingCreate.current;
+    pendingCreate.current = null;
+    setQuick(kind ? nowDraft(kind) : null);
+    // The preview's anchor block is gone after navigating.
+    setPreview(null);
+  }, [days, mode]);
+  const range = useMemo(
+    () => ({
+      from: dayStart(days[0], zone),
+      to: dayStart(addDays(days[days.length - 1], 1), zone),
+    }),
+    [days, zone],
+  );
+  useEffect(() => {
+    void planningStore.refresh(range);
+  }, [range]);
+  // Read-only scheduled-task layer: only merged into the snapshot handed to the calendar views.
+  const showCron = mode === "calendar" && preferences.showCronTasks;
+  const cron = useCronOccurrences(showCron, range.from, range.to);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: virtual titles follow the UI locale
+  const viewSnapshot = useMemo(
+    () =>
+      snapshot && showCron && cron.data
+        ? withCronLayer(snapshot, cronVirtualEvents(cron.data, zone), preferences.cronColor)
+        : snapshot,
+    [snapshot, showCron, cron.data, zone, locale, preferences.cronColor],
+  );
+  // Re-rendering the whole page (grid layout, task panel) every second made every popover
+  // stutter. Tick per second only while the undo countdown shows; otherwise once a minute
+  // keeps the now line and past-item styling current.
+  const undoActive = undo !== null && (undo.paused !== undefined || undo.expiresAt > clock);
+  const offerUndo = useCallback(
+    (message: string, revert: () => Promise<unknown>) =>
+      setUndo({ message, revert, expiresAt: Date.now() + UNDO_MS }),
+    [],
+  );
+  const pauseUndo = (paused: boolean) =>
+    setUndo((current) => {
+      if (!current) return current;
+      if (paused)
+        return current.paused === undefined
+          ? { ...current, paused: Math.max(0, current.expiresAt - Date.now()) }
+          : current;
+      return current.paused === undefined
+        ? current
+        : { ...current, expiresAt: Date.now() + Math.max(current.paused, 3000), paused: undefined };
+    });
+  useEffect(() => {
+    setClock(Date.now());
+    const timer = setInterval(() => setClock(Date.now()), undoActive ? 1000 : 60_000);
+    return () => clearInterval(timer);
+  }, [undoActive]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: switching Agent scopes must reset drafts
+  useEffect(() => {
+    setEditor(null);
+    setQuick(null);
+    setPreview(null);
+    setTrashOpen(false);
+    setImportOpen(false);
+    setCalendarsOpen(false);
+    setUndo(null);
+    setError("");
+  }, [state.scope]);
+  const { askScope, scopeDialog } = useSeriesScope();
+  const report = (e: unknown) => setError(localizePlanningError(e));
+  const run = async (fn: () => Promise<unknown>) => {
+    setBusy(true);
+    setError("");
+    try {
+      await fn();
+    } catch (e) {
+      report(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const commitTime = useCallback(
+    async (event: PlanningEvent | undefined, todoId: string | undefined, time: EventTime) => {
+      if (!snapshot) return;
+      // Moving an occurrence of a recurring event asks for the scope, as in Google.
+      const master =
+        event?.seriesId && event.originalDate
+          ? (snapshot.eventMasters ?? snapshot.events).find((e) => e.id === event.seriesId)
+          : undefined;
+      let scope: SeriesScope = "this";
+      if (master && event?.originalDate) {
+        const chosen = await askScope(t("planner.series.editTitle"), {
+          allowFollowing: event.originalDate !== firstDay(master.time),
+        });
+        if (!chosen) return;
+        scope = chosen;
+      }
+      setBusy(true);
+      setError("");
+      try {
+        if (master && event?.originalDate && scope !== "this") {
+          await planningStore.mutate<PlanningEvent>(
+            scope === "all"
+              ? {
+                  action: "event.update",
+                  id: master.id,
+                  expectedRevision: master.revision,
+                  data: {
+                    time: seriesTime(firstDay(master.time), event.originalDate, time),
+                    ...(master.recurrence && {
+                      recurrence: shiftRuleDays(
+                        master.recurrence,
+                        dayOffset(event.originalDate, firstDay(time)),
+                      ),
+                    }),
+                  },
+                }
+              : {
+                  action: "event.split",
+                  id: master.id,
+                  expectedRevision: master.revision,
+                  data: { date: event.originalDate, time },
+                },
+          );
+          setUndo(null);
+        } else if (event?.id.includes("@") && event.seriesId && event.originalDate) {
+          const saved = await planningStore.mutate<PlanningEvent>({
+            action: "event.exception",
+            id: event.seriesId,
+            expectedRevision: event.revision,
+            data: { date: event.originalDate, time },
+          });
+          const masterId = event.seriesId,
+            date = event.originalDate;
+          if (saved)
+            offerUndo(t("planner.undo.saved"), () =>
+              planningStore.mutate({
+                action: "event.restoreException",
+                id: masterId,
+                expectedRevision: event.revision + 1,
+                data: { date, exceptionId: saved.id, exceptionRevision: saved.revision },
+              }),
+            );
+        } else if (event) {
+          const saved = await planningStore.mutate<PlanningEvent>({
+            action: "event.update",
+            id: event.id,
+            expectedRevision: event.revision,
+            data: { time },
+          });
+          if (saved)
+            offerUndo(t("planner.undo.saved"), () =>
+              planningStore.mutate({
+                action: "event.update",
+                id: saved.id,
+                expectedRevision: saved.revision,
+                data: { time: event.time },
+              }),
+            );
+        } else {
+          const todo = snapshot.todos.find((t) => t.id === todoId);
+          if (!todo) throw new Error(t("planner.page.taskGone"));
+          const calendar = snapshot.calendars.find((c) => c.isDefault && !c.readOnly);
+          if (!calendar) throw new Error(t("planner.page.needDefaultCalendar"));
+          const saved = await planningStore.mutate<PlanningEvent>({
+            action: "todo.schedule",
+            id: todo.id,
+            expectedRevision: todo.revision,
+            data: { calendarId: calendar.id, time },
+          });
+          // Undoing a new block (dragged-in task) discards it instead of filling the trash.
+          if (saved)
+            offerUndo(t("planner.undo.saved"), async () => {
+              const deleted = await planningStore.mutate<PlanningEvent>({
+                action: "event.delete",
+                id: saved.id,
+                expectedRevision: saved.revision,
+                data: {},
+              });
+              if (deleted)
+                await planningStore.mutate({
+                  action: "event.purge",
+                  id: deleted.id,
+                  expectedRevision: deleted.revision,
+                  data: {},
+                });
+            });
+        }
+      } catch (e) {
+        setError(localizePlanningError(e));
+        const latest = planningStore.getState().snapshot;
+        if (event) {
+          const current =
+            latest?.events.find((item) => item.id === event.id) ??
+            latest?.eventMasters?.find((item) => item.id === event.id);
+          if (current) setEditor({ kind: "event", event: current, time });
+        } else {
+          const todo = latest?.todos.find((item) => item.id === todoId);
+          if (todo) setEditor({ kind: "event", todo, time });
+        }
+      } finally {
+        setBusy(false);
+      }
+    },
+    [snapshot, t, askScope, offerUndo],
+  );
+  useEffect(() => {
+    if (!todoDrag || view !== "month") return;
+    let moved = false;
+    const move = (event: PointerEvent) => {
+      if (event.pointerId !== todoDrag.pointerId) return;
+      event.preventDefault();
+      moved ||= Math.hypot(event.clientX - todoDrag.x, event.clientY - todoDrag.y) > 5;
+      const day = document
+        .elementFromPoint(event.clientX, event.clientY)
+        ?.closest<HTMLElement>("[data-planning-all-day]")?.dataset.planningAllDay;
+      setHoverDay(day ?? null);
+    };
+    const clear = () => {
+      setTodoDrag(null);
+      setHoverDay(null);
+      setInteraction(false);
+    };
+    const end = (event: PointerEvent) => {
+      if (event.pointerId !== todoDrag.pointerId) return;
+      const day = document
+        .elementFromPoint(event.clientX, event.clientY)
+        ?.closest<HTMLElement>("[data-planning-all-day]")?.dataset.planningAllDay;
+      if ((moved || Math.hypot(event.clientX - todoDrag.x, event.clientY - todoDrag.y) > 5) && day)
+        void commitTime(undefined, todoDrag.todo.id, {
+          kind: "allDay",
+          startDate: day,
+          endDateExclusive: addDays(day, 1),
+          timeZone: zone,
+        });
+      clear();
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") clear();
+    };
+    document.addEventListener("pointermove", move, { passive: false });
+    document.addEventListener("pointerup", end);
+    document.addEventListener("pointercancel", clear);
+    document.addEventListener("keydown", key);
+    window.addEventListener("blur", clear);
+    return () => {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", end);
+      document.removeEventListener("pointercancel", clear);
+      document.removeEventListener("keydown", key);
+      window.removeEventListener("blur", clear);
+    };
+  }, [todoDrag, view, zone, commitTime]);
+  const navigate = (direction: number) => {
+    if (view === "month") {
+      const value = new Date(`${date.slice(0, 7)}-01T12:00:00Z`);
+      value.setUTCMonth(value.getUTCMonth() + direction);
+      setDate(value.toISOString().slice(0, 10));
+    } else setDate(addDays(date, direction * (view === "day" ? 1 : 7)));
+  };
+  const openDay = (day: string) => {
+    setDate(day);
+    setView("day");
+  };
+  const shortcuts = useRef<(e: KeyboardEvent) => void>(() => {});
+  shortcuts.current = (e) => {
+    const target = e.target instanceof Element ? e.target : null;
+    if (
+      interaction ||
+      editor ||
+      e.defaultPrevented ||
+      e.isComposing ||
+      e.repeat ||
+      e.metaKey ||
+      e.ctrlKey ||
+      e.altKey ||
+      target?.closest(
+        "input, textarea, select, [contenteditable=true], [role=dialog], [role=menu], [role=listbox]",
+      )
+    )
+      return;
+    const views: Record<string, PlanningView> = { d: "day", w: "week", m: "month", a: "agenda" };
+    const key = e.key.toLowerCase();
+    if (mode === "calendar" && views[key]) setView(views[key]);
+    else if (mode === "calendar" && key === "t") {
+      setDate(today);
+      setNowRequest((n) => n + 1);
+    } else if (mode === "calendar" && (key === "j" || key === "n")) navigate(1);
+    else if (mode === "calendar" && (key === "k" || key === "p")) navigate(-1);
+    else if (key === "c") createNow(mode === "tasks" ? "todo" : "event");
+    else if (key === "/") setSearchOpen(true);
+    else if (key === "?") setShortcutsOpen(true);
+    else return;
+    e.preventDefault();
+  };
+  useEffect(() => {
+    const listener = (e: KeyboardEvent) => shortcuts.current(e);
+    document.addEventListener("keydown", listener);
+    return () => document.removeEventListener("keydown", listener);
+  }, []);
+
+  if (!snapshot)
+    return (
+      <section
+        className="flex h-full min-h-0 flex-1 flex-col bg-background"
+        aria-label={t("planner.page.label")}
+      >
+        <HubHeader
+          title={t("settings.navPlanning")}
+          subtitle={t("planner.page.subtitle")}
+          prominent
+        />
+        {state.error ? (
+          <EmptyState>
+            <SettingsNotice role="alert" variant="action-error">
+              {state.error}
+            </SettingsNotice>
+            <Button variant="outline" onClick={() => void planningStore.refresh()}>
+              {t("planner.common.retry")}
+            </Button>
+          </EmptyState>
+        ) : (
+          <div
+            className="flex flex-1 flex-col gap-4 px-5 pb-5 sm:px-6"
+            role="status"
+            aria-label={t("planner.page.loading")}
+          >
+            <Skeleton className="h-9 w-64" />
+            <Skeleton className="min-h-48 flex-1" />
+            <span className="sr-only">{t("planner.page.loadingEllipsis")}</span>
+          </div>
+        )}
+      </section>
+    );
+  const trashed = (kind: "event" | "todo", item: { id: string; revision: number }) =>
+    offerUndo(t("planner.undo.trashed"), () =>
+      planningStore.mutate({
+        action: kind === "event" ? "event.restore" : "todo.restore",
+        id: item.id,
+        expectedRevision: item.revision,
+        data: {},
+      }),
+    );
+  const panelProps = {
+    busy,
+    run,
+    onTrashed: trashed,
+    onEdit: (todo?: Todo) => {
+      setEditor({ kind: "todo", todo });
+    },
+    onSchedule: (todo: Todo, event?: PlanningEvent) => {
+      setEditor({ kind: "event", todo, event });
+    },
+    onDragEnd: () => {
+      setTodoDrag(null);
+      setInteraction(false);
+    },
+    onDrag: (drag: PlanningDragStart) => {
+      setTodoDrag(drag);
+      setInteraction(true);
+    },
+  };
+  const taskPanel = <TaskPanel key={state.scope} snapshot={snapshot} {...panelProps} />;
+  // Layer visibility is remembered per Agent scope, like Google remembers calendar checkboxes.
+  const toggleLayer = (id: string) => {
+    const next = new Set(hidden);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setPreferences({
+      hiddenLayers: { ...preferences.hiddenLayers, [state.scope]: [...next] },
+    });
+  };
+  const sidebar = (
+    <PlanningSidebar
+      mode={mode}
+      snapshot={snapshot}
+      date={date}
+      today={today}
+      hidden={hidden}
+      weekStartsOn={preferences.weekStartsOn}
+      showWeekNumbers={preferences.showWeekNumbers}
+      taskFilter={taskFilter}
+      onDate={setDate}
+      onToggleLayer={toggleLayer}
+      onCreateEvent={() => createNow("event")}
+      onCreateTask={() => createNow("todo")}
+      onManageCalendars={() => setCalendarsOpen(true)}
+      onCreateList={() => setCreatingList(true)}
+      onTaskFilter={setTaskFilter}
+      showCron={preferences.showCronTasks}
+      onToggleCron={() => setPreferences({ showCronTasks: !preferences.showCronTasks })}
+      onManageLayer={setCalendarsOpen}
+      onError={report}
+    />
+  );
+  const calendarSnapshot = viewSnapshot ?? snapshot;
+  // Side panels are fixed parts of the layout; narrow windows simply leave them out.
+  const showSidebar = sidebarInline;
+  const showTaskPanel = !compact && mode === "calendar";
+  return (
+    <section
+      ref={setSurface}
+      className={`planning-page relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden text-sm text-foreground ${snug ? "is-snug" : ""}`}
+      aria-label={t("planner.page.label")}
+      onDragStart={(e) => e.preventDefault()}
+    >
+      <PlanningToolbar
+        date={date}
+        days={days}
+        view={view}
+        mode={mode}
+        preferences={preferences}
+        onPreferences={setPreferences}
+        interaction={interaction}
+        busy={busy}
+        onNavigate={navigate}
+        onView={setView}
+        onMode={setMode}
+        onCalendars={() => setCalendarsOpen(true)}
+        onTrash={() => setTrashOpen(true)}
+        onImport={() => setImportOpen(true)}
+        onShortcuts={() => setShortcutsOpen(true)}
+        search={
+          <PlanningSearch
+            snapshot={snapshot}
+            open={searchOpen}
+            onOpenChange={setSearchOpen}
+            onOpenEvent={(event, day) => {
+              setMode("calendar");
+              setDate(day);
+              setEditor({ kind: "event", event });
+            }}
+            onOpenTodo={(todo) => setEditor({ kind: "todo", todo })}
+          />
+        }
+        layers={
+          showSidebar ? undefined : (
+            <LayerChecklist
+              snapshot={snapshot}
+              hidden={hidden}
+              onToggleLayer={toggleLayer}
+              showCron={preferences.showCronTasks}
+              onToggleCron={() => setPreferences({ showCronTasks: !preferences.showCronTasks })}
+              onManageLayer={setCalendarsOpen}
+              onError={report}
+            />
+          )
+        }
+      />
+      {(error || state.error) && (
+        <SettingsNotice variant="action-error" role="alert" className="mx-4 mb-3">
+          {error || state.error}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setError("");
+              if (state.error) void planningStore.refresh();
+            }}
+          >
+            {state.error ? t("planner.common.retry") : t("planner.common.close")}
+          </Button>
+        </SettingsNotice>
+      )}
+      {showCron && cron.error && (
+        <SettingsNotice variant="action-error" role="alert" className="mx-4 mb-3">
+          {cron.error}
+          <Button variant="ghost" size="sm" onClick={() => void cron.reload()}>
+            {t("planner.common.retry")}
+          </Button>
+        </SettingsNotice>
+      )}
+      <div className="planning-body" data-testid="planning-split">
+        {showSidebar && sidebar}
+        <main
+          className={`min-h-0 min-w-0 flex-1 ${mode === "tasks" ? "overflow-auto" : "planning-surface"}`}
+          data-testid="planning-calendar-surface"
+        >
+          {mode === "tasks" ? (
+            <TasksBoard
+              key={state.scope}
+              snapshot={snapshot}
+              hidden={hidden}
+              filter={taskFilter}
+              {...panelProps}
+            />
+          ) : view === "month" ? (
+            <MonthGrid
+              days={days}
+              date={date}
+              today={today}
+              zone={zone}
+              snapshot={calendarSnapshot}
+              hidden={hidden}
+              hoverDay={hoverDay}
+              showLunar={preferences.showLunar}
+              showCompleted={preferences.showCompleted}
+              showWeekNumbers={preferences.showWeekNumbers}
+              onSelect={(event, anchor) => setPreview({ event, anchor })}
+              onSelectTodo={(todo) => setEditor({ kind: "todo", todo })}
+              onOpenDay={openDay}
+              onCreate={(time, anchor) => {
+                // The click that dismissed an open card must not immediately start another one.
+                if (Date.now() - quickClosedAt.current < 400) return;
+                setQuick({ kind: "event", time, title: "", anchor });
+              }}
+              onMove={(event, time) => void commitTime(event, undefined, time)}
+            />
+          ) : view === "agenda" ? (
+            <AgendaView
+              days={days}
+              today={today}
+              snapshot={calendarSnapshot}
+              hidden={hidden}
+              showLunar={preferences.showLunar}
+              showCompleted={preferences.showCompleted}
+              onSelect={(event, anchor) => setPreview({ event, anchor })}
+              onSelectTodo={(todo) => setEditor({ kind: "todo", todo })}
+              onOpenDay={openDay}
+            />
+          ) : (
+            <TimeGrid
+              nowRequest={nowRequest}
+              onInteractionChange={setInteraction}
+              onSelectTodo={(todo) => setEditor({ kind: "todo", todo })}
+              onOpenDay={openDay}
+              onOpenTasks={() => setMode("tasks")}
+              days={days}
+              today={today}
+              snapshot={calendarSnapshot}
+              hourHeight={HOUR_HEIGHT}
+              workHours={
+                preferences.workHoursOnly ? [preferences.workStart, preferences.workEnd] : null
+              }
+              hidden={hidden}
+              showLunar={preferences.showLunar}
+              showCompleted={preferences.showCompleted}
+              todoDrag={todoDrag}
+              onDragEnd={() => setTodoDrag(null)}
+              onSelect={(event, anchor) => setPreview({ event, anchor })}
+              onCreate={(time) => setQuick({ kind: "event", time, title: "" })}
+              draft={
+                quick && !quick.anchor
+                  ? { time: quick.time, title: quick.title, task: quick.kind === "todo" }
+                  : null
+              }
+              onDraftElement={setDraftElement}
+              onCommit={commitTime}
+            />
+          )}
+        </main>
+        {showTaskPanel && (
+          <aside
+            className="planning-task-surface"
+            aria-label={t("planner.mode.tasks")}
+            data-testid="planning-task-surface"
+          >
+            {taskPanel}
+          </aside>
+        )}
+      </div>
+      {scopeDialog}
+      {shortcutsOpen && <ShortcutHelp onClose={() => setShortcutsOpen(false)} />}
+      {creatingList && (
+        <TaskListDialog
+          action={{ kind: "create" }}
+          onClose={() => setCreatingList(false)}
+          onSelect={() => {}}
+        />
+      )}
+      {/* A stable polite region announces the change once; the countdown stays silent. */}
+      <p role="status" className="sr-only">
+        {undoActive ? undo.message : ""}
+      </p>
+      {undo && undoActive && (
+        // biome-ignore lint/a11y/noStaticElementInteractions: hover and focus only pause the timer
+        <div
+          className="absolute bottom-4 left-1/2 z-10 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-3 rounded-lg border border-border bg-popover px-4 py-2 text-sm text-popover-foreground shadow-lg"
+          onMouseEnter={() => pauseUndo(true)}
+          onMouseLeave={() => pauseUndo(false)}
+          onFocus={() => pauseUndo(true)}
+          onBlur={() => pauseUndo(false)}
+        >
+          <span aria-hidden>{undo.message}</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            disabled={busy}
+            onClick={() =>
+              void run(async () => {
+                await undo.revert();
+                setUndo(null);
+              })
+            }
+          >
+            {t("planner.undo.undo")}
+            {undo.paused === undefined && (
+              <span aria-hidden className="tabular-nums text-muted-foreground">
+                {t("planner.undo.seconds", {
+                  seconds: Math.max(1, Math.ceil((undo.expiresAt - clock) / 1000)),
+                })}
+              </span>
+            )}
+          </Button>
+        </div>
+      )}
+      {preview && isCronEvent(preview.event) ? (
+        cron.data && (
+          <CronEventPreview
+            event={preview.event}
+            anchor={preview.anchor}
+            data={cron.data}
+            onClose={() => setPreview(null)}
+            onOpenCron={onOpenCron}
+          />
+        )
+      ) : preview ? (
+        <EventPreview
+          event={snapshot.events.find((e) => e.id === preview.event.id) ?? preview.event}
+          anchor={preview.anchor}
+          snapshot={snapshot}
+          onClose={() => setPreview(null)}
+          onTrashed={trashed}
+          onEdit={(target) => {
+            setPreview(null);
+            setEditor(target);
+          }}
+        />
+      ) : null}
+      {quick && (quick.anchor ?? draftElement) && (
+        <QuickCreate
+          kind={quick.kind}
+          time={quick.time}
+          anchor={(quick.anchor ?? draftElement) as Element}
+          defaultScheduled={!quick.anchor}
+          snapshot={snapshot}
+          onKind={(kind) => setQuick({ ...quick, kind })}
+          onTitleChange={(title) => setQuick((current) => current && { ...current, title })}
+          onTimeChange={(time) => setQuick((current) => current && { ...current, time })}
+          onClose={() => {
+            quickClosedAt.current = Date.now();
+            setQuick(null);
+          }}
+          onMore={(target) => {
+            setQuick(null);
+            setEditor(target);
+          }}
+        />
+      )}
+      {editor && (
+        <PlanningEditor
+          key={`${editor.kind}-${editor.todo?.id ?? (editor.kind === "event" ? editor.event?.id : "") ?? "new"}`}
+          target={editor}
+          snapshot={snapshot}
+          onClose={() => setEditor(null)}
+          onError={report}
+          onSchedule={(todo) => setEditor({ kind: "event", todo })}
+          onSwitchKind={(kind, time) =>
+            setEditor(kind === "todo" ? { kind: "todo" } : { kind: "event", time })
+          }
+        />
+      )}
+      {trashOpen && <PlanningTrash snapshot={snapshot} onClose={() => setTrashOpen(false)} />}
+      {importOpen && <CalendarImport snapshot={snapshot} onClose={() => setImportOpen(false)} />}
+      {calendarsOpen && (
+        <LayerManager
+          snapshot={snapshot}
+          initial={calendarsOpen === true ? undefined : calendarsOpen}
+          onClose={() => setCalendarsOpen(false)}
+        />
+      )}
+    </section>
+  );
+}

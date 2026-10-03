@@ -1,0 +1,164 @@
+import { Fragment, useState } from "react";
+import {
+  Check,
+  ChevronDown,
+  MoreHorizontal,
+  Plus,
+  SquarePen,
+  Star,
+  Trash2,
+} from "../../components/IconSet";
+import { Button } from "../../components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../../components/ui/dropdown-menu";
+import { translate } from "../../lib/planning/i18n";
+import { taskLists } from "../../lib/planning/taskLists";
+import type { PlanningSnapshot } from "../../lib/planning/types";
+import { type TaskListAction, TaskListDialog } from "./TaskListDialog";
+export function TaskListMenu({
+  snapshot,
+  value,
+  onChange,
+  actionsOnly,
+}: {
+  snapshot: PlanningSnapshot;
+  value: string;
+  onChange(value: string): void;
+  /** Card header kebab: only rename/delete the pinned list. */
+  actionsOnly?: boolean;
+}) {
+  const [action, setAction] = useState<TaskListAction | null>(null);
+  const currentList = snapshot.groups?.find((list) => list.id === value);
+  const lists = taskLists(snapshot);
+  const selected =
+    value === "starred"
+      ? translate("planner.starred")
+      : (lists.find((l) => l.id === value)?.name ?? translate("planner.myTasks"));
+  const count = (id: string) =>
+    snapshot.todos.filter(
+      (t) =>
+        !t.deletedAt &&
+        t.status === "open" &&
+        (id === "starred" ? t.priority === "high" : (t.groupId ?? "") === id),
+    ).length;
+  const myTasks = value === "" && !snapshot.defaultGroupId;
+  // Deleting a list moves its tasks to the default list; deleting the default brings back My Tasks.
+  const fallback = (list: { id: string }) =>
+    (list.id !== snapshot.defaultGroupId &&
+      snapshot.groups?.find((g) => g.id === snapshot.defaultGroupId)?.name) ||
+    translate("planner.myTasks");
+  const deleteCurrent = () =>
+    currentList
+      ? setAction({ kind: "delete", list: currentList, fallback: fallback(currentList) })
+      : setAction({
+          kind: "deleteMyTasks",
+          lists: snapshot.groups ?? [],
+          taskCount: snapshot.todos.filter((t) => !t.groupId && !t.deletedAt).length,
+        });
+  const dialog = action && (
+    <TaskListDialog action={action} onClose={() => setAction(null)} onSelect={onChange} />
+  );
+  // Starred is a filter, not a list; My Tasks can only be deleted, not renamed.
+  if (actionsOnly) {
+    if (!currentList && !myTasks) return null;
+    return (
+      <>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={<Button variant="ghost" size="icon-sm" className="rounded-full" />}
+            aria-label={translate("planner.list.actions", { name: selected })}
+          >
+            <MoreHorizontal className="size-4 rotate-90" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {currentList && (
+              <DropdownMenuItem
+                className="gap-2"
+                onClick={() => setAction({ kind: "rename", list: currentList })}
+              >
+                <SquarePen className="size-4" />
+                {translate("planner.list.rename")}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem className="gap-2 text-destructive" onClick={deleteCurrent}>
+              <Trash2 className="size-4" />
+              {translate("planner.list.delete")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {dialog}
+      </>
+    );
+  }
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={<Button variant="ghost" />}
+          aria-label={translate("planner.list.switch", { name: selected })}
+          className="-ml-1 h-8 max-w-full justify-start gap-1 rounded-md px-1 text-lg font-normal"
+        >
+          <span className="truncate">{selected}</span>
+          <ChevronDown className="size-4 shrink-0" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-56">
+          {[{ id: "starred", name: translate("planner.starred"), color: undefined }, ...lists].map(
+            (list, index) => (
+              <Fragment key={list.id}>
+                <DropdownMenuItem className="gap-2" onClick={() => onChange(list.id)}>
+                  <span className="flex size-4 shrink-0 items-center justify-center">
+                    {list.color ? (
+                      <span
+                        className="size-2.5 rounded-full"
+                        style={{ backgroundColor: list.color }}
+                      />
+                    ) : (
+                      <Star className="size-4" />
+                    )}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{list.name}</span>
+                  <span className="text-xs tabular-nums text-muted-foreground">
+                    {count(list.id)}
+                  </span>
+                  <span className="flex size-4 shrink-0 items-center justify-center">
+                    {list.id === value && <Check className="size-4" />}
+                  </span>
+                </DropdownMenuItem>
+                {index === 0 && <DropdownMenuSeparator />}
+              </Fragment>
+            ),
+          )}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem className="gap-2" onClick={() => setAction({ kind: "create" })}>
+            <Plus className="size-4" />
+            {translate("planner.list.new")}
+          </DropdownMenuItem>
+          {(currentList || myTasks) && (
+            <>
+              <DropdownMenuSeparator />
+              {currentList && (
+                <DropdownMenuItem
+                  className="gap-2"
+                  onClick={() => setAction({ kind: "rename", list: currentList })}
+                >
+                  <SquarePen className="size-4" />
+                  {translate("planner.list.renameCurrent")}
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem className="gap-2 text-destructive" onClick={deleteCurrent}>
+                <Trash2 className="size-4" />
+                {translate("planner.list.deleteCurrent")}
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {dialog}
+    </>
+  );
+}

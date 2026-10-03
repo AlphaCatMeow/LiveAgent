@@ -127,8 +127,10 @@ export async function prepare(options = {}) {
     }
   }
   try {
-    const artifactDirectory = resolve(options.artifactDir || process.env.LIVEAGENT_KBRAIN_ARTIFACT_DIR || defaultArtifact);
-    const record = await optionalJson(join(artifactDirectory, "kbrain-artifact.json"));
+    // artifactDir:false skips the repo-local artifact record (used by hermetic tests, which must
+    // not depend on a developer's locally built .liveagent/kbrain-artifact).
+    const artifactDirectory = options.artifactDir === false ? null : resolve(options.artifactDir || process.env.LIVEAGENT_KBRAIN_ARTIFACT_DIR || defaultArtifact);
+    const record = artifactDirectory ? await optionalJson(join(artifactDirectory, "kbrain-artifact.json")) : null;
     let assets;
     let checksums;
     let origin;

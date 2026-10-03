@@ -78,8 +78,8 @@ test("downloads a pinned HTTP fixture, verifies it, and reuses its checksum cach
   } });
   const firstOutput = join(lock.directory, "first");
   const secondOutput = join(lock.directory, "second");
-  const first = await prepare({ lock: lock.path, target: "x86_64-unknown-linux-gnu", output: firstOutput });
-  const second = await prepare({ lock: lock.path, target: "x86_64-unknown-linux-gnu", output: secondOutput });
+  const first = await prepare({ lock: lock.path, target: "x86_64-unknown-linux-gnu", artifactDir: false, output: firstOutput });
+  const second = await prepare({ lock: lock.path, target: "x86_64-unknown-linux-gnu", artifactDir: false, output: secondOutput });
   assert.equal(requests, 2);
   assert.equal(await readFile(first.binary, "utf8"), backendBody.toString());
   assert.equal(await readFile(first.computerBinary, "utf8"), computerBody.toString());
@@ -95,9 +95,9 @@ test("uses an explicit absolute local development binary and refuses it for rele
   const helper = join(lock.directory, "k-brain-computer-linux-x64");
   await writeFile(helper, "local helper fixture");
   const output = join(lock.directory, "output");
-  const result = await prepare({ lock: lock.path, target: "x86_64-unknown-linux-gnu", output, localBinary: local, localComputerBinary: helper });
+  const result = await prepare({ lock: lock.path, target: "x86_64-unknown-linux-gnu", artifactDir: false, output, localBinary: local, localComputerBinary: helper });
   assert.equal(result.origin, "development-override");
-  await assert.rejects(() => prepare({ lock: lock.path, target: "x86_64-unknown-linux-gnu", output, localBinary: local, localComputerBinary: helper, release: true }), /forbidden/);
+  await assert.rejects(() => prepare({ lock: lock.path, target: "x86_64-unknown-linux-gnu", artifactDir: false, output, localBinary: local, localComputerBinary: helper, release: true }), /forbidden/);
 });
 
 test("blocks checksum mismatches and failed downloads without leaving a runtime fallback", async () => {
@@ -107,16 +107,16 @@ test("blocks checksum mismatches and failed downloads without leaving a runtime 
     "x86_64-unknown-linux-gnu": { sourceRevision: revision, assets: { backend: "k-brain-linux-x64", computer: "k-brain-computer-linux-x64" }, urls: { backend: url, computer: url }, sha256: { backend: "0".repeat(64), computer: "0".repeat(64) } },
   } });
   const output = join(mismatch.directory, "output");
-  await assert.rejects(() => prepare({ lock: mismatch.path, target: "x86_64-unknown-linux-gnu", output, release: true }), /SHA-256 mismatch/);
+  await assert.rejects(() => prepare({ lock: mismatch.path, target: "x86_64-unknown-linux-gnu", artifactDir: false, output, release: true }), /SHA-256 mismatch/);
   await assert.rejects(() => access(join(output, "k-brain-x86_64-unknown-linux-gnu")));
   await new Promise((resolve) => server.close(resolve));
   server = undefined;
   const failed = await fixtureLock({ downloads: {
     "x86_64-unknown-linux-gnu": { sourceRevision: revision, assets: { backend: "k-brain-linux-x64", computer: "k-brain-computer-linux-x64" }, urls: { backend: "https://example.invalid/k-brain", computer: "https://example.invalid/k-brain-computer" }, sha256: { backend: "0".repeat(64), computer: "0".repeat(64) } },
   } });
-  await assert.rejects(() => prepare({ lock: failed.path, target: "x86_64-unknown-linux-gnu", output: join(failed.directory, "output") }), /download failed|fetch failed|ENOTFOUND|network/i);
+  await assert.rejects(() => prepare({ lock: failed.path, target: "x86_64-unknown-linux-gnu", artifactDir: false, output: join(failed.directory, "output") }), /download failed|fetch failed|ENOTFOUND|network/i);
   const noDownloads = await fixtureLock();
-  await assert.rejects(() => prepare({ lock: noDownloads.path, target: "x86_64-unknown-linux-gnu", output: join(noDownloads.directory, "output") }), /No pinned K-brain backend and computer artifacts/);
+  await assert.rejects(() => prepare({ lock: noDownloads.path, target: "x86_64-unknown-linux-gnu", artifactDir: false, output: join(noDownloads.directory, "output") }), /No pinned K-brain backend and computer artifacts/);
 });
 
 test("rejects an invalid lock before downloading", async () => {

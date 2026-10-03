@@ -44,7 +44,7 @@ test("backend build reads the lock from the same release tag as desktop installe
   assert.match(backendJob, /git -C "\$RUNNER_TEMP\/k-brain" checkout --detach "\$\{\{ steps\.lock\.outputs\.revision \}\}"/);
 });
 
-test("prepared backend and computer helper receipts use the locked target and checksums", async () => {
+test("prepared backend and computer helper receipts use the locked target and checksums", { skip: process.platform === "win32" && "Unix executable bits are not observable on Windows" }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "liveagent-kbrain-package-"));
   try {
     const backend = Buffer.from("backend fixture");
@@ -67,7 +67,7 @@ test("prepared backend and computer helper receipts use the locked target and ch
   }
 });
 
-test("verifies the real macOS Tauri app layout with executable files and receipt hashes", async () => {
+test("verifies the real macOS Tauri app layout with executable files and receipt hashes", { skip: process.platform === "win32" && "Unix executable bits are not observable on Windows" }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "liveagent-kbrain-app-"));
   try {
     const bundle = join(directory, "LiveAgent.app", "Contents", "MacOS");

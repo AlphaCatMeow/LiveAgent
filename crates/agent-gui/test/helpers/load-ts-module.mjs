@@ -120,7 +120,13 @@ export function createTsModuleLoader(options = {}) {
   const defaultMocks = createDefaultMocks();
   const mocks = new Map(Object.entries(defaultMocks));
   const optionMocks = options.mocks ?? {};
-  for (const [specifier, override] of Object.entries(optionMocks)) {
+  // Tests often key mocks with `new URL(..., import.meta.url).pathname`. On Windows that yields
+  // "/D:/x/src/lib/host.ts" while module resolution produces "D:\x\src\lib\host.ts", so the mock
+  // silently never matched. Normalize such keys to the native path form.
+  const normalizeMockKey = (specifier) =>
+    /^\/[A-Za-z]:\//.test(specifier) ? path.normalize(decodeURIComponent(specifier.slice(1))) : specifier;
+  for (const [rawSpecifier, override] of Object.entries(optionMocks)) {
+    const specifier = normalizeMockKey(rawSpecifier);
     const base = defaultMocks[specifier];
     const isPlainMerge =
       base &&
@@ -134,7 +140,7 @@ export function createTsModuleLoader(options = {}) {
 
   const hostModulePath = path.join(hostSourceDir, "lib/host.ts");
   const hasExplicitHostMock =
-    Object.hasOwn(optionMocks, hostModulePath) ||
+    Object.keys(optionMocks).some((key) => normalizeMockKey(key) === hostModulePath) ||
     Object.hasOwn(optionMocks, "@liveagent/app/lib/host");
   if (Object.hasOwn(optionMocks, "@tauri-apps/api/core") && !hasExplicitHostMock) {
     const hostModule = loadModule("src/lib/host.ts");

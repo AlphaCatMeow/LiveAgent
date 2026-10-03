@@ -109,14 +109,22 @@ fn copy_missing(src: &Path, dst: &Path) -> io::Result<()> {
     Ok(())
 }
 
-// A competing migrator may create this directory. Never follow a competing link.
+#[cfg(unix)]
 fn ensure_dir(path: &Path, permissions: &fs::Permissions) -> io::Result<bool> {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
     let mut builder = fs::DirBuilder::new();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-        builder.mode(permissions.mode() | 0o700);
-    }
+    builder.mode(permissions.mode() | 0o700);
+    create_migration_dir(builder, path)
+}
+
+// Windows has no POSIX permission bits, so the mode of the source entry is dropped here.
+#[cfg(not(unix))]
+fn ensure_dir(path: &Path, _permissions: &fs::Permissions) -> io::Result<bool> {
+    create_migration_dir(fs::DirBuilder::new(), path)
+}
+
+// A competing migrator may create this directory. Never follow a competing link.
+fn create_migration_dir(builder: fs::DirBuilder, path: &Path) -> io::Result<bool> {
     match builder.create(path) {
         Ok(()) => return Ok(true),
         Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}

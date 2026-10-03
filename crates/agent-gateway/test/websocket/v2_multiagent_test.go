@@ -5,6 +5,7 @@ package websocket_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -286,6 +287,9 @@ func TestV2WorkspaceSubscribeOfflineAgentStreamsLocalActivity(t *testing.T) {
 	root := t.TempDir()
 	workdir := filepath.Join(root, "workspace-link")
 	if err := os.Symlink(t.TempDir(), workdir); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skip("symlink creation requires privileges on Windows")
+		}
 		t.Fatal(err)
 	}
 	cfg := newV2TestConfig()

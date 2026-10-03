@@ -466,6 +466,11 @@ export type PersistedSettingsLoadResult = {
   defaultWorkdir: string;
 };
 
+function isKBrainRejection(error: unknown): boolean {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === "number" && status >= 400 && status < 500;
+}
+
 async function loadAndMaybeImportKBrainProviders(
   legacyProviders: readonly CustomProvider[],
   legacySelectedModel?: AppSettings["selectedModel"],
@@ -477,19 +482,45 @@ async function loadAndMaybeImportKBrainProviders(
   if (missingLegacyProviders.length === 0) {
     return { document: backend, providers: backendProviders };
   }
-  const mergedProviders = [...backendProviders, ...missingLegacyProviders];
   const backendSelectedModel =
     backend.defaultProvider && backend.defaultModel
       ? { customProviderId: backend.defaultProvider, model: backend.defaultModel }
       : legacySelectedModel;
-  const imported = await saveKBrainProviderSettings(
-    kBrainSettingsUpdateFromLegacyProviders(
-      backendProviders,
-      mergedProviders,
-      backendSelectedModel,
-    ),
-  );
-  return { document: imported, providers: appProvidersFromKBrain(imported) };
+  const importProviders = (current: readonly CustomProvider[], extra: readonly CustomProvider[]) =>
+    saveKBrainProviderSettings(
+      kBrainSettingsUpdateFromLegacyProviders(
+        current,
+        [...current, ...extra],
+        backendSelectedModel,
+      ),
+    );
+  // Legacy import is a best-effort migration step. A provider K-brain rejects (for example a
+  // shared model id whose metadata conflicts with an existing provider) must never fail the
+  // whole settings load: that used to drop every setting back to defaults on each launch.
+  try {
+    const imported = await importProviders(backendProviders, missingLegacyProviders);
+    return { document: imported, providers: appProvidersFromKBrain(imported) };
+  } catch (batchError) {
+    // Transient/backend failures keep surfacing (and retry on the next launch); only a
+    // validation rejection (4xx) means some legacy record can never be imported as-is.
+    if (!isKBrainRejection(batchError)) throw batchError;
+    console.warn("K-brain legacy provider import rejected; retrying per provider", batchError);
+  }
+  let document = backend;
+  let providers = backendProviders;
+  for (const legacy of missingLegacyProviders) {
+    try {
+      document = await importProviders(providers, [legacy]);
+      providers = appProvidersFromKBrain(document);
+    } catch (error) {
+      if (!isKBrainRejection(error)) throw error;
+      console.warn(
+        `Skipped legacy provider "${legacy.name || legacy.id}" during K-brain import`,
+        error,
+      );
+    }
+  }
+  return { document, providers };
 }
 
 export async function loadPersistedSettingsWithDefaults(): Promise<PersistedSettingsLoadResult> {
@@ -650,6 +681,29 @@ async function persistKBrainPrompts(prev: AppSettings, next: AppSettings): Promi
   }
 }
 
+// Runs a synchronous local write as a task so it shares error reporting with backend saves:
+// a throwing localStorage write must not escape while backend requests are still in flight.
+function settleLocalWrite(write: () => void): Promise<void> {
+  try {
+    write();
+    return Promise.resolve();
+  } catch (error) {
+    return Promise.reject(
+      error instanceof SettingsStorageError
+        ? error
+        : new SettingsStorageError("save_failed", error),
+    );
+  }
+}
+
+// Waits for every domain to finish so one failure cannot cancel another domain's write, then
+// reports the first failure in submission order (backend diagnostics are pushed first).
+async function settleTasks(tasks: Promise<unknown>[]): Promise<void> {
+  const outcomes = await Promise.allSettled(tasks);
+  const failed = outcomes.find((outcome) => outcome.status === "rejected");
+  if (failed) throw failed.reason;
+}
+
 export async function persistSettings(
   prev: AppSettings,
   next: AppSettings,
@@ -659,18 +713,23 @@ export async function persistSettings(
   const providersChanged =
     hasChanged(prev.customProviders, next.customProviders) ||
     hasChanged(prev.selectedModel ?? null, next.selectedModel ?? null);
+  // Provider records go to K-brain. A failure there must not stop the other domains from
+  // saving: it used to throw before the local UI write, and failedProviderSave then made every
+  // later save retry and throw again, so theme/locale/font changes were never persisted.
   if (providersChanged || failedProviderSave) {
     const baseline = failedProviderSave ?? prev;
-    try {
-      const document = await saveKBrainProviderSettings(
-        kBrainSettingsUpdateFromAppSettings(baseline, next),
-      );
-      result.customProviders = appProvidersFromKBrain(document);
-      failedProviderSave = undefined;
-    } catch (error) {
-      failedProviderSave = baseline;
-      throw new SettingsStorageError("save_failed", error);
-    }
+    tasks.push(
+      saveKBrainProviderSettings(kBrainSettingsUpdateFromAppSettings(baseline, next)).then(
+        (document) => {
+          result.customProviders = appProvidersFromKBrain(document);
+          failedProviderSave = undefined;
+        },
+        (error) => {
+          failedProviderSave = baseline;
+          throw new SettingsStorageError("save_failed", error);
+        },
+      ),
+    );
   }
 
   if (
@@ -696,8 +755,8 @@ export async function persistSettings(
   }
 
   if (isKBrainBrowserHost()) {
-    writeBrowserPersistedSettings(next);
-    await Promise.all(tasks);
+    tasks.push(settleLocalWrite(() => writeBrowserPersistedSettings(next)));
+    await settleTasks(tasks);
     return result;
   }
 
@@ -793,22 +852,26 @@ export async function persistSettings(
     hasChanged(prev.closeWindowBehavior, next.closeWindowBehavior) ||
     hasChanged(prev.retryErrorSettings, next.retryErrorSettings)
   ) {
-    writeLocalUiSettings({
-      skills: next.skills,
-      chatRuntimeControls: next.chatRuntimeControls,
-      customSettings: next.customSettings,
-      updates: next.updates,
-      selectedModel: next.selectedModel,
-      theme: next.theme,
-      locale: next.locale,
-      closeWindowBehavior: next.closeWindowBehavior,
-      retryErrorSettings: next.retryErrorSettings,
-    });
+    tasks.push(
+      settleLocalWrite(() =>
+        writeLocalUiSettings({
+          skills: next.skills,
+          chatRuntimeControls: next.chatRuntimeControls,
+          customSettings: next.customSettings,
+          updates: next.updates,
+          selectedModel: next.selectedModel,
+          theme: next.theme,
+          locale: next.locale,
+          closeWindowBehavior: next.closeWindowBehavior,
+          retryErrorSettings: next.retryErrorSettings,
+        }),
+      ),
+    );
   }
 
   // 自动同步的标脏完全由后端完成：快照六域全部落 SQLite，各域的 save_*
   // 在 tx.commit() 之后自行标脏，前端无需（也不应）参与。
-  await Promise.all(tasks);
+  await settleTasks(tasks);
 
   return result;
 }

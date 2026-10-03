@@ -45,7 +45,8 @@ test("K-brain provider discovery disables WebView caching for shared proxy paths
   });
   assert.equal(new URL(call.url).pathname, "/v1/settings/providers/provider-a/models");
   assert.equal(call.init.cache, "no-store");
-  assert.equal(call.init.headers["Cache-Control"], "no-cache, no-store, must-revalidate");
+  // Custom headers outside K-brain's CORS allow-list make the WebView block the request.
+  assert.equal(call.init.headers["Cache-Control"], undefined);
 });
 
 test("K-brain client sends auxiliary text generation through the versioned backend contract", async () => {
@@ -418,5 +419,23 @@ test("history import validates checkpoint statuses, identities, and partial reas
   for (const invalid of [null, {}, { ...valid, checkpoint: "complete" }, { ...valid, source_id: "" }, { ...valid, fingerprint: "" }, { ...valid, checkpoint_reason: 3 }]) {
     const client = createKBrainClient({ fetch: async () => jsonResponse(invalid) });
     await assert.rejects(() => client.importLegacyHistory({ source_id: "legacy" }), /Malformed K-brain history import response/);
+  }
+});
+
+test("K-brain model catalog request only sends CORS-allowed headers", async () => {
+  let call;
+  const client = createKBrainClient({
+    baseUrl: "https://kbrain.test",
+    token: "secret",
+    fetch: async (url, init = {}) => {
+      call = { url: String(url), init };
+      return jsonResponse({ models: [] });
+    },
+  });
+  await client.listModels();
+  assert.equal(call.init.cache, "no-store");
+  const allowed = new Set(["authorization", "content-type", "accept"]);
+  for (const name of Object.keys(call.init.headers ?? {})) {
+    assert.ok(allowed.has(name.toLowerCase()), `header ${name} is outside the K-brain CORS allow-list`);
   }
 });

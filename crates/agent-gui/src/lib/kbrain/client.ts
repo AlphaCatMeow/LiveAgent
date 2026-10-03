@@ -270,11 +270,8 @@ export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
 
   async function listModels(): Promise<KBrainModelRef[]> {
     const result = await request<{ models?: KBrainModelRef[] } | KBrainModelRef[]>("/v1/models", {
-      // The catalog changes immediately after provider/model imports. A WebView
-      // cache entry from the first empty catalog must not survive that update.
-      // cache:"no-store" is a fetch option and adds no request header. Do not add a
-      // Cache-Control header: K-brain's CORS preflight only allows Authorization,
-      // Content-Type and Accept, so the WebView would block the request entirely.
+      // The catalog changes immediately after provider/model imports. Request cache
+      // mode avoids stale WebView entries without adding a CORS-preflight header.
       cache: "no-store",
     });
     return Array.isArray(result) ? result : (result.models ?? []);

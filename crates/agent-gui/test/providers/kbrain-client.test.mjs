@@ -45,8 +45,7 @@ test("K-brain provider discovery disables WebView caching for shared proxy paths
   });
   assert.equal(new URL(call.url).pathname, "/v1/settings/providers/provider-a/models");
   assert.equal(call.init.cache, "no-store");
-  // Custom headers outside K-brain's CORS allow-list make the WebView block the request.
-  assert.equal(call.init.headers["Cache-Control"], undefined);
+  assert.equal(call.init.headers?.["Cache-Control"], undefined);
 });
 
 test("K-brain client sends auxiliary text generation through the versioned backend contract", async () => {

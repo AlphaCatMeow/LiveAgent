@@ -431,6 +431,58 @@ test("native settings keep backend credentials separate from nonprovider prefere
   });
 });
 
+// Regression: a legacy provider K-brain rejects (shared model id with conflicting metadata) used
+// to fail the whole load, so App fell back to default settings and the theme reset every launch.
+test("a rejected legacy provider import does not fail the settings load", async () => {
+  const localStorage = createMemoryLocalStorage({ [LOCAL_UI_SETTINGS_STORAGE_KEY]: JSON.stringify({ theme: "dark" }) });
+  await withSettingsFixture({
+    browser: false,
+    kbrainBackend: true,
+    localStorage,
+    invoke: async (command) =>
+      command === "settings_load_all"
+        ? { providers: [{ id: "legacy-dup", name: "Old RightCode", type: "claude_code", baseUrl: "https://old.invalid", apiKey: "k", models: [{ id: "backend-model" }], activeModels: ["backend-model"] }] }
+        : {},
+    fixtureOptions: { putStatus: 400 },
+  }, async ({ storage }) => {
+    const loaded = await storage.loadPersistedSettings();
+    assert.equal(loaded.theme, "dark");
+    assert.deepEqual(loaded.customProviders.map((provider) => provider.id), ["backend-provider"]);
+  });
+});
+
+// Regression: a provider save that K-brain rejects used to throw before the local UI write.
+// failedProviderSave then retried (and failed) on every later save, so theme, locale and font
+// preferences silently never reached storage and reverted on the next launch.
+test("native UI preferences persist even when the K-brain provider save fails", async () => {
+  const localStorage = createMemoryLocalStorage();
+  await withSettingsFixture({
+    browser: false,
+    kbrainBackend: true,
+    localStorage,
+    invoke: async (command) => (command === "settings_load_all" ? {} : {}),
+    fixtureOptions: { putStatus: 500 },
+  }, async ({ storage, loader }) => {
+    const settingsApi = loader.loadModule("src/lib/settings/index.ts");
+    const loaded = settingsApi.normalizeSettings(await storage.loadPersistedSettings());
+    const providerEdit = settingsApi.normalizeSettings({
+      ...loaded,
+      theme: "dark",
+      customProviders: loaded.customProviders.map((provider) => ({ ...provider, name: "Renamed" })),
+    });
+    await assert.rejects(() => storage.persistSettings(loaded, providerEdit), (error) => error.code === "save_failed");
+    assert.equal(JSON.parse(localStorage.getItem(LOCAL_UI_SETTINGS_STORAGE_KEY)).theme, "dark");
+
+    // The pending provider retry still fails, but a pure UI change in the next save must land.
+    const themeOnly = settingsApi.normalizeSettings({ ...providerEdit, theme: "light", locale: "en-US" });
+    await assert.rejects(() => storage.persistSettings(providerEdit, themeOnly), (error) => error.code === "save_failed");
+    const stored = JSON.parse(localStorage.getItem(LOCAL_UI_SETTINGS_STORAGE_KEY));
+    assert.equal(stored.theme, "light");
+    assert.equal(stored.locale, "en-US");
+    assert.equal((await storage.loadPersistedSettings()).theme, "light");
+  });
+});
+
 for (const operation of ["load", "save"]) {
   test(`K-brain browser ${operation} reports storage failures instead of claiming success`, async () => {
     const localStorage = createMemoryLocalStorage({ [BROWSER_SETTINGS_STORAGE_KEY]: JSON.stringify(credentialSnapshot("blocked")) });

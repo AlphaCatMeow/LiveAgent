@@ -171,6 +171,7 @@ export function ProviderModalView({ viewModel }: { viewModel: ProviderModalViewM
     providerType,
     removeCustomHeader,
     removeModel,
+    clearVisibleModels,
     requestClose,
     requestFormat,
     saveInlineModelSettings,
@@ -214,7 +215,7 @@ export function ProviderModalView({ viewModel }: { viewModel: ProviderModalViewM
     typeLabel,
     updateCustomHeader,
     usageQuery,
-    usageQueryConfirmDialog,
+    confirmDialog,
     usageQueryTest,
     usageTimeoutInput,
     usageVariableApiKey,
@@ -525,6 +526,18 @@ export function ProviderModalView({ viewModel }: { viewModel: ProviderModalViewM
                               .replace("{enabled}", String(visibleActiveCount))
                               .replace("{total}", String(visibleModels.length))}
                       </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="ml-auto shrink-0 gap-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive max-[720px]:h-10"
+                        onClick={() => void clearVisibleModels()}
+                      >
+                        <Trash2 className="size-3.5" />
+                        {modelSearchQuery
+                          ? t("settings.clearMatchedModels")
+                          : t("settings.clearAllModels")}
+                      </Button>
                     </div>
                   ) : null}
 
@@ -2016,7 +2029,7 @@ export function ProviderModalView({ viewModel }: { viewModel: ProviderModalViewM
             </DialogFooter>
           </DialogContent>
         </Dialog>
-        {usageQueryConfirmDialog}
+        {confirmDialog}
       </DialogContent>
     </Dialog>
   );

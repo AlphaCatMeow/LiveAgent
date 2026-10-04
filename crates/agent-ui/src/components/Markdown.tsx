@@ -1,7 +1,6 @@
 import { openUrl } from "@liveagent/app/shims/tauriOpener";
 import { ChevronDown, ChevronUp, Copy, ExternalLink } from "@liveagent/ui/components/IconSet";
 import { useLocale } from "@liveagent/ui/i18n/index";
-import { cjk } from "@streamdown/cjk";
 import { math } from "@streamdown/math";
 import {
   type ComponentProps,
@@ -40,6 +39,10 @@ import {
   resolveCodeBlockRenderPolicy,
 } from "../lib/markdownCodeBlockPolicy";
 import { throttledCodePlugin } from "../lib/markdownCodeHighlight";
+import {
+  cjkDoubleTildeStrikethrough,
+  withDoubleTildeStrikethrough,
+} from "../lib/markdownStrikethrough";
 import { normalizeLatexDelimiters } from "../lib/normalizeLatexDelimiters";
 import { copyTextToClipboard } from "../lib/shared/clipboard";
 import { cn } from "../lib/shared/utils";
@@ -218,8 +221,14 @@ export type MarkdownProps = {
 };
 
 // code 走包装插件：有界 LRU + 流式增长块 300ms 节流（见 markdownCodeHighlight.ts）。
-const streamdownPlugins = { code: throttledCodePlugin, math, cjk };
-const remarkPlugins = [...Object.values(defaultRemarkPlugins), remarkBreaks];
+// 删除线只认 `~~text~~`，单个 `~` 按普通字符显示（见 markdownStrikethrough.ts）。
+const streamdownPlugins = { code: throttledCodePlugin, math, cjk: cjkDoubleTildeStrikethrough };
+const remarkPlugins = [
+  ...Object.entries(defaultRemarkPlugins).map(([name, plugin]) =>
+    name === "gfm" ? withDoubleTildeStrikethrough(plugin) : plugin,
+  ),
+  remarkBreaks,
+];
 const chatRemarkPlugins = [...remarkPlugins, remarkChatFileLinks];
 
 type StreamdownRehypePlugins = NonNullable<ComponentProps<typeof Streamdown>["rehypePlugins"]>;

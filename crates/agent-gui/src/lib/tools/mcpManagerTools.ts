@@ -61,6 +61,8 @@ type McpRuntimeTestResponse = {
   tools: McpDiagnosticToolInfo[];
   error?: string | null;
   stderrTail?: string | null;
+  /** 实际使用的 MCP 协议版本：modern（如 2026-07-28）或 legacy 握手协商结果。 */
+  protocolVersion?: string | null;
 };
 
 type McpStopServerResponse = {
@@ -629,6 +631,7 @@ function formatMcpManagerResult(result: McpManagerExecutionResult) {
       `test=${result.test.ok ? "ok" : "failed"} phase=${result.test.phase} durationMs=${result.test.durationMs}`,
     );
     lines.push(`tools=${result.test.toolsCount}`);
+    if (result.test.protocolVersion) lines.push(`protocolVersion=${result.test.protocolVersion}`);
     if (result.test.error) lines.push(`error=${result.test.error}`);
     if (result.test.stderrTail) lines.push(result.test.stderrTail);
   }

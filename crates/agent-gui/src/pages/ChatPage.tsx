@@ -127,7 +127,13 @@ import {
   createConversationStateFromContext,
   type RenderTimelineItem,
 } from "../lib/chat/conversation/conversationState";
-import type { ChatHistorySummary } from "../lib/chat/history/chatHistory";
+import {
+  branchChatHistory,
+  buildConversationStateFromWindow,
+  CHAT_HISTORY_WINDOW_MESSAGES,
+  type ChatHistorySummary,
+  getChatHistoryWindow,
+} from "../lib/chat/history/chatHistory";
 import {
   buildFallbackConversationTitle,
   createConversationIdentity,
@@ -193,6 +199,7 @@ import { useConversationPaneHostBridge } from "./chat/conversations/useConversat
 import { useConversationRuntimeEntrySnapshot } from "./chat/conversations/useConversationRuntimeEntrySnapshot";
 import type {
   EnsureGatewayBridgeConversationReadyOptions,
+  PrepareEditResend,
   SendChatAction,
 } from "./chat/gateway/gatewayBridgeTypes";
 import { useGatewayBridgeListeners } from "./chat/gateway/useGatewayBridgeListeners";
@@ -222,6 +229,7 @@ import { useChatTurnQueue } from "./chat/queue/useChatTurnQueue";
 import { createChatRuntimeHost } from "./chat/runtime/ChatRuntimeHost";
 import {
   pruneIdleConversationRuntimeCaches,
+  setConversationRuntimeCacheEntry,
   syncMovedConversationRuntimeWorkdir,
 } from "./chat/runtime/chatPageRuntime";
 import { createGuiClarifyRunner } from "./chat/runtime/clarifyRunner";
@@ -1513,41 +1521,56 @@ function ChatPageContent(props: ChatPageProps) {
     setContext(currentRequestContext);
   }, [currentRequestContext, setContext]);
 
-  useGatewayBridgeListeners({
-    currentConversationIdRef,
-    conversationRuntimeCacheRef,
-    ensureGatewayBridgeConversationReadyRef,
-    sendActionRef,
-    queueGatewayBridgeEventForRequest,
-    shouldQueueGatewayChatRequest,
-    enqueueGatewayChatRequest,
-    isConversationRunning,
-    getConversationAbortController,
-    requestConversationStop,
-    requestActiveConversationStop,
-    consumeConversationStop,
-    runGatewayClarifyTurn: async (messages, selection, runtimeControls, onTextDelta) => {
-      const provider = settings.customProviders.find((p) => p.id === selection.providerId);
-      if (!provider) {
-        throw new Error(`clarify provider not found: ${selection.providerId}`);
-      }
-      // 与本地澄清共用 createGuiClarifyRunner：调用参数（cacheRetention/
-      // nativeWebSearch/context 拼装）单一来源，桥接路径不再手写一份。
-      const guiSelection = {
-        selectedModel: {
-          customProviderId: provider.id,
-          model: selection.model,
-        },
-        provider,
-        providerId: provider.type,
-        model: selection.model,
+  const prepareEditResend = useCallback<PrepareEditResend>(
+    async (requestedConversationId, messageRef, options) => {
+      const sourceConversationId =
+        requestedConversationId.trim() || currentConversationIdRef.current.trim();
+      if (!sourceConversationId) throw new Error("当前会话不存在，无法编辑重发");
+      if (!kBrainBackendEnabled) return { conversationId: sourceConversationId, messageRef };
+      const summary = await branchChatHistory(sourceConversationId, messageRef);
+      sidebarStore.upsertLocal({ ...summary, isPending: undefined });
+      const childWindow = await getChatHistoryWindow({
+        id: summary.id,
+        maxMessages: CHAT_HISTORY_WINDOW_MESSAGES,
+        includeActiveSegment: true,
+      });
+      if (!childWindow.activeSegment) throw new Error("编辑重发分支缺少活跃历史");
+      const childState = buildConversationStateFromWindow(childWindow);
+      const childRef = childState.transcript.items
+        .filter((item): item is Extract<typeof item, { kind: "user" }> => item.kind === "user")
+        .find((item) => item.messageRef?.messageId === messageRef.messageId)?.messageRef;
+      if (!childRef) throw new Error("编辑重发分支缺少稳定消息标识");
+      const sourceEntry = conversationRuntimeCacheRef.current.get(sourceConversationId);
+      if (!sourceEntry) throw new Error("当前会话运行状态不存在，无法编辑重发");
+      const childEntry = {
+        ...sourceEntry,
+        state: childState,
+        sessionId: childWindow.conversation.sessionId ?? childWindow.conversation.id,
+        createdAt: childWindow.conversation.createdAt,
+        workdir: childWindow.conversation.cwd,
+        isSending: false,
+        errorMessage: null,
       };
-      return createGuiClarifyRunner(
-        () => guiSelection,
-        () => createProviderRuntimeConfig(provider, selection.model, runtimeControls),
-      )(messages, new AbortController().signal, onTextDelta);
+      setConversationRuntimeCacheEntry(conversationRuntimeCacheRef.current, summary.id, childEntry);
+      conversationPersistenceCursorRef.current.set(summary.id, {
+        activeSegmentIndex: childWindow.activeSegment?.segmentIndex ?? 0,
+        activeSegmentId: childWindow.activeSegment?.segmentId ?? `kbrain:${summary.sessionId}`,
+      });
+      if (options?.activate !== false) {
+        // Activate the child before its run starts. The source session remains
+        // available in the sidebar and is never edited.
+        await openInitialActionRef.current(summary.id);
+      }
+      return { conversationId: summary.id, messageRef: childRef };
     },
-  });
+    [
+      conversationPersistenceCursorRef,
+      conversationRuntimeCacheRef,
+      currentConversationIdRef,
+      kBrainBackendEnabled,
+      sidebarStore,
+    ],
+  );
 
   const { send } = useSendChatTurn({
     settings,
@@ -1610,6 +1633,41 @@ function ChatPageContent(props: ChatPageProps) {
 
   sendActionRef.current = send;
   stopSendingActionRef.current = stopSending;
+
+  useGatewayBridgeListeners({
+    currentConversationIdRef,
+    conversationRuntimeCacheRef,
+    ensureGatewayBridgeConversationReadyRef,
+    prepareEditResend,
+    sendActionRef,
+    queueGatewayBridgeEventForRequest,
+    shouldQueueGatewayChatRequest,
+    enqueueGatewayChatRequest,
+    isConversationRunning,
+    getConversationAbortController,
+    requestConversationStop,
+    requestActiveConversationStop,
+    consumeConversationStop,
+    runGatewayClarifyTurn: async (messages, selection, runtimeControls, onTextDelta) => {
+      const provider = settings.customProviders.find((p) => p.id === selection.providerId);
+      if (!provider) {
+        throw new Error(`clarify provider not found: ${selection.providerId}`);
+      }
+      const guiSelection = {
+        selectedModel: {
+          customProviderId: provider.id,
+          model: selection.model,
+        },
+        provider,
+        providerId: provider.type,
+        model: selection.model,
+      };
+      return createGuiClarifyRunner(
+        () => guiSelection,
+        () => createProviderRuntimeConfig(provider, selection.model, runtimeControls),
+      )(messages, new AbortController().signal, onTextDelta);
+    },
+  });
 
   const handleManualCompact = useManualCompaction({
     onCompleted: async (conversationId) => {
@@ -2160,6 +2218,7 @@ function ChatPageContent(props: ChatPageProps) {
     isConversationHydrationFailed,
     currentConversationIdRef,
     onError: handleEditResendError,
+    prepareEditResend,
     sendActionRef,
   });
 

@@ -19,9 +19,11 @@ import {
   normalizeGatewayCommandSafetyMode,
   normalizeGatewayExecutionMode,
   normalizeGatewayWorkdir,
+  type PrepareEditResend,
 } from "./gatewayBridgeTypes";
 
 type UseGatewayBridgeListenersParams = GatewayBridgeRuntimeRefs & {
+  prepareEditResend?: PrepareEditResend;
   queueGatewayBridgeEventForRequest: (
     requestId: string,
     event: Record<string, unknown>,
@@ -439,6 +441,7 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
           failClaimedRequest(requestId, targetConversationId, "invalid_chat_command", message);
           return;
         }
+        let editResendBaseMessageRef = baseMessageRef;
 
         if (
           targetConversationId &&
@@ -463,6 +466,17 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
               rebased: payload.rebased === true,
             },
           );
+
+        const prepareEditResend = latestParamsRef.current.prepareEditResend;
+        if (payload.rebased === true && editResendBaseMessageRef && prepareEditResend) {
+          const prepared = await prepareEditResend(
+            resolvedConversationId,
+            editResendBaseMessageRef,
+            { activate: false },
+          );
+          resolvedConversationId = prepared.conversationId;
+          editResendBaseMessageRef = prepared.messageRef;
+        }
 
         const runningRequest =
           getActiveGatewayBridgeRequestByConversationId(resolvedConversationId) ||
@@ -523,7 +537,7 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
           commandSafetyModeOverride: gatewayBridgeRequest.commandSafetyModeOverride,
           runtimeControlsOverride: gatewayBridgeRequest.runtimeControlsOverride,
           gatewayBridgeRequestOverride: gatewayBridgeRequest,
-          editResendBaseMessageRef: baseMessageRef,
+          editResendBaseMessageRef,
           beforeRuntimeStart: markRuntimeStarted,
           afterInitialHistoryPersist: markRuntimeStarted,
         });

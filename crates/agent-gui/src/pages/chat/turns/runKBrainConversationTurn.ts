@@ -25,6 +25,7 @@ import type {
 import { requestBackendQuestion } from "../../../lib/tools/askUserQuestionTools";
 import { createBrowserTools } from "../../../lib/tools/browserTools";
 import { createExitPlanModeTools } from "../../../lib/tools/planModeTools";
+import { resolveShellSandboxSettings } from "../../../lib/tools/sandboxPolicy";
 import { requestToolApproval } from "../../../lib/tools/toolApproval";
 import type { RunAgentConversationTurnParams } from "./runAgentConversationTurn";
 import type { RunTextConversationTurnParams } from "./runTextConversationTurn";
@@ -33,8 +34,10 @@ type Params = RunAgentConversationTurnParams | RunTextConversationTurnParams;
 
 // Desktop-only tools K-brain cannot run itself. They are declared per run as client tools;
 // K-brain offers them to the model and hands each call back through client_tool.requested.
-function createDesktopClientTools() {
-  return createBrowserTools({});
+function createDesktopClientTools(
+  commandSafetyMode: RunAgentConversationTurnParams["commandSafetyMode"],
+) {
+  return createBrowserTools({ sandbox: resolveShellSandboxSettings(commandSafetyMode) });
 }
 
 function clientToolDefinitions(
@@ -99,7 +102,7 @@ function canonicalRunOptions(
       )
       .sort(([left], [right]) => left.localeCompare(right)),
   ) as Record<string, "ask" | "allow" | "deny">;
-  const safety = agentMode ? params.commandSafetyMode : undefined;
+  const safety = agentMode && "commandSafetyMode" in params ? params.commandSafetyMode : undefined;
   const reasoning = params.runtime.reasoning;
   return {
     mode: agentMode ? "agent" : "chat",
@@ -205,7 +208,9 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
   hookLifecycle.startTurn(round);
   try {
     const runtimeConnection = getConfiguredKBrainConnection();
-    const desktopClientTools = createDesktopClientTools();
+    const desktopClientTools = createDesktopClientTools(
+      "commandSafetyMode" in params ? params.commandSafetyMode : undefined,
+    );
     const assistant = await runKBrainTurn({
       conversationId: params.conversationId,
       sessionId: params.sessionId,

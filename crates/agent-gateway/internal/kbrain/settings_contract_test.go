@@ -338,3 +338,18 @@ func TestProviderDiscoveryDraftPresenceAndFailureContracts(t *testing.T) {
 		})
 	}
 }
+
+func TestSettingsReplacementClearsSelectedModelRemovedFromProvider(t *testing.T) {
+	previous := json.RawMessage(`{"defaultProvider":"p","defaultModel":"old","providers":[{"id":"p","models":[{"id":"old"}]}]}`)
+	translated, err := settingsUpdateForKBrain(json.RawMessage(`{"customProviders":[{"id":"p","models":[{"id":"new"}],"activeModels":["new"]}]}`), previous)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(translated, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["defaultProvider"] != "" || got["defaultModel"] != "" {
+		t.Fatalf("stale selected model was retained: %s", translated)
+	}
+}

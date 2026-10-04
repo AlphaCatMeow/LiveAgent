@@ -4,6 +4,7 @@ export type KBrainSettingsProvider = {
   api: string;
   baseUrl: string;
   apiKeyConfigured: boolean;
+  activeModels: string[];
   models: KBrainSettingsModel[];
 };
 

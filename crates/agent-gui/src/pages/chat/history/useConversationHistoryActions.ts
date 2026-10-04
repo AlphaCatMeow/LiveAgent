@@ -14,6 +14,7 @@ import {
   buildChatHistoryRevision,
   buildConversationStateFromWindow,
   CHAT_HISTORY_WINDOW_MESSAGES,
+  type ChatHistoryWindowRecord,
   type ConversationPersistenceCursor,
   getChatHistoryWindow,
   persistConversationRuntime,
@@ -295,6 +296,7 @@ export function useConversationHistoryActions(params: UseConversationHistoryActi
 
       if (!record.activeSegment) throw new Error("历史窗口缺少活跃分段");
       const state = buildConversationStateFromWindow(record);
+      const selectedModel = resolveConversationSelectedModel(record.conversation.selectedModelJson);
       // Runtime may have advanced while metadata was loading (including streaming turns).
       const latestCached = fromSearch ? conversationRuntimeCacheRef.current.get(id) : undefined;
       const reuseCached =
@@ -307,7 +309,7 @@ export function useConversationHistoryActions(params: UseConversationHistoryActi
             sessionId: record.conversation.sessionId ?? record.conversation.id,
             createdAt: record.conversation.createdAt,
             workdir: record.conversation.cwd,
-            selectedModel: resolveConversationSelectedModel(record.conversation.selectedModelJson),
+            selectedModel,
           });
       if (fromSearch) {
         request?.beforeCommit?.(record.conversation);
@@ -368,12 +370,15 @@ export function useConversationHistoryActions(params: UseConversationHistoryActi
           includeActiveSegment: true,
         });
         if (!record.activeSegment) throw new Error("历史窗口缺少活跃分段");
+        const selectedModel = resolveConversationSelectedModel(
+          record.conversation.selectedModelJson,
+        );
         const entry = createConversationRuntimeEntry({
           state: buildConversationStateFromWindow(record),
           sessionId: record.conversation.sessionId ?? record.conversation.id,
           createdAt: record.conversation.createdAt,
           workdir: record.conversation.cwd,
-          selectedModel: resolveConversationSelectedModel(record.conversation.selectedModelJson),
+          selectedModel,
         });
         setConversationRuntimeCacheEntry(conversationRuntimeCacheRef.current, id, entry);
         conversationPersistenceCursorRef.current.set(id, {
@@ -453,13 +458,51 @@ export function useConversationHistoryActions(params: UseConversationHistoryActi
       throw new Error("历史会话缺少 revision，无法安全替换消息");
     }
 
-    const replaced = await replaceChatHistoryFromMessage({
-      id,
-      baseMessageRef: messageRef,
-      replacementMessage,
-      maxMessages: CHAT_HISTORY_WINDOW_MESSAGES,
-      expectedRevision,
-    });
+    let replaced: ChatHistoryWindowRecord;
+    try {
+      replaced = await replaceChatHistoryFromMessage({
+        id,
+        baseMessageRef: messageRef,
+        replacementMessage,
+        maxMessages: CHAT_HISTORY_WINDOW_MESSAGES,
+        expectedRevision,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes("K-brain history revision conflict")) throw error;
+
+      // A concurrent run may have advanced the history after the view rendered.
+      // Reload the authoritative window before retrying so both the CAS token
+      // and the message projection are current.
+      const refreshed = await getChatHistoryWindow({
+        id,
+        maxMessages: CHAT_HISTORY_WINDOW_MESSAGES,
+        includeActiveSegment: true,
+      });
+      if (!refreshed.activeSegment) throw new Error("重新加载会话后缺少活跃分段");
+      const refreshedState = buildConversationStateFromWindow(refreshed);
+      const refreshedRef = refreshedState.transcript.items
+        .flatMap((item) => (item.kind === "user" && item.messageRef ? [item.messageRef] : []))
+        .find((ref) => ref.messageId === messageRef.messageId);
+      if (!refreshedRef || refreshedRef.contentHash !== messageRef.contentHash) {
+        throw new Error("历史消息已发生变化，请重新选择要编辑的消息");
+      }
+      const refreshedEntry = { ...current, state: refreshedState };
+      setConversationRuntimeCacheEntry(conversationRuntimeCacheRef.current, id, refreshedEntry);
+      conversationPersistenceCursorRef.current.set(id, {
+        activeSegmentIndex: refreshed.activeSegment.segmentIndex,
+        activeSegmentId: refreshed.activeSegment.segmentId,
+      });
+      if (currentConversationIdRef.current === id)
+        syncVisibleConversationRuntime(id, refreshedEntry);
+      replaced = await replaceChatHistoryFromMessage({
+        id,
+        baseMessageRef: refreshedRef,
+        replacementMessage,
+        maxMessages: CHAT_HISTORY_WINDOW_MESSAGES,
+        expectedRevision: refreshed.revision,
+      });
+    }
     if (!replaced.activeSegment) throw new Error("历史替换结果缺少活跃分段");
     const state = buildConversationStateFromWindow(replaced);
     const entry = {

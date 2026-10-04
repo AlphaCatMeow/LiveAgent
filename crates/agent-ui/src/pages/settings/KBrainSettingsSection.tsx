@@ -23,6 +23,9 @@ export function toKBrainProviderUpdate(
     api: provider.api,
     baseUrl: provider.baseUrl,
     ...(clearApiKey ? { clearApiKey: true } : apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+    activeModels: provider.activeModels.filter((modelId) =>
+      provider.models.some((model) => model.id === modelId),
+    ),
     models: provider.models.map(({ provider: _provider, ...model }) => model),
   };
 }
@@ -89,6 +92,7 @@ export function KBrainSettingsSection(
       api: "openai-completions",
       baseUrl: newProviderBaseUrl.trim(),
       apiKeyConfigured: Boolean(newProviderApiKey.trim()),
+      activeModels: [],
       models: [],
     };
     setDocument({ ...document, providers: [...document.providers, next] });
@@ -105,11 +109,12 @@ export function KBrainSettingsSection(
   function removeModel(modelId: string) {
     if (!provider || !document) return;
     const models = provider.models.filter((model) => model.id !== modelId);
+    const activeModels = provider.activeModels.filter((id) => id !== modelId);
     const nextDefault =
       document.defaultProvider === provider.id && document.defaultModel === modelId
         ? { defaultProvider: "", defaultModel: "" }
         : {};
-    updateProvider({ models });
+    updateProvider({ models, activeModels });
     setDocument((current) => (current ? { ...current, ...nextDefault } : current));
   }
   function removeProvider() {
@@ -139,6 +144,7 @@ export function KBrainSettingsSection(
         ...provider.models,
         { provider: provider.id, id, contextWindow: 0, maxOutputTokens: 0 },
       ],
+      activeModels: [...provider.activeModels, id],
     });
     setNewModel("");
   }

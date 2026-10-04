@@ -223,11 +223,14 @@ func settingsUpdateForKBrain(raw json.RawMessage, previous ...json.RawMessage) (
 		}
 	}
 	current := map[string]kbrainProvider{}
+	previousDefaultProvider, previousDefaultModel := "", ""
 	if len(previous) > 0 {
 		document, err := decodeSettingsDocument(previous[0])
 		if err != nil {
 			return nil, err
 		}
+		previousDefaultProvider = document.DefaultProvider
+		previousDefaultModel = document.DefaultModel
 		for _, provider := range document.Providers {
 			current[provider.ID] = provider
 		}
@@ -330,6 +333,24 @@ func settingsUpdateForKBrain(raw json.RawMessage, previous ...json.RawMessage) (
 		}
 		delete(provider, "apiKeyConfigured")
 	}
+	// A provider replacement can remove the model currently selected in the
+	// K-brain config. Clear that stale default in the same write instead of
+	// leaving a session that fails with "unknown model" on the next open.
+	if _, replacingProviders := input["customProviders"]; replacingProviders {
+		selectedProvider, selectedModel := previousDefaultProvider, previousDefaultModel
+		if value, ok := update["defaultProvider"].(string); ok {
+			selectedProvider = value
+		}
+		if value, ok := update["defaultModel"].(string); ok {
+			selectedModel = value
+		}
+		provider := byID[selectedProvider]
+		valid := provider != nil && providerModelPresent(provider, selectedModel)
+		if !valid {
+			update["defaultProvider"], update["defaultModel"] = "", ""
+		}
+	}
+
 	if usageRaw, ok := input["providerUsageQuerySecretUpdates"]; ok {
 		var usage map[string]map[string]string
 		if err := json.Unmarshal(usageRaw, &usage); err != nil || usage == nil {
@@ -363,6 +384,41 @@ func settingsUpdateForKBrain(raw json.RawMessage, previous ...json.RawMessage) (
 		return nil, errors.New("settings update contains no supported changes")
 	}
 	return json.Marshal(update)
+}
+
+func providerModelPresent(provider map[string]any, modelID string) bool {
+	if strings.TrimSpace(modelID) == "" {
+		return false
+	}
+	models, ok := provider["models"].([]any)
+	if !ok {
+		return false
+	}
+	known := false
+	for _, item := range models {
+		model, ok := item.(map[string]any)
+		if ok && asString(model["id"]) == modelID {
+			known = true
+			break
+		}
+	}
+	if !known {
+		return false
+	}
+	active, present := provider["activeModels"]
+	if !present {
+		return true
+	}
+	items, ok := active.([]any)
+	if !ok {
+		return false
+	}
+	for _, item := range items {
+		if asString(item) == modelID {
+			return true
+		}
+	}
+	return false
 }
 
 func kbrainProviderUpdate(provider map[string]json.RawMessage) (map[string]any, error) {

@@ -112,7 +112,9 @@ v2 当前**全部自动化测试通过、类型检查通过、代码质量检查
 
 ### 6. 发布
 
-- LiveAgent `v2.0.0-beta.1` prerelease 已发布，指向 `2a60137a`，8 个资产复制自 `v1.3.8-beta.8`，未重新触发发布流水线。
+- LiveAgent `v2.0.0-beta.1` prerelease 已发布，tag 指向 `2a60137a`，8 个资产复制自 `v1.3.8-beta.8`，未重新构建。
+- 发布说明已更新为包含本轮修复（`gh release edit --notes-file`），仍为 prerelease、8 个资产、digest 未变。
+- **注意**：`v2.0.0-beta.1` 的 tag 触发 `Desktop Release` 与 `Gateway Docker` 两条 `push: tags` 工作流。任何对该 tag 的 `git push --force`（包括把它指到新提交再指回来）都会重新触发这两条流水线；本轮误操作触发过两次，均已 `gh run cancel` 取消，未产生新资产，release 与 tag 已恢复到原始状态。后续如需让发布源指向新提交，应改用 `workflow_dispatch` 或另开新 tag。
 
 ## 从 main 移植的提交
 

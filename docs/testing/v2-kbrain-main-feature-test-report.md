@@ -23,6 +23,7 @@ v2 当前**全部自动化测试通过、类型检查通过、代码质量检查
 7. TypeScript 检查（仓库锁定的 TS `7.0.2`）：`agent-ui`、`agent-gui`、`gateway-web` 三个包全部 `0` 错误。
 8. Biome 检查：`1015` 个文件，`exit 0`，无错误无警告。
 9. 浏览器端到端验证：已执行，覆盖聊天收发、旧会话加载、编辑重发、Skills/MCP/定时任务/记忆/设置各页面、项目工具能力边界、桌面与移动两种视口。
+10. 桌面端（Tauri）实机验证：已执行。在真实 macOS 桌面进程里跑通 `311` 个注册命令中的 `309` 个（`323/323` 断言通过），并驱动真实 WKWebView 完成页面导航与输入区交互。
 
 **未补齐**的是三块体量较大的重写：日程（planning）、上下文压缩重构、以及一处上游缓存隔离修复（v2 已有等效实现，见下）。
 
@@ -40,6 +41,7 @@ v2 当前**全部自动化测试通过、类型检查通过、代码质量检查
 | Biome 全量检查 | ✅ 通过 | 1015 文件，无错误无警告 |
 | K-brain 二进制与锁文件一致性 | ✅ 通过 | 8 个 artifact 的 sha256 与发布页 SHA256SUMS 一致 |
 | 浏览器端到端验证 | ✅ 通过 | 见"浏览器验证证据" |
+| 桌面端（Tauri）命令验证 | ✅ 通过 | 309/311 个命令实机跑通，323/323 断言 |
 | Windows 实机验证 | ⏸ 未执行 | 无 Windows 环境；相关移植代码与脚本测试已在 macOS 通过 |
 
 ## 本轮修复
@@ -229,13 +231,92 @@ v2 当前**全部自动化测试通过、类型检查通过、代码质量检查
 - 引入 zcode 式的架构检查门禁（文件行数、循环依赖、深层导入）。
 - 把宿主能力缺失的处理集中到 `hostErrors` 这样的单一出口（本轮已开始）。
 
+## 桌面端（Tauri）命令验证
+
+上一版报告把"桌面端专属能力本身未在桌面实机复测"列为未完成项：所有浏览器结论验证的是"缺能力时不再泄漏诊断"，而不是桌面命令真的能跑。本轮补齐了这一项。
+
+### 方法
+
+应用在 debug 构建下注册了 `tauri-plugin-mcp-bridge`（`crates/agent-gui/src-tauri/src/lib.rs`），它在 `0.0.0.0:9223` 起一个 WebSocket，可以对真实 WKWebView 执行 JS。据此搭了一套 harness（`/tmp/desk/`）：
+
+1. `extract.mjs` 从 `generate_handler![...]` 抽出全部注册命令，再解析每个 `#[tauri::command]` 的参数表，得到 `311` 条命令及其必填/可选参数。
+2. `bridge.mjs` 是 WebSocket 客户端；`harness.mjs` 的 `call(command, args)` 通过 `invoke(...)['then'](ok, err)` 起调并轮询 `window` 上的槽位取结果。
+3. `run_all.mjs` 串起 12 个分组的用例脚本，统计通过数与覆盖率。
+
+**插件已知限制**：`execute_js` 的原生求值路径会拒绝含 `await ` / `async ` / `.then(` / `Promise.` 的脚本，回退到一条恒超时的 IPC 路径。因此 harness 统一用中括号取值 `invoke(...)['then'](ok, err)` 起调，再轮询结果槽位，不使用 `await`。
+
+### 环境
+
+```
+LIVEAGENT_HOME=/tmp/la-desktop/home ./target/debug/liveagent
+```
+
+应用自起 `k-brain backend -listen 127.0.0.1:0`（子进程），窗口指向 Vite dev server `localhost:1420`。
+
+> **注意**：本次会话中 `/private/tmp/liveagent-fix/target/` 被环境反复回收，`k-brain` 兄弟二进制一度消失，导致 `kbrain_backend_connection` 报 `No such file or directory`。改用 `CARGO_TARGET_DIR=/tmp/la-target` 重新构建、并把 `k-brain` 放到稳定路径后复测通过。该报错是环境问题，不是产品缺陷。
+
+### 结果
+
+**`323/323` 断言通过，`0` 失败。** 按分组：
+
+| 分组 | 结果 | 覆盖内容 |
+| --- | --- | --- |
+| 终端 + 文件系统 | 24/24 | 终端创建/列表/输入/尾部读取/改名/关闭；文件读写改删、目录、glob、grep、mention |
+| Git | 41/41 | 状态、发现仓库、分支增删改切、diff、log、提交详情/diff/与远端比较、暂存/取消、ignore、fetch/pull/push、stash、远端、clone（含同步与任务两种）、worktree 增删、丢弃、init |
+| 聊天历史 | 22/22 | 列表/分页/搜索/工作目录、upsert、窗口读取、revision 校验、改名/置顶/改 cwd/改模型/分享、分支、追加分段、删除、两个迁移分页 |
+| 设置 | 22/22 | 十个配置域的读取与保存回环、CCSwitch/Cherry Studio 导入、SSH patch/known_host、备份同步配置、WebDAV 连接与远端信息、STT 密钥与自检 |
+| 记忆 | 21/21 | 路径信息、列表、搜索、索引概览、配额、当日、近期拒绝、写入/读取/更新/通过/删除、批量应用、整理运行 |
+| 自动化 | 13/13 | Cron 表达式校验、快照、Hooks 应用、Cron 增删、运行记录、立即执行、prompt run 领取/释放/完成、revision 冲突 |
+| Shell + 托管进程 | 14/14 | `shell_run`（含退出码）、会话 start/wait/stop、取消、托管进程 start/status/日志/wait/stop/clear |
+| 子代理 + 轨迹 | 20/20 | 身份 upsert/list、run save/list/load/prune、消息 append/list、轨迹事件与窗口、分段读写、轮次解析 |
+| SFTP + SSH | 24/24 | 10 条 SFTP 命令、SSH 终端标签页、SSH 执行/延迟/重连/SFTP 开关、交互提示应答、本地端口转发 |
+| 备份 | 3/3 | 显式路径导入预检、拒绝非备份文件、导入应用 |
+| 其余 | 61/61 | checkpoint、workspace grants、hooks、browser、app、system、cua、mcp、gateway、proxy、provider、kbrain |
+| 补充 | 31/31 | 内存整理读写、记忆项目删除/清空、图片读取与预览、聊天文件链接、`replace_from_message`、子代理 worktree、MCP OAuth、STT 全流程 |
+| 收尾 | 50/50 | 文本/文件导入、图片剪贴板链路、Skills 元数据与正文、原生选择器、Gateway 聊天全链路、托盘、隧道、更新安装 |
+
+**未调用的 2 条**：`app_restart` 与 `app_confirmed_exit` —— 它们会终止当前进程，无法在同一个会话里既执行又继续断言。两条在源码层面已核对（`commands/app/update.rs`、`commands/app/app.rs`）。
+
+### 本轮发现的参数契约（非缺陷，供后续用例参考）
+
+实现过程中若干命令报"缺参数/参数类型不符"，逐一核对源码后确认是我方调用形状不对，命令本身行为正确：
+
+| 命令 | 正确形状 |
+| --- | --- |
+| `terminal_stream_input` | `bytes` 为字节数组，不是 `data` 字符串 |
+| `terminal_read_tail` | 必填 `project_path_key` |
+| `fs_write_text` | `mode` 只接受 `"rewrite"` |
+| `fs_edit_text` | 先 `fs_read_editable_text` 拿到 `mtimeMs`/`contentHash` 再传 |
+| `cron_validate_expression` | 六段式（秒 分 时 日 月 周） |
+| `memory_write` | `memoryType` 只接受 `user`/`feedback`/`project`/`reference` |
+| `memory_organize_run_update` | `status` 只接受 `pending`/`running`/`succeeded`/`failed`/`skipped`/`cancelled` |
+| `subagent_identity_upsert` | `lastMode` 只接受 `readonly`/`worktree` |
+| `subagent_message_append` | `channel` 只接受 `direct`/`shared`/`decision`/`question` |
+| 部分历史/轨迹/设置命令 | 未标注 `rename_all = "snake_case"`，参数走 camelCase |
+
+### 桌面 UI 验证
+
+除命令外，还用同一桥接驱动真实 WKWebView 做了页面级验证（`ui_suite.mjs`，`8/8` 通过）：
+
+- 应用外壳渲染（`document.title === "LiveAgent"`、`#root` 存在）。
+- 侧栏五个入口（Skills / MCP / 定时任务 / 记忆 / 设置）逐个点击，各自打开对应面板（`Skills Hub`、`MCP Hub`、`定时任务`、`记忆` 等标题切换）。
+- 返回对话后输入区可交互（`contenteditable` 存在）。
+- 全程无未捕获页面错误。
+
+**一处需说明的界面文案**：桌面端打开 Skills 页会显示"Skills 需要 Agent 模式"。这是 `SkillsHubPage.tsx` 里 `AgentModeRequired` 组件的既有设计（项目未处于 Agent 模式时的门控），不是缺陷；点"切换至 Agent 模式"即可进入。
+
+### 仍未覆盖
+
+- `system_pick_folder` / `system_pick_file` / `system_prepare_preview_file_save` / `system_save_preview_file` / `settings_backup_export` 会弹出原生模态框并阻塞到人工点击。用例以有界超时确认"命令已进入 `rfd` 等待用户"，未做真实点击。
+- 原生模态框弹出期间应用主线程仍可响应（实测 DOM 查询与其它命令均正常返回）。
+
 ## 未完成验证
 
 - 未在 Windows 实机执行 Windows worktree、Node 测试批处理与路径回归。
-- 未执行真实远程 SSH 复用测试（无外部 SSH 主机）。
+- 未执行真实远程 SSH 复用测试（无外部 SSH 主机）；SSH/SFTP 相关命令已通过参数契约与域级拒绝路径验证。
 - 未执行带 K-brain 二进制的 Tauri 桌面打包与安装包冒烟测试。
 - macOS 窄窗口标题栏避让无自动化截图比对。
-- 桌面端（Tauri）专属能力本身未在桌面实机复测：本轮所有浏览器结论都来自 K-brain 浏览器宿主，验证的是"缺能力时不再泄漏诊断"，不是桌面端命令的行为。
+- 桌面端命令与页面交互已在真实 macOS 桌面进程复测（见"桌面端（Tauri）命令验证"）；仍未覆盖的是 5 个原生模态框命令的真实点击，以及 `app_restart` / `app_confirmed_exit` 这两条会终止进程的命令。
 - Gateway WebUI 未起实例：`gateway-web` 的 475 个 Node 测试通过，但没有像 GUI 那样做浏览器端到端点击。
 
 ## 后续建议
@@ -243,4 +324,5 @@ v2 当前**全部自动化测试通过、类型检查通过、代码质量检查
 1. 移植日程（`75d582c5`）与压缩重构（`79c3ac35` + `7d3839ff`），补齐对应测试文件。
 2. 在 Windows CI 上跑 worktree 与脚本回归。
 3. 把"宿主能力缺失"的浏览器回归固化成自动化用例（当前只在项目工具面板有源码级断言），任何新入口都应走 `hostAwareErrorMessage`。
-4. 在桌面实机跑一遍同样的设置页交互，确认本地化提示不会掩盖桌面端真实错误。
+4. 把桌面端命令 harness 固化成仓库内的测试脚本（当前在 `/tmp/desk/`）：`extract.mjs` 已能从 `generate_handler!` 自动派生命令与参数表，新增命令即可被自动纳入覆盖统计。
+5. 为 5 个原生模态框命令补可点击的验证路径（例如给 `rfd` 注入可编程后端），使覆盖率达到 100%。

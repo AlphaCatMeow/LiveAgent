@@ -1138,6 +1138,8 @@ export const ZH_CN_COMMON_TRANSLATIONS = {
   "git.branchSelector.noRepository": "未找到 Git 仓库",
   "git.branchSelector.refresh": "刷新",
   "git.branchSelector.noRepositoryFound": "未找到 Git 仓库。",
+  "git.branchSelector.runtimeUnsupported":
+    "当前运行面没有桌面 Git 能力：请在桌面应用中使用，或在 Gateway WebUI 中连接桌面端。",
   "git.branchSelector.localBranches": "本地分支",
   "git.branchSelector.remoteBranches": "远端分支",
   "git.branchSelector.moreRemoteBranches": "还有 {count} 个远端分支未显示",

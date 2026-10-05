@@ -1479,4 +1479,6 @@ export const EN_US_SETTINGS_TRANSLATIONS = {
     "Install from the desktop app: the script is downloaded and run on the desktop host, and the person at that machine has to review the full command first.",
   "settings.cuaDriver.desktopOnlyGrant":
     "Grant from the desktop app: the system permission dialogs only appear on the desktop host's screen.",
+  "settings.cuaDriver.desktopOnlyRuntime":
+    "This runtime cannot read Computer Use status: the browser host has no desktop app behind it. Open the desktop app, or the Gateway WebUI connected to a desktop host, to manage the driver.",
 } as const satisfies Record<string, string>;

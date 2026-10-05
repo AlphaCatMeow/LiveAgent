@@ -1203,6 +1203,8 @@ export const EN_US_COMMON_TRANSLATIONS = {
   "git.branchSelector.noRepository": "No Git repository",
   "git.branchSelector.refresh": "Refresh",
   "git.branchSelector.noRepositoryFound": "No Git repository found.",
+  "git.branchSelector.runtimeUnsupported":
+    "This runtime has no desktop Git access: use the desktop app, or connect the Gateway WebUI to a desktop host.",
   "git.branchSelector.localBranches": "Local Branches",
   "git.branchSelector.remoteBranches": "Remote Branches",
   "git.branchSelector.moreRemoteBranches": "{count} more remote branches not shown",

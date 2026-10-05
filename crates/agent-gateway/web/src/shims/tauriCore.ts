@@ -85,6 +85,11 @@ async function pickFilePathInBrowser(): Promise<string | null> {
   });
 }
 
+/** The WebUI always runs in a plain browser; there is no Tauri core to reach. */
+export function isTauri(): boolean {
+  return false;
+}
+
 export async function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   if (command.startsWith("memory_")) {
     return invokeGatewayMemory<T>(command, args);

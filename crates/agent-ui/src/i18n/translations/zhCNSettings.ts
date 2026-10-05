@@ -1406,4 +1406,6 @@ export const ZH_CN_SETTINGS_TRANSLATIONS = {
     "安装需要在桌面端完成：安装脚本在桌面主机上联网下载并执行，须由使用那台机器的人确认命令全文。",
   "settings.cuaDriver.desktopOnlyGrant":
     "授权需要在桌面端完成：系统授权对话框只会出现在桌面主机的屏幕上。",
+  "settings.cuaDriver.desktopOnlyRuntime":
+    "当前运行面无法读取 Computer Use 状态：这个浏览器宿主背后没有桌面端。请在桌面应用或已连接桌面端的 Gateway WebUI 中查看。",
 } as const satisfies Record<string, string>;

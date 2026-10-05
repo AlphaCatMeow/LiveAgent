@@ -2,7 +2,7 @@
 
 - **测试日期**：2026-10-05（Asia/Shanghai）
 - **测试仓库**：LiveAgent
-- **测试提交**：`e3a9bfe846cf9175017f307fd29a954c04097f5a`（`v2-kbrian` HEAD，与 `origin/v2-kbrian` 一致；被测代码提交为 `ad0fbb26`）
+- **测试提交**：`1105ae43540360e51d06f4b31ce24288507b0aad`（`v2-kbrian` HEAD，与 `origin/v2-kbrian` 一致）
 - **对比基准**：`origin/main` HEAD `8e8cf46f`；共同祖先 `e63588a1`
 - **提交差**：v2 领先 main `54` 个提交，main 领先 v2 `19` 个提交
 - **K-brain 侧**：`main` HEAD `7604d22`，发布标签 `v0.107.4`
@@ -14,7 +14,7 @@
 
 v2 当前**全部自动化测试通过、类型检查通过、代码质量检查通过**，并在真实浏览器中完成了端到端验证。
 
-1. LiveAgent GUI 全量 Node 测试：`2900` 个测试，`2899` 通过、`0` 失败、`1` 跳过。
+1. LiveAgent GUI 全量 Node 测试：`2902` 个测试，`2901` 通过、`0` 失败、`1` 跳过。
 2. Gateway WebUI Node 测试：`475/475` 通过。
 3. Gateway Go 测试：`go test ./...` 全部通过（21 个包）。
 4. K-brain Go 测试：`go test ./...` 全部通过。
@@ -30,7 +30,7 @@ v2 当前**全部自动化测试通过、类型检查通过、代码质量检查
 
 | 测试项 | 结果 | 说明 |
 | --- | --- | --- |
-| LiveAgent GUI 全量前端 Node 测试 | ✅ 通过 | 2900 个中 2899 通过、1 跳过 |
+| LiveAgent GUI 全量前端 Node 测试 | ✅ 通过 | 2902 个中 2901 通过、1 跳过 |
 | LiveAgent Gateway `go test ./...` | ✅ 通过 | 21 个包全部 ok |
 | K-brain `go test ./...` | ✅ 通过 | 所有 Go 包通过 |
 | Gateway WebUI Node 测试 | ✅ 通过 | 475/475 |
@@ -89,6 +89,20 @@ v2 当前**全部自动化测试通过、类型检查通过、代码质量检查
 | 新建文件树 | `Tauri command fs_list is unavailable in K-brain browser mode` | 中文原因，无泄漏 |
 | 新建 SSH 连接 | `Tauri command terminal_ssh_local_forward_list is unavailable in K-brain browser mode` | 中文原因，无泄漏 |
 | 新建审查 / 新建内网穿透 / 后台任务 | 无泄漏 | 中文原因，无泄漏 |
+
+同一类问题在设置页里还有三处，本轮（`1105ae43`）一并修掉——这些入口只有点了按钮才会暴露，所以逐页遍历时容易漏掉：
+
+| 入口 | 触发命令 | 修复前泄漏 | 修复后 |
+| --- | --- | --- | --- |
+| 关于 → 检查更新 | `app_update_check` | `Tauri command app_update_check is unavailable in K-brain browser mode` | 中文原因，无泄漏 |
+| 关于 → 预览更新公告 | `app_release_announcement_preview` | `Tauri command app_release_announcement_preview is unavailable in K-brain browser mode` | 中文原因，无泄漏 |
+| 备份与同步 | `settings_backup_load_sync_config` | `Tauri command settings_backup_load_sync_config is unavailable in K-brain browser mode` | 中文原因，无泄漏 |
+| SSH → 导入 | `fs_roots` | `扫描失败: Tauri command fs_roots is unavailable in K-brain browser mode` | 中文原因，无泄漏 |
+
+- `AboutSection.tsx` 删除本地 `errorMessage`，检查更新 / 查看公告 / 预览公告的 catch 改走 `hostAwareErrorMessage(error, t("settings.aboutDesktopHostRequired"))`。
+- `BackupSyncSection.tsx` 的 `errorText(error)` 增加 `unavailableMessage` 参数并统一走 helper，覆盖读取配置、保存、上传、下载、导出、导入六条路径。
+- `SshSection.tsx` 的导入扫描 catch 改走 `hostAwareErrorMessage(scanError, t("settings.sshImportDesktopHostRequired"))`。
+- 新增 zh/en 文案 `settings.aboutDesktopHostRequired`、`settings.backupSyncDesktopHostRequired`、`settings.sshImportDesktopHostRequired`；新增回归测试 `crates/agent-gui/test/shared/host-command-unavailable.test.mjs` 两条（设置页出口 + 双语文案），该文件现为 `7/7`。
 
 ### 5. K-brain 运行时版本锁定（已完成）
 
@@ -163,19 +177,24 @@ v2 当前**全部自动化测试通过、类型检查通过、代码质量检查
 
 环境：Vite dev server `localhost:1420`（`crates/agent-gui`）→ K-brain `127.0.0.1:47412`（v0.107.4，fixture `/tmp/la-fix/new`），Chrome headless CDP 驱动，视口 1440×900 与 420×860。
 
-已实测通过：
+已实测通过（均为真实鼠标点击驱动，不是合成 `.click()`）：
 
-- **聊天收发**：输入 → 发送 → 流式回复渲染（`echo: … / Answer / This is streamed verification text.`），消息时间戳显示为 `22:08`。
-- **打开旧会话**：`deleted-model history repro` 正常加载，历史与轨迹 200，无页面错误。
+- **聊天收发**：输入 → 发送 → 流式回复渲染（`echo: v2 sweep roundtrip … / Answer / This is streamed verification text.`），消息时间戳显示为 `22:36`；`1 轮 · 1 步`，`上下文 1%`。
+- **打开旧会话**：`deleted-model history repro` 正常加载，历史与轨迹均 200，无页面错误。
+- **轨迹视图**：点开「轨迹」标签后按轮次渲染（SYSTEM / USER / ASSISTANT + 工具行 + `1 ms` 耗时），点回「对话」正常。
 - **编辑重发**：分支创建 201 → `/edit` → `/runs`，无冲突报错。
-- **Skills 页面**：商店列表与分类筛选渲染正常（`全部 2`，其余分类 0），单个 skill 的 `role="switch"` 可切换（`aria-checked` 实测 true → false → true），无 console 错误。
-- **MCP 页面**：已配置 `fixture-mcp`（STDIO）显示为 `1/1 已启用`，权限策略与参数编辑入口齐全。
-- **定时任务**：列表正常；"新增任务"打开类型选择对话框（Shell 脚本 / Http 请求 / Auto Prompt），文案完整。
-- **记忆**：新建记忆对话框要求 **slug 输入框 + 正文 textarea**（只填正文会被拒绝）；保存后 `全局 1 / 500`；待审核横幅显示 `1 条记忆待审核`，`待审核` 筛选按钮 `aria-pressed` 实测 false → true 且列表按待审核过滤。
-- **供应商设置**：标签页与卡片、清空按钮、模型删除后配置清理。
-- **设置各分区**：系统设置 / 提示词模板 / Hooks / 系统工具 / 语音输入 / SSH / Remote / 快捷键 / 备份与同步 / 关于 全部渲染，无请求错误。
-- **项目工具能力边界**：六个入口（终端、文件树、审查、内网穿透、SSH、后台任务）全部只显示中文原因，无英文诊断泄漏，无 console 错误。
-- **移动端 420×860**：应用正常渲染聊天与输入区，`scrollWidth - clientWidth = 0`（无横向溢出），无 JS 错误；侧栏收为 Sheet（符合预期）。
+- **Skills 页面**：商店列表与分类筛选渲染正常（`全部 2`，其余分类 0）；功能总开关 `role="switch"` 实测 `false → true → false`；本地导入面板打开正常（Claude Code / Codex / CodeBuddy / Agent Skills 四个来源）。
+- **MCP 页面**：已配置 `fixture-mcp`（STDIO）显示 `1/1 已启用`；「添加」菜单 → 对话框字段完整（Server Name / Transport / Timeout / Command / CWD / Args / Env / 描述 / 文档链接），实测新增 `v2-sweep-mcp` 后变为 `2/2` 并持久化。
+- **定时任务**：新增任务 → 类型选择（Shell 脚本 / Http 请求 / Auto Prompt）→ Shell 表单（任务名称 / Cron / 描述 / 工作空间 / 脚本 / 超时）；实测保存 `v2 sweep task`（`0 0 3 * * *`）后列表显示 `1 个任务`，`GET /v1/cron` 返回同一任务，磁盘持久化。
+- **记忆**：新建记忆对话框需要 **slug 输入框 + 正文 textarea**（只填正文会被拒绝）；保存后 `全局 1 / 500`，出现 `1 条记忆待审核` 横幅与「通过」按钮；点行选中 → 「通过」后横幅消失、条目转为已审核。
+- **供应商设置**：五个供应商标签页（Anthropic / OpenAI / Gemini / Grok / DeepSeek）与卡片渲染正常；OpenAI 下两张卡片（Legacy Vendor / Mock Relay），行内「复制 Base URL 和 API Key / 编辑 / 删除」入口齐全；模型删除后配置清理已在上一轮验证。
+- **设置各分区**：系统设置 / 供应商设置 / 提示词模板 / Skills / MCP / 定时任务 / 记忆 / Hooks / 系统工具 / Computer Use / 语音输入 / SSH / Remote / 快捷键 / 备份与同步 / 关于，`nav.settings-nav` 共 `16` 个入口，逐个点击全部渲染，无 console 错误。
+- **设置页交互**：提示词模板「新增模板」、Hooks「新增 Hook」、MCP「添加」、WebDAV「设置同步」（服务商预设对话框）、备份「导出配置」均正常打开，无异常。
+- **主题切换**：浅色（`aria-pressed=true`）→ 深色后 `documentElement.className` 变为 `dark`，切回浅色后为空。
+- **Computer Use**：当前运行面提示为中文（"这个浏览器宿主背后没有桌面端"），无内部诊断。
+- **项目工具能力边界**：面板真实打开（`data-state=open`、`inert=false`）后，「新建项目工具」按钮为 `disabled`，六个入口（终端、文件树、审查、内网穿透、SSH、后台任务）全部只显示中文原因，全页扫描无 `unavailable in K-brain` / `WebUI shim does not implement` 字样。
+- **设置页泄漏扫描**：16 个设置分区 + 5 个侧栏页面逐页扫描，加上 关于/备份/SSH/Hooks/定时任务/记忆/Computer Use/语音输入/Remote 的主要按钮点击，修复后全为 0 泄漏。
+- **移动端 420×860（deviceScaleFactor 2）**：应用正常渲染聊天与输入区，`innerWidth = 420`、`scrollWidth - clientWidth = 0`（无横向溢出），无 JS 错误；侧栏收为 Sheet（符合预期）。
 
 ## 与 zcode 前后端分离架构的对比
 
@@ -212,9 +231,12 @@ v2 当前**全部自动化测试通过、类型检查通过、代码质量检查
 - 未执行真实远程 SSH 复用测试（无外部 SSH 主机）。
 - 未执行带 K-brain 二进制的 Tauri 桌面打包与安装包冒烟测试。
 - macOS 窄窗口标题栏避让无自动化截图比对。
+- 桌面端（Tauri）专属能力本身未在桌面实机复测：本轮所有浏览器结论都来自 K-brain 浏览器宿主，验证的是"缺能力时不再泄漏诊断"，不是桌面端命令的行为。
+- Gateway WebUI 未起实例：`gateway-web` 的 475 个 Node 测试通过，但没有像 GUI 那样做浏览器端到端点击。
 
 ## 后续建议
 
 1. 移植日程（`75d582c5`）与压缩重构（`79c3ac35` + `7d3839ff`），补齐对应测试文件。
 2. 在 Windows CI 上跑 worktree 与脚本回归。
-3. 为项目工具能力边界补一条浏览器自动化用例，防止后续新增入口再次泄漏内部诊断。
+3. 把"宿主能力缺失"的浏览器回归固化成自动化用例（当前只在项目工具面板有源码级断言），任何新入口都应走 `hostAwareErrorMessage`。
+4. 在桌面实机跑一遍同样的设置页交互，确认本地化提示不会掩盖桌面端真实错误。

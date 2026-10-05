@@ -2,7 +2,7 @@
 
 - **测试日期**：2026-10-05（Asia/Shanghai）
 - **测试仓库**：LiveAgent
-- **测试提交**：`ad0fbb260da6b4cba9d86d02a4a717cf024b4d25`（`v2-kbrian` HEAD，与 `origin/v2-kbrian` 一致）
+- **测试提交**：`e3a9bfe846cf9175017f307fd29a954c04097f5a`（`v2-kbrian` HEAD，与 `origin/v2-kbrian` 一致；被测代码提交为 `ad0fbb26`）
 - **对比基准**：`origin/main` HEAD `8e8cf46f`；共同祖先 `e63588a1`
 - **提交差**：v2 领先 main `54` 个提交，main 领先 v2 `19` 个提交
 - **K-brain 侧**：`main` HEAD `7604d22`，发布标签 `v0.107.4`

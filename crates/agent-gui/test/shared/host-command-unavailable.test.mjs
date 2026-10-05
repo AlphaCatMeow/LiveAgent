@@ -92,3 +92,48 @@ test("branch selector swaps the host message for a localised hint", () => {
   assert.match(zh, /"git\.branchSelector\.runtimeUnsupported":\s*\n?\s*"[^"]*桌面 Git 能力/);
   assert.match(en, /"git\.branchSelector\.runtimeUnsupported":\s*\n?\s*"[^"]*desktop Git/);
 });
+
+test("settings surfaces swap host diagnostics for a desktop-only hint", () => {
+  const about = readFileSync(
+    new URL("../../src/pages/settings/AboutSection.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(about, /hostAwareErrorMessage\(error, t\("settings\.aboutDesktopHostRequired"\)\)/);
+  assert.equal(/function errorMessage\(error: unknown\)/.test(about), false);
+
+  const backup = readFileSync(
+    new URL("../../src/pages/settings/BackupSyncSection.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(backup, /function errorText\(error: unknown, unavailableMessage: string\)/);
+  assert.match(backup, /hostAwareErrorMessage\(error, unavailableMessage\)/);
+  assert.match(backup, /errorText\(error, t\("settings\.backupSyncDesktopHostRequired"\)\)/);
+
+  const ssh = readFileSync(
+    new URL("../../../agent-ui/src/pages/settings/SshSection.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(ssh, /hostAwareErrorMessage\(scanError, t\("settings\.sshImportDesktopHostRequired"\)\)/);
+});
+
+test("settings desktop-only hints exist in both locales", () => {
+  // GUI overrides carry both locales in one module; assert each locale's copy separately.
+  const guiConfig = readFileSync(new URL("../../src/i18n/config.ts", import.meta.url), "utf8");
+  assert.match(guiConfig, /"settings\.aboutDesktopHostRequired":\s*\n?\s*"[^"]*桌面应用/);
+  assert.match(guiConfig, /"settings\.backupSyncDesktopHostRequired":\s*\n?\s*"[^"]*桌面应用/);
+  assert.match(
+    guiConfig,
+    /"settings\.aboutDesktopHostRequired":\s*\n?\s*"Updates and update announcements are provided by the desktop app/,
+  );
+
+  const zhSettings = readFileSync(
+    new URL("../../../agent-ui/src/i18n/translations/zhCNSettings.ts", import.meta.url),
+    "utf8",
+  );
+  const enSettings = readFileSync(
+    new URL("../../../agent-ui/src/i18n/translations/enUSSettings.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(zhSettings, /"settings\.sshImportDesktopHostRequired":\s*\n?\s*"[^"]*桌面应用/);
+  assert.match(enSettings, /"settings\.sshImportDesktopHostRequired":\s*\n?\s*"[^"]*desktop/);
+});

@@ -77,6 +77,8 @@ export const GUI_TRANSLATION_OVERRIDES: Record<Locale, Record<string, string>> =
     "settings.aboutAnnouncementUnavailable": "暂无更新公告",
     "settings.aboutAnnouncementUnavailableDesc": "当前安装版本没有对应的发布说明。",
     "settings.aboutAnnouncementLoadFailed": "加载更新公告失败",
+    "settings.aboutDesktopHostRequired":
+      "更新与更新公告由桌面端提供：请在 LiveAgent 桌面应用中使用。",
     "settings.aboutDebugMode": "调试模式",
     "settings.aboutDebugModeDesc": "仅开发构建可见；预览最新更新公告，不会修改已读状态。",
     "settings.aboutPreviewAnnouncement": "预览更新公告",
@@ -166,6 +168,8 @@ export const GUI_TRANSLATION_OVERRIDES: Record<Locale, Record<string, string>> =
     "settings.backupSyncRemoteTitle": "远端备份",
     "settings.backupSyncCredentialNote": "账号密码仅保存在本机",
     "settings.backupSyncLoading": "正在读取同步配置…",
+    "settings.backupSyncDesktopHostRequired":
+      "WebDAV 云同步由桌面端提供：请在 LiveAgent 桌面应用中使用。",
     "settings.backupSyncStatusReady": "云同步已就绪",
     "settings.backupSyncStatusNeverSynced": "尚未同步，点击「上传」推送本机配置",
     "settings.backupSyncStatusNotConfigured": "未配置云同步",
@@ -370,6 +374,8 @@ export const GUI_TRANSLATION_OVERRIDES: Record<Locale, Record<string, string>> =
     "settings.aboutAnnouncementUnavailableDesc":
       "There are no release notes for the installed version.",
     "settings.aboutAnnouncementLoadFailed": "Failed to load update announcement",
+    "settings.aboutDesktopHostRequired":
+      "Updates and update announcements are provided by the desktop app: use LiveAgent on the desktop.",
     "settings.aboutDebugMode": "Debug Mode",
     "settings.aboutDebugModeDesc":
       "Visible only in development builds. Preview the latest announcement without changing its read state.",
@@ -466,6 +472,8 @@ export const GUI_TRANSLATION_OVERRIDES: Record<Locale, Record<string, string>> =
     "settings.backupSyncRemoteTitle": "Remote backup",
     "settings.backupSyncCredentialNote": "Credentials never leave this device",
     "settings.backupSyncLoading": "Loading sync settings…",
+    "settings.backupSyncDesktopHostRequired":
+      "WebDAV cloud sync is provided by the desktop app: use LiveAgent on the desktop.",
     "settings.backupSyncStatusReady": "Cloud sync ready",
     "settings.backupSyncStatusNeverSynced":
       "Not synced yet — use Upload to push this machine's config",

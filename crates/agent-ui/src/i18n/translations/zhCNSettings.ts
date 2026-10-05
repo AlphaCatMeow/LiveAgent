@@ -931,6 +931,8 @@ export const ZH_CN_SETTINGS_TRANSLATIONS = {
   "settings.sshImportDesc": "扫描用户目录下的 ~/.ssh/config 和常见私钥文件",
   "settings.sshImportScanning": "正在扫描 ~/.ssh ...",
   "settings.sshImportFailed": "扫描失败",
+  "settings.sshImportDesktopHostRequired":
+    "导入需要读取本机 ~/.ssh：请在 LiveAgent 桌面应用中使用，或在已连接桌面端的 Gateway WebUI 中使用。",
   "settings.sshImportFound": "发现 {count} 条 Host 配置，{keys} 个可读取私钥文件。",
   "settings.sshImportEmpty": "没有发现可导入的 SSH 配置",
   "settings.sshImportEmptyHint": "请确认 ~/.ssh/config 中存在 Host 配置。",

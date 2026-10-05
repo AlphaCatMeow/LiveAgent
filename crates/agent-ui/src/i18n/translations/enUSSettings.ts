@@ -984,6 +984,8 @@ export const EN_US_SETTINGS_TRANSLATIONS = {
   "settings.sshImportDesc": "Scan ~/.ssh/config and common private key files in the user directory",
   "settings.sshImportScanning": "Scanning ~/.ssh ...",
   "settings.sshImportFailed": "Scan failed",
+  "settings.sshImportDesktopHostRequired":
+    "Importing reads the local ~/.ssh directory: use LiveAgent on the desktop, or a Gateway WebUI connected to a desktop app.",
   "settings.sshImportFound": "Found {count} Host entries and {keys} readable private key files.",
   "settings.sshImportEmpty": "No importable SSH config found",
   "settings.sshImportEmptyHint": "Make sure ~/.ssh/config contains Host entries.",

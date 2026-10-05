@@ -1,14 +1,16 @@
 # v2-kbrian 与 main 功能测试报告
 
-- **测试日期**：2026-10-05（Asia/Shanghai）
+- **测试日期**：2026-10-05 至 2026-10-06（Asia/Shanghai）
 - **测试仓库**：LiveAgent
-- **测试提交**：`v2-kbrian` 分支，被测代码提交 `1105ae43`（`fix(ui): stop leaking host diagnostics in About, Backup, SSH settings`）；本报告自身的提交只改文档，不改变结论。
+- **测试提交**：`v2-kbrian` 分支 HEAD `510b5a25`（本报告自身的提交只改文档，不改变结论）；被测代码提交 `1105ae43`（`fix(ui): stop leaking host diagnostics in About, Backup, SSH settings`）。
 - **对比基准**：`origin/main` HEAD `8e8cf46f`；共同祖先 `e63588a1`
-- **提交差**：v2 领先 main `54` 个提交，main 领先 v2 `19` 个提交
+- **提交差**：v2 领先 main `61` 个提交，main 领先 v2 `19` 个提交
 - **K-brain 侧**：`main` HEAD `7604d22`，发布标签 `v0.107.4`
 - **报告目的**：验证 main 已有功能在 v2 分支是否存在、可测试、可用，列出不能使用或尚未补齐的功能，并记录本轮修复。
 
 > 本报告替代此前 `6091a16e` 版本。此前版本基于一个错误环境（混入 `typescript@5.4.5`）得出"TypeScript 4 个错误"的 P0 结论，并声明浏览器验证未执行；两者均已在本轮澄清。
+
+> 2026-10-06 更新：新增"桌面端（Tauri）命令验证"一节，在真实桌面进程里跑通 `309/311` 个注册命令；其余各节的结论未变。
 
 ## 结论
 

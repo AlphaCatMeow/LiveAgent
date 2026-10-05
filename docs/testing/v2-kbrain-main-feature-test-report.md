@@ -2,7 +2,7 @@
 
 - **测试日期**：2026-10-05（Asia/Shanghai）
 - **测试仓库**：LiveAgent
-- **测试提交**：`8506dcbecf5c2fc7f77969fcc6aeca04d2172193`（`v2-kbrian` HEAD，与 `origin/v2-kbrian` 一致；被测代码为 `1105ae43`）
+- **测试提交**：`v2-kbrian` 分支，被测代码提交 `1105ae43`（`fix(ui): stop leaking host diagnostics in About, Backup, SSH settings`）；本报告自身的提交只改文档，不改变结论。
 - **对比基准**：`origin/main` HEAD `8e8cf46f`；共同祖先 `e63588a1`
 - **提交差**：v2 领先 main `54` 个提交，main 领先 v2 `19` 个提交
 - **K-brain 侧**：`main` HEAD `7604d22`，发布标签 `v0.107.4`

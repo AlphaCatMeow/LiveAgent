@@ -131,7 +131,12 @@ function canonicalMessage(value: unknown): KBrainMessage {
       : message.content.filter((part) => part.type === "toolCall");
     converted.tool_calls = toolCalls
       .filter((call): call is { id: string; name: string; arguments: unknown } =>
-        Boolean(call && typeof call === "object" && typeof call.id === "string" && typeof call.name === "string"),
+        Boolean(
+          call &&
+            typeof call === "object" &&
+            typeof call.id === "string" &&
+            typeof call.name === "string",
+        ),
       )
       .map((call) => ({ id: call.id, name: call.name, arguments: call.arguments }));
   }
@@ -325,7 +330,10 @@ export async function migrateLegacyHistoryPage(
       const sourceFingerprint = await fingerprint({ item, messages });
       const cached = cache[item.id];
       if (cached?.fingerprint === sourceFingerprint && isStableMigrationResult(cached.result)) {
-        const cachedResult: MigrationImportResult = { ...cached.result, status: "already_imported" };
+        const cachedResult: MigrationImportResult = {
+          ...cached.result,
+          status: "already_imported",
+        };
         setKBrainSessionId(item.id, cachedResult.backend_id, connection.baseUrl);
         results.push(cachedResult);
         continue;

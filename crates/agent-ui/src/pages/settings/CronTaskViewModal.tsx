@@ -477,6 +477,9 @@ function RightPanel({
   const requestGenerationRef = useRef(0);
   const clearInFlightRef = useRef(false);
 
+  // refreshKey 是外部的失效信号：不在 effect 体内读取，仅用于父层保存/删除任务后
+  // 强制重跑一次日志拉取，因此关掉多余依赖告警。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is an invalidation signal
   useEffect(() => {
     let cancelled = false;
     const taskId = task.id;

@@ -7,9 +7,13 @@ import {
   useRef,
   useState,
 } from "react";
-import type { HistoryMessageRef } from "../../../lib/chat/conversation/conversationState";
-import { branchChatHistory } from "../../../lib/chat/history/chatHistory";
+import type {
+  ConversationViewState,
+  HistoryMessageRef,
+} from "../../../lib/chat/conversation/conversationState";
+import { branchChatHistory, type ChatHistorySummary } from "../../../lib/chat/history/chatHistory";
 import { asErrorMessage } from "../chatPageUtils";
+import { findReloadedMessageRef, isKBrainRevisionConflict } from "./useConversationHistoryActions";
 
 type UseBranchConversationParams = {
   currentConversationIdRef: MutableRefObject<string>;
@@ -18,6 +22,10 @@ type UseBranchConversationParams = {
   isConversationHydrationFailed: boolean;
   sidebarStore: SidebarStore;
   handleSelectConversation: (id: string) => void;
+  /** Re-request the authoritative window after a backend revision conflict. */
+  reloadConversation: (
+    conversationId: string,
+  ) => Promise<{ state: ConversationViewState; revision: string } | null>;
   setErrorMessage: Dispatch<SetStateAction<string | null>>;
   t: (key: string) => string;
 };
@@ -34,6 +42,7 @@ export function useBranchConversation(params: UseBranchConversationParams) {
     isConversationHydrationFailed,
     sidebarStore,
     handleSelectConversation,
+    reloadConversation,
     setErrorMessage,
     t,
   } = params;
@@ -52,7 +61,20 @@ export function useBranchConversation(params: UseBranchConversationParams) {
       branchInFlightRef.current = true;
       setBranchPendingMessageId(messageRef.messageId);
       try {
-        const summary = await branchChatHistory(conversationId, messageRef);
+        let summary: ChatHistorySummary;
+        try {
+          summary = await branchChatHistory(conversationId, messageRef);
+        } catch (error) {
+          if (!isKBrainRevisionConflict(error)) throw error;
+          // The stored projection is behind the backend: re-request it and
+          // re-resolve the same message before retrying once.
+          const refreshed = await reloadConversation(conversationId);
+          const freshRef = refreshed && findReloadedMessageRef(refreshed.state, messageRef);
+          if (!freshRef) {
+            throw new Error("历史消息已发生变化，请重新选择要分支的消息");
+          }
+          summary = await branchChatHistory(conversationId, freshRef);
+        }
         sidebarStore.upsertLocal({ ...summary, isPending: undefined });
         handleSelectConversation(summary.id);
       } catch (error) {
@@ -68,6 +90,7 @@ export function useBranchConversation(params: UseBranchConversationParams) {
       isConversationHydrating,
       isConversationHydrationFailed,
       isSending,
+      reloadConversation,
       setErrorMessage,
       sidebarStore,
       t,

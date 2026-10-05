@@ -1139,7 +1139,10 @@ export class GatewayWebSocketTransport {
       if (
         decoded.agentId &&
         !this.matchesActiveAgent(decoded.agentId) &&
-        !(decoded.type === "workspace.activity" && decoded.agentId.startsWith("gateway-local-workspace-"))
+        !(
+          decoded.type === "workspace.activity" &&
+          decoded.agentId.startsWith("gateway-local-workspace-")
+        )
       ) {
         return;
       }

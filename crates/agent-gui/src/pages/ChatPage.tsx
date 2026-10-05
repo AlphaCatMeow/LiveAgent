@@ -1221,6 +1221,7 @@ function ChatPageContent(props: ChatPageProps) {
     replaceConversationAtMessage,
     cleanupDeletedConversation,
     persistConversation,
+    reloadConversation,
   } = useConversationHistoryActions({
     conversationState,
     currentConversationIdRef,
@@ -2229,6 +2230,7 @@ function ChatPageContent(props: ChatPageProps) {
     isConversationHydrationFailed,
     sidebarStore,
     handleSelectConversation,
+    reloadConversation,
     setErrorMessage,
     t,
   });

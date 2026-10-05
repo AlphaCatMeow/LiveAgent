@@ -986,6 +986,19 @@ export const EN_US_COMMON_TRANSLATIONS = {
   "projectTools.tunnelScopeGlobalTitle": "Manage global tunnels",
   "projectTools.newProjectTool": "New project tool",
   "projectTools.closePanel": "Close project tools panel",
+  "projectTools.collapsePanel": "Collapse project tools panel",
+  "projectTools.expandPanel": "Expand project tools panel",
+  "projectTools.agentModeRequired": "Project tools require Agent project mode.",
+  "projectTools.projectRequired": "Select a project to use project tools.",
+  "projectTools.desktopTerminalOnly":
+    "Terminals run in the desktop app: use LiveAgent on desktop for project terminals.",
+  "projectTools.desktopHostRequired":
+    "Project tools (terminal, file tree, Git review, SSH, tunnels) run in the desktop app: use LiveAgent on desktop.",
+  "projectTools.runtimeUnsupported":
+    "This runtime has no access to that desktop capability: use the LiveAgent desktop app, or connect the WebUI to a desktop host.",
+  "projectTools.settingsSyncing": "Syncing desktop settings…",
+  "projectTools.webTerminalDisabled": "Desktop Remote settings do not allow WebUI terminals.",
+  "projectTools.webGitDisabled": "Desktop Remote settings do not allow WebUI Git.",
   "projectTools.close": "Close",
   "projectTools.confirmClose": "Confirm close",
   "projectTools.closeTerminal": "Close terminal",

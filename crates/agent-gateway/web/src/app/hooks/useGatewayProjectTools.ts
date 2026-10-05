@@ -82,16 +82,16 @@ export function useGatewayProjectTools({
     "sshTunnel",
   );
   const projectToolsDisabledMessage = !settingsSyncReady
-    ? "Syncing desktop settings..."
+    ? translate("projectTools.settingsSyncing", settings.locale)
     : !isAgentMode
-      ? "Project tools require Agent project mode."
+      ? translate("projectTools.agentModeRequired", settings.locale)
       : !terminalProjectPath
-        ? "Select a project to use project tools."
+        ? translate("projectTools.projectRequired", settings.locale)
         : undefined;
   const terminalDisabledMessage =
     projectToolsDisabledMessage ??
     (!settings.remote.enableWebTerminal
-      ? "Enable WebUI Terminal in desktop Remote settings."
+      ? translate("projectTools.webTerminalDisabled", settings.locale)
       : undefined);
   const webTerminalSessionsEnabled =
     settings.remote.enableWebTerminal || settings.remote.enableWebSshTerminal;
@@ -111,7 +111,7 @@ export function useGatewayProjectTools({
   resetProjectToolsRuntimeRef.current = runtime.resetTerminalSessions;
 
   const gitDisabledMessage = !settings.remote.enableWebGit
-    ? "WebUI Git is disabled in desktop Remote settings."
+    ? translate("projectTools.webGitDisabled", settings.locale)
     : undefined;
   const tunnelEnabled = settingsSyncReady && settings.remote.enableWebTunnels === true;
   const tunnelDisabledMessage = !settingsSyncReady

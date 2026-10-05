@@ -930,6 +930,18 @@ export const ZH_CN_COMMON_TRANSLATIONS = {
   "projectTools.tunnelScopeGlobalTitle": "管理全局内网穿透",
   "projectTools.newProjectTool": "新建项目工具",
   "projectTools.closePanel": "关闭项目工具栏",
+  "projectTools.collapsePanel": "收起项目工具栏",
+  "projectTools.expandPanel": "展开项目工具栏",
+  "projectTools.agentModeRequired": "项目工具需要 Agent 项目模式。",
+  "projectTools.projectRequired": "选择项目后才可使用项目工具。",
+  "projectTools.desktopTerminalOnly": "终端由桌面端提供：请在 LiveAgent 桌面应用中使用终端。",
+  "projectTools.desktopHostRequired":
+    "项目工具（终端、文件树、Git 审查、SSH、内网穿透）由桌面端提供：请在 LiveAgent 桌面应用中使用。",
+  "projectTools.runtimeUnsupported":
+    "当前运行面没有该桌面端能力：请在 LiveAgent 桌面应用中使用，或让 WebUI 连接桌面端。",
+  "projectTools.settingsSyncing": "正在同步桌面端设置…",
+  "projectTools.webTerminalDisabled": "桌面端 Remote 设置未允许 WebUI 终端。",
+  "projectTools.webGitDisabled": "桌面端 Remote 设置未允许 WebUI Git。",
   "projectTools.close": "关闭",
   "projectTools.confirmClose": "确认关闭",
   "projectTools.closeTerminal": "关闭终端",

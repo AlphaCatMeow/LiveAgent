@@ -13,3 +13,20 @@ export function isHostCommandUnavailable(error: unknown): boolean {
     /WebUI shim does not implement/i.test(message)
   );
 }
+
+/**
+ * 统一的错误文案出口：宿主能力缺失 → 用调用方给的本地化提示；真实失败 →
+ * 原样透出（空串时退回 `fallback`）。项目工具面板的每个 catch 都走这里，
+ * 免得新增入口时又忘记过滤内部诊断。
+ */
+export function hostAwareErrorMessage(
+  error: unknown,
+  unavailableMessage: string,
+  fallback = "",
+): string {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (isHostCommandUnavailable(error) && unavailableMessage.trim() !== "") {
+    return unavailableMessage;
+  }
+  return message.trim() !== "" ? message : fallback;
+}

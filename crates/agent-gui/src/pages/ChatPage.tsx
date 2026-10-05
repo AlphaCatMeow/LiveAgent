@@ -143,7 +143,7 @@ import {
 } from "../lib/chat/page/chatPageHelpers";
 import { skillMentionInjection } from "../lib/chat/skills/mentionInjection";
 import { tauriGitClient } from "../lib/git/tauriGitClient";
-import { isKBrainBackendEnabled } from "../lib/host";
+import { isKBrainBackendEnabled, isKBrainBrowserHost } from "../lib/host";
 import { useKBrainCatalogSettings } from "../lib/kbrain/catalog";
 import { createProviderRuntimeConfig, toModelValue } from "../lib/providers/llm";
 import {
@@ -800,15 +800,31 @@ function ChatPageContent(props: ChatPageProps) {
     handleRightDockFileTreeStateChange,
     handleSshProjectHostIdsChange,
   } = useRightDockSettings({ settings, setSettings, terminalProjectPathKey });
-  const terminalDisabledMessage = !isAgentMode
-    ? "Project tools require Agent project mode."
+  // 项目工具区（终端 / 文件树 / Git 审查 / SSH 隧道 / 内网穿透）全部依赖桌面
+  // 宿主命令（`terminal_*`、`fs_*`、`git_*`、`gateway_tunnel_*`），K-brain 后端
+  // 没有对应路由。浏览器宿主里整区标记为不可用并给出本地化原因，避免每个入口
+  // 各自把内部诊断顶到面板上。
+  const projectToolsUserDisabledMessage = !isAgentMode
+    ? t("projectTools.agentModeRequired")
     : !terminalProjectPath
-      ? "Select a project to use project tools."
+      ? t("projectTools.projectRequired")
       : undefined;
-  const tunnelEnabled = settings.remote.enableWebTunnels === true;
-  const tunnelDisabledMessage = !settings.remote.enableWebTunnels
-    ? t("projectTools.tunnelWebDisabled")
-    : undefined;
+  const projectToolsDisabledMessage =
+    projectToolsUserDisabledMessage ??
+    (isKBrainBrowserHost() ? t("projectTools.desktopHostRequired") : undefined);
+  // 头部按钮只在"用户自己可以解决"的状态下禁用；浏览器宿主的桌面能力缺失保持
+  // 可点开，面板里逐项显示本地化原因，避免按钮像坏掉了。
+  // 终端比其余项目工具更严格：桌面宿主里它也只在 Agent 项目模式下可用，
+  // 因此直接沿用整区判定（浏览器宿主已在上面返回桌面端提示）。
+  const terminalDisabledMessage = projectToolsDisabledMessage;
+  // 内网穿透由桌面端网关执行（`gateway_tunnel_*`），浏览器宿主没有这条通路。
+  const tunnelEnabled = !isKBrainBrowserHost() && settings.remote.enableWebTunnels === true;
+  const projectToolTunnelClient = isAgentMode && !isKBrainBrowserHost() ? tauriTunnelClient : null;
+  const tunnelDisabledMessage = isKBrainBrowserHost()
+    ? t("projectTools.desktopHostRequired")
+    : !settings.remote.enableWebTunnels
+      ? t("projectTools.tunnelWebDisabled")
+      : undefined;
   const {
     handleRightDockInsertFileMention,
     handleRightDockInsertCommitMention,
@@ -3780,11 +3796,12 @@ function ChatPageContent(props: ChatPageProps) {
         terminal: tauriTerminalClient,
         git: tauriGitClient,
         textGeneration: projectToolTextGenerationClient,
-        tunnel: isAgentMode ? tauriTunnelClient : null,
+        // 浏览器宿主没有 `gateway_tunnel_*`：不注入 client，内网穿透入口直接置灰。
+        tunnel: projectToolTunnelClient,
         workspaceActivity: tauriWorkspaceActivityClient,
       },
       capabilities: {
-        disabledMessage: terminalDisabledMessage,
+        disabledMessage: projectToolsDisabledMessage,
         terminalDisabledMessage,
         gitWriteEnabled: true,
         tunnelEnabled,
@@ -3850,7 +3867,6 @@ function ChatPageContent(props: ChatPageProps) {
       handleRightDockInsertCommitMention,
       handleRightDockInsertFileMention,
       handleRightDockInsertGitFileMention,
-      isAgentMode,
       openWorkspaceEditorFile,
       openWorkspaceFilePreview,
       projectToolTextGenerationClient,
@@ -3860,7 +3876,8 @@ function ChatPageContent(props: ChatPageProps) {
       settings.remote.gatewayPort,
       settings.remote.gatewayUrl,
       settings.ssh,
-      tauriTunnelClient,
+      projectToolTunnelClient,
+      projectToolsDisabledMessage,
       terminalDisabledMessage,
       terminalProjectPathKey,
       terminalSessions,
@@ -4059,7 +4076,7 @@ function ChatPageContent(props: ChatPageProps) {
           <ProjectToolsPanelToggle
             isOpen={rightDockOpen}
             sessionCount={projectTerminalSessions.length}
-            disabledMessage={terminalDisabledMessage}
+            disabledMessage={projectToolsUserDisabledMessage}
             onToggle={() => setRightDockOpen((open) => !open)}
           />
         }
@@ -4299,7 +4316,8 @@ function ChatPageContent(props: ChatPageProps) {
               leasedSessionIds={leasedDockSessionIds}
               leasedTools={leasedDockTools}
               theme={effectiveTheme}
-              disabledMessage={terminalDisabledMessage}
+              disabledMessage={projectToolsDisabledMessage}
+              terminalDisabledMessage={terminalDisabledMessage}
               projectState={rightDockProjectState}
               fileTreeState={rightDockFileTreeState}
               sshHosts={settings.ssh.hosts}
@@ -4308,7 +4326,7 @@ function ChatPageContent(props: ChatPageProps) {
               gitClient={tauriGitClient}
               gitWriteEnabled
               textGenerationClient={projectToolTextGenerationClient}
-              tunnelClient={isAgentMode ? tauriTunnelClient : null}
+              tunnelClient={projectToolTunnelClient}
               tunnelEnabled={tunnelEnabled}
               tunnelDisabledMessage={tunnelDisabledMessage}
               tunnelPublicBaseUrl={buildGatewayPublicBaseUrl(

@@ -4,7 +4,7 @@ import test from "node:test";
 import { createTsModuleLoader } from "../helpers/load-ts-module.mjs";
 
 const loader = createTsModuleLoader();
-const { isHostCommandUnavailable } = loader.loadModule(
+const { isHostCommandUnavailable, hostAwareErrorMessage } = loader.loadModule(
   "../agent-ui/src/lib/shared/hostErrors.ts",
 );
 
@@ -30,6 +30,47 @@ test("real failures keep passing through", () => {
   assert.equal(isHostCommandUnavailable(new Error("permission denied")), false);
   assert.equal(isHostCommandUnavailable(undefined), false);
   assert.equal(isHostCommandUnavailable(null), false);
+});
+
+test("hostAwareErrorMessage swaps host diagnostics for the localised reason", () => {
+  assert.equal(
+    hostAwareErrorMessage(
+      new Error("Tauri command fs_list is unavailable in K-brain browser mode"),
+      "本地化提示",
+    ),
+    "本地化提示",
+  );
+  assert.equal(
+    hostAwareErrorMessage('WebUI shim does not implement invoke("git_branches")', "本地化提示"),
+    "本地化提示",
+  );
+  // 真实失败原样透出，空消息才回落 fallback。
+  assert.equal(hostAwareErrorMessage(new Error("permission denied"), "本地化提示"), "permission denied");
+  assert.equal(hostAwareErrorMessage(new Error(""), "本地化提示", "兜底"), "兜底");
+  assert.equal(hostAwareErrorMessage(undefined, "本地化提示", "兜底"), "兜底");
+});
+
+test("project tool surfaces route errors through the host-aware helper", () => {
+  const dockSessions = readFileSync(
+    new URL("../../../agent-ui/src/components/project-tools/useRightDockSessions.ts", import.meta.url),
+    "utf8",
+  );
+  // 终端 tile 的失败文案不再直接落原始 Tauri 诊断。
+  assert.match(dockSessions, /setError\(hostAwareErrorMessage\(err, t\("projectTools\.runtimeUnsupported"\)\)\)/);
+  assert.equal(/setError\(err instanceof Error \? err\.message/.test(dockSessions), false);
+
+  const fileTreeModel = readFileSync(
+    new URL("../../../agent-ui/src/components/project-tools/file-tree/model.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(fileTreeModel, /if \(isHostCommandUnavailable\(error\)\) return fallback;/);
+
+  const sshPanel = readFileSync(
+    new URL("../../../agent-ui/src/components/project-tools/SshTunnelPanel.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(sshPanel, /function errorMessage\(error: unknown, unavailableMessage = ""\)/);
+  assert.match(sshPanel, /hostAwareErrorMessage\(error, unavailableMessage\)/);
 });
 
 test("branch selector swaps the host message for a localised hint", () => {

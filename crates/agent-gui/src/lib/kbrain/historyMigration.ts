@@ -2,7 +2,7 @@ import type { Message } from "@liveagent/app/lib/agentTypes";
 import { invoke } from "@liveagent/app/shims/tauriCore";
 import { isTauriHost } from "../host";
 import { createKBrainClient } from "./client";
-import { setKBrainSessionId } from "./mapping";
+import { kBrainStorageScope, setKBrainSessionId } from "./mapping";
 import { getConfiguredKBrainConnection } from "./runtimeConnection";
 import { contextToKBrainMessages } from "./turn";
 import type { KBrainMessage, KBrainModelRef } from "./types";
@@ -315,13 +315,12 @@ export async function migrateLegacyHistoryPage(
   const connection = getConfiguredKBrainConnection();
   if (!connection) throw new Error("K-brain backend connection is not ready");
   const client = createKBrainClient({
-    baseUrl: connection.baseUrl,
-    token: connection.token,
     fetch: options.fetch,
   });
   const results: MigrationImportResult[] = [];
   const failures: MigrationFailure[] = [];
-  const cache = readMigrationCache(connection.baseUrl);
+  const scope = kBrainStorageScope();
+  const cache = readMigrationCache(scope);
   let cacheChanged = false;
   for (const item of page.conversations) {
     try {
@@ -334,7 +333,7 @@ export async function migrateLegacyHistoryPage(
           ...cached.result,
           status: "already_imported",
         };
-        setKBrainSessionId(item.id, cachedResult.backend_id, connection.baseUrl);
+        setKBrainSessionId(item.id, cachedResult.backend_id);
         results.push(cachedResult);
         continue;
       }
@@ -394,7 +393,7 @@ export async function migrateLegacyHistoryPage(
       ) {
         throw new Error("legacy history import response identity mismatch");
       }
-      setKBrainSessionId(item.id, result.backend_id, connection.baseUrl);
+      setKBrainSessionId(item.id, result.backend_id);
       if (isStableMigrationResult(result)) {
         cache[item.id] = { fingerprint: sourceFingerprint, result };
         cacheChanged = true;
@@ -407,7 +406,7 @@ export async function migrateLegacyHistoryPage(
       });
     }
   }
-  if (cacheChanged) writeMigrationCache(connection.baseUrl, cache);
+  if (cacheChanged) writeMigrationCache(scope, cache);
   return {
     results,
     failures,

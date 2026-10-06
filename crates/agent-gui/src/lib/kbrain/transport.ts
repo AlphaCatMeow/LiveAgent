@@ -5,6 +5,24 @@ import type { KBrainClientOptions } from "./types";
 
 let reconnect: ReturnType<typeof connectKBrainBackend> | undefined;
 
+export class KBrainTransportError extends Error {
+  readonly code = "KBRAIN_TRANSPORT_UNAVAILABLE";
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : "K-brain connection unavailable", { cause });
+    this.name = "KBrainTransportError";
+  }
+}
+
+function waitForConnection<T>(promise: Promise<T>, signal?: AbortSignal | null): Promise<T> {
+  if (!signal) return promise;
+  signal.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+
 function refreshConnection() {
   reconnect ??= connectKBrainBackend().finally(() => {
     reconnect = undefined;
@@ -18,6 +36,7 @@ export async function fetchKBrain(
   input: KBrainClientOptions = {},
   retryRead = false,
 ): Promise<Response> {
+  init.signal?.throwIfAborted();
   const managed = input.baseUrl === undefined && input.token === undefined && !input.fetch;
   const options = resolveKBrainClientOptions(input);
   const baseUrl = options.baseUrl?.trim().replace(/\/+$/, "");
@@ -37,7 +56,8 @@ export async function fetchKBrain(
     response = await send(baseUrl, options.token);
     if (response.status !== 401) return response;
   } catch (error) {
-    failure = error;
+    if (init.signal?.aborted) throw init.signal.reason;
+    failure = new KBrainTransportError(error);
   }
   if (!managed || !isTauriHost() || init.signal?.aborted) {
     if (response) return response;
@@ -46,8 +66,9 @@ export async function fetchKBrain(
   let connection = getConfiguredKBrainConnection();
   if (connection?.baseUrl === baseUrl && connection.token === options.token) {
     try {
-      connection = await refreshConnection();
+      connection = await waitForConnection(refreshConnection(), init.signal);
     } catch {
+      if (init.signal?.aborted) throw init.signal.reason;
       if (response) return response;
       throw failure;
     }
@@ -60,5 +81,10 @@ export async function fetchKBrain(
     throw failure;
   }
   await response?.body?.cancel();
-  return send(connection.baseUrl, connection.token);
+  try {
+    return await send(connection.baseUrl, connection.token);
+  } catch (error) {
+    if (init.signal?.aborted) throw init.signal.reason;
+    throw new KBrainTransportError(error);
+  }
 }

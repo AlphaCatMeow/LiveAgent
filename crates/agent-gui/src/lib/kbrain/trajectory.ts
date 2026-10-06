@@ -6,6 +6,7 @@ import type { ChatFileLink } from "@liveagent/ui/lib/chat/chatFileLinks";
 import type { TrajectorySection, TrajectorySubagentRun } from "@liveagent/ui/lib/trajectory/types";
 import { getKBrainSessionId } from "./mapping";
 import { resolveKBrainClientOptions } from "./runtimeConnection";
+import { fetchKBrain } from "./transport";
 import type { KBrainClientOptions, KBrainEvent, KBrainUsage } from "./types";
 
 export type KBrainTrajectoryWindow = TrajectoryEventsWindowPayload & {
@@ -57,14 +58,10 @@ export function createKBrainTrajectoryHost(
     const id = mappedId ?? (isBackendSessionId(candidate) ? candidate : undefined);
     // Unsent local conversations have no backend journal yet; recheck on every refresh.
     if (!id) return undefined;
-    const response = await (options.fetch ?? globalThis.fetch)(
-      `${baseUrl}/v1/sessions/${encodeURIComponent(id)}/trajectory${suffix}`,
-      {
-        headers: {
-          Accept: "application/json",
-          ...(options.token?.trim() ? { Authorization: `Bearer ${options.token.trim()}` } : {}),
-        },
-      },
+    const response = await fetchKBrain(
+      `/v1/sessions/${encodeURIComponent(id)}/trajectory${suffix}`,
+      {},
+      input,
     );
     if (!response.ok) {
       const body = await response.text();

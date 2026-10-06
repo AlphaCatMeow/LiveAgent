@@ -142,7 +142,7 @@ test("real catalog and selection hooks fetch /v1/models with the runtime connect
     await act(async () => request.resolve(new Response(JSON.stringify({ models: refs }), { status: 200 })));
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, "http://kbrain.test/v1/models");
-    assert.equal(calls[0].init.headers.Authorization, "Bearer backend-token");
+    assert.equal(new Headers(calls[0].init.headers).get("Authorization"), "Bearer backend-token");
     assert.deepEqual(snapshot.selection.modelOptions.map(o => [o.providerId, o.model]), [
       ["backend-anthropic-account", "claude-test"],
       ["backend-anthropic-account", "claude-other"],

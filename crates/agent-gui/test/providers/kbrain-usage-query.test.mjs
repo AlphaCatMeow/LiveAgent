@@ -3,15 +3,8 @@ import test from "node:test";
 import { createTsModuleLoader } from "../helpers/load-ts-module.mjs";
 
 const calls = [];
-const loader = createTsModuleLoader({
-  mocks: {
-    "../kbrain/runtimeConnection": {
-      getConfiguredKBrainConnection() {
-        return { baseUrl: "http://127.0.0.1:47321/", token: "kbrain-token" };
-      },
-    },
-  },
-});
+const loader = createTsModuleLoader();
+loader.loadModule("src/lib/kbrain/runtimeConnection.ts").setKBrainRuntimeConnection({baseUrl:"http://127.0.0.1:47321",token:"kbrain-token",protocolVersion:"kbrain.agent.v1"});
 const usage = loader.loadModule("src/lib/providers/usageQuery.ts");
 const originalFetch = globalThis.fetch;
 
@@ -31,7 +24,7 @@ test("query adapter uses the canonical K-brain endpoint and never a vendor URL",
   await usage.queryProviderUsage("provider/a", true);
   assert.equal(calls[0].url, "http://127.0.0.1:47321/v1/providers/provider%2Fa/usage");
   assert.equal(
-    calls[0].init.headers.Authorization ?? calls[0].init.headers.authorization,
+    new Headers(calls[0].init.headers).get("Authorization"),
     "Bearer kbrain-token",
   );
   assert.deepEqual(JSON.parse(calls[0].init.body), { refresh: true });

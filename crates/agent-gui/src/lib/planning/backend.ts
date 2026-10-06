@@ -1,8 +1,8 @@
 import type { PlanningBackend } from "@liveagent/ui/lib/planning/types";
-import { getConfiguredKBrainConnection } from "../kbrain/runtimeConnection";
+import { kBrainStorageScope } from "../kbrain/mapping";
 import { requestPlanning } from "./kbrain";
 export const backend: PlanningBackend = {
-  scope: () => getConfiguredKBrainConnection()?.baseUrl ?? "",
+  scope: () => kBrainStorageScope(),
   call: requestPlanning,
   subscribe(listener) {
     const timer = setInterval(() => listener(), 2_000);

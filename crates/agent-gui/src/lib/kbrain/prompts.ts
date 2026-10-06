@@ -1,4 +1,4 @@
-import { resolveKBrainClientOptions } from "./runtimeConnection";
+import { fetchKBrain } from "./transport";
 import type { KBrainClientOptions } from "./types";
 
 export type KBrainAgentTemplate = {
@@ -61,23 +61,8 @@ export type KBrainPromptClient = {
 export function createKBrainPromptClient(
   inputOptions: KBrainClientOptions = {},
 ): KBrainPromptClient {
-  const options = resolveKBrainClientOptions(inputOptions);
-  const configuredBaseUrl =
-    options.baseUrl?.trim() ?? (options.fetch ? "http://127.0.0.1:47321" : undefined);
-  if (!configuredBaseUrl) throw new Error("K-brain backend connection is not ready");
-  const baseUrl = configuredBaseUrl.replace(/\/+$/, "");
-  const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
-
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const response = await fetchImpl(`${baseUrl}${path}`, {
-      ...init,
-      headers: {
-        Accept: "application/json",
-        ...(options.token?.trim() ? { Authorization: `Bearer ${options.token.trim()}` } : {}),
-        ...(init.body === undefined ? {} : { "Content-Type": "application/json" }),
-        ...(init.headers ?? {}),
-      },
-    });
+    const response = await fetchKBrain(path, init, inputOptions);
     if (!response.ok) {
       const body = await response.text();
       let message = body;

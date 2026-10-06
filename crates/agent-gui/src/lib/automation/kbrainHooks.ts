@@ -3,17 +3,14 @@ import type {
   HooksApplyResponse,
   HooksSnapshot,
 } from "@liveagent/ui/lib/automation/types";
-import { getConfiguredKBrainConnection } from "../kbrain/runtimeConnection";
+import { fetchKBrain } from "../kbrain/transport";
 
 async function request<T>(method: string, input?: AutomationApplyInput): Promise<T> {
-  const connection = getConfiguredKBrainConnection();
-  if (!connection) throw new Error("K-brain backend connection is not ready");
-  const response = await fetch(`${connection.baseUrl.replace(/\/+$/, "")}/v1/hooks`, {
+  const response = await fetchKBrain("/v1/hooks", {
     method,
     headers: {
       Accept: "application/json",
       ...(input ? { "Content-Type": "application/json" } : {}),
-      ...(connection.token ? { Authorization: `Bearer ${connection.token}` } : {}),
     },
     ...(input ? { body: JSON.stringify(input) } : {}),
   });

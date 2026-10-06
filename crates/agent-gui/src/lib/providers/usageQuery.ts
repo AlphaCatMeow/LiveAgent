@@ -5,20 +5,17 @@ import {
   type UsageQueryProvider,
   useProviderUsageWithQuery,
 } from "@liveagent/ui/lib/providers/usageQueryCore";
-import { getConfiguredKBrainConnection } from "../kbrain/runtimeConnection";
+import { fetchKBrain } from "../kbrain/transport";
 import type { UsageQueryConfig } from "../settings";
 
 export * from "@liveagent/ui/lib/providers/usageQueryCore";
 
 async function requestProviderUsage<T>(path: string, body: unknown): Promise<T> {
-  const connection = getConfiguredKBrainConnection();
-  if (!connection) throw new Error("K-brain backend connection is not ready");
-  const response = await fetch(`${connection.baseUrl.replace(/\/+$/, "")}${path}`, {
+  const response = await fetchKBrain(path, {
     method: "POST",
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
-      ...(connection.token ? { Authorization: `Bearer ${connection.token}` } : {}),
     },
     body: JSON.stringify(body),
   });

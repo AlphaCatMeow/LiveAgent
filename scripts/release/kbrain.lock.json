@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "repository": "https://github.com/Stack-Cairn/K-brain",
-  "sourceRevision": "96b6a3cd30ac7bb6f2ed51267e360ef03187612f",
+  "sourceRevision": "3ee2e3b72f168f37a5d62c90100c59ffc9c9553a",
   "protocol": "kbrain.agent.v1",
   "requiredBackendFlags": [
     "-parent-stdio"

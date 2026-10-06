@@ -11,7 +11,6 @@ import { appendMessagesToConversation } from "../chat/conversation/conversationS
 import { createKBrainClient } from "./client";
 import { getKBrainSessionId, setKBrainSessionId } from "./mapping";
 import { questionResultDetails } from "./questions";
-import { getConfiguredKBrainConnection } from "./runtimeConnection";
 import type {
   KBrainClientToolRequest,
   KBrainClientToolResult,
@@ -347,12 +346,10 @@ function fallbackRequestId(params: KBrainTurnParams) {
 }
 
 export async function runKBrainTurn(params: KBrainTurnParams): Promise<AssistantMessage> {
-  const runtimeConnection = getConfiguredKBrainConnection();
-  const baseUrl = params.baseUrl ?? runtimeConnection?.baseUrl;
-  const token = params.token ?? runtimeConnection?.token;
+  const baseUrl = params.baseUrl;
   const client = createKBrainClient({
     baseUrl,
-    token,
+    token: params.token,
     fetch: params.fetch,
   });
   const model = params.model;
@@ -385,18 +382,21 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
   throwIfAborted(params.signal);
   const clientRequestId = params.clientRequestId ?? fallbackRequestId(params);
   const startRun = () =>
-    client.startRun({
-      conversation_id: kbrainSessionId,
-      client_request_id: clientRequestId,
-      ...(params.turnId ? { turn_id: params.turnId } : {}),
-      prompt: params.prompt,
-      ...(promptContent.length ? { content: promptContent } : {}),
-      model,
-      ...(params.options ? { options: params.options } : {}),
-      ...(params.hook_policy ? { hook_policy: params.hook_policy } : {}),
-      ...(params.hook_scope_id ? { hook_scope_id: params.hook_scope_id } : {}),
-      ...(resumeMessageId ? { resume_message_id: resumeMessageId } : {}),
-    });
+    client.startRun(
+      {
+        conversation_id: kbrainSessionId,
+        client_request_id: clientRequestId,
+        ...(params.turnId ? { turn_id: params.turnId } : {}),
+        prompt: params.prompt,
+        ...(promptContent.length ? { content: promptContent } : {}),
+        model,
+        ...(params.options ? { options: params.options } : {}),
+        ...(params.hook_policy ? { hook_policy: params.hook_policy } : {}),
+        ...(params.hook_scope_id ? { hook_scope_id: params.hook_scope_id } : {}),
+        ...(resumeMessageId ? { resume_message_id: resumeMessageId } : {}),
+      },
+      params.signal,
+    );
   let accepted: Awaited<ReturnType<typeof client.startRun>>;
   try {
     accepted = await startRun();

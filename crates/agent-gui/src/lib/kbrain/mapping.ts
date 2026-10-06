@@ -11,7 +11,7 @@ type MappingState = {
   backendToLocal: MappingRecord;
 };
 
-function normalizeBaseUrl(baseUrl?: string) {
+export function kBrainStorageScope(baseUrl?: string) {
   const managed = getKBrainRuntimeConnection();
   const normalized = (baseUrl ?? managed?.baseUrl ?? "http://127.0.0.1:47321")
     .trim()
@@ -19,6 +19,8 @@ function normalizeBaseUrl(baseUrl?: string) {
   // The managed backend retains its storage identity across ephemeral ports.
   return managed && normalized === managed.baseUrl ? "liveagent-managed-kbrain" : normalized;
 }
+
+const normalizeBaseUrl = kBrainStorageScope;
 
 function scopedKey(baseUrl: string, conversationId: string) {
   return `${normalizeBaseUrl(baseUrl)}\u0000${conversationId.trim()}`;

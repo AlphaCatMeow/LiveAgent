@@ -1,4 +1,4 @@
-import { fetchKBrain } from "./transport";
+import { fetchKBrain, KBrainTransportError } from "./transport";
 import {
   KBRAIN_PROTOCOL_VERSION,
   type KBrainBranchRequest,
@@ -516,11 +516,36 @@ export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
     return result;
   }
 
-  async function startRun(input: KBrainPromptRequest): Promise<KBrainRunAccepted> {
-    const accepted = await request<KBrainRunAccepted>(
-      `/v1/sessions/${encodeURIComponent(input.conversation_id)}/runs`,
-      { method: "POST", body: JSON.stringify(input) },
-    );
+  async function startRun(
+    input: KBrainPromptRequest,
+    signal?: AbortSignal,
+  ): Promise<KBrainRunAccepted> {
+    const path = `/v1/sessions/${encodeURIComponent(input.conversation_id)}/runs`;
+    let accepted: KBrainRunAccepted;
+    try {
+      accepted = await request<KBrainRunAccepted>(path, {
+        method: "POST",
+        body: JSON.stringify(input),
+        signal,
+      });
+    } catch (error) {
+      if (
+        !(error instanceof KBrainTransportError) ||
+        !input.client_request_id?.trim() ||
+        signal?.aborted
+      )
+        throw error;
+      // Recover a lost ACK by its original identity; never resubmit the mutation.
+      try {
+        accepted = await request<KBrainRunAccepted>(
+          `${path}?client_request_id=${encodeURIComponent(input.client_request_id)}`,
+          { signal },
+        );
+      } catch {
+        if (signal?.aborted) throw signal.reason;
+        throw error;
+      }
+    }
     if (accepted.version !== KBRAIN_PROTOCOL_VERSION) {
       throw new Error(`Unsupported K-brain protocol ${String(accepted.version)}`);
     }
@@ -678,6 +703,7 @@ export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
       if (buffer.trim()) throw new Error("K-brain event stream ended with an incomplete event");
     } finally {
       signal?.removeEventListener("abort", abortReader);
+      await reader.cancel().catch(() => undefined);
       reader.releaseLock();
     }
   }

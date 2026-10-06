@@ -1,5 +1,16 @@
 # v2-kbrian 与 main 功能测试报告
 
+## 2026-10-06 参考 ZCode 收敛传输与运行恢复
+
+- 设计与状态边界见 `docs/design/kbrain-transport-boundary.md`；保留 HTTP/SSE，不进行 stdio/MessagePort 的形式替换。
+- Prompt、Trajectory、Hooks、Usage 适配器接入统一传输；聊天和迁移不再固定启动时的地址/token；托管日程和迁移缓存使用稳定 scope，不因随机端口改变而变成另一份数据。
+- 恢复等待者独立取消、共享重连；传输错误有稳定 code/cause；SSE 消费失败/取消释放 reader。
+- K-brain `3ee2e3b` 新增按 client_request_id 查询持久化运行接收记录。前端丢失 ACK 后仅查询，不重发 POST；找到原 run 后继续订阅事件，未知结果仍报告错误。锁文件已更新。
+- 前端全量 **2959 通过 / 1 跳过 / 0 失败**，GUI TypeScript、10 个改动源码 Biome 通过。K-brain 全量、backend race/vet 通过。
+- 真实 HTTP 故障注入：丢弃运行 POST 响应，查询找回同一 run，模型工具链完成；断言一次 POST/一次查询，无重复 Read。上游为本地 fixture，不是外部模型验收。
+- 新后端真实桌面重启与换端口恢复通过；Cron/Memory/MCP/Skills/Planning、1440/480 视口、日程 26 项及历史命令 22/22 通过。日志与脚本见设计文档验证节。
+- 通用命令队列、完整 snapshot/delta、跨设备 owner/lease、其他剩余领域迁移不在本轮完成范围内。没有改标签或发布附件。
+
 ## 2026-10-06 后端重启后的 Load failed 修复
 
 - 在真实 WKWebView 的日程页复现 `Load failed 重试`：原 sidecar 重启后端口和 token 改变，前端运行时仍缓存旧连接。页面仍显示旧日程数据，不能以“页面有内容”判定请求正常。

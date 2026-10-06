@@ -5,6 +5,7 @@ import { AppErrorBoundary } from "@liveagent/ui/components/AppErrorBoundary";
 import { Pin } from "@liveagent/ui/components/IconSet";
 import { useConfirmDialog } from "@liveagent/ui/components/ui/confirm-dialog";
 import { Toaster } from "@liveagent/ui/components/ui/toaster";
+import { TimeZoneNoticeBanner } from "./lib/planning/TimeZoneNoticeBanner";
 import { LocaleContext, t as translate, useLocaleContextValue } from "@liveagent/ui/i18n/index";
 import { loadThinkingLiveSupplement } from "@liveagent/ui/lib/models/thinkingLive";
 import {
@@ -109,7 +110,7 @@ function interpolateMessage(template: string, values: Record<string, string>) {
 
 const GATEWAY_SETTINGS_SYNC_EVENT = "gateway:settings-sync";
 
-function AppChrome(props: { children: ReactNode }) {
+function AppChrome(props: { children: ReactNode; notice?: ReactNode }) {
   // Plain inputs get a shared cut/copy/paste menu; everything else keeps the
   // suppressed native menu (surfaces with their own menus opt out upstream).
   const { onRootContextMenu, onRootMouseDownCapture, menu } = useNativeInputContextMenu();
@@ -123,6 +124,7 @@ function AppChrome(props: { children: ReactNode }) {
       {/* No conditional title bar here: adding or removing a 32px sibling when the
           settings overlay opens would resize the chat subtree underneath it and make
           the whole page jump. The overlay carries its own title bar instead. */}
+      {props.notice}
       <div className="relative min-h-0 flex-1 overflow-hidden bg-background">{props.children}</div>
       {menu}
     </div>
@@ -784,7 +786,7 @@ export default function App() {
   return (
     <LocaleContext.Provider value={localeContextValue}>
       <Toaster />
-      <AppChrome>
+      <AppChrome notice={<TimeZoneNoticeBanner onOpenSettings={() => openSettings("system")} />}>
         {backgroundHostsReady ? (
           <Suspense fallback={null}>
             <CronPromptRunner settings={settings} />

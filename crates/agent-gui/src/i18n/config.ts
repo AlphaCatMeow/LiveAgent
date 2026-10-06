@@ -13,6 +13,17 @@ export {
  */
 export const GUI_TRANSLATION_OVERRIDES: Record<Locale, Record<string, string>> = {
   "zh-CN": {
+    "historyImport.title": "旧版对话迁移",
+    "historyImport.action": "导入旧版对话",
+    "historyImport.description":
+      "扫描本机旧版对话并转换为 K-brain 存储格式。保留旧数据，已有对话不覆盖，已明确删除的记录不恢复。",
+    "historyImport.desktopOnly": "请在保存旧数据的桌面端执行导入，浏览器无法读取本机旧版数据。",
+    "historyImport.running": "正在导入…",
+    "historyImport.runningHint": "正在扫描与转换旧对话，可以继续使用其他功能。",
+    "historyImport.result": "新增 {imported} 条，已存在 {existing} 条，失败 {failed} 项。",
+    "historyImport.empty": "未发现可导入的旧对话；已明确删除的记录会跳过。",
+    "historyImport.partial": "{count} 条对话正文已导入，但文件回滚记录尚不完整，可稍后重试。",
+    "historyImport.failures": "查看失败详情（可再次点击导入重试）",
     "app.windowPinned": "已置顶",
     "app.windowPinnedHint": "窗口已置顶，浮在其他应用上方。点击取消置顶。",
     "app.settingsLoadFailed": "加载设置失败，已回退到默认配置。",
@@ -304,6 +315,21 @@ export const GUI_TRANSLATION_OVERRIDES: Record<Locale, Record<string, string>> =
     "settings.remoteHeartbeatHint": "本地 Agent 向 Gateway 上报存活状态的间隔",
   },
   "en-US": {
+    "historyImport.title": "Legacy conversation migration",
+    "historyImport.action": "Import old conversations",
+    "historyImport.description":
+      "Scan local legacy conversations and convert them to K-brain storage. Originals are preserved, existing conversations are not overwritten, and explicitly deleted records are not restored.",
+    "historyImport.desktopOnly":
+      "Import from the desktop app that holds your old data. The browser cannot read local legacy files.",
+    "historyImport.running": "Importing…",
+    "historyImport.runningHint":
+      "Scanning and converting old conversations. You can keep using other features.",
+    "historyImport.result": "{imported} imported, {existing} already present, {failed} failed.",
+    "historyImport.empty":
+      "No importable old conversations found. Explicitly deleted records are skipped.",
+    "historyImport.partial":
+      "{count} conversation transcripts were imported, but file rollback records are incomplete. You can retry later.",
+    "historyImport.failures": "View failures (click Import again to retry)",
     "app.windowPinned": "Pinned",
     "app.windowPinnedHint": "Window is pinned above other apps. Click to unpin.",
     "app.settingsLoadFailed": "Failed to load settings. Default settings have been restored.",

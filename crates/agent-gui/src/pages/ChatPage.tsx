@@ -169,6 +169,7 @@ import {
 } from "../lib/settings";
 import { tauriSftpClient } from "../lib/sftp/tauriSftpClient";
 import { createGuiSidebarBackend } from "../lib/sidebar/guiSidebarBackend";
+import { subscribeHistoryImported } from "../lib/kbrain/manualHistoryImport";
 import { desktopSttTransport } from "../lib/stt/desktopSttTransport";
 import { createSubagentStoreManager } from "../lib/subagents";
 import { tauriTerminalClient } from "../lib/terminal/tauriTerminalClient";
@@ -362,6 +363,14 @@ function ChatPageContent(props: ChatPageProps) {
   // workdirs, running set); ChatPage only issues imperative calls and keeps a
   // few narrow selector subscriptions.
   const sidebarStore = useMemo(() => createSidebarStore(createGuiSidebarBackend()), []);
+  useEffect(
+    () =>
+      subscribeHistoryImported(() => {
+        void sidebarStore.refresh();
+        void sidebarStore.refreshWorkdirs("fallback");
+      }),
+    [sidebarStore],
+  );
   const startNewConversationActionRef = useRef<(options?: { workdir?: string }) => string>(
     () => "",
   );

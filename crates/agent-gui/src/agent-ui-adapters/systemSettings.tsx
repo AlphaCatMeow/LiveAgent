@@ -13,6 +13,7 @@ import {
 } from "@liveagent/ui/pages/settings/shared";
 import { useMemo, useState } from "react";
 import { isTauriHost } from "../lib/host";
+import { LegacyHistoryImportSettings } from "../lib/kbrain/LegacyHistoryImportSettings";
 import { inferRuntimePlatform } from "../lib/runtimePlatform";
 import { CLOSE_WINDOW_BEHAVIOR_OPTIONS } from "../lib/settings";
 import { useTrayPrefs, writeTrayPrefs } from "../lib/tray/trayPrefs";
@@ -46,6 +47,7 @@ export function SystemSettingsExtensions(props: SettingsSectionProps) {
 
   return (
     <>
+      <LegacyHistoryImportSettings />
       {isTauriHost() && (
         <SettingsGroup title={t("settings.calendarNotifications")}>
           <SettingsRow

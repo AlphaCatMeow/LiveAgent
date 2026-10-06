@@ -623,7 +623,9 @@ jobs:
           fi
           gh release upload "$RELEASE_TAG" "${public_assets[@]}" --clobber
 
-          if [ "$is_prerelease" != true ]; then
-            node scripts/release/create-tauri-updater-manifest.mjs release-artifacts release-artifacts/latest.json "$notes_path"
-            gh release upload "$RELEASE_TAG" release-artifacts/latest.json --clobber
-          fi
+          # 预发布也必须上传 latest.json：客户端更新检测按 feed 逐个探测
+          # releases/download/<tag>/latest.json，缺清单的 release 会被静默跳过，
+          # 导致预发布通道完全失效。macOS preview 包无签名更新产物，清单里
+          # 不含 darwin 平台键即可，客户端会降级为手动下载提示。
+          node scripts/release/create-tauri-updater-manifest.mjs release-artifacts release-artifacts/latest.json "$notes_path"
+          gh release upload "$RELEASE_TAG" release-artifacts/latest.json --clobber

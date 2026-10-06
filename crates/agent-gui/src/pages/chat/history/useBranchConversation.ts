@@ -11,9 +11,8 @@ import type {
   ConversationViewState,
   HistoryMessageRef,
 } from "../../../lib/chat/conversation/conversationState";
-import { branchChatHistory, type ChatHistorySummary } from "../../../lib/chat/history/chatHistory";
 import { asErrorMessage } from "../chatPageUtils";
-import { findReloadedMessageRef, isKBrainRevisionConflict } from "./useConversationHistoryActions";
+import { branchConversationWithReload } from "./useConversationHistoryActions";
 
 type UseBranchConversationParams = {
   currentConversationIdRef: MutableRefObject<string>;
@@ -61,20 +60,11 @@ export function useBranchConversation(params: UseBranchConversationParams) {
       branchInFlightRef.current = true;
       setBranchPendingMessageId(messageRef.messageId);
       try {
-        let summary: ChatHistorySummary;
-        try {
-          summary = await branchChatHistory(conversationId, messageRef);
-        } catch (error) {
-          if (!isKBrainRevisionConflict(error)) throw error;
-          // The stored projection is behind the backend: re-request it and
-          // re-resolve the same message before retrying once.
-          const refreshed = await reloadConversation(conversationId);
-          const freshRef = refreshed && findReloadedMessageRef(refreshed.state, messageRef);
-          if (!freshRef) {
-            throw new Error("历史消息已发生变化，请重新选择要分支的消息");
-          }
-          summary = await branchChatHistory(conversationId, freshRef);
-        }
+        const summary = await branchConversationWithReload(
+          conversationId,
+          messageRef,
+          reloadConversation,
+        );
         sidebarStore.upsertLocal({ ...summary, isPending: undefined });
         handleSelectConversation(summary.id);
       } catch (error) {

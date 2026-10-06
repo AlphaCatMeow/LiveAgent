@@ -129,7 +129,6 @@ import {
   type RenderTimelineItem,
 } from "../lib/chat/conversation/conversationState";
 import {
-  branchChatHistory,
   buildConversationStateFromWindow,
   CHAT_HISTORY_WINDOW_MESSAGES,
   type ChatHistorySummary,
@@ -208,7 +207,10 @@ import { useGatewayBridgeReadiness } from "./chat/gateway/useGatewayBridgeReadin
 import { useGatewayRunMirrorCoordinator } from "./chat/gateway/useGatewayRunMirrorCoordinator";
 import { useGatewayStatus } from "./chat/gateway/useGatewayStatus";
 import { useBranchConversation } from "./chat/history/useBranchConversation";
-import { useConversationHistoryActions } from "./chat/history/useConversationHistoryActions";
+import {
+  branchConversationWithReload,
+  useConversationHistoryActions,
+} from "./chat/history/useConversationHistoryActions";
 import { useSharedHistory } from "./chat/history/useSharedHistory";
 import { useChatPageRuntimeStore } from "./chat/hooks/useChatPageRuntimeStore";
 import {
@@ -1545,7 +1547,11 @@ function ChatPageContent(props: ChatPageProps) {
         requestedConversationId.trim() || currentConversationIdRef.current.trim();
       if (!sourceConversationId) throw new Error("当前会话不存在，无法编辑重发");
       if (!kBrainBackendEnabled) return { conversationId: sourceConversationId, messageRef };
-      const summary = await branchChatHistory(sourceConversationId, messageRef);
+      const summary = await branchConversationWithReload(
+        sourceConversationId,
+        messageRef,
+        reloadConversation,
+      );
       sidebarStore.upsertLocal({ ...summary, isPending: undefined });
       const childWindow = await getChatHistoryWindow({
         id: summary.id,
@@ -1586,6 +1592,7 @@ function ChatPageContent(props: ChatPageProps) {
       conversationRuntimeCacheRef,
       currentConversationIdRef,
       kBrainBackendEnabled,
+      reloadConversation,
       sidebarStore,
     ],
   );

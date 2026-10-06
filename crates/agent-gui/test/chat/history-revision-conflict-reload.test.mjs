@@ -92,7 +92,7 @@ function buildState(messages, revision) {
 
 const CONFLICT = "K-brain history revision conflict";
 
-function loadHistoryActions({ getWindow, replace }) {
+function loadHistoryActions({ getWindow, replace, branch }) {
   const loader = createTsModuleLoader({
     mocks: {
       react: {
@@ -101,6 +101,7 @@ function loadHistoryActions({ getWindow, replace }) {
         useState: (initial) => [initial, () => {}],
       },
       [chatHistoryPath]: {
+        branchChatHistory: branch,
         CHAT_HISTORY_WINDOW_MESSAGES: 360,
         buildChatHistoryRevision: () => "stamped",
         buildConversationStateFromWindow: (record) =>
@@ -178,6 +179,63 @@ test("revision conflict matcher accepts backend 409 and client guard text", () =
   assert.equal(isKBrainRevisionConflict(new Error("K-brain history revision conflict")), true);
   assert.equal(isKBrainRevisionConflict(new Error("upstream unavailable")), false);
   assert.equal(isKBrainRevisionConflict("history revision conflict"), false);
+});
+
+test("retry preparation reloads a stale branch anchor once before creating the child", async () => {
+  const old = buildState([userMessage("hello")], "rev-1");
+  const fresh = buildState([userMessage("hello")], "rev-2");
+  const ref = old.transcript.items.find(item => item.kind === "user").messageRef;
+  const calls = [];
+  let reloads = 0;
+  const { branchConversationWithReload } = loadHistoryActions({
+    branch: async (id, anchor) => {
+      calls.push({ id, anchor });
+      if (calls.length === 1) throw conflictError();
+      return { id: "child" };
+    },
+  });
+  const result = await branchConversationWithReload("conversation-1", ref, async id => {
+    assert.equal(id, "conversation-1");
+    reloads++;
+    return { state: fresh, revision: "rev-2" };
+  });
+  assert.equal(result.id, "child");
+  assert.equal(reloads, 1);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].anchor, fresh.transcript.items.find(item => item.kind === "user").messageRef);
+});
+
+test("retry preparation refuses changed or missing message content after reload", async () => {
+  const old = buildState([userMessage("hello")], "rev-1");
+  const ref = old.transcript.items.find(item => item.kind === "user").messageRef;
+  for (const messages of [[userMessage("changed")], [userMessage("other", 1, "u2")]]) {
+    let calls = 0;
+    const { branchConversationWithReload } = loadHistoryActions({
+      branch: async () => { calls++; throw conflictError(); },
+    });
+    await assert.rejects(() => branchConversationWithReload("conversation-1", ref, async () => ({
+      state: buildState(messages, "rev-2"), revision: "rev-2",
+    })), /历史消息已发生变化/);
+    assert.equal(calls, 1);
+  }
+});
+
+test("retry preparation bounds conflicts and does not replay unrelated failures", async () => {
+  const state = buildState([userMessage("hello")], "rev-1");
+  const ref = state.transcript.items.find(item => item.kind === "user").messageRef;
+  for (const conflict of [true, false]) {
+    let calls = 0;
+    let reloads = 0;
+    const { branchConversationWithReload } = loadHistoryActions({
+      branch: async () => { calls++; throw conflict ? conflictError() : new Error("network failed"); },
+    });
+    await assert.rejects(() => branchConversationWithReload("conversation-1", ref, async () => {
+      reloads++;
+      return { state, revision: "rev-1" };
+    }), conflict ? /revision conflict/ : /network failed/);
+    assert.equal(calls, conflict ? 2 : 1);
+    assert.equal(reloads, conflict ? 1 : 0);
+  }
 });
 
 test("reloaded message ref keeps content identity and drops a replaced message", () => {

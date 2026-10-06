@@ -11,6 +11,7 @@ import {
   prependTranscriptProjection,
 } from "../../../lib/chat/conversation/conversationState";
 import {
+  branchChatHistory,
   buildChatHistoryRevision,
   buildConversationStateFromWindow,
   CHAT_HISTORY_WINDOW_MESSAGES,
@@ -81,6 +82,26 @@ export function findReloadedMessageRef(
   return state.transcript.items
     .flatMap((item) => (item.kind === "user" && item.messageRef ? [item.messageRef] : []))
     .find((ref) => ref.messageId === messageRef.messageId);
+}
+
+export async function branchConversationWithReload(
+  conversationId: string,
+  messageRef: HistoryMessageRef,
+  reload: (
+    conversationId: string,
+  ) => Promise<{ state: ConversationViewState; revision: string } | null>,
+) {
+  try {
+    return await branchChatHistory(conversationId, messageRef);
+  } catch (error) {
+    if (!isKBrainRevisionConflict(error)) throw error;
+    const refreshed = await reload(conversationId);
+    const freshRef = refreshed && findReloadedMessageRef(refreshed.state, messageRef);
+    if (!freshRef || freshRef.contentHash !== messageRef.contentHash) {
+      throw new Error("历史消息已发生变化，请重新选择要重试或分支的消息");
+    }
+    return branchChatHistory(conversationId, freshRef);
+  }
 }
 
 type UseConversationHistoryActionsParams = {

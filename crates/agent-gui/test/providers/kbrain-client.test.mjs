@@ -69,7 +69,7 @@ test("K-brain client sends auxiliary text generation through the versioned backe
   });
   assert.equal(result.text, "generated");
   assert.equal(new URL(calls[0].url).pathname, "/v1/text/generate");
-  assert.equal(calls[0].init.headers.Authorization, "Bearer backend-token");
+  assert.equal(new Headers(calls[0].init.headers).get("Authorization"), "Bearer backend-token");
   assert.deepEqual(JSON.parse(calls[0].init.body).model, {
     provider: "opaque-provider",
     model: "model-v1",
@@ -187,7 +187,7 @@ test("K-brain client uses the canonical session, run, permission, and SSE contra
   );
   const runCall = calls.find(({ url }) => url.endsWith("/runs"));
   assert.equal(JSON.parse(runCall.init.body).model, undefined);
-  assert.equal(runCall.init.headers.Authorization, "Bearer secret");
+  assert.equal(new Headers(runCall.init.headers).get("Authorization"), "Bearer secret");
 });
 
 test("K-brain client rejects malformed event sequences and incomplete SSE records", async () => {
@@ -317,7 +317,7 @@ test("K-brain client sends remote cancellation to the backend run", async () => 
     conversation_id: "session/id",
     run_id: "run/id",
   });
-  assert.equal(calls[0].init.headers.Authorization, "Bearer secret");
+  assert.equal(new Headers(calls[0].init.headers).get("Authorization"), "Bearer secret");
 });
 
 test("K-brain client surfaces a backend failure before remote run acceptance", async () => {
@@ -434,7 +434,7 @@ test("K-brain model catalog request only sends CORS-allowed headers", async () =
   await client.listModels();
   assert.equal(call.init.cache, "no-store");
   const allowed = new Set(["authorization", "content-type", "accept"]);
-  for (const name of Object.keys(call.init.headers ?? {})) {
+  for (const name of new Headers(call.init.headers).keys()) {
     assert.ok(allowed.has(name.toLowerCase()), `header ${name} is outside the K-brain CORS allow-list`);
   }
 });

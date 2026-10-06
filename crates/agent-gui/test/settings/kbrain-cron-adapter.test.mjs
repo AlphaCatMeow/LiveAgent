@@ -8,6 +8,7 @@ const loader = createTsModuleLoader({
   mocks: {
     [source("lib/kbrain/runtimeConnection.ts")]: {
       getConfiguredKBrainConnection: () => ({ baseUrl: "http://cron.test", token: "secret", protocolVersion: "kbrain.agent.v1" }),
+      resolveKBrainClientOptions: (input) => ({ baseUrl: "http://cron.test", token: "secret", ...input }),
     },
   },
 });
@@ -30,7 +31,7 @@ test("K-brain cron adapter uses authoritative HTTP CRUD, run, history, and valid
   assert.deepEqual(requests.map((request) => `${request.init.method ?? "GET"} ${new URL(request.url).pathname}`), [
     "GET /v1/cron", "PUT /v1/cron", "GET /v1/cron/task%2F1/runs", "DELETE /v1/cron/task%2F1/runs", "POST /v1/cron/task%2F1/run-now", "POST /v1/cron/validate", "POST /v1/cron/task%2F1/cancel",
   ]);
-  assert.equal(requests[1].init.headers.Authorization, "Bearer secret");
+  assert.equal(new Headers(requests[1].init.headers).get("Authorization"), "Bearer secret");
 });
 
 test("cron cancellation encodes the exact execution identity", async () => {
@@ -60,6 +61,7 @@ test("original automation adapter routes K-brain cron through HTTP and never cla
       [source("shims/tauriEvent.ts")]: { listen: async () => () => {} },
       [source("lib/kbrain/runtimeConnection.ts")]: {
         getConfiguredKBrainConnection: () => ({ baseUrl: "http://cron.test", token: "secret" }),
+        resolveKBrainClientOptions: (input) => ({ baseUrl: "http://cron.test", token: "secret", ...input }),
       },
       [source("lib/automation/kbrainHooks.ts")]: {
         fetchKBrainHooks: async () => ({ revision: 0, hooks: [] }),

@@ -141,7 +141,7 @@ test("K-brain resource client uses the checkpoint, compaction, and migration HTT
   assert.equal(compactBody.conversation_id, "session/id");
   assert.equal(typeof compactBody.client_request_id, "string");
   assert.equal(compactBody.expected_revision, "rev-7");
-  assert.equal(calls.at(-1).init.headers.Authorization, "Bearer fixture-token");
+  assert.equal(new Headers(calls.at(-1).init.headers).get("Authorization"), "Bearer fixture-token");
 });
 
 test("K-brain resource client rejects malformed resource replies", async () => {

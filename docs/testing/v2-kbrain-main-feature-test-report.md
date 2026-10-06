@@ -1,5 +1,14 @@
 # v2-kbrian 与 main 功能测试报告
 
+## 2026-10-06 后端重启后的 Load failed 修复
+
+- 在真实 WKWebView 的日程页复现 `Load failed 重试`：原 sidecar 重启后端口和 token 改变，前端运行时仍缓存旧连接。页面仍显示旧日程数据，不能以“页面有内容”判定请求正常。
+- 增加统一 HTTP transport：默认桌面连接出现网络失败或 401 后，通过原生连接命令重新取得当前端口/token；并发恢复共享同一次连接请求，客户端每次请求读取最新连接。
+- 日程只读 query/export/cron.occurrences、定时任务 GET、通用客户端 GET 最多自动重试一次。写入失败只刷新连接、不自动重放；显式指定的外部地址、浏览器连接、取消操作、409 等业务错误不会触发桌面重连。
+- 新增 6 个回归用例；相关测试 **118/118**，GUI TypeScript 和改动源码 Biome 检查通过。
+- 真实桌面故障注入：主动终止测试 sidecar，确认新端口启动，日程无需重启应用恢复；Cron/Memory/MCP/Skills/Planning 页面没有 Load failed；1440×900、480×844 视口通过。日志 `/tmp/la-reconnect-browser.log`，脚本 `/private/tmp/desk/reconnect-verify.mjs`。
+- 修复位于 LiveAgent 前端，不需改 K-brain。没有更新 beta 发布附件。
+
 ## 2026-10-06 第二轮缺项补齐
 
 K-brain 锁文件更新为 `96b6a3cd30ac7bb6f2ed51267e360ef03187612f`，供应商适配继续集中在后端。本节覆盖上一轮列出的请求兼容与只读历史缺项，不把下方旧测试计数当作本次重跑结果。

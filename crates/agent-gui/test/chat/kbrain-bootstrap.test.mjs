@@ -244,7 +244,7 @@ test("client endpoint override does not inherit a different backend token", asyn
   const { createKBrainClient } = localLoader.loadModule("src/lib/kbrain/client.ts");
   const requests = [];
   const fetch = async (url, init) => {
-    requests.push({ url, authorization: init.headers.Authorization });
+    requests.push({ url, authorization: new Headers(init.headers).get("Authorization") ?? undefined });
     return new Response(JSON.stringify({ models: [] }), { status: 200 });
   };
   await createKBrainClient({ baseUrl: "https://another-backend.invalid", fetch }).listModels();
@@ -269,5 +269,5 @@ test("client without options uses the bootstrapped dynamic connection", async ()
   } });
   await client.listModels();
   assert.equal(requests[0].url, "http://dynamic.invalid/v1/models");
-  assert.equal(requests[0].init.headers.Authorization, "Bearer runtime-token");
+  assert.equal(new Headers(requests[0].init.headers).get("Authorization"), "Bearer runtime-token");
 });

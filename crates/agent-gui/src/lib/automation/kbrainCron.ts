@@ -5,20 +5,10 @@ import type {
   CronRunRecord,
   CronSnapshot,
 } from "@liveagent/ui/lib/automation/types";
-import { getConfiguredKBrainConnection } from "../kbrain/runtimeConnection";
+import { fetchKBrain } from "../kbrain/transport";
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const connection = getConfiguredKBrainConnection();
-  if (!connection) throw new Error("K-brain backend connection is not ready");
-  const response = await fetch(`${connection.baseUrl.replace(/\/+$/, "")}${path}`, {
-    ...init,
-    headers: {
-      Accept: "application/json",
-      ...(connection.token ? { Authorization: `Bearer ${connection.token}` } : {}),
-      ...(init.body === undefined ? {} : { "Content-Type": "application/json" }),
-      ...(init.headers ?? {}),
-    },
-  });
+  const response = await fetchKBrain(path, init);
   if (!response.ok) {
     const body = await response.text();
     let message = body;

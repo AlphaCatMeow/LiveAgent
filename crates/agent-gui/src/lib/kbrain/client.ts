@@ -1,4 +1,4 @@
-import { resolveKBrainClientOptions } from "./runtimeConnection";
+import { fetchKBrain } from "./transport";
 import {
   KBRAIN_PROTOCOL_VERSION,
   type KBrainBranchRequest,
@@ -96,10 +96,6 @@ export type KBrainProviderModelsResponse = {
   models: unknown[];
 };
 
-function trimBaseUrl(baseUrl: string) {
-  return baseUrl.trim().replace(/\/+$/, "");
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -175,27 +171,8 @@ async function readError(response: Response) {
 }
 
 export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
-  const options = resolveKBrainClientOptions(inputOptions);
-  // A custom fetch marks an explicit test client; preserve its historical local default.
-  const configuredBaseUrl =
-    options.baseUrl?.trim() ?? (options.fetch ? "http://127.0.0.1:47321" : undefined);
-  if (!configuredBaseUrl) throw new Error("K-brain backend connection is not ready");
-  const baseUrl = trimBaseUrl(configuredBaseUrl);
-  const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
-  const headers = () => ({
-    Accept: "application/json",
-    ...(options.token?.trim() ? { Authorization: `Bearer ${options.token.trim()}` } : {}),
-  });
-
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const response = await fetchImpl(`${baseUrl}${path}`, {
-      ...init,
-      headers: {
-        ...headers(),
-        ...(init.body === undefined ? {} : { "Content-Type": "application/json" }),
-        ...(init.headers ?? {}),
-      },
-    });
+    const response = await fetchKBrain(path, init, inputOptions);
     if (!response.ok) throw await readError(response);
     return (await response.json()) as T;
   }
@@ -643,12 +620,13 @@ export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
     handlers: KBrainEventHandlers,
     signal?: AbortSignal,
   ): Promise<void> {
-    const response = await fetchImpl(
-      `${baseUrl}/v1/sessions/${encodeURIComponent(conversationId)}/events?after_seq=${encodeURIComponent(String(afterSeq))}`,
+    const response = await fetchKBrain(
+      `/v1/sessions/${encodeURIComponent(conversationId)}/events?after_seq=${encodeURIComponent(String(afterSeq))}`,
       {
-        headers: { ...headers(), Accept: "text/event-stream" },
+        headers: { Accept: "text/event-stream" },
         signal,
       },
+      inputOptions,
     );
     if (!response.ok) throw await readError(response);
     if (!response.body) throw new Error("K-brain event stream has no body");

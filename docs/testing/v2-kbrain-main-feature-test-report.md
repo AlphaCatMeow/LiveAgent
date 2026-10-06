@@ -1,5 +1,44 @@
 # v2-kbrian 与 main 功能测试报告
 
+## 2026-10-06 第二轮缺项补齐
+
+K-brain 锁文件更新为 `96b6a3cd30ac7bb6f2ed51267e360ef03187612f`，供应商适配继续集中在后端。本节覆盖上一轮列出的请求兼容与只读历史缺项，不把下方旧测试计数当作本次重跑结果。
+
+### 已实现
+
+- Chat Completions 推理文本的持久化/同协议同 endpoint 同模型回放、重复工具名、模型专属思考参数、`max_completion_tokens`。
+- Responses encrypted reasoning items 回放、终态去重、include 合并、Grok/xAI cache/reasoning 字段清理。
+- Gemini thinkingConfig、parametersJsonSchema、工具图片、连续角色合并、版本路径及拦截/错误终态处理。
+- `reasoning: off` 不再在 backend 丢失；按协议显式关闭。不支持关闭的模型降为最低支持档位，不能宣称完全停止内部推理。
+- 删除全部配置模型后仍能读取历史；消息、revision、分页 offset 使用同一快照。继续推理仍须配置可用模型。
+- Windows TerminalSession 原生 ConPTY、Job Object、取消/缩放/退出码；已补测试并交叉编译，尚未 Windows 实机验收。Unix Resize/Close 的数据竞争已修复。
+
+### 本次验证
+
+| 范围 | 结果 |
+| --- | --- |
+| K-brain 全量 `go test -p 1 ./...` | 通过 |
+| AI/protocol/backend/tools race；相关包 vet | 通过 |
+| Windows amd64 tools/backend 测试交叉编译、tools vet；amd64/arm64 CLI 构建 | 通过；未运行 Windows 测试程序 |
+| LiveAgent 请求/历史/revision conflict/provider settings 回归 | 25/25 |
+| 源码 sidecar 构建/准备/打包契约测试 | 13/13；未执行发布 |
+| 真实 runKBrainTurn → 新后端 → 本地 Anthropic fixture → Read → 签名回放 | 通过；不是外部供应商验收 |
+| 新 sidecar 的真实 WKWebView | Cron/Memory/Skills/MCP/Planning 导航、健康检查、1440/480 视口通过 |
+| 桌面终端与文件操作 | 创建、输入、标记读回、缩放、重命名、关闭及文件读写通过 |
+| 桌面历史命令 | 22/22 |
+| 日程回归 | 26 项断言通过：重启恢复、CRUD、冲突、幂等、回收恢复、cron 图层及两档视口 |
+
+实际测试 sidecar 路径为 `crates/agent-gui/src-tauri/binaries/k-brain-aarch64-apple-darwin`，最终二进制 SHA-256：`d7d46f6b5dd95645489f7c9d93f3fe616a5cff5475cb92de0cbabdeb6e2c665c`；已终止旧后端并由真实桌面重新启动。测试使用 `/tmp/la-desktop/home`，没有替换用户正式配置。
+
+详细实现、日志路径及限制见 `K-brain/docs/2026-10-06-provider-compatibility-followup.md`。桌面日志位于 `/tmp/la-remaining-{desktop,terminal,history,planning}.log`，前端测试为 `/tmp/la-remaining-frontend.log`。
+
+### 仍未完成的范围
+
+- 真实供应商及完整多轮原生搜索；模型别名/中转站的字段容忍度。
+- Windows 真机 ConPTY/进程树/WSL sandbox；`bashrun` 独立 interactive 模式尚未接入新 ConPTY。
+- 下方既有审计中的独立 TUI 日程工具、特殊 ICS、通知、浏览器全局时区和完整压缩重构；本次保持已有日程迁移，没有宣称全功能完成。
+- 签名安装包、升级迁移、全部 main/v2 功能重验。本次没有修改标签、发布附件或触发发布工作流，现有 `v2.0.0-beta.1` 附件不包含这次新代码。
+
 ## 2026-10-06 请求兼容性增量验证
 
 本次将 K-brain 锁定为 `d303a06`，保持 provider 请求构造在后端：

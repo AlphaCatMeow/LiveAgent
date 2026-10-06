@@ -5,9 +5,9 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { kbrainSource } from "./kbrain-source.mjs";
 
-const source = fileURLToPath(new URL("../../../../../K-brain/", import.meta.url));
+const source = kbrainSource;
 
 async function buildBackend(directory) {
   const binary = path.join(directory, "kn");

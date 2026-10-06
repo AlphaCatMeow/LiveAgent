@@ -40,3 +40,26 @@ test("time zone notice is passive, scoped, dismissible, deduplicated and cleared
     assert.equal(api.getTimeZoneNotice("a").kind, "unsupported");
   } finally { globalThis.sessionStorage = previous; }
 });
+
+test("following the system, a device zone change since startup asks for a restart", () => {
+  const previous = globalThis.sessionStorage;
+  globalThis.sessionStorage = undefined;
+  try {
+    const api = createTsModuleLoader().loadModule("src/lib/planning/timeZoneNotice.ts");
+    const auto = { preference: "", timeZone: "Asia/Shanghai", systemTimeZone: "Asia/Shanghai" };
+    api.observeTimeZoneResponse("d", "timezone.get", auto, "Asia/Shanghai");
+    assert.equal(api.getTimeZoneNotice("d"), null);
+    // Aliases and zones on the same clock all year are not a change.
+    api.observeTimeZoneResponse("d", "timezone.get", auto, "Asia/Chongqing");
+    assert.equal(api.getTimeZoneNotice("d"), null);
+    api.observeTimeZoneResponse("d", "timezone.get", auto, "Europe/Paris");
+    assert.deepEqual(JSON.parse(JSON.stringify(api.getTimeZoneNotice("d"))), {
+      kind: "device", effective: "Asia/Shanghai", device: "Europe/Paris",
+    });
+    api.observeTimeZoneResponse("d", "query", { timeZone: "Asia/Shanghai" });
+    assert.equal(api.getTimeZoneNotice("d").kind, "device", "unrelated queries keep it");
+    // A custom zone is intentional: never flagged against the device.
+    api.observeTimeZoneResponse("d", "timezone", { preference: "Asia/Tokyo", timeZone: "Asia/Tokyo" }, "Europe/Paris");
+    assert.equal(api.getTimeZoneNotice("d"), null);
+  } finally { globalThis.sessionStorage = previous; }
+});

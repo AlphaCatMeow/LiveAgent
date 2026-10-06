@@ -5,7 +5,6 @@ import { AppErrorBoundary } from "@liveagent/ui/components/AppErrorBoundary";
 import { Pin } from "@liveagent/ui/components/IconSet";
 import { useConfirmDialog } from "@liveagent/ui/components/ui/confirm-dialog";
 import { Toaster } from "@liveagent/ui/components/ui/toaster";
-import { TimeZoneNoticeBanner } from "./lib/planning/TimeZoneNoticeBanner";
 import { LocaleContext, t as translate, useLocaleContextValue } from "@liveagent/ui/i18n/index";
 import { loadThinkingLiveSupplement } from "@liveagent/ui/lib/models/thinkingLive";
 import {
@@ -33,7 +32,6 @@ import {
 } from "react";
 import { settingsHostAdapter } from "./agent-ui-adapters/kbrainSettings";
 import { kbrainSkillsAdapter } from "./agent-ui-adapters/kbrainSkills";
-
 import { AppBootShell } from "./components/app/AppBootShell";
 import { useNativeInputContextMenu } from "./components/input-context-menu/NativeInputContextMenu";
 import { useMacOsAppHeaderHeight } from "./components/MacOsTitleBarSpacer";
@@ -41,6 +39,8 @@ import { ReleaseAnnouncementDialog } from "./components/ReleaseAnnouncementDialo
 import { WindowsTitleBar } from "./components/WindowsTitleBar";
 import { useAppUpdateController } from "./lib/appUpdates";
 import { isKBrainBrowserHost } from "./lib/host";
+import { requestPlanning } from "./lib/planning/kbrain";
+import { TimeZoneNoticeBanner } from "./lib/planning/TimeZoneNoticeBanner";
 import { setRetryErrorExtension } from "./lib/providers/runtime/streamRetry";
 import { useReleaseAnnouncementController } from "./lib/releaseAnnouncement";
 import {
@@ -593,6 +593,18 @@ export default function App() {
     },
     [openSettingsOverlay, reloadPersistedSettings],
   );
+
+  // Read the calendar time zone once per launch so the banner can flag a mismatch; it is
+  // not tracked afterwards (a system change applies after restart). Failures stay silent.
+  const timeZoneChecked = useRef(false);
+  useEffect(() => {
+    if (!settingsReady || !backgroundHostsReady || timeZoneChecked.current) return;
+    const timer = setTimeout(() => {
+      timeZoneChecked.current = true;
+      void requestPlanning("timezone.get").catch(() => {});
+    }, 1_500);
+    return () => clearTimeout(timer);
+  }, [settingsReady, backgroundHostsReady]);
 
   const closeSettings = closeSettingsOverlay;
 

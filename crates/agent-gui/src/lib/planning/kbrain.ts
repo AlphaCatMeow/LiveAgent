@@ -1,7 +1,7 @@
-import { fetchKBrain } from "../kbrain/transport";
 import { invoke } from "@liveagent/app/shims/tauriCore";
 import { isTauriHost } from "../host";
 import { kBrainStorageScope } from "../kbrain/mapping";
+import { fetchKBrain } from "../kbrain/transport";
 import { observeTimeZoneResponse, reportTimeZoneFailure } from "./timeZoneNotice";
 
 const migrations = new Map<string, Promise<void>>();

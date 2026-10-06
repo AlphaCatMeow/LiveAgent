@@ -10,6 +10,7 @@ import type {
   AutomationSnapshot,
   CompletePromptRunInput,
   CronApplyResponse,
+  CronOccurrencesResponse,
   CronRunNowResponse,
   CronRunRecord,
   CronSnapshot,
@@ -88,6 +89,10 @@ export const backend = {
       task_id: taskId,
       limit: limit ?? 100,
     });
+  },
+
+  cronOccurrences(from: number, to: number): Promise<CronOccurrencesResponse> {
+    return invoke<CronOccurrencesResponse>("automation_cron_occurrences", { from, to });
   },
 
   clearRuns(taskId: string): Promise<number> {

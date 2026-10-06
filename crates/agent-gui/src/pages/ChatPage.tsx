@@ -4253,6 +4253,7 @@ function ChatPageContent(props: ChatPageProps) {
                   } as CSSProperties
                 }
                 chat={{ content: chatContent }}
+                onOpenView={setActiveView}
                 workspaceOverlays={
                   <WorkspaceOverlayHost
                     locale={settings.locale}

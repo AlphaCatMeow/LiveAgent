@@ -226,8 +226,10 @@ test("sidebar shortcuts survive a local save and reload without changing resourc
     invoke: async (command) => { commands.push(command); return {}; },
   }, async ({ storage, fixture, loader }) => {
     const initial = await storage.loadPersistedSettings();
-    assert.deepEqual(initial.customSettings.sidebarShortcuts, { skills: true, mcp: true, cron: true, memory: true });
-    const hidden = { skills: false, mcp: true, cron: false, memory: false };
+    assert.deepEqual(initial.customSettings.sidebarShortcuts, {
+      skills: true, mcp: true, cron: true, planning: true, memory: true,
+    });
+    const hidden = { skills: false, mcp: true, cron: false, planning: false, memory: false };
     const settingsApi = loader.loadModule("src/lib/settings/index.ts");
     const next = settingsApi.updateCustomSettings(initial, { sidebarShortcuts: hidden });
     await storage.persistSettings(initial, next);

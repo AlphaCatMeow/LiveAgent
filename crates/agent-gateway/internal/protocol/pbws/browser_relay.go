@@ -180,6 +180,10 @@ func (c *browserConn) handleAgentRequest(requestID, agentID string, env *gateway
 		return
 	}
 	if c.srv.kbrainRelay != nil && agentID == c.srv.kbrainTargetID {
+		if env.GetPlanning() != nil {
+			_ = c.sendLocalError(requestID, "E:desktop_required")
+			return
+		}
 		if settingsGet := env.GetSettingsGet(); settingsGet != nil {
 			c.handleKBrainSettingsGet(requestID, agentID, settingsGet)
 			return

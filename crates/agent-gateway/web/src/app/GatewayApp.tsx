@@ -2291,6 +2291,7 @@ function useGatewayAppController() {
     setProjectPickerOpen,
     setProjectSettingsProject,
     setRightDockOpen,
+    setActiveView,
     setSettings,
     setSharedManagerOpen,
     setSidebarOpen,

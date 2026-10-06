@@ -2,8 +2,9 @@ use std::sync::Arc;
 
 use crate::services::automation::{
     validate_cron_expression, AutomationApplyInput, AutomationSnapshot, AutomationStore,
-    CompletePromptRunInput, CronApplyResponse, CronRunNowResponse, CronRunRecord,
-    HooksApplyResponse, PromptCompletionResponse, PromptRunRequest,
+    CompletePromptRunInput, CronApplyResponse, CronOccurrenceQuery, CronOccurrencesResponse,
+    CronRunNowResponse, CronRunRecord, HooksApplyResponse, PromptCompletionResponse,
+    PromptRunRequest,
 };
 
 #[tauri::command(rename_all = "snake_case")]
@@ -43,6 +44,15 @@ pub async fn automation_hooks_apply(
     tauri::async_runtime::spawn_blocking(move || store.hooks_apply(input))
         .await
         .map_err(|e| format!("automation_hooks_apply join 失败：{e}"))?
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn automation_cron_occurrences(
+    app: tauri::AppHandle,
+    from: i64,
+    to: i64,
+) -> Result<CronOccurrencesResponse, String> {
+    crate::services::automation::kbrain_occurrences::query(app, CronOccurrenceQuery { from, to }).await
 }
 
 #[tauri::command(rename_all = "snake_case")]

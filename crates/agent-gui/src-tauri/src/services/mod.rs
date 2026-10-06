@@ -8,6 +8,7 @@ pub mod kbrain_backend;
 mod kbrain_paths;
 pub mod mcp_oauth;
 pub mod memory;
+pub mod planning;
 pub mod power_activity;
 pub mod provider_usage;
 pub mod proxy;

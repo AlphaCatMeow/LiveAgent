@@ -19,6 +19,9 @@ type SettingsComboboxProps = {
   searchPlaceholder: string;
   emptyLabel: string;
   triggerClassName?: string;
+  /** Lets an external <label htmlFor> target the trigger. */
+  id?: string;
+  disabled?: boolean;
 };
 
 export function SettingsCombobox({
@@ -29,6 +32,8 @@ export function SettingsCombobox({
   searchPlaceholder,
   emptyLabel,
   triggerClassName,
+  id,
+  disabled,
 }: SettingsComboboxProps) {
   const zoneStyle = useZoneFontScaleStyle();
   const selectedOption = options.find((option) => option.value === value) ?? null;
@@ -38,6 +43,7 @@ export function SettingsCombobox({
       items={options}
       value={selectedOption}
       autoHighlight
+      disabled={disabled}
       itemToStringLabel={(option) => option.label}
       isItemEqualToValue={(option, selected) => option.value === selected.value}
       onValueChange={(option) => {
@@ -45,6 +51,7 @@ export function SettingsCombobox({
       }}
     >
       <Combobox.Trigger
+        id={id}
         aria-label={ariaLabel}
         className={cn(
           SETTINGS_PICKER_TRIGGER_CLASS,

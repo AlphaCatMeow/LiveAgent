@@ -127,6 +127,7 @@ struct HistorySharedListArgs {
 /// versioned apply protocol as the desktop webview and the LLM tool; the
 /// legacy per-task create/update/delete actions no longer exist.
 pub async fn handle_cron_manage(
+    app: AppHandle,
     store: Arc<AutomationStore>,
     request: proto::CronManageRequest,
 ) -> Result<proto::CronManageResponse, String> {
@@ -180,6 +181,11 @@ pub async fn handle_cron_manage(
                 tauri::async_runtime::spawn_blocking(move || store.run_cron_task_now(&task_id))
                     .await
                     .map_err(|e| format!("gateway run_now join failed: {e}"))??;
+            serialize_cron_manage_result(&response)?
+        }
+        "occurrences" => {
+            let query = parse_occurrence_query(&request.task_json)?;
+            let response = crate::services::automation::kbrain_occurrences::query(app, query).await?;
             serialize_cron_manage_result(&response)?
         }
         "validate" => {
@@ -1725,6 +1731,12 @@ fn parse_runs_limit(raw: &str) -> Result<usize, String> {
         .unwrap_or(100))
 }
 
+fn parse_occurrence_query(
+    raw: &str,
+) -> Result<crate::services::automation::CronOccurrenceQuery, String> {
+    serde_json::from_str(raw.trim()).map_err(|e| format!("invalid occurrences payload: {e}"))
+}
+
 fn parse_validate_expression(raw: &str) -> Result<String, String> {
     let payload = serde_json::from_str::<Value>(raw.trim())
         .map_err(|e| format!("invalid validate payload: {e}"))?;
@@ -1767,6 +1779,8 @@ fn is_builtin_share_tool_name(name: &str) -> bool {
             | "ProcessWait"
             | "McpManager"
             | "MemoryManager"
+            | "PlanningMutate"
+            | "PlanningQuery"
             | "Read"
             | "ReadConversation"
             | "ReadTerminal"
@@ -2131,9 +2145,9 @@ mod tests {
     use super::{
         decode_kbrain_terminal_response, flatten_history_messages_json,
         flatten_history_messages_json_window, is_builtin_share_tool_name, kbrain_provider_models,
-        kbrain_terminal_request, parse_runs_limit, proto, redact_builtin_tool_content_json,
-        resolve_stored_provider_models_config, sanitize_provider_summaries,
-        KBrainBackendConnection,
+        kbrain_terminal_request, parse_occurrence_query, parse_runs_limit, proto,
+        redact_builtin_tool_content_json, resolve_stored_provider_models_config,
+        sanitize_provider_summaries, KBrainBackendConnection,
     };
     use crate::commands::chat_history::{
         self, history_message_content_hash, ChatHistoryMessageRef, ChatHistorySegmentRecord,
@@ -2160,6 +2174,15 @@ mod tests {
             created_at: 0,
             updated_at: 0,
         }
+    }
+
+    #[test]
+    fn parse_occurrence_query_requires_exact_range_fields() {
+        let query = parse_occurrence_query(r#"{"from":1,"to":2}"#).expect("parse query");
+        assert_eq!((query.from, query.to), (1, 2));
+        assert!(parse_occurrence_query(r#"{"from":1}"#).is_err());
+        assert!(parse_occurrence_query(r#"{"from":1,"to":2,"extra":true}"#).is_err());
+        assert!(parse_occurrence_query("").is_err());
     }
 
     #[test]

@@ -32,6 +32,7 @@ pub async fn settings_save_providers(payload: Value) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn settings_save_system(
+    app: tauri::AppHandle,
     payload: Value,
     automation_scheduler: tauri::State<'_, Arc<AutomationScheduler>>,
 ) -> Result<(), String> {
@@ -45,8 +46,30 @@ pub async fn settings_save_system(
     .map_err(|e| format!("settings_save_system join 失败：{e}"))??;
     // Bash cron tasks execute in the system workdir; reschedule so the new
     // workdir takes effect without an app restart.
+    // 默认时区可能已变:先让缓存失效,记忆等高频调用方立即读到新时区。
+    invalidate_default_tz_cache();
     automation_scheduler.request_reload();
+    // 默认时区可能已变:让日程按新时区重算日期截止提醒并通知桌面端与 WebUI 刷新。
+    refresh_planning_default_zone(&app).await;
     Ok(())
+}
+
+async fn refresh_planning_default_zone(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    let Some(store) = app.try_state::<Arc<crate::services::planning::PlanningStore>>() else {
+        return;
+    };
+    let store = Arc::clone(store.inner());
+    let synced = tauri::async_runtime::spawn_blocking(move || {
+        store.sync_default_zone(crate::services::planning::store::now())
+    })
+    .await;
+    match synced {
+        Ok(Ok(Some(seq))) => crate::services::planning::changed(app, seq),
+        Ok(Ok(None)) => {}
+        Ok(Err(error)) => eprintln!("[settings] planning time zone refresh failed: {error}"),
+        Err(error) => eprintln!("[settings] planning time zone refresh join failed: {error}"),
+    }
 }
 
 #[tauri::command]

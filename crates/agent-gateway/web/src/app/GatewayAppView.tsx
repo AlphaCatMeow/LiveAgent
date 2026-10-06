@@ -326,6 +326,7 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
     setProjectPickerOpen,
     setProjectSettingsProject,
     setRightDockOpen,
+    setActiveView,
     setSettings,
     setSharedManagerOpen,
     setSidebarOpen,
@@ -1507,6 +1508,7 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
                       isAgentMode={isAgentMode}
                       initialSkills={availableSkills}
                       initialSkillsRootDir={skillsRootDir}
+                      onOpenView={setActiveView}
                       className="contents"
                       chat={{
                         containerRef: chatFrameRef,

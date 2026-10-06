@@ -242,6 +242,15 @@ jobs:
           # 指向子目录会导致依赖产物完全不被缓存。
           workspaces: .
 
+      # tauri-build 要求 externalBin 的 sidecar 存在;--lib 单元测试不会执行它,放置空占位即可。
+      - name: Stub K-brain sidecars
+        working-directory: crates/agent-gui/src-tauri
+        run: |
+          mkdir -p binaries
+          for bin in k-brain k-brain-computer; do
+            install -m 755 /dev/null "binaries/$bin-x86_64-unknown-linux-gnu"
+          done
+
       - name: Build Tauri backend tests
         env:
           CARGO_TERM_COLOR: always

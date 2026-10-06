@@ -226,6 +226,12 @@ export const PLANNING_TRANSLATIONS = {
     "planner.error.subscription_interval_invalid": "刷新间隔无效",
     "planner.error.subscription_missing": "订阅不存在",
     "planner.error.subscription_not_ics": "链接返回的不是日历文件",
+    "planner.error.subscription_auth_required":
+      "订阅地址需要登录或已失效，请更新可直接下载的 ICS 地址。当前不支持账户登录或 CalDAV/Graph 同步。",
+    "planner.error.subscription_unavailable": "订阅不存在或已撤销，请重新复制发布的 ICS 地址。",
+    "planner.error.subscription_rate_limited": "日历服务暂时限制请求，请稍后重试。",
+    "planner.subscription.providerHelp":
+      "Google：日历设置 → 整合日历 → iCal 地址。iCloud：共享日历 → 公共日历 → 复制链接。Outlook/Exchange：设置 → 日历 → 共享日历 → 发布日历 → ICS。iCloud/Outlook 发布可能使持有链接的人读取日历，请按账户的共享范围选择；组织未开放发布时不能用登录页替代。这里只读订阅，不回写源账户。",
     "planner.error.subscription_too_large": "日历文件超过 10 MB",
     "planner.error.subscription_url_invalid": "请输入有效的 https:// 或 webcal:// 日历链接",
     "planner.error.tags_invalid": "标签不存在、重复或超过 30 个",
@@ -813,6 +819,14 @@ export const PLANNING_TRANSLATIONS = {
     "planner.error.subscription_interval_invalid": "Invalid refresh interval",
     "planner.error.subscription_missing": "The subscription doesn’t exist",
     "planner.error.subscription_not_ics": "The link didn’t return a calendar file",
+    "planner.error.subscription_auth_required":
+      "The feed requires login or has expired. Replace it with a directly downloadable ICS URL. Account login and CalDAV/Graph sync are not supported.",
+    "planner.error.subscription_unavailable":
+      "The subscription is missing or revoked. Copy a new published ICS URL.",
+    "planner.error.subscription_rate_limited":
+      "The calendar service is rate limiting requests. Retry later.",
+    "planner.subscription.providerHelp":
+      "Google: Calendar settings → Integrate calendar → iCal address. iCloud: Share calendar → Public calendar → Copy link. Outlook/Exchange: Settings → Calendar → Shared calendars → Publish calendar → ICS. Publishing may allow anyone holding the link to read the calendar; choose the appropriate sharing scope. Login pages cannot replace a published feed. Subscriptions are read-only and do not write back to the account.",
     "planner.error.subscription_too_large": "The calendar file is larger than 10 MB",
     "planner.error.subscription_url_invalid": "Enter a valid https:// or webcal:// calendar link",
     "planner.error.tags_invalid": "Tags don’t exist, are duplicated, or exceed 30",

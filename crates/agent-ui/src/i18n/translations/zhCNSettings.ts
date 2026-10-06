@@ -300,8 +300,14 @@ export const ZH_CN_SETTINGS_TRANSLATIONS = {
   "settings.language": "语言",
   "settings.languageDesc": "选择界面显示语言，切换后立即生效。",
   "settings.defaultTimeZone": "默认时区",
+  "settings.calendarNotifications": "日程通知",
+  "settings.notificationTest": "测试系统通知",
+  "settings.notificationTestHint":
+    "请求通知权限并发送测试通知。请在 macOS 系统设置中允许横幅；专注模式可能隐藏横幅。",
+  "settings.notificationSubmitted":
+    "系统已接受测试通知。请检查横幅或通知中心；接受请求不代表横幅已显示。",
   "settings.defaultTimeZoneDesc":
-    "用于日程显示与日期计算，默认跟随系统；不会改变定时任务的触发时区。",
+    "由日程后端统一保存，所有客户端共享；自动模式跟随后端系统时区。不会改变定时任务的触发时区。",
   "settings.defaultTimeZoneAuto": "自动（跟随系统：{zone}）",
   "settings.timeZoneSearch": "搜索时区或城市",
   "settings.timeZoneEmpty": "没有匹配的时区",

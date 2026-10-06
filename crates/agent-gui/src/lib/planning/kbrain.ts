@@ -11,7 +11,7 @@ export async function requestPlanning<T>(action: string, input: unknown = {}): P
       body: JSON.stringify({ action, input }),
     },
     {},
-    ["query", "export", "cron.occurrences"].includes(action),
+    ["query", "export", "cron.occurrences", "timezone.get"].includes(action),
   );
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));

@@ -2,6 +2,18 @@ use crate::services::planning::{self, backend, Mutation, MutationResult, Query, 
 use serde_json::{json, Value};
 
 #[tauri::command]
+pub async fn planning_notification_test(app: tauri::AppHandle) -> Result<(), String> {
+    planning::notification::deliver(
+        &app,
+        format!("planning-test-{}", uuid::Uuid::new_v4()),
+        "LiveAgent".into(),
+        "日程通知测试 / Calendar notification test".into(),
+        true,
+    )
+    .await
+}
+
+#[tauri::command]
 pub async fn planning_query(
     app: tauri::AppHandle,
     query: Option<Query>,

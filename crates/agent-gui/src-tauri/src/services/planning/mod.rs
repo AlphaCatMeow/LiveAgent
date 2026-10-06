@@ -4,6 +4,7 @@ mod calendar_import;
 #[cfg(test)]
 mod hierarchy;
 mod legacy;
+pub mod notification;
 #[cfg(test)]
 pub mod store;
 #[cfg(test)]
@@ -76,21 +77,24 @@ pub fn start(app: tauri::AppHandle) {
         timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             timer.tick().await;
+            if notification::disabled() {
+                continue;
+            }
             let claimed = backend::request(&app, "reminders.claim", serde_json::json!({})).await;
             if let Ok(serde_json::Value::Array(reminders)) = claimed {
                 for mut reminder in reminders {
-                    use tauri_plugin_notification::NotificationExt;
-                    let success =
-                        if std::env::var("LIVEAGENT_DISABLE_NOTIFICATIONS").as_deref() == Ok("1") {
-                            true
-                        } else {
-                            app.notification()
-                                .builder()
-                                .title(notification_title())
-                                .body(reminder["title"].as_str().unwrap_or(""))
-                                .show()
-                                .is_ok()
-                        };
+                    let delivery = notification::deliver(
+                        &app,
+                        reminder["id"].as_str().unwrap_or("").to_string(),
+                        notification_title(),
+                        reminder["title"].as_str().unwrap_or("").to_string(),
+                        false,
+                    )
+                    .await;
+                    let success = delivery.is_ok();
+                    if let Err(error) = delivery {
+                        eprintln!("[planning] notification delivery failed: {error}");
+                    }
                     reminder["success"] = serde_json::json!(success);
                     let _ = backend::request(&app, "reminders.finish", reminder).await;
                 }

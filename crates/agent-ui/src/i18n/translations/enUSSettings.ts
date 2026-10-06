@@ -320,8 +320,14 @@ export const EN_US_SETTINGS_TRANSLATIONS = {
   "settings.languageDesc":
     "Choose the display language for the interface. Changes take effect immediately.",
   "settings.defaultTimeZone": "Default time zone",
+  "settings.calendarNotifications": "Calendar notifications",
+  "settings.notificationTest": "Test system notification",
+  "settings.notificationTestHint":
+    "Request permission and send a test notification. Enable banners in macOS System Settings; Focus may hide banners.",
+  "settings.notificationSubmitted":
+    "The system accepted the test notification. Check banners or Notification Center; acceptance does not confirm banner visibility.",
   "settings.defaultTimeZoneDesc":
-    "Used for calendar display and date calculations; follows the system by default. Does not change scheduled task trigger time zones.",
+    "Shared by all clients through the calendar backend. Automatic follows the backend system time zone. Does not change scheduled task trigger time zones.",
   "settings.defaultTimeZoneAuto": "Automatic (system: {zone})",
   "settings.timeZoneSearch": "Search time zones or cities",
   "settings.timeZoneEmpty": "No matching time zones",

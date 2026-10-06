@@ -1,5 +1,13 @@
 # v2-kbrian 与 main 功能测试报告
 
+## 2026-10-06 通知、原生拖拽、双向时区继续验收
+
+- [详细报告](2026-10-06-planning-notifications-sync-macos.md)：macOS 原生通知接口、授权与错误处理、测试按钮；真实到期提醒有系统 banner 展示日志。禁用通知不再领取提醒或伪造成功。
+- K-brain `b1e0747` 统一日程时区 preference/revision，三端选择器双向同步、自动模式、旧版本冲突、重启持久化通过；原生保存其他系统设置不再覆盖日程时区。
+- 原生 WKWebView CoreGraphics 鼠标拖拽通过；真实 Google 官方公共 ICS 导入 30 条。iCloud/Exchange 未提供测试地址，仍待真实账户验收。
+- GUI 2964 通过/1 跳过，Gateway 769/769，Rust 日程 28 通过/1 忽略，Go 全量/race/vet、前端构建和类型检查通过。
+- 本次更新前一轮对应待办状态，不代表私有账户同步、正式签名包或全部 main 功能已完成。
+
 ## 2026-10-06 日程补齐与 Mac 实机验收
 
 - 详细记录：[日程补齐与 macOS 实机验收](2026-10-06-planning-followup-macos.md)。该增量更新下方旧报告中“RDATE/DURATION/VTIMEZONE 未补齐、浏览器时区未实现”的状态，不表示全部历史待办已完成。

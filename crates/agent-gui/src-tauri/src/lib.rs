@@ -210,6 +210,7 @@ macro_rules! app_invoke_handler {
             commands::planning::planning_mutate,
             commands::planning::planning_export,
             commands::planning::planning_set_labels,
+            commands::planning::planning_notification_test,
             commands::planning::planning_subscription,
             commands::planning::planning_import,
             commands::cron::cron_validate_expression,

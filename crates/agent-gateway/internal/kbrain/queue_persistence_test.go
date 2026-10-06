@@ -113,6 +113,21 @@ func TestRelayQueueStateRestoresQueuedItemsAndCurrentRun(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("queued run did not complete after restore")
 	}
+	// The terminal control is emitted before finish() persists the queue; wait for it so
+	// the queue state temp file is gone before TempDir cleanup runs.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		second.mu.Lock()
+		idle := second.activeRuns["conv"] == ""
+		second.mu.Unlock()
+		if idle {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("queued run did not finish after completion")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	if runCount != 1 {

@@ -95,9 +95,21 @@ test("uses an explicit absolute local development binary and refuses it for rele
   const helper = join(lock.directory, "k-brain-computer-linux-x64");
   await writeFile(helper, "local helper fixture");
   const output = join(lock.directory, "output");
-  const result = await prepare({ lock: lock.path, target: "x86_64-unknown-linux-gnu", artifactDir: false, output, localBinary: local, localComputerBinary: helper });
-  assert.equal(result.origin, "development-override");
-  await assert.rejects(() => prepare({ lock: lock.path, target: "x86_64-unknown-linux-gnu", artifactDir: false, output, localBinary: local, localComputerBinary: helper, release: true }), /forbidden/);
+  const options = { lock: lock.path, target: "x86_64-unknown-linux-gnu", artifactDir: false, output, localBinary: local, localComputerBinary: helper };
+  // Overrides are a development-only path: the CI environment itself must refuse them,
+  // so the development half runs with CI unset (the suite runs on CI too).
+  const previousCI = process.env.CI;
+  try {
+    delete process.env.CI;
+    const result = await prepare(options);
+    assert.equal(result.origin, "development-override");
+    process.env.CI = "true";
+    await assert.rejects(() => prepare(options), /forbidden/);
+  } finally {
+    if (previousCI === undefined) delete process.env.CI;
+    else process.env.CI = previousCI;
+  }
+  await assert.rejects(() => prepare({ ...options, release: true }), /forbidden/);
 });
 
 test("blocks checksum mismatches and failed downloads without leaving a runtime fallback", async () => {

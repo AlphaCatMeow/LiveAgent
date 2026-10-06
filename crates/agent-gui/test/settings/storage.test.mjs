@@ -277,14 +277,15 @@ function assertBrowserWhitelist(localStorage, marker) {
   return saved;
 }
 
-test("browser time zone preference reaches Planning and survives local reload", async () => {
+test("browser settings saves never push a resolved time zone to Planning", async () => {
+  // The calendar zone belongs to K-brain's own picker ("" follows the system); a resolved
+  // zone sent from here would freeze "automatic" into a fixed zone.
   await withSettingsFixture({}, async ({ storage, fixture }) => {
     const prev = await storage.loadPersistedSettings();
-    await storage.persistSettings(prev, { ...prev, system: { ...prev.system, defaultTimeZone: "America/New_York" } });
-    const request = fixture.requests.find(r => r.path === "/v1/planning");
-    assert.deepEqual(request.body, { action: "timezone", input: { timeZone: "America/New_York" } });
-    assert.equal(request.headers.authorization, "Bearer fixture-token");
-    assert.equal((await storage.loadPersistedSettings()).system.defaultTimeZone, "America/New_York");
+    const custom = { ...prev, system: { ...prev.system, defaultTimeZone: "America/New_York" } };
+    await storage.persistSettings(prev, custom);
+    await storage.persistSettings(custom, { ...custom, system: { ...custom.system, defaultTimeZone: "" } });
+    assert.equal(fixture.requests.filter(r => r.path === "/v1/planning").length, 0);
   });
 });
 
@@ -528,13 +529,3 @@ for (const raw of ['{"apiKey":"corrupt-key-secret",', "null", '[{"headers":{"Aut
     });
   });
 }
-
-test("failed browser timezone save reports error and retries even with equal preferences", async () => {
- await withSettingsFixture({ fixtureOptions: { timezoneStatuses: [503,200] } }, async ({ storage,fixture }) => {
-  const prev=await storage.loadPersistedSettings();
-  const next={...prev,system:{...prev.system,defaultTimeZone:"America/New_York"}};
-  await assert.rejects(storage.persistSettings(prev,next), e => e.code === "save_failed" && e.message === "timezone unavailable");
-  await storage.persistSettings(next,next);
-  assert.equal(fixture.requests.filter(r=>r.path === "/v1/planning").length,2);
- });
-});

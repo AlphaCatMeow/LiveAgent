@@ -1,5 +1,22 @@
 # v2-kbrian 与 main 功能测试报告
 
+## 2026-10-06 请求兼容性增量验证
+
+本次将 K-brain 锁定为 `d303a06`，保持 provider 请求构造在后端：
+
+- 修复 Anthropic adaptive thinking、旧模型预算超限、签名和 redacted thinking 的后端持久化/同 endpoint 同模型回放，以及内置搜索 JSON 分片导致的流中断。
+- 编辑历史保留现有运行时能力，避免使用已删除模型重建 agent，同时避免丢失工具和记忆配置。
+- 前端增加 session/run 请求体测试，确认自定义 provider ID 原样传递、`reasoning: off` 到达后端、当前用户消息不会重复导入历史。
+- 相关前端测试 **25/25**；GUI/Gateway TypeScript 均通过。测试目录被现有 Biome 配置忽略，未将该文件的 Biome 检查记为通过。
+- K-brain 全量 `go test -p 1 ./...`、AI/protocol/backend race 检查、CLI 编译及帮助入口均通过。
+- 真实前端 `runKBrainTurn` 调用本次编译的后端，经本地 Anthropic HTTP fixture、真实 Read 工具和带签名的后续请求完整跑通。日志 `/tmp/kbrain-compat-live.log`，脚本 `/private/tmp/desk/compat-live.mjs`。
+- macOS 真实 WKWebView 再次检查 Cron、Memory、Skills、MCP、Planning 导航，Planning 在 1440/480 视口无横向溢出；日志 `/tmp/la-compat-desktop.log`。桌面进程仍加载基线 sidecar，本次新内核的验证是前述独立端到端测试。
+- 核对 `v2.0.0-beta.1` 已是 prerelease，8 个附件名称、大小和 GitHub SHA256 digest 均与 `v1.3.8-beta.8` 对应附件一致。本次没有改标签、上传附件或触发发布工作流。
+
+**剩余项**：Chat Completions/Responses reasoning 回放和专属参数、Gemini 请求兼容、各协议显式关闭思考、零可用模型时的独立历史读取、真实供应商与新桌面 sidecar 验收、Windows PTY。日程已有迁移保持不变，本次没有宣称全部 main/v2 功能重新验收完成。
+
+后端完整进度：`K-brain/docs/2026-10-06-provider-compatibility-followup.md`。下方计数与截图保留为此前测试基线，不是本次重新全量执行的结果。
+
 - **测试日期**：2026-10-05 至 2026-10-06（Asia/Shanghai）
 - **测试仓库**：LiveAgent
 - **测试提交**：原桌面全量命令基线为 `510b5a25` / 代码 `1105ae43`；日程测试针对基线 `d13a21d1` 之上的本次 `feat(planning): port calendar and tasks to v2 desktop` 提交内容。

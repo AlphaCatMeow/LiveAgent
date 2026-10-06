@@ -146,6 +146,25 @@ test("final assistant snapshot reconciles the streamed text across tool rounds",
   assert.equal(result.content.filter((part) => part.type === "text").map((part) => part.text).join(""), "Checking. All done.");
 });
 
+test("session and run bodies preserve provider identity and explicit reasoning off", async () => {
+  storage.clear();
+  const selected = { provider: "custom-relay-id", model: "claude-opus-5-5" };
+  const calls = [];
+  const fetch = makeFetch({ calls, streams: [() => stream(
+    event(2, "assistant.text.delta", { text: "ok" }) + event(3, "run.completed"),
+  )] });
+  await runKBrainTurn({ ...baseParams, model: selected, options: { reasoning: "off" }, fetch });
+  const create = JSON.parse(calls.find(({ url }) => url.pathname === "/v1/sessions").init.body);
+  const run = JSON.parse(calls.find(({ url }) => url.pathname.endsWith("/runs")).init.body);
+  assert.deepEqual(create.model, selected);
+  assert.deepEqual(run.model, selected);
+  assert.equal(run.options.reasoning, "off");
+  assert.equal(run.prompt, "hello");
+  assert.deepEqual(create.messages, []);
+  assert.equal("thinking" in run, false);
+  assert.equal("reasoning_effort" in run, false);
+});
+
 test("session stream accepts earlier-run subagents without terminating the current turn", async () => {
   storage.clear();
   const children = [];

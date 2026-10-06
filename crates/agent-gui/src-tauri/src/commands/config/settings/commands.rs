@@ -55,20 +55,9 @@ pub async fn settings_save_system(
 }
 
 async fn refresh_planning_default_zone(app: &tauri::AppHandle) {
-    use tauri::Manager;
-    let Some(store) = app.try_state::<Arc<crate::services::planning::PlanningStore>>() else {
-        return;
-    };
-    let store = Arc::clone(store.inner());
-    let synced = tauri::async_runtime::spawn_blocking(move || {
-        store.sync_default_zone(crate::services::planning::store::now())
-    })
-    .await;
-    match synced {
-        Ok(Ok(Some(seq))) => crate::services::planning::changed(app, seq),
-        Ok(Ok(None)) => {}
-        Ok(Err(error)) => eprintln!("[settings] planning time zone refresh failed: {error}"),
-        Err(error) => eprintln!("[settings] planning time zone refresh join failed: {error}"),
+    let zone = crate::commands::settings::load_runtime_default_time_zone();
+    if let Err(error) = crate::services::planning::backend::request(app, "timezone", serde_json::json!({"timeZone":zone})).await {
+        eprintln!("[settings] planning time zone refresh failed: {error}");
     }
 }
 

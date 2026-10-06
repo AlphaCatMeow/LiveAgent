@@ -406,9 +406,12 @@ pub async fn kbrain_backend_connection(
     state: State<'_, Arc<KBrainBackendState>>,
 ) -> Result<KBrainBackendConnection, String> {
     let state = Arc::clone(state.inner());
-    tauri::async_runtime::spawn_blocking(move || state.ensure_started(&app))
+    let handle = app.clone();
+    let connection = tauri::async_runtime::spawn_blocking(move || state.ensure_started(&handle))
         .await
-        .map_err(|error| format!("K-brain backend startup task failed: {error}"))?
+        .map_err(|error| format!("K-brain backend startup task failed: {error}"))??;
+    crate::services::planning::backend::migrate(&app, &connection).await?;
+    Ok(connection)
 }
 
 fn resolve_binary() -> Result<PathBuf, String> {

@@ -1,6 +1,7 @@
 package websocket_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,8 +11,23 @@ import (
 	"github.com/liveagent/agent-gateway/internal/session"
 )
 
-func TestV2KBrainPlanningReportsDesktopRequirement(t *testing.T) {
-	backend := httptest.NewServer(http.NotFoundHandler())
+func TestV2KBrainPlanningRelaysWithoutDesktop(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/planning" || r.Method != "POST" {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		var input map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			t.Error(err)
+		}
+		if input["action"] != "query" {
+			t.Errorf("action %v", input)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"seq":7,"todos":[{"id":"backend-task"}]}`))
+	}))
 	defer backend.Close()
 	cfg := newV2TestConfig()
 	cfg.KBrainURL = backend.URL
@@ -31,7 +47,7 @@ func TestV2KBrainPlanningReportsDesktopRequirement(t *testing.T) {
 		}},
 	})
 	response := receiveWebFrameWithID(t, browser, "planning-query")
-	if response.GetLocalError().GetMessage() != "E:desktop_required" {
+	if response.GetAgentResponse().GetPlanningResp().GetResultJson() != `{"seq":7,"todos":[{"id":"backend-task"}]}` {
 		t.Fatalf("unexpected Planning response: %v", response)
 	}
 }

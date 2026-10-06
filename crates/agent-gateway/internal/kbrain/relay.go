@@ -275,6 +275,20 @@ func (r *Relay) CronManage(ctx context.Context, request *gatewayv2.CronManageReq
 	return &gatewayv2.CronManageResponse{Action: request.GetAction(), ResultJson: string(raw)}, nil
 }
 
+func (r *Relay) Planning(ctx context.Context, request *gatewayv2.PlanningRequest) (*gatewayv2.PlanningResponse, error) {
+	var input any
+	if request.GetInputJson() != "" {
+		if err := json.Unmarshal([]byte(request.GetInputJson()), &input); err != nil {
+			return nil, err
+		}
+	}
+	raw, err := r.client.cronRequest(ctx, "POST", "/v1/planning", map[string]any{"action": request.GetAction(), "input": input})
+	if err != nil {
+		return nil, err
+	}
+	return &gatewayv2.PlanningResponse{ResultJson: string(raw)}, nil
+}
+
 // Start accepts a run, queues it when the conversation is busy, and starts it
 // asynchronously when the conversation is idle. The returned bool reports a
 // duplicate or queued acceptance.

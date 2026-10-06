@@ -30,7 +30,7 @@ pub struct CronOccurrenceQuery {
     pub to: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CronRunSummary {
     pub id: String,
@@ -46,7 +46,7 @@ pub struct CronRunSummary {
     pub output_preview: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CronOccurrenceTask {
     pub id: String,
@@ -58,14 +58,14 @@ pub struct CronOccurrenceTask {
     pub last_run: Option<CronRunSummary>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CronOccurrence {
     pub task_id: String,
     pub at: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CronDaySummary {
     pub task_id: String,
@@ -80,7 +80,7 @@ pub struct CronDaySummary {
     pub last_at: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CronOccurrencesResponse {
     pub time_zone: String,

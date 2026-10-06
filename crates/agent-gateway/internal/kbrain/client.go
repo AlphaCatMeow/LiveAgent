@@ -498,6 +498,8 @@ func (c *Client) CronManage(ctx context.Context, action, taskID, taskJSON string
 			return nil, err
 		}
 		return json.Marshal(map[string]json.RawMessage{"cron": cron, "hooks": hooks})
+	case "occurrences":
+		return c.cronRequest(ctx, http.MethodPost, "/v1/planning", map[string]any{"action": "cron.occurrences", "input": input})
 	case "cron_apply":
 		method, path, body = http.MethodPut, "/v1/cron", input
 	case "hooks_apply":

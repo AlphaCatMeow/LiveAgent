@@ -20,6 +20,7 @@ import type {
   PromptRunRequest,
 } from "@liveagent/ui/lib/automation/types";
 import { isKBrainBackendEnabled, isKBrainBrowserHost } from "../host";
+import { requestPlanning } from "../planning/kbrain";
 import {
   applyKBrainCron,
   cancelKBrainCron,
@@ -92,6 +93,7 @@ export const backend = {
   },
 
   cronOccurrences(from: number, to: number): Promise<CronOccurrencesResponse> {
+    if (isKBrainBackendEnabled()) return requestPlanning("cron.occurrences", { from, to });
     return invoke<CronOccurrencesResponse>("automation_cron_occurrences", { from, to });
   },
 

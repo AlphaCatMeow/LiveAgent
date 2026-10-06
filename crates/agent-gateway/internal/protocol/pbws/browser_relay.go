@@ -181,7 +181,14 @@ func (c *browserConn) handleAgentRequest(requestID, agentID string, env *gateway
 	}
 	if c.srv.kbrainRelay != nil && agentID == c.srv.kbrainTargetID {
 		if env.GetPlanning() != nil {
-			_ = c.sendLocalError(requestID, "E:desktop_required")
+			ctx, cancel := context.WithTimeout(context.Background(), c.srv.requestTimeout())
+			defer cancel()
+			response, err := c.srv.kbrainRelay.Planning(ctx, env.GetPlanning())
+			if err != nil {
+				_ = c.sendLocalError(requestID, errorMessage(err))
+				return
+			}
+			c.sendKBrainResponse(requestID, agentID, &gatewayv2.AgentEnvelope{Payload: &gatewayv2.AgentEnvelope_PlanningResp{PlanningResp: response}})
 			return
 		}
 		if settingsGet := env.GetSettingsGet(); settingsGet != nil {

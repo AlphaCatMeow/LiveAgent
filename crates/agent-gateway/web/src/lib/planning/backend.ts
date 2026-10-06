@@ -15,7 +15,7 @@ export const backend: PlanningBackend = {
       socket.subscribeConnection(() => listener()),
       socket.subscribeStatus(() => listener()),
     ];
-    const timer = setInterval(() => listener(), 30_000);
+    const timer = setInterval(() => listener(), 2_000);
     return () => {
       for (const cleanup of cleanups) cleanup();
       clearInterval(timer);

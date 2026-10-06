@@ -211,10 +211,6 @@ macro_rules! app_invoke_handler {
             commands::planning::planning_export,
             commands::planning::planning_set_labels,
             commands::planning::planning_subscription,
-            commands::planning::planning_subscription_due,
-            commands::planning::planning_subscription_fetch,
-            commands::planning::planning_subscription_sync,
-            commands::planning::planning_subscription_fail,
             commands::planning::planning_import,
             commands::cron::cron_validate_expression,
             commands::cron::automation_snapshot,
@@ -830,13 +826,6 @@ pub fn run() {
     // 非 Windows 平台为空操作。
     runtime::windows_sandbox::run_sandbox_launcher_if_requested();
 
-    // 日程快照的 timeZone 取全局默认时区(设置 → 通用),须在打开日程库之前安装。
-    services::planning::time::set_default_zone_resolver(Arc::new(
-        commands::settings::load_runtime_default_time_zone,
-    ));
-    let planning_store = Arc::new(
-        services::planning::PlanningStore::open().expect("failed to initialize planning store"),
-    );
     let automation_store = Arc::new(
         services::automation::AutomationStore::open()
             .expect("failed to initialize LiveAgent automation store"),
@@ -917,7 +906,6 @@ pub fn run() {
         .manage(Arc::clone(&git_clone_task_registry))
         .manage(Arc::clone(&allow_exit))
         .manage(Arc::clone(&close_window_behavior))
-        .manage(Arc::clone(&planning_store))
         .manage(Arc::clone(&automation_store))
         .manage(Arc::clone(&automation_scheduler))
         .manage(Arc::new(commands::hook::HookScopeRegistry::default()))
@@ -998,7 +986,7 @@ pub fn run() {
                     scheduler: Arc::downgrade(&automation_scheduler),
                 });
                 Arc::clone(&automation_scheduler).start();
-                services::planning::start(app.handle().clone(), Arc::clone(&planning_store));
+                services::planning::start(app.handle().clone());
                 app.manage(Arc::clone(&gateway_controller));
                 if let Err(error) = gateway_controller.start() {
                     eprintln!("failed to start remote gateway controller: {error}");

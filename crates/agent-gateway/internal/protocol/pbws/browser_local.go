@@ -290,9 +290,10 @@ func kbrainOptions(body handler.ChatRequestBody) *kbrain.RunOptions {
 	if body.ExecutionMode == "tools" || body.ExecutionMode == "agent-dev" {
 		options.Mode = "agent"
 	}
-	if body.CommandSafetyMode == "auto" {
+	switch body.CommandSafetyMode {
+	case "auto":
 		options.ApprovalPolicy = "auto"
-	} else if body.CommandSafetyMode == "sandboxOffline" {
+	case "sandboxOffline":
 		options.ApprovalPolicy = "deny"
 	}
 	if body.RuntimeControls != nil {

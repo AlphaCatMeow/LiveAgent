@@ -530,7 +530,7 @@ func (r *Relay) persistQueueLocked() error {
 		return fmt.Errorf("create kbrain queue state: %w", err)
 	}
 	name := file.Name()
-	defer os.Remove(name)
+	defer func() { _ = os.Remove(name) }()
 	if _, err = file.Write(data); err == nil {
 		err = file.Sync()
 	}

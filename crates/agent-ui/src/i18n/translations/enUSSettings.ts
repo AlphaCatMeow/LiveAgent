@@ -321,7 +321,7 @@ export const EN_US_SETTINGS_TRANSLATIONS = {
     "Choose the display language for the interface. Changes take effect immediately.",
   "settings.defaultTimeZone": "Default time zone",
   "settings.defaultTimeZoneDesc":
-    "Used by the schedule, scheduled tasks and background date math; follows the system by default.",
+    "Used for calendar display and date calculations; follows the system by default. Does not change scheduled task trigger time zones.",
   "settings.defaultTimeZoneAuto": "Automatic (system: {zone})",
   "settings.timeZoneSearch": "Search time zones or cities",
   "settings.timeZoneEmpty": "No matching time zones",

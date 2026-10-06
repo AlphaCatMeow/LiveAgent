@@ -38,7 +38,7 @@ function jsonResponse(value) {
   return JSON.stringify(value);
 }
 
-async function startSettingsFixture({ document = SETTINGS_DOCUMENT, promptDocument = { revision: 1, globalTemplates: [], projectPrompts: {} }, mcpSettings = { servers: [], selected: [] }, getStatus = 200, putStatus = 200, mcpGetStatus = 200, mcpPutStatus = 200 } = {}) {
+async function startSettingsFixture({ document = SETTINGS_DOCUMENT, promptDocument = { revision: 1, globalTemplates: [], projectPrompts: {} }, mcpSettings = { servers: [], selected: [] }, getStatus = 200, putStatus = 200, mcpGetStatus = 200, mcpPutStatus = 200, timezoneStatuses = [200] } = {}) {
   let current = structuredClone(document);
   let prompts = structuredClone(promptDocument);
   let mcp = structuredClone(mcpSettings);
@@ -49,6 +49,10 @@ async function startSettingsFixture({ document = SETTINGS_DOCUMENT, promptDocume
     const raw = Buffer.concat(chunks).toString("utf8");
     const body = raw ? JSON.parse(raw) : null;
     requests.push({ method: request.method, path: request.url, headers: request.headers, body });
+    if (request.url === "/v1/planning" && body?.action === "timezone") {
+      const status = timezoneStatuses.length > 1 ? timezoneStatuses.shift() : timezoneStatuses[0];
+      response.writeHead(status, { "content-type": "application/json" }); response.end(status === 200 ? "null" : JSON.stringify({ error: "timezone unavailable" })); return;
+    }
     if (request.url?.startsWith("/v1/prompts") && request.method === "GET") {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(jsonResponse(prompts));
@@ -267,11 +271,22 @@ function assertBrowserWhitelist(localStorage, marker) {
   assert.ok(!raw.includes(marker), "credentials and runtime prompt text must be removed from the stored JSON");
   const saved = JSON.parse(raw);
   assert.deepEqual(Object.keys(saved).sort(), ["chatRuntimeControls", "customSettings", "locale", "system", "theme"]);
-  assert.deepEqual(Object.keys(saved.system).sort(), ["executionMode", "workdir"]);
+  assert.deepEqual(Object.keys(saved.system).sort(), ["defaultTimeZone", "executionMode", "workdir"]);
   assert.deepEqual(saved.customSettings.rightDock.projects, {});
   assert.doesNotMatch(raw, /"(?:apiKey|headers|usageQuery|password|token|providers|customProviders|agents|remote|stt|ssh)"/);
   return saved;
 }
+
+test("browser time zone preference reaches Planning and survives local reload", async () => {
+  await withSettingsFixture({}, async ({ storage, fixture }) => {
+    const prev = await storage.loadPersistedSettings();
+    await storage.persistSettings(prev, { ...prev, system: { ...prev.system, defaultTimeZone: "America/New_York" } });
+    const request = fixture.requests.find(r => r.path === "/v1/planning");
+    assert.deepEqual(request.body, { action: "timezone", input: { timeZone: "America/New_York" } });
+    assert.equal(request.headers.authorization, "Bearer fixture-token");
+    assert.equal((await storage.loadPersistedSettings()).system.defaultTimeZone, "America/New_York");
+  });
+});
 
 test("K-brain browser load migrates credential-bearing snapshots before returning settings", async () => {
   const nativeUi = JSON.stringify({ theme: "light", locale: "zh-CN", skills: { selected: ["native-skill"] }, retryErrorSettings: { customPatterns: ["native preference"] }, selectedModel: { customProviderId: "native", model: "native-model" } });
@@ -513,3 +528,13 @@ for (const raw of ['{"apiKey":"corrupt-key-secret",', "null", '[{"headers":{"Aut
     });
   });
 }
+
+test("failed browser timezone save reports error and retries even with equal preferences", async () => {
+ await withSettingsFixture({ fixtureOptions: { timezoneStatuses: [503,200] } }, async ({ storage,fixture }) => {
+  const prev=await storage.loadPersistedSettings();
+  const next={...prev,system:{...prev.system,defaultTimeZone:"America/New_York"}};
+  await assert.rejects(storage.persistSettings(prev,next), e => e.code === "save_failed" && e.message === "timezone unavailable");
+  await storage.persistSettings(next,next);
+  assert.equal(fixture.requests.filter(r=>r.path === "/v1/planning").length,2);
+ });
+});

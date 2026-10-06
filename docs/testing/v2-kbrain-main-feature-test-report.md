@@ -1,5 +1,13 @@
 # v2-kbrian 与 main 功能测试报告
 
+## 2026-10-06 日程补齐与 Mac 实机验收
+
+- 详细记录：[日程补齐与 macOS 实机验收](2026-10-06-planning-followup-macos.md)。该增量更新下方旧报告中“RDATE/DURATION/VTIMEZONE 未补齐、浏览器时区未实现”的状态，不表示全部历史待办已完成。
+- K-brain `ade5f3c`：订阅 recurrence 合集、PERIOD、DURATION、自定义时区与 DST、错误刷新原子保留。LA 修复 RDATE-only 手动导入漏 DTSTART；浏览器时区保存进入共享后端，失败可重试。
+- Mac 真实 WKWebView 订阅/导入；本机 Chrome 直连及 Gateway 导入、去重、拖动、跨端任务同步、1440/390/480 视口通过。后端重启换端口恢复通过。
+- GUI **2963 通过 / 1 跳过 / 0 失败**，Gateway **769/769**，三端类型检查、相关 Biome、Go 全量/race/vet 通过。
+- 通知横幅、外部日历账户、时区偏好完整双向同步、原生拖拽、安装包升级仍未验收。未改发布附件。
+
 ## 2026-10-06 参考 ZCode 收敛传输与运行恢复
 
 - 设计与状态边界见 `docs/design/kbrain-transport-boundary.md`；保留 HTTP/SSE，不进行 stdio/MessagePort 的形式替换。

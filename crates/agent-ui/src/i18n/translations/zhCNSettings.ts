@@ -300,7 +300,8 @@ export const ZH_CN_SETTINGS_TRANSLATIONS = {
   "settings.language": "语言",
   "settings.languageDesc": "选择界面显示语言，切换后立即生效。",
   "settings.defaultTimeZone": "默认时区",
-  "settings.defaultTimeZoneDesc": "日程、定时任务与后台日期计算统一使用此时区；默认跟随系统。",
+  "settings.defaultTimeZoneDesc":
+    "用于日程显示与日期计算，默认跟随系统；不会改变定时任务的触发时区。",
   "settings.defaultTimeZoneAuto": "自动（跟随系统：{zone}）",
   "settings.timeZoneSearch": "搜索时区或城市",
   "settings.timeZoneEmpty": "没有匹配的时区",

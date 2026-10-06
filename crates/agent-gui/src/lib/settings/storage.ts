@@ -16,6 +16,7 @@ import {
   loadKBrainProviderSettings,
   saveKBrainProviderSettings,
 } from "../kbrain/providerSettings";
+import { requestPlanning } from "../planning/kbrain";
 import { SettingsStorageError, type SettingsStorageErrorCode } from "./errors";
 import {
   type AppSettings,
@@ -35,6 +36,7 @@ import {
   normalizeSkillsSettings,
   normalizeTheme,
   normalizeUpdateSettings,
+  resolveDefaultTimeZone,
   resolveWorkspaceProjects,
   type SelectedModel,
   type SkillsSettings,
@@ -293,6 +295,7 @@ function browserUiSettings(input: unknown) {
     system: {
       executionMode: system.executionMode,
       workdir: system.workdir,
+      defaultTimeZone: system.defaultTimeZone,
     } as AppSettings["system"],
     customSettings: {
       chatSidebar: custom.chatSidebar,
@@ -319,6 +322,7 @@ function browserUiSettings(input: unknown) {
     system: {
       executionMode: normalized.system.executionMode,
       workdir: normalized.system.workdir,
+      defaultTimeZone: normalized.system.defaultTimeZone,
     },
     customSettings: normalized.customSettings,
     chatRuntimeControls: normalized.chatRuntimeControls,
@@ -642,6 +646,7 @@ export async function loadPersistedSettings(): Promise<AppSettings> {
 }
 
 let failedProviderSave: AppSettings | undefined;
+let failedTimeZoneSave = false;
 
 function projectPromptFields(settings: AppSettings, path: string) {
   const entry = settings.system.workspaceResourceSettings[path];
@@ -755,6 +760,22 @@ export async function persistSettings(
   }
 
   if (isKBrainBrowserHost()) {
+    if (
+      failedTimeZoneSave ||
+      hasChanged(prev.system.defaultTimeZone, next.system.defaultTimeZone)
+    ) {
+      tasks.push(
+        requestPlanning("timezone", { timeZone: resolveDefaultTimeZone(next.system) }).then(
+          () => {
+            failedTimeZoneSave = false;
+          },
+          (error) => {
+            failedTimeZoneSave = true;
+            throw new SettingsStorageError("save_failed", error);
+          },
+        ),
+      );
+    }
     tasks.push(settleLocalWrite(() => writeBrowserPersistedSettings(next)));
     await settleTasks(tasks);
     return result;

@@ -13,6 +13,114 @@ const migration = loader.loadModule("src/lib/kbrain/historyMigration.ts");
 const runtime = loader.loadModule("src/lib/kbrain/runtimeConnection.ts");
 const mapping = loader.loadModule("src/lib/kbrain/mapping.ts");
 
+function stablePage(id = "recoverable") {
+  return { complete: true, conversations: [{
+    id, title: "Old conversation", providerId: "removed", model: "removed-model",
+    createdAt: 1000, updatedAt: 2000, isPinned: false, isShared: false,
+    redactToolContent: false, contextMetaJson: "{}", checkpoint: { status: "not_found" },
+    segments: [{ segmentIndex: 0, segmentId: "first", messagesJson: JSON.stringify([
+      { id: "old-user", role: "user", content: "old question", timestamp: 1000 },
+    ]) }],
+  }] };
+}
+
+test("stable migration verifies existence, repairs only 404, and honors backend deletion", async () => {
+  const values = new Map();
+  globalThis.localStorage = { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, String(value)) };
+  runtime.setKBrainRuntimeConnection({ baseUrl: "http://migration.test", token: "", protocolVersion: "kbrain.agent.v1" });
+  let status = 200;
+  let deleted = false;
+  let posts = 0;
+  let gets = 0;
+  const fetch = async (_url, init) => {
+    if (init.method === "POST") {
+      posts++;
+      if (deleted) return new Response(JSON.stringify({ error: "history was explicitly deleted" }), { status: 410 });
+      return new Response(JSON.stringify({ source_id: "recoverable", backend_id: "recoverable", status: "imported", checkpoint: "not_found", fingerprint: "fixture" }));
+    }
+    gets++;
+    if (status === 0) throw new Error("offline");
+    return new Response(JSON.stringify(status === 200 ? { id: "recoverable" } : { error: "fixture error" }), { status });
+  };
+  try {
+    assert.equal((await migration.migrateLegacyHistoryPage(stablePage(), { fetch })).complete, true);
+    assert.equal(posts, 1);
+    assert.equal((await migration.migrateLegacyHistoryPage(stablePage(), { fetch })).results[0].status, "already_imported");
+    assert.equal(posts, 1);
+    assert.equal(gets, 1);
+    for (status of [500, 401, 403, 0]) {
+      assert.equal((await migration.migrateLegacyHistoryPage(stablePage(), { fetch })).failures.length, 1);
+      assert.equal(posts, 1);
+    }
+    status = 404;
+    assert.equal((await migration.migrateLegacyHistoryPage(stablePage(), { fetch })).complete, true);
+    assert.equal(posts, 2);
+    status = 200;
+    await migration.migrateLegacyHistoryPage(stablePage(), { fetch });
+    assert.equal(posts, 2);
+    status = 404;
+    deleted = true;
+    const skipped = await migration.migrateLegacyHistoryPage(stablePage(), { fetch });
+    assert.equal(skipped.results.length, 0);
+    assert.equal(skipped.failures.length, 0);
+    assert.equal(skipped.complete, true);
+  } finally {
+    runtime.clearKBrainRuntimeConnection();
+  }
+});
+
+test("on-demand recovery scans sources once for concurrent callers and retries history once", async () => {
+  const values = new Map();
+  globalThis.localStorage = { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, String(value)) };
+  const commands = [];
+  const isolated = createTsModuleLoader({ mocks: {
+    "@liveagent/app/shims/tauriCore": { invoke: async (command) => {
+      commands.push(command);
+      return command === "legacy_history_migration_page" ? { conversations: [], complete: true } : stablePage();
+    } },
+    "../host": { isTauriHost: () => true },
+  } });
+  const recovery = isolated.loadModule("src/lib/kbrain/historyMigration.ts");
+  const localRuntime = isolated.loadModule("src/lib/kbrain/runtimeConnection.ts");
+  const localMapping = isolated.loadModule("src/lib/kbrain/mapping.ts");
+  const history = isolated.loadModule("src/lib/kbrain/history.ts");
+  localRuntime.setKBrainRuntimeConnection({ baseUrl: "http://migration.test", token: "", protocolVersion: "kbrain.agent.v1" });
+  const originalFetch = globalThis.fetch;
+  let posts = 0;
+  let historyReads = 0;
+  let missing = true;
+  globalThis.fetch = async (url, init) => {
+    if (init.method === "POST") {
+      posts++;
+      missing = false;
+      return new Response(JSON.stringify({ source_id: "recoverable", backend_id: "recoverable", status: "imported", checkpoint: "not_found", fingerprint: "fixture" }));
+    }
+    if (String(url).includes("/history")) {
+      historyReads++;
+      if (!missing) return new Response(JSON.stringify({
+        session: { id: "recoverable", title: "Old conversation", model: { provider: "removed", model: "removed-model" } },
+        revision: "restored", total_message_count: 0, oldest_offset: 0, active_messages: [],
+      }));
+    }
+    return new Response(JSON.stringify({ error: "not found" }), { status: 404 });
+  };
+  try {
+    assert.deepEqual(await Promise.all([recovery.recoverLegacyHistory("recoverable"), recovery.recoverLegacyHistory("recoverable")]), [true, true]);
+    assert.equal(posts, 1);
+    assert.deepEqual(commands, ["legacy_history_migration_page", "pi_history_migration_page"]);
+    missing = true;
+    localMapping.setKBrainSessionId("recoverable", "recoverable");
+    const restored = await history.getKBrainHistoryWindow("recoverable");
+    assert.equal(restored.revision, "restored");
+    assert.equal(historyReads, 2);
+    assert.equal(posts, 2);
+    assert.equal(await recovery.recoverLegacyHistory("absent"), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    localRuntime.clearKBrainRuntimeConnection();
+  }
+});
+
 test("real migration conversion preserves row IDs, tool IDs, response IDs, ordering, and empty sessions", async () => {
   const values = new Map();
   globalThis.localStorage = { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, String(value)), removeItem: (key) => values.delete(key), get length() { return values.size; }, key: (index) => [...values.keys()][index] ?? null };

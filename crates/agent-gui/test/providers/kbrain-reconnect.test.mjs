@@ -8,6 +8,7 @@ const fresh = { ...old, baseUrl: "http://new.test", token: "new" };
 function setup(t, fetch, desktop = true) {
   let connections = 0;
   const loader = createTsModuleLoader({ mocks: {
+    "@liveagent/app/shims/tauriCore": { invoke: async (command) => { assert.equal(command, "planning_migrate_legacy"); } },
     "@tauri-apps/api/core": { invoke: async () => { connections++; return fresh; } },
     [new URL("../../src/lib/host.ts", import.meta.url).pathname]: { isTauriHost: () => desktop },
   } });

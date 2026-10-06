@@ -410,7 +410,6 @@ pub async fn kbrain_backend_connection(
     let connection = tauri::async_runtime::spawn_blocking(move || state.ensure_started(&handle))
         .await
         .map_err(|error| format!("K-brain backend startup task failed: {error}"))??;
-    crate::services::planning::backend::migrate(&app, &connection).await?;
     Ok(connection)
 }
 

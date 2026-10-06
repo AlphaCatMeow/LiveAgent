@@ -3,12 +3,24 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use tauri::Manager;
 
+pub async fn migrate_on_demand(app: &tauri::AppHandle) -> Result<(), String> {
+    let state = Arc::clone(app.state::<Arc<KBrainBackendState>>().inner());
+    let handle = app.clone();
+    let connection = tauri::async_runtime::spawn_blocking(move || state.ensure_started(&handle))
+        .await
+        .map_err(|e| e.to_string())??;
+    migrate(app, &connection).await
+}
+
 pub async fn request(app: &tauri::AppHandle, action: &str, input: Value) -> Result<Value, String> {
     let state = Arc::clone(app.state::<Arc<KBrainBackendState>>().inner());
     let handle = app.clone();
     let connection = tauri::async_runtime::spawn_blocking(move || state.ensure_started(&handle))
         .await
         .map_err(|e| e.to_string())??;
+    if matches!(action, "query" | "export" | "mutate" | "import") || action.starts_with("subscription.") {
+        migrate(app, &connection).await?;
+    }
     send(&connection, action, input).await
 }
 

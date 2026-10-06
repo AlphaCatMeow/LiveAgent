@@ -22,6 +22,7 @@ import type {
   ConversationPersistenceCursor,
 } from "../chat/history/chatHistory";
 import { createKBrainClient } from "./client";
+import { historyErrorStatus, recoverLegacyHistory } from "./historyMigration";
 import {
   clearKBrainSessionId,
   ensureKBrainConversationId,
@@ -450,14 +451,26 @@ export async function getKBrainHistoryWindow(
   } = {},
 ): Promise<ChatHistoryWindowRecord> {
   const localId = id.trim();
-  const backendId = getKBrainSessionId(localId, baseUrl());
+  let backendId = getKBrainSessionId(localId, baseUrl());
+  if (!backendId && (await recoverLegacyHistory(localId))) {
+    backendId = getKBrainSessionId(localId, baseUrl());
+  }
   if (!backendId) throw new Error(`K-brain session mapping not found for conversation ${localId}`);
-  const result = await client().getHistory(backendId, {
-    maxMessages: params.maxMessages ?? 360,
-    beforeOffset: params.beforeOffset,
-    expectedRevision: params.expectedRevision,
-    includeActive: params.includeActive ?? true,
-  });
+  const read = () =>
+    client().getHistory(backendId!, {
+      maxMessages: params.maxMessages ?? 360,
+      beforeOffset: params.beforeOffset,
+      expectedRevision: params.expectedRevision,
+      includeActive: params.includeActive ?? true,
+    });
+  let result: KBrainHistoryResponse;
+  try {
+    result = await read();
+  } catch (error) {
+    if (historyErrorStatus(error) !== 404 || !(await recoverLegacyHistory(localId))) throw error;
+    backendId = getKBrainSessionId(localId, baseUrl()) ?? backendId;
+    result = await read();
+  }
   setKBrainSessionId(localId, result.session.id, baseUrl());
   if (params.expectedRevision !== undefined && result.revision !== params.expectedRevision) {
     throw new Error("K-brain history revision conflict");

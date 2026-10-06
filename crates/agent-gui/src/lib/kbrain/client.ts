@@ -335,8 +335,8 @@ export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
     });
   }
 
-  async function getSession(conversationId: string): Promise<KBrainSession> {
-    return request<KBrainSession>(`/v1/sessions/${encodeURIComponent(conversationId)}`);
+  async function getSession(conversationId: string, signal?: AbortSignal): Promise<KBrainSession> {
+    return request<KBrainSession>(`/v1/sessions/${encodeURIComponent(conversationId)}`, { signal });
   }
 
   async function getHistory(

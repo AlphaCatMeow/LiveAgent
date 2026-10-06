@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createTsModuleLoader } from "../helpers/load-ts-module.mjs";
 
-test("Planning browser and desktop use the same authenticated backend without native storage", async () => {
+test("Planning uses the authenticated backend after the one-time native legacy export", async () => {
   const requests = [];
+  let migrations = 0;
   const loader = createTsModuleLoader({ mocks: {
-    "@tauri-apps/api/core": { invoke() { throw new Error("unexpected desktop invocation"); } },
+    "@tauri-apps/api/core": { invoke(command) { assert.equal(command, "planning_migrate_legacy"); migrations++; return Promise.resolve(); } },
     "@tauri-apps/api/event": { listen() { throw new Error("unexpected desktop listener"); } },
   } });
   loader.loadModule("src/lib/kbrain/runtimeConnection.ts").setKBrainRuntimeConnection({baseUrl:"http://planning.test",token:"secret",protocolVersion:"kbrain.agent.v1"});
@@ -20,5 +21,6 @@ test("Planning browser and desktop use the same authenticated backend without na
     assert.deepEqual(JSON.parse(requests[0].init.body),{action:"query",input:{from:1,to:2}});
     globalThis.fetch = async () => ({ok:false,status:422,json:async()=>({error:"E:conflict"})});
     await assert.rejects(backend.call("mutate",{}),/E:conflict/);
+    assert.equal(migrations, 1);
   } finally {globalThis.fetch=original;}
 });

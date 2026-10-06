@@ -2,6 +2,11 @@ use crate::services::planning::{self, backend, Mutation, MutationResult, Query, 
 use serde_json::{json, Value};
 
 #[tauri::command]
+pub async fn planning_migrate_legacy(app: tauri::AppHandle) -> Result<(), String> {
+    backend::migrate_on_demand(&app).await
+}
+
+#[tauri::command]
 pub async fn planning_notification_test(app: tauri::AppHandle) -> Result<(), String> {
     planning::notification::deliver(
         &app,

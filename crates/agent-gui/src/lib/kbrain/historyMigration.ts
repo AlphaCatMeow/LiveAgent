@@ -303,6 +303,10 @@ function isStableMigrationResult(result: MigrationImportResult) {
   return result.checkpoint === "available" || result.checkpoint === "not_found";
 }
 
+export function historyErrorStatus(error: unknown): number | undefined {
+  return error && typeof error === "object" && "status" in error ? Number(error.status) : undefined;
+}
+
 export async function migrateLegacyHistoryPage(
   page: LegacyPage,
   options: { fetch?: typeof globalThis.fetch; signal?: AbortSignal } = {},
@@ -329,13 +333,22 @@ export async function migrateLegacyHistoryPage(
       const sourceFingerprint = await fingerprint({ item, messages });
       const cached = cache[item.id];
       if (cached?.fingerprint === sourceFingerprint && isStableMigrationResult(cached.result)) {
-        const cachedResult: MigrationImportResult = {
-          ...cached.result,
-          status: "already_imported",
-        };
-        setKBrainSessionId(item.id, cachedResult.backend_id);
-        results.push(cachedResult);
-        continue;
+        let exists = true;
+        try {
+          await client.getSession(cached.result.backend_id, options.signal);
+        } catch (error) {
+          if (historyErrorStatus(error) !== 404) throw error;
+          exists = false;
+        }
+        if (exists) {
+          const cachedResult: MigrationImportResult = {
+            ...cached.result,
+            status: "already_imported",
+          };
+          setKBrainSessionId(item.id, cachedResult.backend_id);
+          results.push(cachedResult);
+          continue;
+        }
       }
       const payload = {
         source_id: item.id,
@@ -400,6 +413,8 @@ export async function migrateLegacyHistoryPage(
       }
       results.push(result);
     } catch (error) {
+      // The backend persists deletion intent across restarts and clients.
+      if (historyErrorStatus(error) === 410) continue;
       failures.push({
         sourceId: item.id,
         error: error instanceof Error ? error.message : String(error),
@@ -418,6 +433,44 @@ export async function migrateLegacyHistoryPage(
         (result) => result.checkpoint === "available" || result.checkpoint === "not_found",
       ),
   };
+}
+
+const recoveries = new Map<string, Promise<boolean>>();
+
+export async function recoverLegacyHistory(id: string): Promise<boolean> {
+  if (!isTauriHost() || !getConfiguredKBrainConnection()) return false;
+  const key = `${kBrainStorageScope()}:${id}`;
+  const pending = recoveries.get(key);
+  if (pending) return pending;
+  const recovery = (async () => {
+    for (const command of ["legacy_history_migration_page", "pi_history_migration_page"] as const) {
+      let cursor: string | undefined;
+      do {
+        const page = await invoke<LegacyPage>(command, { cursor });
+        const item = page.conversations.find((item) => item.id === id);
+        if (item) {
+          const migrated = await migrateLegacyHistoryPage({
+            conversations: [item],
+            complete: true,
+          });
+          if (migrated.failures.length) throw new Error(migrated.failures[0].error);
+          return migrated.results.length === 1;
+        }
+        if (page.complete) break;
+        if (!page.nextCursor || page.nextCursor === cursor) {
+          throw new Error(`${command} did not advance its cursor`);
+        }
+        cursor = page.nextCursor;
+      } while (cursor !== undefined);
+    }
+    return false;
+  })();
+  recoveries.set(key, recovery);
+  try {
+    return await recovery;
+  } finally {
+    recoveries.delete(key);
+  }
 }
 
 async function migrateHistorySourceOnce(

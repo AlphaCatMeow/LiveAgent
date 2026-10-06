@@ -1,6 +1,34 @@
 import { fetchKBrain } from "../kbrain/transport";
+import { invoke } from "@liveagent/app/shims/tauriCore";
+import { isTauriHost } from "../host";
+import { kBrainStorageScope } from "../kbrain/mapping";
+
+const migrations = new Map<string, Promise<void>>();
+
+async function migrateOnDemand(action: string) {
+  if (
+    !isTauriHost() ||
+    !(
+      ["query", "export", "mutate", "import"].includes(action) || action.startsWith("subscription.")
+    )
+  )
+    return;
+  const scope = kBrainStorageScope();
+  let pending = migrations.get(scope);
+  if (!pending) {
+    pending = invoke<void>("planning_migrate_legacy");
+    migrations.set(scope, pending);
+  }
+  try {
+    await pending;
+  } catch (error) {
+    migrations.delete(scope);
+    throw error;
+  }
+}
 
 export async function requestPlanning<T>(action: string, input: unknown = {}): Promise<T> {
+  await migrateOnDemand(action);
   const response = await fetchKBrain(
     "/v1/planning",
     {

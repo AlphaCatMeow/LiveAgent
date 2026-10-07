@@ -549,6 +549,10 @@ export const ComposerModelControls = memo(function ComposerModelControls(
                                 !collapsedProviders.has(group.id) && "rotate-90",
                               )}
                             />
+                            <ProviderBrandIcon
+                              type={group.providerType}
+                              className="size-3.5 opacity-90"
+                            />
                             <span className="min-w-0 truncate">{group.name}</span>
                             <span className="ml-auto tabular-nums">{group.opts.length}</span>
                           </button>
@@ -594,8 +598,18 @@ export const ComposerModelControls = memo(function ComposerModelControls(
                                       : "text-foreground/90 hover:bg-settings-tile-hover hover:text-foreground",
                                   )}
                                 >
-                                  <span className="min-w-0 flex-1 truncate" title={option.model}>
-                                    {option.label}
+                                  <span className="flex min-w-0 flex-1 items-center gap-2">
+                                    {/* 12px，比分组标题的 14px 小一档，避免子行图标压过父行。 */}
+                                    <ProviderBrandIcon
+                                      type={option.providerType}
+                                      className={cn(
+                                        "size-3",
+                                        isSelected ? "opacity-80" : "opacity-45",
+                                      )}
+                                    />
+                                    <span className="min-w-0 flex-1 truncate" title={option.model}>
+                                      {option.label}
+                                    </span>
                                   </span>
                                   <span
                                     className={cn(

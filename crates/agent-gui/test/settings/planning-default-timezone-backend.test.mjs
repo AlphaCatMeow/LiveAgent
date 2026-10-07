@@ -1,25 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
-import { kbrainSource, skipWithoutKBrainSource } from "../helpers/kbrain-source.mjs";
+import { getKBrainBinary } from "../helpers/kbrain-binary.mjs";
 import { createTsModuleLoader } from "../helpers/load-ts-module.mjs";
 
 test("fresh real backend defaults to automatic across browser reads and backend restarts without overwriting custom zones", { timeout: 180_000 }, async (t) => {
-  if (skipWithoutKBrainSource(t)) return;
+  const binary = await getKBrainBinary();
   const directory = await mkdtemp(path.join(tmpdir(), "planning-default-zone-"));
-  const binary = path.join(directory, process.platform === "win32" ? "kn.exe" : "kn");
   const config = path.join(directory, "config.json");
   let stop;
   t.after(async () => {
     try { await stop?.(); }
     finally { await rm(directory, { recursive: true, force: true }); }
   });
-  await promisify(execFile)("go", ["build", "-o", binary, "./cmd/kn"], { cwd: kbrainSource, timeout: 120_000 });
   await writeFile(config, JSON.stringify({ defaultModel: "fixture", providers: { fixture: {
     api: "openai-completions", baseUrl: "http://127.0.0.1:1", apiKey: "fixture",
     models: [{ id: "fixture", contextWindow: 4096, maxTokens: 256 }],

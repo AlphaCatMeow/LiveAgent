@@ -28,20 +28,25 @@ test("Tauri base and release configs retain both external binaries and preparati
 
 test("release workflow uses fixed triples for non-matrix jobs and packages both helpers", async () => {
   const workflow = await readFile(join(root, ".github/workflows/desktop-release.yml"), "utf8");
-  assert.match(workflow, /name: kbrain-source-x86_64-pc-windows-msvc/);
-  assert.match(workflow, /name: kbrain-source-x86_64-unknown-linux-gnu/);
   assert.match(workflow, /TAURI_ENV_TARGET_TRIPLE: x86_64-pc-windows-msvc/);
   assert.match(workflow, /TAURI_ENV_TARGET_TRIPLE: x86_64-unknown-linux-gnu/);
-  assert.match(workflow, /computer_asset:/);
+  assert.equal(workflow.match(/run: pnpm --dir crates\/agent-gui prepare:kbrain:release/g)?.length, 3);
   assert.match(workflow, /k-brain-computer\.exe/);
 });
 
-test("backend build reads the lock from the same release tag as desktop installers", async () => {
+test("desktop jobs download locked releases without checking out or compiling K-brain", async () => {
   const workflow = await readFile(join(root, ".github/workflows/desktop-release.yml"), "utf8");
-  const backendJob = workflow.split("\n  kbrain-backend:")[1]?.split("\n  macos:")[0];
-  assert.ok(backendJob, "backend build job must exist");
-  assert.match(backendJob, /uses: actions\/checkout@v6\s+with:\s+ref: \$\{\{ needs\.release-metadata\.outputs\.release_tag \}\}/);
-  assert.match(backendJob, /git -C "\$RUNNER_TEMP\/k-brain" checkout --detach "\$\{\{ steps\.lock\.outputs\.revision \}\}"/);
+  assert.doesNotMatch(workflow, /kbrain-backend:|kbrain-source-|setup-go|go build|git clone.*K-brain/);
+  for (const job of ["macos", "windows", "linux"]) {
+    const section = workflow.split(`\n  ${job}:`)[1]?.split(/\n  [\w-]+:/)[0];
+    assert.ok(section, `${job} packaging job must exist`);
+    assert.match(section, /uses: actions\/checkout@v6\s+with:\s+ref: \$\{\{ needs\.release-metadata\.outputs\.release_tag \}\}/);
+    assert.match(section, /prepare:kbrain:release/);
+  }
+  const ci = await readFile(join(root, ".github/workflows/ci.yml"), "utf8");
+  const gui = ci.split("\n  gui:")[1]?.split("\n  changes:")[0];
+  assert.match(gui, /node scripts\/release\/prepare-kbrain.mjs --release/);
+  assert.doesNotMatch(gui, /setup-go|go build|KBRAIN_REPO_ROOT|\.kbrain-src/);
 });
 
 test("prepared backend and computer helper receipts use the locked target and checksums", { skip: process.platform === "win32" && "Unix executable bits are not observable on Windows" }, async () => {

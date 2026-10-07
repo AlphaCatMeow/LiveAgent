@@ -140,24 +140,6 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # End-to-end GUI tests build the real K-brain backend from source, at the revision
-      # pinned in kbrain.lock.json (the same one the desktop app bundles).
-      - name: Read pinned K-brain revision
-        id: kbrain
-        run: echo "revision=$(jq -r .sourceRevision scripts/release/kbrain.lock.json)" >> "$GITHUB_OUTPUT"
-
-      - name: Check out pinned K-brain source
-        uses: actions/checkout@v6
-        with:
-          repository: Stack-Cairn/K-brain
-          ref: ${{ steps.kbrain.outputs.revision }}
-          path: .kbrain-src
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: .kbrain-src/go.mod
-          cache-dependency-path: .kbrain-src/go.sum
-
       - uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -178,15 +160,18 @@ jobs:
         working-directory: crates/agent-gui
         run: pnpm lint
 
+      - name: Download checksum-verified K-brain release
+        run: node scripts/release/prepare-kbrain.mjs --release
+
       - name: Test frontend modules
         working-directory: crates/agent-gui
-        env:
-          KBRAIN_REPO_ROOT: ${{ github.workspace }}/.kbrain-src
         run: pnpm test:frontend
 
       - name: Test release scripts
         working-directory: crates/agent-gui
-        run: pnpm test:release
+        run: |
+          pnpm test:release
+          node --test ../../scripts/release/*.test.mjs
 
   changes:
     name: Detect Changes

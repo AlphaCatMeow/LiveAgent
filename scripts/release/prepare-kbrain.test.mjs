@@ -57,7 +57,6 @@ afterEach(async () => {
 
 after(async () => {
   await Promise.all(cacheFiles.splice(0).map((path) => rm(path, { force: true })));
-  await rm(join(root, ".liveagent", "kbrain-cache"), { recursive: true, force: true });
 });
 
 test("maps the supported Tauri targets and rejects unsupported targets", () => {
@@ -80,6 +79,12 @@ test("downloads a pinned HTTP fixture, verifies it, and reuses its checksum cach
   const secondOutput = join(lock.directory, "second");
   const first = await prepare({ lock: lock.path, target: "x86_64-unknown-linux-gnu", artifactDir: false, output: firstOutput });
   const second = await prepare({ lock: lock.path, target: "x86_64-unknown-linux-gnu", artifactDir: false, output: secondOutput });
+  const staleArtifact = join(lock.directory, "stale-artifact");
+  await mkdir(staleArtifact);
+  await writeFile(join(staleArtifact, "kbrain-artifact.json"), JSON.stringify({ sourceRevision: "stale" }));
+  const release = await prepare({ lock: lock.path, target: "x86_64-unknown-linux-gnu", artifactDir: staleArtifact, release: true, output: join(lock.directory, "release") });
+  assert.equal(release.origin, "locked-download");
+  assert.equal(release.sha256.backend, backendHash);
   assert.equal(requests, 2);
   assert.equal(await readFile(first.binary, "utf8"), backendBody.toString());
   assert.equal(await readFile(first.computerBinary, "utf8"), computerBody.toString());

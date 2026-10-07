@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -42,7 +42,7 @@ export function platformFor(lock, target) {
 
 async function atomicWrite(path, data, executable = false) {
   await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.${process.pid}.tmp`;
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {
     await writeFile(temporary, data);
     if (executable) await chmod(temporary, 0o755);
@@ -127,9 +127,10 @@ export async function prepare(options = {}) {
     }
   }
   try {
-    // artifactDir:false skips the repo-local artifact record (used by hermetic tests, which must
-    // not depend on a developer's locally built .liveagent/kbrain-artifact).
-    const artifactDirectory = options.artifactDir === false ? null : resolve(options.artifactDir || process.env.LIVEAGENT_KBRAIN_ARTIFACT_DIR || defaultArtifact);
+    // Release/CI always use pinned downloads; stale local builds must not override them.
+    const explicitArtifact = options.artifactDir || process.env.LIVEAGENT_KBRAIN_ARTIFACT_DIR;
+    const useDownload = release || process.env.CI === "true" || (!explicitArtifact && lock.downloads?.[target]);
+    const artifactDirectory = options.artifactDir === false || useDownload ? null : resolve(explicitArtifact || defaultArtifact);
     const record = artifactDirectory ? await optionalJson(join(artifactDirectory, "kbrain-artifact.json")) : null;
     let assets;
     let checksums;
@@ -154,7 +155,7 @@ export async function prepare(options = {}) {
       checksums = { backend: backendResult.sha256, computer: computerResult.sha256 };
       origin = "source-artifact";
     } else {
-      if (options.artifactDir || process.env.LIVEAGENT_KBRAIN_ARTIFACT_DIR) throw new Error(`K-brain artifact record missing: ${artifactDirectory}`);
+      if (artifactDirectory && (options.artifactDir || process.env.LIVEAGENT_KBRAIN_ARTIFACT_DIR)) throw new Error(`K-brain artifact record missing: ${artifactDirectory}`);
       const entry = lock.downloads?.[target];
       assets = entry?.assets;
       checksums = entry?.sha256;

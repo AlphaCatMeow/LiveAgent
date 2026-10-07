@@ -35,7 +35,8 @@ export function currentLiveAgentHost(): LiveAgentHost {
 
 export function kBrainOwnedDesktopCommand(command: string): boolean {
   return (
-    /^(memory_|checkpoint_|gateway_|hook_|chat_history_|subagent_|trajectory_|cua_driver_|browser_)/.test(command) ||
-    /^system_(ensure_builtin_skills|read_skill_|manage_skill)/.test(command)
+    /^(memory_|checkpoint_|gateway_|hook_|chat_history_|subagent_|trajectory_|cua_driver_|browser_)/.test(
+      command,
+    ) || /^system_(ensure_builtin_skills|read_skill_|manage_skill)/.test(command)
   );
 }

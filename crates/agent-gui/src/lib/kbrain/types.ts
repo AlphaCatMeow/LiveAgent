@@ -87,6 +87,7 @@ export type KBrainToolCall = {
 };
 
 export type KBrainToolResult = {
+  content?: KBrainContentBlock[];
   id: string;
   name?: string;
   output: string;

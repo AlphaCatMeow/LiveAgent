@@ -1,4 +1,17 @@
 export const ZH_CN_SETTINGS_TRANSLATIONS = {
+  "settings.cuaBackend.description": "LiveAgent 只展示请求与结果。工具、权限判定、Cua 执行和会话清理由 K-brain 负责，修改从下一次运行生效。",
+  "settings.cuaBackend.upgrade": "当前 K-brain 版本尚未提供计算机操作设置，请升级后端；不会回退到前端执行。",
+  "settings.cuaBackend.permissions": "检测到安装不代表桌面已就绪。请在后端所在机器授予系统权限，本页面不会操作桌面。",
+  "settings.cuaBackend.enabled": "启用后端计算机操作",
+  "settings.cuaBackend.backend": "后端驱动",
+  "settings.cuaBackend.policy": "后端审批策略",
+  "settings.cuaBackend.ask": "执行前询问",
+  "settings.cuaBackend.allow": "遵循本次运行的审批策略",
+  "settings.cuaBackend.deny": "禁止计算机操作",
+  "settings.cuaBackend.command": "后端命令参数（JSON 数组；[] 表示自动查找）",
+  "settings.cuaBackend.commandError": "命令必须是由字符串组成的 JSON 数组。",
+  "settings.cuaBackend.legacy": "保留旧应用限制。移除旧限制前，请在后端配置 Cua 能力清单；已有 Cua MCP 条目不会并行执行。",
+  "settings.cuaBackend.refresh": "重新读取后端状态",
   "git.branchSelector.switchConfirmTitle": "切换到 {branch}？",
   "git.branchSelector.switchConfirmDescription":
     "这会实际切换当前工作目录的 Git 分支，并更新工作区文件。未提交的修改可能随分支保留，或导致 Git 拒绝切换。",

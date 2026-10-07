@@ -305,6 +305,17 @@ function buildErrorResult(toolCall: ToolCall, text: string): ToolResultMessage {
   };
 }
 
+export function projectBackendPlan(
+  conversationId: string,
+  toolCall: ToolCall,
+): ExitPlanModeResultDetails | undefined {
+  const plan = sanitizePlanMarkdown(toolCall.arguments?.plan);
+  if (!plan) return undefined;
+  pendingPlanByConversation.set(conversationId, { conversationId, toolCallId: toolCall.id, plan });
+  emitChange();
+  return { kind: "exit_plan_mode", plan };
+}
+
 export function createExitPlanModeTools(params: { conversationId: string }): BuiltinToolBundle {
   const toolExitPlanMode: Tool = {
     name: EXIT_PLAN_MODE_TOOL_NAME,

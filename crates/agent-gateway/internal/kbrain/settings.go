@@ -12,11 +12,13 @@ import (
 // settings and the selected model. Omitting other fields lets the frontend
 // retain its local settings instead of replacing them with fabricated defaults.
 type gatewaySettingsProjection struct {
-	CustomProviders []any          `json:"customProviders"`
-	SelectedModel   map[string]any `json:"selectedModel"`
+	Computer        json.RawMessage `json:"computer,omitempty"`
+	CustomProviders []any           `json:"customProviders"`
+	SelectedModel   map[string]any  `json:"selectedModel"`
 }
 
 type kbrainSettingsDocument struct {
+	Computer        json.RawMessage  `json:"computer,omitempty"`
 	DefaultModel    string           `json:"defaultModel"`
 	DefaultProvider string           `json:"defaultProvider"`
 	Providers       []kbrainProvider `json:"providers"`
@@ -191,7 +193,7 @@ func settingsProjectionForGateway(raw json.RawMessage) (json.RawMessage, error) 
 			"providerType":     providerTypeByID[document.DefaultProvider],
 		}
 	}
-	return json.Marshal(gatewaySettingsProjection{CustomProviders: providers, SelectedModel: selected})
+	return json.Marshal(gatewaySettingsProjection{CustomProviders: providers, SelectedModel: selected, Computer: document.Computer})
 }
 
 func decodeSettingsDocument(raw json.RawMessage) (kbrainSettingsDocument, error) {
@@ -217,7 +219,7 @@ func settingsUpdateForKBrain(raw json.RawMessage, previous ...json.RawMessage) (
 	}
 	for key := range input {
 		switch key {
-		case "selectedModel", "customProviders", "deleteProviders", "providerApiKeyUpdates", "providerUsageQuerySecretUpdates":
+		case "selectedModel", "customProviders", "deleteProviders", "providerApiKeyUpdates", "providerUsageQuerySecretUpdates", "computer":
 		default:
 			return nil, fmt.Errorf("unsupported Gateway settings field %q: non-provider settings persistence is unavailable", key)
 		}
@@ -236,6 +238,13 @@ func settingsUpdateForKBrain(raw json.RawMessage, previous ...json.RawMessage) (
 		}
 	}
 	update := map[string]any{}
+	if computer, ok := input["computer"]; ok {
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(computer, &object); err != nil || object == nil {
+			return nil, errors.New("computer must be an object")
+		}
+		update["computer"] = computer
+	}
 	if selectedRaw, ok := input["selectedModel"]; ok {
 		var selected map[string]json.RawMessage
 		if err := json.Unmarshal(selectedRaw, &selected); err != nil {

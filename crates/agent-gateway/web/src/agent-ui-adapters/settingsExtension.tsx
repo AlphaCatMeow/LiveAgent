@@ -4,6 +4,10 @@ import {
   configureResourceHostCapabilities,
   nativeResourceHostCapabilities,
 } from "@liveagent/ui/lib/resourceHost";
+import type { GatewaySettingsSyncUpdatePayload } from "@liveagent/ui/lib/settings/sync";
+import type { KBrainSettingsAdapter } from "@liveagent/ui/pages/settings/kbrainSettingsAdapter";
+import { getGatewayWebSocketClient } from "../lib/gatewaySocket";
+import { loadToken } from "../lib/storage";
 import { DevicesSection } from "../pages/settings/DevicesSection";
 import type { SettingsPageProps } from "../pages/settings/types";
 
@@ -34,4 +38,27 @@ export function createSettingsExtension(props: SettingsPageProps): {
 
 configureResourceHostCapabilities(nativeResourceHostCapabilities);
 
-export const settingsHostAdapter = { isKbrain: false as const };
+const computerSettingsAdapter: KBrainSettingsAdapter = {
+  isKbrain: true,
+  runtimeConnection: () => null,
+  getConnection: () => null,
+  async getSettings() {
+    const document = await getGatewayWebSocketClient(loadToken().trim()).getSettings();
+    return {
+      mode: "kbrain",
+      defaultModel: "",
+      defaultProvider: "",
+      providers: [],
+      models: [],
+      computer: document.computer,
+    };
+  },
+  async updateSettings(update) {
+    await getGatewayWebSocketClient(loadToken().trim()).updateSettings(
+      update as GatewaySettingsSyncUpdatePayload,
+    );
+    return this.getSettings();
+  },
+};
+
+export const settingsHostAdapter = { isKbrain: true as const, kbrain: computerSettingsAdapter };

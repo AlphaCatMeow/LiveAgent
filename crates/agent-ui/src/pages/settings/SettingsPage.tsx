@@ -24,6 +24,7 @@ import { CalendarSection } from "./CalendarSection";
 import { CronSection } from "./CronSection";
 import { CuaDriverSection } from "./CuaDriverSection";
 import { HooksSection } from "./HooksSection";
+import { KBrainComputerSection } from "./KBrainComputerSection";
 import { MemoryPanel } from "./memory/MemoryPanel";
 import { ProvidersSection } from "./ProvidersSection";
 import { RemoteSection } from "./RemoteSection";
@@ -176,13 +177,16 @@ export function SettingsPage(props: SettingsPageProps) {
         order: 25,
         labelKey: "settings.navCua",
         icon: <SquareMousePointer className={extension.iconClassName} />,
-        render: () => (
-          <CuaDriverSection
-            settings={settings}
-            setSettings={setSettings}
-            surface={extension.surface}
-          />
-        ),
+        render: () =>
+          props.settingsHost?.kbrain ? (
+            <KBrainComputerSection kbrain={props.settingsHost.kbrain} />
+          ) : (
+            <CuaDriverSection
+              settings={settings}
+              setSettings={setSettings}
+              surface={extension.surface}
+            />
+          ),
       },
       {
         id: "stt",
@@ -251,6 +255,7 @@ export function SettingsPage(props: SettingsPageProps) {
       settings,
       sttSelectedProvider,
       sttSettingsService,
+      props.settingsHost,
     ],
   );
   const registry: UiExtensionRegistry<void> = {

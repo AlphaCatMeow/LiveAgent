@@ -145,11 +145,6 @@ export type KBrainTurnParams = {
     request: KBrainQuestionRequest,
     signal?: AbortSignal,
   ) => Promise<KBrainQuestionAnswer[]>;
-  /** Executes a desktop tool K-brain delegated to this client (see options.client_tools). */
-  onClientToolRequest?: (
-    request: KBrainClientToolRequest,
-    signal?: AbortSignal,
-  ) => Promise<KBrainClientToolResult>;
   onPermissionRequest?: (
     request: {
       permission_id: string;
@@ -205,7 +200,14 @@ function toolResult(result: KBrainToolResult): ToolResultMessage {
     role: "toolResult",
     toolCallId: result.id,
     toolName: result.name ?? "tool",
-    content: [{ type: "text", text: result.output }],
+    content: [
+      { type: "text", text: result.output },
+      ...(result.content ?? []).flatMap((block): ToolResultMessage["content"] =>
+        block.type === "image" && block.image_url
+          ? [{ type: "image", data: block.image_url, mimeType: block.mime_type || "image/png" }]
+          : [],
+      ),
+    ],
     details: questionResultDetails(result.name, result.output),
     isError: result.failed === true || result.cancelled === true,
     timestamp: Date.now(),
@@ -346,6 +348,9 @@ function fallbackRequestId(params: KBrainTurnParams) {
 }
 
 export async function runKBrainTurn(params: KBrainTurnParams): Promise<AssistantMessage> {
+  if (params.options?.client_tools?.length) {
+    throw new Error("LiveAgent tools must execute in K-brain, not in the frontend");
+  }
   const baseUrl = params.baseUrl;
   const client = createKBrainClient({
     baseUrl,
@@ -596,16 +601,10 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
         handledClientTools.add(request.call_id);
         const controller = new AbortController();
         pendingClientTools.set(request.call_id, controller);
-        const execute = params.onClientToolRequest;
         void Promise.resolve()
-          .then((): Promise<KBrainClientToolResult> | KBrainClientToolResult =>
-            execute
-              ? execute(request, controller.signal)
-              : { text: `${request.tool} is not available in this client.`, is_error: true },
-          )
-          .catch(
-            (error: unknown): KBrainClientToolResult => ({
-              text: `${request.tool} failed: ${error instanceof Error ? error.message : String(error)}`,
+          .then(
+            (): KBrainClientToolResult => ({
+              text: `${request.tool} must execute in K-brain; LiveAgent does not execute client tools.`,
               is_error: true,
             }),
           )

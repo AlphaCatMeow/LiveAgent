@@ -18,11 +18,33 @@ export type KBrainSettingsModel = {
 };
 
 export type KBrainSettingsDocument = {
+  computer?: KBrainComputerConfig;
   mode: "kbrain";
   defaultModel: string;
   defaultProvider: string;
   providers: KBrainSettingsProvider[];
   models: KBrainSettingsModel[];
+};
+
+export type KBrainComputerConfig = {
+  enabled?: boolean;
+  backend?: string;
+  command?: string[];
+  approvalPolicy?: "ask" | "allow" | "deny";
+  allow?: string[];
+  deny?: string[];
+  defaultDeny?: boolean;
+};
+
+export type KBrainComputerStatus = {
+  executionOwner: "kbrain";
+  backend: string;
+  enabled: boolean;
+  installed: boolean;
+  platform: string;
+  driverVersion?: string;
+  message?: string;
+  permissionsVerified?: boolean;
 };
 
 export type KBrainRuntimeConnection = {
@@ -36,6 +58,7 @@ export type KBrainSettingsAdapter = {
   getConnection: () => KBrainRuntimeConnection | null;
   getSettings: () => Promise<KBrainSettingsDocument>;
   updateSettings: (update: unknown) => Promise<KBrainSettingsDocument>;
+  getComputerStatus?: () => Promise<KBrainComputerStatus>;
 };
 
 export type SettingsHostAdapter = {

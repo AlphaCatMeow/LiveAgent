@@ -1,3 +1,4 @@
+#[cfg(test)]
 use std::fs;
 use std::io::{self, BufRead, BufReader, Read};
 use std::path::PathBuf;
@@ -15,8 +16,8 @@ use tauri::{AppHandle, Manager, State};
 use crate::runtime::process::terminate_child_process_tree;
 
 const BACKEND_DIR: &str = "kbrain";
+#[cfg(test)]
 const CONFIG_FILE: &str = "config.json";
-const SESSIONS_DIR: &str = "sessions";
 const TOKEN_ENV: &str = "K_BRAIN_BACKEND_TOKEN";
 const DEBUG_BINARY_ENV: &str = "LIVEAGENT_KBRAIN_BINARY";
 #[cfg(test)]
@@ -94,39 +95,19 @@ impl KBrainBackendManager {
         backend_dir: PathBuf,
         startup_timeout: Duration,
     ) -> Result<Arc<Self>, String> {
-        Self::start(binary, backend_dir, startup_timeout, &|| false)
+        Self::start(binary, backend_dir, None, startup_timeout, &|| false)
     }
 
     fn start(
         binary: PathBuf,
         backend_dir: PathBuf,
+        legacy_desktop_dir: Option<PathBuf>,
         startup_timeout: Duration,
         cancelled: &dyn Fn() -> bool,
     ) -> Result<Arc<Self>, String> {
         if cancelled() {
             return Err("K-brain backend startup cancelled".into());
         }
-        let sessions_dir = backend_dir.join(SESSIONS_DIR);
-        fs::create_dir_all(&sessions_dir)
-            .map_err(|error| format!("failed to create K-brain data directory: {error}"))?;
-        let config_path = backend_dir.join(CONFIG_FILE);
-        let mut options = fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        match options.open(&config_path) {
-            Ok(mut file) => {
-                use std::io::Write;
-                file.write_all(b"{}\n")
-                    .map_err(|error| format!("failed to create K-brain config: {error}"))?;
-            }
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(error) => return Err(format!("failed to create K-brain config: {error}")),
-        }
-        harden_config_permissions(&config_path)?;
         let token = uuid::Uuid::new_v4().to_string();
 
         let mut command = Command::new(&binary);
@@ -134,16 +115,17 @@ impl KBrainBackendManager {
             .arg("backend")
             .arg("-listen")
             .arg("127.0.0.1:0")
-            .arg("-config")
-            .arg(&config_path)
-            .arg("-session-dir")
-            .arg(&sessions_dir)
+            .arg("-data-dir")
+            .arg(&backend_dir)
             .arg("-parent-stdio")
             .env(TOKEN_ENV, &token)
             .env("LIVEAGENT_HOME", &backend_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let Some(legacy) = legacy_desktop_dir {
+            command.arg("-legacy-desktop-dir").arg(legacy);
+        }
         crate::runtime::process::configure_child_process_group(&mut command);
 
         let mut child = command
@@ -307,26 +289,27 @@ impl KBrainBackendState {
             .filter(|v| !v.is_empty())
             .map(PathBuf::from);
         let overridden = preferred.is_some() || legacy_override.is_some();
-        let root = super::kbrain_paths::resolve(&home, preferred, legacy_override);
-        if !overridden {
-            super::kbrain_paths::migrate(
-                &data_dir.join(BACKEND_DIR),
-                &root,
-                ".migration-desktop-kbrain",
-            )?;
-            super::kbrain_paths::migrate(
-                &home.join(".k-brain"),
-                &root,
-                ".migration-legacy-kbrain",
-            )?;
-        }
-        self.ensure_started_with_binary(binary, root)
+        let root = preferred
+            .or(legacy_override)
+            .unwrap_or_else(|| home.join(".liveagent"));
+        let legacy = (!overridden).then(|| data_dir.join(BACKEND_DIR));
+        self.ensure_started_with_paths(binary, root, legacy)
     }
 
+    #[cfg(test)]
     fn ensure_started_with_binary(
         &self,
         binary: PathBuf,
         app_data_dir: PathBuf,
+    ) -> Result<KBrainBackendConnection, String> {
+        self.ensure_started_with_paths(binary, app_data_dir, None)
+    }
+
+    fn ensure_started_with_paths(
+        &self,
+        binary: PathBuf,
+        app_data_dir: PathBuf,
+        legacy_desktop_dir: Option<PathBuf>,
     ) -> Result<KBrainBackendConnection, String> {
         let epoch = self.shutdown_epoch.load(Ordering::SeqCst);
         let cancelled = || self.shutdown_epoch.load(Ordering::SeqCst) != epoch;
@@ -363,7 +346,13 @@ impl KBrainBackendState {
 
         // Convert startup panics before unwinding through the serialization lock.
         let manager = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            KBrainBackendManager::start(binary, app_data_dir, STARTUP_TIMEOUT, &cancelled)
+            KBrainBackendManager::start(
+                binary,
+                app_data_dir,
+                legacy_desktop_dir,
+                STARTUP_TIMEOUT,
+                &cancelled,
+            )
         }))
         .map_err(|_| "K-brain backend startup panicked".to_string())??;
         if cancelled() {
@@ -522,23 +511,6 @@ fn wait_for_health(
     }
 }
 
-fn harden_config_permissions(config_path: &std::path::Path) -> Result<(), String> {
-    let metadata = fs::symlink_metadata(config_path)
-        .map_err(|error| format!("failed to inspect K-brain config: {error}"))?;
-    if !metadata.file_type().is_file() {
-        return Err("K-brain config is not a regular file".to_string());
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut permissions = metadata.permissions();
-        permissions.set_mode(0o600);
-        fs::set_permissions(config_path, permissions)
-            .map_err(|error| format!("failed to secure K-brain config file: {error}"))?;
-    }
-    Ok(())
-}
-
 fn spawn_stderr_drain(stderr: impl Read + Send + 'static, token: String) -> Result<(), String> {
     thread::Builder::new()
         .name("kbrain-stderr".into())
@@ -667,7 +639,8 @@ import threading
 import time
 
 mode = os.path.basename(sys.argv[0]).split("kbrain-fixture-", 1)[-1]
-data = Path(sys.argv[sys.argv.index("-config") + 1]).parent
+data = Path(sys.argv[sys.argv.index("-data-dir") + 1])
+data.mkdir(parents=True, exist_ok=True)
 (data / "fixture.pid").write_text(str(os.getpid()))
 if mode == "oversized":
     print("x" * 20000, flush=True)
@@ -974,7 +947,7 @@ while True:
 
     #[cfg(unix)]
     #[test]
-    fn existing_config_permissions_are_hardened_without_clobbering_content() {
+    fn host_does_not_mutate_user_config() {
         let _serial = CHILD_TEST_LOCK
             .lock()
             .unwrap_or_else(|error| error.into_inner());
@@ -1007,7 +980,7 @@ while True:
                 .permissions()
                 .mode()
                 & 0o777,
-            0o600
+            0o644
         );
     }
 

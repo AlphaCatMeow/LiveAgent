@@ -5,7 +5,6 @@ pub mod cua_driver;
 pub mod gateway;
 pub mod gateway_bridge;
 pub mod kbrain_backend;
-mod kbrain_paths;
 pub mod mcp_oauth;
 pub mod memory;
 pub mod planning;

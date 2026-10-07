@@ -38,8 +38,34 @@ func ToChatEvent(event Event) (*v2.ChatEvent, *v2.ChatControlEvent, error) {
 		base.Type = v2.ChatEvent_HOSTED_SEARCH
 	case "tool.call":
 		base.Type = v2.ChatEvent_TOOL_CALL
+		if call, ok := payload["tool_call"].(map[string]any); ok {
+			for key, value := range call {
+				payload[key] = value
+			}
+		}
 	case "tool.result":
 		base.Type = v2.ChatEvent_TOOL_RESULT
+		if result, ok := payload["tool_result"].(map[string]any); ok {
+			payload["id"], payload["name"] = result["id"], result["name"]
+			payload["isError"] = result["failed"] == true || result["cancelled"] == true
+			content := []any{map[string]any{"type": "text", "text": result["output"]}}
+			if blocks, ok := result["content"].([]any); ok {
+				for _, value := range blocks {
+					block, ok := value.(map[string]any)
+					if !ok {
+						continue
+					}
+					if block["type"] == "image" {
+						mime, _ := block["mime_type"].(string)
+						if mime == "" {
+							mime = "image/png"
+						}
+						content = append(content, map[string]any{"type": "image", "data": block["image_url"], "mimeType": mime})
+					}
+				}
+			}
+			payload["content"] = content
+		}
 	case "tool.status":
 		base.Type = v2.ChatEvent_TOOL_STATUS
 	case "run.completed":
@@ -55,6 +81,11 @@ func ToChatEvent(event Event) (*v2.ChatEvent, *v2.ChatControlEvent, error) {
 	default:
 		return nil, nil, nil
 	}
+	data, err = json.Marshal(payload)
+	if err != nil {
+		return nil, nil, err
+	}
+	base.Data = string(data)
 	return base, nil, nil
 }
 

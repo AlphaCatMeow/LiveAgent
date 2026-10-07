@@ -1,4 +1,5 @@
 import type {
+  KBrainComputerStatus,
   KBrainSettingsAdapter,
   KBrainSettingsDocument,
 } from "@liveagent/ui/pages/settings/kbrainSettingsAdapter";
@@ -26,6 +27,7 @@ export const kbrainSettingsAdapter: KBrainSettingsAdapter = {
   runtimeConnection: getKBrainRuntimeConnection,
   getConnection: getKBrainRuntimeConnection,
   getSettings: () => request<KBrainSettingsDocument>("/v1/settings"),
+  getComputerStatus: () => request<KBrainComputerStatus>("/v1/computer"),
   updateSettings: (update) =>
     request<KBrainSettingsDocument>("/v1/settings", {
       method: "PUT",

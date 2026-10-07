@@ -12,12 +12,8 @@ import {
   upsertToolCallToRound,
 } from "../../../lib/chat/messages/uiMessages";
 import { getKBrainHistoryWindow } from "../../../lib/kbrain/history";
-import { getConfiguredKBrainConnection } from "../../../lib/kbrain/runtimeConnection";
 import { runKBrainTurn } from "../../../lib/kbrain/turn";
 import type {
-  KBrainClientToolDefinition,
-  KBrainClientToolRequest,
-  KBrainClientToolResult,
   KBrainQuestionAnswer,
   KBrainQuestionRequest,
   KBrainRunOptions,
@@ -27,65 +23,14 @@ import {
   withUploadStagingRoot,
 } from "../../../lib/kbrain/uploadStagingRoot";
 import { requestBackendQuestion } from "../../../lib/tools/askUserQuestionTools";
-import { createBrowserTools } from "../../../lib/tools/browserTools";
-import { createExitPlanModeTools } from "../../../lib/tools/planModeTools";
-import { resolveShellSandboxSettings } from "../../../lib/tools/sandboxPolicy";
+import { projectBackendPlan } from "../../../lib/tools/planModeTools";
 import { requestToolApproval } from "../../../lib/tools/toolApproval";
 import type { RunAgentConversationTurnParams } from "./runAgentConversationTurn";
 import type { RunTextConversationTurnParams } from "./runTextConversationTurn";
 
 type Params = RunAgentConversationTurnParams | RunTextConversationTurnParams;
 
-// Desktop-only tools K-brain cannot run itself. They are declared per run as client tools;
-// K-brain offers them to the model and hands each call back through client_tool.requested.
-function createDesktopClientTools(
-  commandSafetyMode: RunAgentConversationTurnParams["commandSafetyMode"],
-) {
-  return createBrowserTools({ sandbox: resolveShellSandboxSettings(commandSafetyMode) });
-}
-
-function clientToolDefinitions(
-  bundle: ReturnType<typeof createDesktopClientTools>,
-): KBrainClientToolDefinition[] {
-  return bundle.tools.map((tool) => ({
-    name: tool.name,
-    description: tool.description,
-    parameters: tool.parameters as unknown as Record<string, unknown>,
-  }));
-}
-
-async function executeDesktopClientTool(
-  bundle: ReturnType<typeof createDesktopClientTools>,
-  request: KBrainClientToolRequest,
-  signal?: AbortSignal,
-): Promise<KBrainClientToolResult> {
-  const result = await bundle.executeToolCall(
-    {
-      type: "toolCall",
-      id: request.tool_call_id,
-      name: request.tool,
-      arguments: request.arguments,
-    },
-    signal,
-  );
-  const text: string[] = [];
-  const images: NonNullable<KBrainClientToolResult["images"]> = [];
-  for (const part of result.content) {
-    if (part.type === "text") text.push(part.text);
-    else if (part.type === "image") images.push({ mime_type: part.mimeType, data: part.data });
-  }
-  return {
-    text: text.join("\n"),
-    ...(images.length ? { images } : {}),
-    ...(result.isError ? { is_error: true } : {}),
-  };
-}
-
-function canonicalRunOptions(
-  params: Params,
-  clientTools: KBrainClientToolDefinition[] = [],
-  uploadsRoot?: string,
-): KBrainRunOptions {
+function canonicalRunOptions(params: Params, uploadsRoot?: string): KBrainRunOptions {
   const agentMode = "effectiveWorkdir" in params;
   const workspaceRoots = [
     {
@@ -117,7 +62,6 @@ function canonicalRunOptions(
     approval_policy: safety === "auto" ? "auto" : "ask",
     ...(roots.length ? { workspace_roots: roots } : {}),
     ...(Object.keys(policies).length ? { tools: { policies } } : {}),
-    ...(agentMode && clientTools.length ? { client_tools: clientTools } : {}),
     ...(agentMode && params.planModeEnabled !== undefined
       ? { plan_mode_enabled: params.planModeEnabled }
       : {}),
@@ -204,19 +148,15 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
   };
   const onToolResult = (call: ToolCall, result: ToolResultMessage) => {
     if (call.name === "ExitPlanMode" && !result.isError) {
-      const planTools = createExitPlanModeTools({ conversationId: params.conversationId });
-      void planTools
-        .executeToolCall(call)
-        .then((projected) => projectToolResult(call, { ...result, details: projected.details }));
+      projectToolResult(call, {
+        ...result,
+        details: projectBackendPlan(params.conversationId, call),
+      });
     } else projectToolResult(call, result);
   };
   hookLifecycle.startAgent();
   hookLifecycle.startTurn(round);
   try {
-    const runtimeConnection = getConfiguredKBrainConnection();
-    const desktopClientTools = createDesktopClientTools(
-      "commandSafetyMode" in params ? params.commandSafetyMode : undefined,
-    );
     const uploadsRoot = await resolveUploadStagingRoot();
     const assistant = await runKBrainTurn({
       conversationId: params.conversationId,
@@ -231,12 +171,10 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
       },
       prompt,
       context,
-      options: canonicalRunOptions(params, clientToolDefinitions(desktopClientTools), uploadsRoot),
+      options: canonicalRunOptions(params, uploadsRoot),
       signal: cancellation.userStop.signal,
       hook_policy: "backend",
       hook_scope_id: params.conversationId,
-      baseUrl: runtimeConnection?.baseUrl,
-      token: runtimeConnection?.token,
       onTextDelta: (delta) => {
         update((target) => appendTextDeltaToRound(collapseThinking(target), delta));
         gatewayBridgeEvents.queueToken(delta, { round });
@@ -273,8 +211,6 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
           ...(answer.custom ? { custom: true } : {}),
         }));
       },
-      onClientToolRequest: (request, signal) =>
-        executeDesktopClientTool(desktopClientTools, request, signal),
       onPermissionRequest: async (request) => {
         const settlement = await requestToolApproval({
           toolCallId: request.permission_id,

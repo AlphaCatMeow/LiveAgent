@@ -27,6 +27,20 @@ const baseParams = {
   onToolResult() {},
 };
 
+test("backend computer screenshots survive live tool result events", async () => {
+  storage.clear();
+  const results = [];
+  const image = "data:image/png;base64,aW1hZ2U=";
+  const fetch = makeFetch({ calls: [], streams: [() => stream(
+    event(2, "tool.call", { tool_call: { id: "cua", name: "computer_exec", arguments: { action: "call", tool: "get_window_state" } } }) +
+    event(3, "tool.result", { tool_result: { id: "cua", name: "computer_exec", output: "observed", content: [{ type: "image", image_url: image, mime_type: "image/png" }] } }) +
+    event(4, "run.completed"),
+  )] });
+  await runKBrainTurn({ ...baseParams, fetch, onToolResult: (_call, result) => results.push(result) });
+  assert.equal(results[0].content[1].data, image);
+  assert.equal(results[0].content[1].mimeType, "image/png");
+});
+
 function event(seq, type, payload = {}, overrides = {}) {
   return `data: ${JSON.stringify({
     version: "kbrain.agent.v1",
@@ -308,7 +322,7 @@ test("only explicitly edit-pending users resume a persisted turn; ordinary repea
   }
 });
 
-test("client tool requests run the desktop executor once and post the result back", async () => {
+test("unexpected client tool requests are rejected once without frontend execution", async () => {
   storage.clear();
   const calls = [];
   const executed = [];
@@ -337,23 +351,30 @@ test("client tool requests run the desktop executor once and post the result bac
   const result = await runKBrainTurn({
     ...baseParams,
     fetch,
-    options: { mode: "agent", client_tools: [{ name: "Browser", description: "Drive the browser.", parameters: { type: "object" } }] },
+    options: { mode: "agent" },
     onClientToolRequest: async (incoming) => {
       executed.push(incoming);
       return { text: "Page: Example Domain", images: [{ mime_type: "image/png", data: "AA==" }] };
     },
   });
   assert.equal(result.stopReason, "stop", result.errorMessage);
-  assert.equal(executed.length, 1);
-  assert.deepEqual(executed[0].arguments, request.arguments);
+  assert.equal(executed.length, 0);
   const runCall = calls.find((call) => call.url.pathname.endsWith("/runs"));
-  assert.equal(JSON.parse(runCall.init.body).options.client_tools[0].name, "Browser");
+  assert.equal(JSON.parse(runCall.init.body).options.client_tools, undefined);
   const post = calls.find((call) => call.url.pathname.includes("/client-tools/"));
   assert.equal(post.url.pathname, "/v1/sessions/backend-session-1/client-tools/call-1");
   assert.deepEqual(JSON.parse(post.init.body), {
     conversation_id: "backend-session-1",
     run_id: "run-1",
-    text: "Page: Example Domain",
-    images: [{ mime_type: "image/png", data: "AA==" }],
+    text: "Browser must execute in K-brain; LiveAgent does not execute client tools.",
+    is_error: true,
   });
+});
+
+test("frontend tool registration fails before making a backend request", async () => {
+  await assert.rejects(runKBrainTurn({
+    ...baseParams,
+    fetch: () => assert.fail("client tool registration reached backend"),
+    options: { client_tools: [{ name: "Browser", description: "client tool", parameters: { type: "object" } }] },
+  }), /must execute in K-brain/);
 });

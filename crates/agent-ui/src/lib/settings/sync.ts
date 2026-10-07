@@ -50,6 +50,7 @@ export type GatewaySettingsSyncCustomSettings = Partial<AppSettings["customSetti
 export type GatewaySttSecretUpdate = AppSettings["stt"];
 
 export type GatewaySettingsSyncPayload = {
+  computer?: import("@liveagent/ui/pages/settings/kbrainSettingsAdapter").KBrainComputerConfig;
   system: AppSettings["system"];
   customProviders: GatewaySettingsSyncProvider[];
   mcp: AppSettings["mcp"];

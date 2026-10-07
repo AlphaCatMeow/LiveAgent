@@ -1,4 +1,17 @@
 export const EN_US_SETTINGS_TRANSLATIONS = {
+  "settings.cuaBackend.description": "LiveAgent displays requests and results. K-brain owns tools, permissions, Cua execution and session cleanup. Changes apply to the next run.",
+  "settings.cuaBackend.upgrade": "This K-brain version does not expose computer settings. Upgrade the backend; no local execution fallback will be used.",
+  "settings.cuaBackend.permissions": "Installation does not prove desktop readiness. Grant OS permissions on the backend machine; this page never drives your desktop.",
+  "settings.cuaBackend.enabled": "Enable backend computer use",
+  "settings.cuaBackend.backend": "Backend driver",
+  "settings.cuaBackend.policy": "Backend approval policy",
+  "settings.cuaBackend.ask": "Ask before execution",
+  "settings.cuaBackend.allow": "Use run approval policy",
+  "settings.cuaBackend.deny": "Deny computer use",
+  "settings.cuaBackend.command": "Backend command argv (JSON array; [] for automatic discovery)",
+  "settings.cuaBackend.commandError": "Command must be a JSON array of strings.",
+  "settings.cuaBackend.legacy": "Legacy app restrictions are preserved. Configure a Cua capability manifest on the backend before removing obsolete restrictions. Existing Cua MCP entries are not executed in parallel.",
+  "settings.cuaBackend.refresh": "Reload backend state",
   "git.branchSelector.switchConfirmTitle": "Switch to {branch}?",
   "git.branchSelector.switchConfirmDescription":
     "This changes the Git branch in the current working directory and updates its files. Uncommitted changes may carry over or cause Git to reject the switch.",

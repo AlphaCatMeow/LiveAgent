@@ -13,6 +13,20 @@ import (
 	gatewayv2 "github.com/liveagent/agent-gateway/internal/proto/v2"
 )
 
+func TestComputerSettingsPassThroughBackend(t *testing.T) {
+	projected, err := settingsProjectionForGateway(json.RawMessage(`{"providers":[],"models":[],"computer":{"enabled":true,"backend":"cua"}}`))
+	if err != nil || !strings.Contains(string(projected), `"computer":{"enabled":true,"backend":"cua"}`) {
+		t.Fatalf("projection: %s %v", projected, err)
+	}
+	update, err := settingsUpdateForKBrain(json.RawMessage(`{"computer":{"enabled":false,"approvalPolicy":"deny"}}`))
+	if err != nil || !strings.Contains(string(update), `"computer"`) {
+		t.Fatalf("update: %s %v", update, err)
+	}
+	if _, err := settingsUpdateForKBrain(json.RawMessage(`{"computer":null}`)); err == nil {
+		t.Fatal("accepted null computer settings")
+	}
+}
+
 func TestSettingsProjectionOnlyProjectsKBrainOwnedFields(t *testing.T) {
 	raw := json.RawMessage(`{"defaultProvider":"p","defaultModel":"m","providers":[{"id":"p","name":"Provider","api":"openai-completions","baseUrl":"https://example.test/v1","apiKeyConfigured":true,"models":[{"id":"m","contextWindow":4096,"maxOutputTokens":512,"inputModalities":["text","image"]}]}]}`)
 	projected, err := settingsProjectionForGateway(raw)

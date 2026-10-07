@@ -56,6 +56,7 @@ import {
   THEME_OPTIONS,
   type Theme,
 } from "./lib/settings";
+import { mergeBackendOwnedSettings } from "./lib/settings/backendOwnedMerge";
 import { getSettingsErrorMessage, SettingsStorageError } from "./lib/settings/errors";
 import {
   loadPersistedSettingsWithDefaults,
@@ -468,20 +469,19 @@ export default function App() {
             ...(persistResult.ssh ? { ssh: persistResult.ssh } : {}),
             ...(persistResult.stt ? { stt: persistResult.stt } : {}),
           });
-          if (
-            (persistResult.customProviders || persistResult.ssh || persistResult.stt) &&
-            saveSequenceRef.current === saveSequence
-          ) {
-            const merged = normalizeSettings({
-              ...settingsRef.current,
-              ...(persistResult.customProviders
-                ? { customProviders: persistResult.customProviders }
-                : {}),
-              ...(persistResult.ssh ? { ssh: persistResult.ssh } : {}),
-              ...(persistResult.stt ? { stt: persistResult.stt } : {}),
-            });
-            settingsRef.current = merged;
-            setSettingsState(merged);
+          if (saveSequenceRef.current === saveSequence) {
+            // K-brain rebuilds customProviders on every PATCH (a model pick included).
+            // Only content changes reach React state, so an unchanged write-back keeps
+            // the existing references and does not re-run catalog/model memos.
+            const merged = mergeBackendOwnedSettings(
+              settingsRef.current,
+              persistResult,
+              normalizeSettings,
+            );
+            if (merged) {
+              settingsRef.current = merged;
+              setSettingsState(merged);
+            }
           }
           if (persistResult.conflict) {
             throw new SettingsStorageError(persistResult.conflict);

@@ -130,17 +130,24 @@ export function useKBrainCatalogSettings(settings: AppSettings, options: Catalog
     const refreshKey = settingsVersion;
     if (!enabled || refreshKey < 0) return;
     let cancelled = false;
-    setCatalog(null);
+    // Stale-while-revalidate: every backend settings write (a model pick, a thinking
+    // level change) triggers a refresh here. Clearing the catalog first would project an
+    // empty provider list for a frame and blank the model picker/labels. A catalog for a
+    // different connection is already hidden by the baseUrl/token check below.
     void createKBrainClient({ baseUrl, token })
       .listModels()
       .then((models) => {
         if (!cancelled) {
-          setCatalog({
-            baseUrl,
-            token,
-            providers: projectKBrainProviders(models, settings.customProviders),
-            error: null,
-          });
+          const providers = projectKBrainProviders(models, settings.customProviders);
+          setCatalog((previous) =>
+            previous &&
+            previous.baseUrl === baseUrl &&
+            previous.token === token &&
+            previous.error === null &&
+            JSON.stringify(previous.providers) === JSON.stringify(providers)
+              ? previous
+              : { baseUrl, token, providers, error: null },
+          );
         }
       })
       .catch((error: unknown) => {

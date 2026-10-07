@@ -11,11 +11,13 @@ import { fromKBrainMcpSettings, toKBrainMcpSettings } from "../kbrain/mcp";
 import { createKBrainPromptClient, type KBrainPromptSnapshot } from "../kbrain/prompts";
 import {
   appProvidersFromKBrain,
+  kBrainSettingsUpdateForMissingInputModalities,
   kBrainSettingsUpdateFromAppSettings,
   kBrainSettingsUpdateFromLegacyProviders,
   loadKBrainProviderSettings,
   saveKBrainProviderSettings,
 } from "../kbrain/providerSettings";
+import type { KBrainSettingsDocument } from "../kbrain/types";
 import { SettingsStorageError, type SettingsStorageErrorCode } from "./errors";
 import {
   type AppSettings,
@@ -473,7 +475,39 @@ function isKBrainRejection(error: unknown): boolean {
   return typeof status === "number" && status >= 400 && status < 500;
 }
 
+// 旧配置的中转模型没有输入模态，K-brain 会把它们当成纯文本、丢弃 Read 到的图片。
+// 每次加载时对账补齐；失败只记日志，绝不影响设置加载。
+async function backfillKBrainInputModalities(
+  document: KBrainSettingsDocument,
+  providers: CustomProvider[],
+) {
+  const selectedModel =
+    document.defaultProvider && document.defaultModel
+      ? { customProviderId: document.defaultProvider, model: document.defaultModel }
+      : undefined;
+  const update = kBrainSettingsUpdateForMissingInputModalities(providers, selectedModel);
+  if (!update) return { document, providers };
+  try {
+    const saved = await saveKBrainProviderSettings(update);
+    return { document: saved, providers: appProvidersFromKBrain(saved) };
+  } catch (error) {
+    console.warn("K-brain input modality backfill failed", error);
+    return { document, providers };
+  }
+}
+
 async function loadAndMaybeImportKBrainProviders(
+  legacyProviders: readonly CustomProvider[],
+  legacySelectedModel?: AppSettings["selectedModel"],
+) {
+  const loaded = await loadAndMaybeImportLegacyKBrainProviders(
+    legacyProviders,
+    legacySelectedModel,
+  );
+  return backfillKBrainInputModalities(loaded.document, loaded.providers);
+}
+
+async function loadAndMaybeImportLegacyKBrainProviders(
   legacyProviders: readonly CustomProvider[],
   legacySelectedModel?: AppSettings["selectedModel"],
 ) {

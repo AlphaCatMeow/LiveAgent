@@ -22,6 +22,10 @@ import type {
   KBrainQuestionRequest,
   KBrainRunOptions,
 } from "../../../lib/kbrain/types";
+import {
+  resolveUploadStagingRoot,
+  withUploadStagingRoot,
+} from "../../../lib/kbrain/uploadStagingRoot";
 import { requestBackendQuestion } from "../../../lib/tools/askUserQuestionTools";
 import { createBrowserTools } from "../../../lib/tools/browserTools";
 import { createExitPlanModeTools } from "../../../lib/tools/planModeTools";
@@ -80,9 +84,10 @@ async function executeDesktopClientTool(
 function canonicalRunOptions(
   params: Params,
   clientTools: KBrainClientToolDefinition[] = [],
+  uploadsRoot?: string,
 ): KBrainRunOptions {
   const agentMode = "effectiveWorkdir" in params;
-  const roots = [
+  const workspaceRoots = [
     {
       path: agentMode ? params.effectiveWorkdir : (params.conversationCwd ?? ""),
       access: "write" as const,
@@ -91,6 +96,7 @@ function canonicalRunOptions(
       ? (params.additionalRoots ?? []).map((root) => ({ path: root.path, access: root.access }))
       : []),
   ].filter((root) => root.path.trim());
+  const roots = withUploadStagingRoot(workspaceRoots, uploadsRoot);
   const configured = agentMode ? params.getToolPolicies?.() : undefined;
   const policies = Object.fromEntries(
     Object.entries(configured ?? {})
@@ -211,6 +217,7 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
     const desktopClientTools = createDesktopClientTools(
       "commandSafetyMode" in params ? params.commandSafetyMode : undefined,
     );
+    const uploadsRoot = await resolveUploadStagingRoot();
     const assistant = await runKBrainTurn({
       conversationId: params.conversationId,
       sessionId: params.sessionId,
@@ -224,7 +231,7 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
       },
       prompt,
       context,
-      options: canonicalRunOptions(params, clientToolDefinitions(desktopClientTools)),
+      options: canonicalRunOptions(params, clientToolDefinitions(desktopClientTools), uploadsRoot),
       signal: cancellation.userStop.signal,
       hook_policy: "backend",
       hook_scope_id: params.conversationId,

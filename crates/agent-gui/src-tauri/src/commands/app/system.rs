@@ -700,6 +700,22 @@ fn canonical_upload_staging_base() -> Option<PathBuf> {
     fs::canonicalize(base).ok()
 }
 
+/// 供 K-brain 运行授权用的暂存区根：确保目录存在（K-brain 要求授权根是已存在
+/// 的目录），返回与消息中 absolute_path 同构的逻辑路径——K-brain 按字符串前缀
+/// 比较授权根，且拒绝 `\\?\` 形式与 symlink 根，因此不能返回 canonical 路径。
+fn ensure_upload_staging_base() -> Result<String, String> {
+    let base = upload_staging_base()?;
+    fs::create_dir_all(&base).map_err(|e| format!("创建上传目录失败 {}: {e}", base.display()))?;
+    Ok(base.to_string_lossy().into_owned())
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub async fn system_upload_staging_base() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(ensure_upload_staging_base)
+        .await
+        .map_err(|e| format!("system_upload_staging_base join failed: {e}"))?
+}
+
 /// 暂存文件保留天数：过期批次由启动 GC 清理。附件路径持久化在历史消息里，
 /// 因此不与单个会话的删除绑定，按时效回收是与"暂存区"语义一致的做法。
 const UPLOAD_STAGING_RETENTION: std::time::Duration =
@@ -2939,6 +2955,24 @@ mod tests {
         );
         assert_eq!(sanitized_relative_components("../.env"), None);
         assert_eq!(sanitized_relative_components("./.env"), None);
+    }
+
+    #[test]
+    fn upload_staging_base_grant_is_logical_and_exists() {
+        // K-brain 按字符串前缀授权，且拒绝 `\\?\` 形式；这里必须返回逻辑路径，
+        // 并与消息里持久化的 absolute_path 同构（不含 verbatim 前缀）。
+        let granted = ensure_upload_staging_base().expect("resolve staging base");
+        let base = upload_staging_base().expect("staging base");
+
+        assert_eq!(granted, base.to_string_lossy());
+        assert!(
+            !granted.contains(r"\\?\"),
+            "grant must not be verbatim: {granted}"
+        );
+        assert!(
+            Path::new(&granted).is_dir(),
+            "granted root must exist as a directory: {granted}"
+        );
     }
 
     #[test]

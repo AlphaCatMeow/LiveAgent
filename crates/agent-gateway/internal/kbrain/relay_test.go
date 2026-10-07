@@ -18,14 +18,14 @@ func TestRelayStartsCanonicalRunAndEmitsOrderedGatewayEvents(t *testing.T) {
 	seenAfter := []string{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.URL.Path == "/v1/sessions":
+		switch r.URL.Path {
+		case "/v1/sessions":
 			w.WriteHeader(http.StatusCreated)
 			_, _ = w.Write([]byte(`{"id":"kb-session"}`))
-		case r.URL.Path == "/v1/sessions/kb-session/runs":
+		case "/v1/sessions/kb-session/runs":
 			w.WriteHeader(http.StatusAccepted)
 			_, _ = w.Write([]byte(`{"version":"kbrain.agent.v1","conversation_id":"kb-session","run_id":"kb-run","accepted_seq":1}`))
-		case r.URL.Path == "/v1/sessions/kb-session/events":
+		case "/v1/sessions/kb-session/events":
 			mu.Lock()
 			seenAfter = append(seenAfter, r.URL.Query().Get("after_seq"))
 			mu.Unlock()

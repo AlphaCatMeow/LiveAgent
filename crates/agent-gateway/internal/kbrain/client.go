@@ -221,7 +221,7 @@ func (c *Client) request(ctx context.Context, method, path string, input any, ou
 		return nil, err
 	}
 	if output != nil {
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if err := json.NewDecoder(resp.Body).Decode(output); err != nil {
 			return resp, err
 		}
@@ -291,7 +291,7 @@ func (c *Client) DeleteSession(ctx context.Context, sessionID string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("kbrain delete session: %s", resp.Status)
 	}
@@ -403,7 +403,7 @@ func (c *Client) settingsRequest(ctx context.Context, method, path string, input
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return nil, fmt.Errorf("kbrain settings request: %s", resp.Status)
 	}
@@ -467,7 +467,7 @@ func (c *Client) CancelRun(ctx context.Context, sessionID, runID string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("kbrain cancel run: %s", resp.Status)
 	}
@@ -588,7 +588,7 @@ func (c *Client) events(ctx context.Context, sessionID string, afterSeq int64, t
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("kbrain events: %s", resp.Status)
 	}

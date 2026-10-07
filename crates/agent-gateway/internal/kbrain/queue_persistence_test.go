@@ -113,6 +113,7 @@ func TestRelayQueueStateRestoresQueuedItemsAndCurrentRun(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("queued run did not complete after restore")
 	}
+	waitRelayIdle(t, second, "conv")
 	mu.Lock()
 	defer mu.Unlock()
 	if runCount != 1 {
@@ -169,7 +170,7 @@ func TestRelayRestoreUsesDurableReplayCursorAndDispatchesCanonicalTerminal(t *te
 	}
 	first.mu.Unlock()
 
-	controls := make(chan *gatewayv2.ChatControlEvent, 2)
+	controls := make(chan *gatewayv2.ChatControlEvent, 4)
 	second, err := NewRelayWithQueueState(client, "target", ModelRef{}, "/workspace", path, Callbacks{OnControl: func(_ string, event *gatewayv2.ChatControlEvent) { controls <- event }})
 	if err != nil {
 		t.Fatal(err)
@@ -190,12 +191,20 @@ func TestRelayRestoreUsesDurableReplayCursorAndDispatchesCanonicalTerminal(t *te
 	case <-time.After(2 * time.Second):
 		t.Fatal("queued run was not dispatched")
 	}
+	select {
+	case event := <-controls:
+		if event.Type != "completed" || event.RequestId != "queued" {
+			t.Fatalf("queued completion = %#v", event)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("queued run did not complete")
+	}
+	waitRelayIdle(t, second, "conv")
 	mu.Lock()
 	defer mu.Unlock()
 	if len(after) != 2 || after[0] != "7" || after[1] != "8" {
 		t.Fatalf("replay cursors = %v, want [7 8]", after)
 	}
-	_ = second
 }
 
 func TestRelayRestartReissuesRunNowCancelAndRestoresDedupeHTTP(t *testing.T) {
@@ -400,5 +409,24 @@ func TestRelayRestoreDropsPreacceptanceOrphanDedupe(t *testing.T) {
 	}
 	if len(relay.runs) != 0 || len(relay.activeRuns) != 0 {
 		t.Fatalf("orphan run survived restore: runs=%v active=%v", relay.runs, relay.activeRuns)
+	}
+}
+
+// waitRelayIdle waits until the conversation has no active run. The terminal control is
+// emitted before finish() persists the queue, so returning earlier races TempDir cleanup.
+func waitRelayIdle(t *testing.T, relay *Relay, conversationID string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		relay.mu.Lock()
+		idle := relay.activeRuns[conversationID] == ""
+		relay.mu.Unlock()
+		if idle {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("run did not finish after completion")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }

@@ -16,7 +16,6 @@ import (
 // request. It does not use the browser transport mock or a direct relay call.
 func TestV2KBrainHistorySurvivesGatewayReload(t *testing.T) {
 	const backendID = "backend-history-1"
-	const revision = "history-rev-1"
 	kbrain := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {

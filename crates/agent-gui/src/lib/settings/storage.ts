@@ -16,7 +16,6 @@ import {
   loadKBrainProviderSettings,
   saveKBrainProviderSettings,
 } from "../kbrain/providerSettings";
-import { requestPlanning } from "../planning/kbrain";
 import { SettingsStorageError, type SettingsStorageErrorCode } from "./errors";
 import {
   type AppSettings,
@@ -36,7 +35,6 @@ import {
   normalizeSkillsSettings,
   normalizeTheme,
   normalizeUpdateSettings,
-  resolveDefaultTimeZone,
   resolveWorkspaceProjects,
   type SelectedModel,
   type SkillsSettings,
@@ -646,7 +644,6 @@ export async function loadPersistedSettings(): Promise<AppSettings> {
 }
 
 let failedProviderSave: AppSettings | undefined;
-let failedTimeZoneSave = false;
 
 function projectPromptFields(settings: AppSettings, path: string) {
   const entry = settings.system.workspaceResourceSettings[path];
@@ -760,22 +757,8 @@ export async function persistSettings(
   }
 
   if (isKBrainBrowserHost()) {
-    if (
-      failedTimeZoneSave ||
-      hasChanged(prev.system.defaultTimeZone, next.system.defaultTimeZone)
-    ) {
-      tasks.push(
-        requestPlanning("timezone", { timeZone: resolveDefaultTimeZone(next.system) }).then(
-          () => {
-            failedTimeZoneSave = false;
-          },
-          (error) => {
-            failedTimeZoneSave = true;
-            throw new SettingsStorageError("save_failed", error);
-          },
-        ),
-      );
-    }
+    // The calendar time zone is owned by K-brain and saved by its own picker as a preference
+    // ("" follows the system). Pushing a resolved zone from here would freeze "automatic".
     tasks.push(settleLocalWrite(() => writeBrowserPersistedSettings(next)));
     await settleTasks(tasks);
     return result;

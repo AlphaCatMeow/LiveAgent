@@ -1,7 +1,7 @@
-import { useSyncExternalStore } from "react";
-import { useLocale } from "@liveagent/ui/i18n";
 import { SettingsNotice } from "@liveagent/ui/components/settings/SettingsNotice";
 import { Button } from "@liveagent/ui/components/ui/button";
+import { useLocale } from "@liveagent/ui/i18n";
+import { useSyncExternalStore } from "react";
 import { kBrainStorageScope } from "../kbrain/mapping";
 import {
   dismissTimeZoneNotice,
@@ -16,7 +16,8 @@ export function TimeZoneNoticeBanner({ onOpenSettings }: { onOpenSettings: () =>
   if (!notice) return null;
   const description = t(`planner.timezoneNotice.${notice.kind}`)
     .replace("{preference}", notice.preference ?? "")
-    .replace("{effective}", notice.effective ?? "");
+    .replace("{effective}", notice.effective ?? "")
+    .replace("{device}", notice.device ?? "");
   return (
     <SettingsNotice
       variant="warning"

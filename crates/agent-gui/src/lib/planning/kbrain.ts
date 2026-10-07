@@ -1,7 +1,8 @@
-import { fetchKBrain } from "../kbrain/transport";
 import { invoke } from "@liveagent/app/shims/tauriCore";
+import { followBrowserPlanning } from "@liveagent/ui/lib/planning/browserTimeZone";
 import { isTauriHost } from "../host";
 import { kBrainStorageScope } from "../kbrain/mapping";
+import { fetchKBrain } from "../kbrain/transport";
 import { observeTimeZoneResponse, reportTimeZoneFailure } from "./timeZoneNotice";
 
 const migrations = new Map<string, Promise<void>>();
@@ -31,7 +32,11 @@ async function migrateOnDemand(action: string) {
 export async function requestPlanning<T>(action: string, input: unknown = {}): Promise<T> {
   const scope = kBrainStorageScope();
   try {
-    const result = await sendPlanning<T>(action, input);
+    let result = await sendPlanning<T>(action, input);
+    if (!isTauriHost())
+      result = await followBrowserPlanning(scope, action, result, () =>
+        sendPlanning<{ preference?: unknown }>("timezone.get", {}),
+      );
     observeTimeZoneResponse(scope, action, result);
     return result;
   } catch (error) {

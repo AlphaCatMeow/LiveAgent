@@ -144,6 +144,7 @@ import { skillMentionInjection } from "../lib/chat/skills/mentionInjection";
 import { tauriGitClient } from "../lib/git/tauriGitClient";
 import { isKBrainBackendEnabled, isKBrainBrowserHost } from "../lib/host";
 import { useKBrainCatalogSettings } from "../lib/kbrain/catalog";
+import { subscribeHistoryImported } from "../lib/kbrain/manualHistoryImport";
 import { createProviderRuntimeConfig, toModelValue } from "../lib/providers/llm";
 import {
   applyConversationThinking,
@@ -169,7 +170,6 @@ import {
 } from "../lib/settings";
 import { tauriSftpClient } from "../lib/sftp/tauriSftpClient";
 import { createGuiSidebarBackend } from "../lib/sidebar/guiSidebarBackend";
-import { subscribeHistoryImported } from "../lib/kbrain/manualHistoryImport";
 import { desktopSttTransport } from "../lib/stt/desktopSttTransport";
 import { createSubagentStoreManager } from "../lib/subagents";
 import { tauriTerminalClient } from "../lib/terminal/tauriTerminalClient";

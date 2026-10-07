@@ -5,6 +5,7 @@ import * as jsxRuntime from "react/jsx-runtime";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createTsModuleLoader } from "../helpers/load-ts-module.mjs";
+import { skipWithoutKBrainSource } from "../helpers/kbrain-source.mjs";
 import { startTrajectoryFixture, runTrajectoryPrompt } from "../helpers/kbrain-trajectory-fixture.mjs";
 
 const loader = createTsModuleLoader();
@@ -140,6 +141,7 @@ test("trajectory host preserves a stale mapped-session 404", async () => {
 });
 
 test("actual Agent HTTP capture reaches original trajectory ledger, rows and usage", { timeout: 240_000 }, async (t) => {
+  if (skipWithoutKBrainSource(t)) return;
   const fixture = await startTrajectoryFixture(t);
   const isolatedLoader = createTsModuleLoader();
   const { createTauriTrajectoryHost } = isolatedLoader.loadModule("src/agent-ui-adapters/trajectory.ts");
@@ -226,6 +228,7 @@ test("actual Agent HTTP capture reaches original trajectory ledger, rows and usa
 });
 
 test("actual child HTTP expands original subtool layout", { timeout: 240_000 }, async (t) => {
+  if (skipWithoutKBrainSource(t)) return;
   const fixture = await startTrajectoryFixture(t, { includeChild: true });
   const isolatedLoader = createTsModuleLoader();
   isolatedLoader.loadModule("src/lib/kbrain/runtimeConnection.ts").setKBrainRuntimeConnection({

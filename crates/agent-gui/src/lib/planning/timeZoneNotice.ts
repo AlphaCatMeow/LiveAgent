@@ -1,7 +1,10 @@
 export type TimeZoneNotice = {
-  kind: "invalid" | "unsupported" | "mismatch";
+  /** `device`: following the system, but this device now reports another zone; the zone is
+   * read at startup only, so the change applies after a restart. */
+  kind: "invalid" | "unsupported" | "mismatch" | "device";
   preference?: string;
   effective?: string;
+  device?: string;
 };
 
 const notices = new Map<string, TimeZoneNotice>();
@@ -69,12 +72,61 @@ function canonicalZone(zone: string) {
   }
 }
 
+/** This device's current zone, as the client runtime sees it. */
+function deviceTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+  } catch {
+    return "";
+  }
+}
+
+function offsetMinutes(zone: string, at: number) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: zone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).formatToParts(at);
+  const value = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  const local = Date.UTC(
+    value("year"),
+    value("month") - 1,
+    value("day"),
+    value("hour"),
+    value("minute"),
+  );
+  return Math.round((local - Math.floor(at / 60_000) * 60_000) / 60_000);
+}
+
+/** Same clock today and half a year from now (DST differences still count as different). */
+function sameClock(a: string, b: string, now = Date.now()) {
+  try {
+    return [now, now + 182 * 86_400_000].every(
+      (at) => offsetMinutes(a, at) === offsetMinutes(b, at),
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Notices that only a time zone response can raise or clear; unrelated queries keep them.
+const STICKY = new Set<TimeZoneNotice["kind"]>(["mismatch", "device"]);
+
 export function reportTimeZoneFailure(scope: string, error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   if (/^E:timezone_invalid(?::|$)/.test(message.trim())) update(scope, { kind: "invalid" });
 }
 
-export function observeTimeZoneResponse(scope: string, action: string, result: unknown) {
+export function observeTimeZoneResponse(
+  scope: string,
+  action: string,
+  result: unknown,
+  device: string = deviceTimeZone(),
+) {
   if (!result || typeof result !== "object") return;
   const value = result as { preference?: unknown; timeZone?: unknown };
   if (typeof value.timeZone !== "string" || !value.timeZone) return;
@@ -90,8 +142,16 @@ export function observeTimeZoneResponse(scope: string, action: string, result: u
       update(scope, { kind: "mismatch", preference: value.preference, effective: value.timeZone });
       return;
     }
+    // Following the system: the backend read the zone at startup. If this device now reports
+    // another clock (system zone changed while running), say a restart applies it. A custom
+    // zone is an intentional choice and is never flagged here.
+    const current = device ? canonicalZone(device) : undefined;
+    if (!value.preference && current && current !== effective && !sameClock(current, effective)) {
+      update(scope, { kind: "device", effective: value.timeZone, device });
+      return;
+    }
     update(scope, null);
-  } else if (notices.get(scope)?.kind !== "mismatch") {
+  } else if (!STICKY.has(notices.get(scope)?.kind as TimeZoneNotice["kind"])) {
     update(scope, null);
   }
 }

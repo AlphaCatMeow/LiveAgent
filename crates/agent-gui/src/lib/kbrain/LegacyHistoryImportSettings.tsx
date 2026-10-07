@@ -1,7 +1,7 @@
-import { useSyncExternalStore } from "react";
 import { Button } from "@liveagent/ui/components/ui/button";
 import { useLocale } from "@liveagent/ui/i18n";
 import { SettingsGroup, SettingsRow } from "@liveagent/ui/pages/settings/shared";
+import { useSyncExternalStore } from "react";
 import { isTauriHost } from "../host";
 import {
   getHistoryImportState,
@@ -60,6 +60,7 @@ export function LegacyHistoryImportSettings() {
                 <summary>{t("historyImport.failures")}</summary>
                 <ul className="max-h-48 overflow-y-auto">
                   {result.failures.map((failure, index) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: a static report of one import run; rows never reorder
                     <li key={`${failure.sourceId}:${index}`}>
                       {failure.sourceId}: {failure.error}
                     </li>

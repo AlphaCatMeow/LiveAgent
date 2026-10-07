@@ -5,15 +5,16 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
+import { kbrainSource, skipWithoutKBrainSource } from "../helpers/kbrain-source.mjs";
 import { createTsModuleLoader } from "../helpers/load-ts-module.mjs";
 
 const HOST_MODULE = new URL("../../src/lib/host.ts", import.meta.url).pathname;
 const BROWSER_KEY = "liveagent.kbrain-browser-settings.v1";
 
-test("original prompt settings save and reload through the real K-brain factory and upstream request", { timeout: 120_000 }, async () => {
+test("original prompt settings save and reload through the real K-brain factory and upstream request", { timeout: 120_000 }, async (t) => {
+  if (skipWithoutKBrainSource(t)) return;
   const root = await mkdtemp(path.join(tmpdir(), "kbrain-prompts-"));
   const home = path.join(root, "home");
   const workdir = path.join(root, "workspace");
@@ -44,7 +45,7 @@ test("original prompt settings save and reload through the real K-brain factory 
     models: [{ id: "fixture-model", contextWindow: 32768, maxTokens: 256 }],
   } } }));
   const binary = path.join(root, "kn");
-  const repo = process.env.KBRAIN_REPO_ROOT ?? fileURLToPath(new URL("../../../../../K-brain", import.meta.url));
+  const repo = kbrainSource;
   let child;
   let baseUrl;
   let logs = "";

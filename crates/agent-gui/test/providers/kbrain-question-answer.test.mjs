@@ -55,7 +55,7 @@ for (const mode of ["answered", "timeout", "cancelled"]) {
       "../../../lib/kbrain/runtimeConnection": { getConfiguredKBrainConnection: () => ({ baseUrl: "http://question.test" }) },
       "./runtimeConnection": {
         getConfiguredKBrainConnection: () => ({ baseUrl: "http://question.test" }),
-        resolveKBrainClientOptions: (options) => options,
+        resolveKBrainClientOptions: (options) => ({ ...options, baseUrl: options.baseUrl ?? "http://question.test" }),
         getKBrainRuntimeConnection: () => undefined,
       },
     } });

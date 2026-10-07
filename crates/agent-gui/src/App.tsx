@@ -36,6 +36,7 @@ import { AppBootShell } from "./components/app/AppBootShell";
 import { useNativeInputContextMenu } from "./components/input-context-menu/NativeInputContextMenu";
 import { useMacOsAppHeaderHeight } from "./components/MacOsTitleBarSpacer";
 import { ReleaseAnnouncementDialog } from "./components/ReleaseAnnouncementDialog";
+import { WindowsSettingsHeader } from "./components/WindowsSettingsHeader";
 import { WindowsTitleBar } from "./components/WindowsTitleBar";
 import { useAppUpdateController } from "./lib/appUpdates";
 import { isKBrainBrowserHost } from "./lib/host";
@@ -121,7 +122,7 @@ function AppChrome(props: { children: ReactNode; notice?: ReactNode }) {
       onContextMenu={onRootContextMenu}
       onMouseDownCapture={onRootMouseDownCapture}
     >
-      {/* No conditional title bar here: adding or removing a 32px sibling when the
+      {/* No conditional title bar here: adding or removing a sibling when the
           settings overlay opens would resize the chat subtree underneath it and make
           the whole page jump. The overlay carries its own title bar instead. */}
       {props.notice}
@@ -834,7 +835,7 @@ export default function App() {
           >
             {/* The overlay owns its title bar so the chat subtree below keeps a
                 constant height across open/close. */}
-            <WindowsTitleBar />
+            <WindowsSettingsHeader onBack={closeSettings} />
             <div className="relative min-h-0 flex-1 overflow-hidden">
               <AppErrorBoundary>
                 <Suspense

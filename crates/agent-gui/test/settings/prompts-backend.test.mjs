@@ -110,7 +110,7 @@ test("original prompt settings save and reload through the real K-brain factory 
     const events = await (await api(`/v1/sessions/${sessionID}/events?after_seq=${accepted.accepted_seq - 1}`)).text();
     assert.match(events, /run.completed/);
     assert.doesNotMatch(events, /run.failed/);
-    const request = requests.slice(start).find(item => item.stream && item.messages?.at(-1)?.content === text);
+    const request = requests.slice(start).find(item => item.stream && item.messages?.at(-1)?.content?.endsWith(`</kbrain-turn-time>\n\n${text}`));
     assert.ok(request, JSON.stringify(requests.slice(start)));
     return request.messages.filter(message => message.role === "system").map(message => message.content).join("\n");
   }
@@ -135,6 +135,15 @@ test("original prompt settings save and reload through the real K-brain factory 
     assert.match(initialPrompt, /AGENTS_RULE_MARKER/);
     assert.match(initialPrompt, /BRAIN_RULE_MARKER/);
 
+    const firstRequest = requests.find(item => item.stream && item.messages?.at(-1)?.content?.endsWith("\n\nfirst settings prompt"));
+    assert.doesNotMatch(initialPrompt, /Current date\/time:/);
+    assert.match(firstRequest.messages.at(-1).content, /^<kbrain-turn-time>\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ<\/kbrain-turn-time>/);
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    assert.equal(await turn(session.id, "unchanged resources followup"), initialPrompt);
+    const followup = requests.find(item => item.stream && item.messages?.at(-1)?.content?.endsWith("\n\nunchanged resources followup"));
+    assert.deepEqual(followup.messages.slice(0, firstRequest.messages.length), firstRequest.messages);
+    assert.deepEqual(followup.tools, firstRequest.tools);
+
     loaded = await storage.loadPersistedSettings();
     next = settings.updateAgents(loaded, loaded.agents.map(item => ({ ...item, enabled: item.id === "second" })));
     next = settings.updateWorkspacePromptSettings(next, workdir, { projectPrompt: "PROJECT_REPLACE_MARKER", projectPromptStrategy: "replace" });
@@ -146,6 +155,7 @@ test("original prompt settings save and reload through the real K-brain factory 
     assert.match(replacedPrompt, /AGENTS_RULE_MARKER/);
     assert.match(replacedPrompt, /BRAIN_RULE_MARKER/);
     assert.match(replacedPrompt, /SYSTEM_RULE_MARKER/);
+    const beforeRestart = requests.find(item => item.stream && item.messages?.at(-1)?.content?.endsWith("\n\nchanged settings same session"));
 
     await stop();
     await start();
@@ -155,6 +165,9 @@ test("original prompt settings save and reload through the real K-brain factory 
     assert.equal(settings.resolveEffectivePromptSettings(loaded, workdir).prompt, "PROJECT_REPLACE_MARKER");
     assert.equal((await prompts.get(workdir)).effectivePrompt, "PROJECT_REPLACE_MARKER");
     assert.match(await turn(session.id, "reloaded settings prompt"), /PROJECT_REPLACE_MARKER/);
+    const afterRestart = requests.find(item => item.stream && item.messages?.at(-1)?.content?.endsWith("\n\nreloaded settings prompt"));
+    assert.deepEqual(afterRestart.messages.slice(0, beforeRestart.messages.length), beforeRestart.messages);
+    assert.deepEqual(afterRestart.tools, beforeRestart.tools);
     next = settings.updateWorkspacePromptSettings(loaded, workdir, { projectPrompt: "PROJECT_APPEND_AFTER_RELOAD", projectPromptStrategy: "append" });
     await storage.persistSettings(loaded, next);
     const expanded = await prompts.expandMarkdown("review", ["src/two words.ts", "strict 'quoted'"], workdir);

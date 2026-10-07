@@ -7,7 +7,7 @@ const device = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const backendZone = device === "Pacific/Auckland" ? "America/New_York" : "Pacific/Auckland";
 
 test("automatic preference follows the browser zone; a custom zone is untouched", () => {
-  const { followBrowserTimeZone } = createTsModuleLoader().loadModule("src/lib/planning/browserTimeZone.ts");
+  const { followBrowserTimeZone } = createTsModuleLoader().loadModule("@liveagent/ui/lib/planning/browserTimeZone.ts");
   const settings = { preference: "", timeZone: backendZone, systemTimeZone: backendZone, revision: 1 };
   assert.deepEqual(followBrowserTimeZone("timezone.get", settings, "", "Asia/Shanghai"), {
     ...settings, timeZone: "Asia/Shanghai", systemTimeZone: "Asia/Shanghai",
@@ -48,5 +48,24 @@ test("browser Planning shows this computer's zone without writing the shared pre
     assert.equal((await backend.call("query", {})).timeZone, "Europe/Paris");
   } finally {
     globalThis.fetch = original;
+  }
+});
+
+test("the browser zone is read at startup; a change while running applies after a restart", () => {
+  const previous = process.env.TZ;
+  try {
+    process.env.TZ = "America/New_York";
+    const started = createTsModuleLoader().loadModule("@liveagent/ui/lib/planning/browserTimeZone.ts");
+    assert.equal(started.startupTimeZone, "America/New_York");
+    // The system zone changes while the page stays open.
+    process.env.TZ = "Asia/Tokyo";
+    assert.equal(started.browserTimeZone(), "Asia/Tokyo", "the live zone is still visible for the restart hint");
+    assert.equal(started.followBrowserTimeZone("query", { timeZone: "UTC" }, "").timeZone, "America/New_York");
+    // A restart reads the new zone.
+    const restarted = createTsModuleLoader().loadModule("@liveagent/ui/lib/planning/browserTimeZone.ts");
+    assert.equal(restarted.followBrowserTimeZone("query", { timeZone: "UTC" }, "").timeZone, "Asia/Tokyo");
+  } finally {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
   }
 });

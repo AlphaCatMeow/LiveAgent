@@ -13,7 +13,6 @@ import {
   Key,
   Mic,
   Settings2,
-  SquareMousePointer,
   Wrench,
   Zap,
 } from "@liveagent/ui/components/IconSet";
@@ -22,9 +21,7 @@ import type { SettingsSectionDefinition, UiExtensionRegistry } from "../../contr
 import { AgentsSection } from "./AgentsSection";
 import { CalendarSection } from "./CalendarSection";
 import { CronSection } from "./CronSection";
-import { CuaDriverSection } from "./CuaDriverSection";
 import { HooksSection } from "./HooksSection";
-import { KBrainComputerSection } from "./KBrainComputerSection";
 import { MemoryPanel } from "./memory/MemoryPanel";
 import { ProvidersSection } from "./ProvidersSection";
 import { RemoteSection } from "./RemoteSection";
@@ -168,27 +165,6 @@ export function SettingsPage(props: SettingsPageProps) {
         render: () => <SystemToolsSection settings={settings} setSettings={setSettings} />,
       },
       {
-        // Computer Use（CUA）。两端同一份引导页：探测与授权状态经宿主真实读取
-        // （WebUI 走 gateway 中继），设置项两端同样可写，只有安装与授权两个必须
-        // 在桌面主机那台机器上完成的动作在 web 面收起——判定交给组件的 surface。
-        id: "cua",
-        groupKey: "settings.groupIntelligence",
-        groupOrder: 25,
-        order: 25,
-        labelKey: "settings.navCua",
-        icon: <SquareMousePointer className={extension.iconClassName} />,
-        render: () =>
-          props.settingsHost?.kbrain ? (
-            <KBrainComputerSection kbrain={props.settingsHost.kbrain} />
-          ) : (
-            <CuaDriverSection
-              settings={settings}
-              setSettings={setSettings}
-              surface={extension.surface}
-            />
-          ),
-      },
-      {
         id: "stt",
         groupKey: "settings.groupIntelligence",
         groupOrder: 25,
@@ -255,7 +231,6 @@ export function SettingsPage(props: SettingsPageProps) {
       settings,
       sttSelectedProvider,
       sttSettingsService,
-      props.settingsHost,
     ],
   );
   const registry: UiExtensionRegistry<void> = {

@@ -6,6 +6,7 @@ import type {
   TextContent,
 } from "@liveagent/app/lib/agentTypes";
 import type { HostedSearchBlock } from "@liveagent/ui/lib/chat/hostedSearch";
+import { parseUserMessageContentWithUploads } from "@liveagent/ui/lib/chat/uploadedFiles";
 import {
   type ConversationViewState,
   getHistoryMessageContentHash,
@@ -120,12 +121,35 @@ function toHostedSearch(value: KBrainMessage["hosted_search"]): HostedSearchBloc
   }));
 }
 
-function toMessage(message: KBrainMessage, index: number): Message | null {
+function toMessage(message: KBrainMessage, index: number, cwd?: string): Message | null {
   const timestamp = epoch(message.created_at, index + 1);
   if (message.role === "user") {
+    const content = userContent(message);
+    // K-brain 只存文本。带附件的消息落库时正文与附件指令拼在一起，历史回读
+    // 要把它拆回去，否则界面会把整段指令当正文显示，附件卡片和粘贴 chip 都丢。
+    const rawText =
+      typeof content === "string"
+        ? content
+        : content
+            .filter((part) => part.type === "text")
+            .map((part) => part.text)
+            .join("");
+    const parsed = parseUserMessageContentWithUploads(rawText, cwd);
+    if (parsed.parsed) {
+      // content 保持原样（仍是给模型的完整文本），只补展示用元数据：正文给
+      // 界面显示，附件列表给卡片/chip 与后续编辑重发、分支复用。
+      return {
+        role: "user",
+        content,
+        timestamp,
+        ...(message.id ? { id: message.id } : {}),
+        liveAgentDisplayContent: parsed.displayText,
+        liveAgentAttachments: parsed.attachments,
+      } as Message;
+    }
     return {
       role: "user",
-      content: userContent(message),
+      content,
       timestamp,
       ...(message.id ? { id: message.id } : {}),
     } as Message;
@@ -297,9 +321,9 @@ function revisionFor(session: KBrainSession): string {
   return session.revision;
 }
 
-function convertMessages(messages: KBrainMessage[], offset = 0): Message[] {
+function convertMessages(messages: KBrainMessage[], offset = 0, cwd?: string): Message[] {
   return messages.flatMap((message, index) => {
-    const converted = toMessage(message, offset + index);
+    const converted = toMessage(message, offset + index, cwd);
     return converted ? [converted] : [];
   });
 }
@@ -332,7 +356,7 @@ function historyWindow(
   }
   const indexedMessages = source.flatMap((message, index) => {
     const offset = offsets[index];
-    const converted = toMessage(message, offset);
+    const converted = toMessage(message, offset, session.cwd);
     return converted ? [{ message: converted, offset }] : [];
   });
   const taskOffset = (offsets.at(-1) ?? result.oldest_offset - 1) + 1;
@@ -348,7 +372,9 @@ function historyWindow(
     const id = (message as { id?: string }).id;
     if (id) snapshot.indices.set(id, offset);
   }
-  const activeMessages = includeActive ? convertMessages(result.active_messages ?? []) : [];
+  const activeMessages = includeActive
+    ? convertMessages(result.active_messages ?? [], 0, session.cwd)
+    : [];
   if (pendingEditId) {
     for (const message of [...windowMessages, ...activeMessages]) {
       if (message.role === "user" && (message as { id?: string }).id === pendingEditId) {
@@ -502,7 +528,7 @@ async function validateRef(id: string, ref: HistoryMessageRef, expectedRevision?
   const expected = expectedRevision ?? snapshot?.revision;
   if (!expected || revision !== expected)
     throw new Error("K-brain history revision conflict; reload the conversation");
-  const messages = convertMessages(current.messages ?? []);
+  const messages = convertMessages(current.messages ?? [], 0, current.cwd);
   const index = messages.findIndex((message) => (message as { id?: string }).id === ref.messageId);
   const message = messages[index];
   const projectedIndex =

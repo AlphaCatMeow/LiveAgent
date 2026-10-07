@@ -1,20 +1,19 @@
 import assert from "node:assert/strict";
-import { spawn, execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { promisify } from "node:util";
 import test from "node:test";
-import { kbrainSource, skipWithoutKBrainSource } from "../helpers/kbrain-source.mjs";
+import { getKBrainBinary } from "../helpers/kbrain-binary.mjs";
 import { createTsModuleLoader } from "../helpers/load-ts-module.mjs";
 
 const HOST_MODULE = new URL("../../src/lib/host.ts", import.meta.url).pathname;
 const BROWSER_KEY = "liveagent.kbrain-browser-settings.v1";
 
-test("original prompt settings save and reload through the real K-brain factory and upstream request", { timeout: 120_000 }, async (t) => {
-  if (skipWithoutKBrainSource(t)) return;
+test("original prompt settings save and reload through the real K-brain factory and upstream request", { timeout: 120_000 }, async () => {
+  const binary = await getKBrainBinary();
   const root = await mkdtemp(path.join(tmpdir(), "kbrain-prompts-"));
   const home = path.join(root, "home");
   const workdir = path.join(root, "workspace");
@@ -44,8 +43,6 @@ test("original prompt settings save and reload through the real K-brain factory 
     api: "openai-completions", baseUrl: `http://127.0.0.1:${upstream.address().port}`, apiKey: "fixture-key",
     models: [{ id: "fixture-model", contextWindow: 32768, maxTokens: 256 }],
   } } }));
-  const binary = path.join(root, "kn");
-  const repo = kbrainSource;
   let child;
   let baseUrl;
   let logs = "";
@@ -115,7 +112,6 @@ test("original prompt settings save and reload through the real K-brain factory 
     return request.messages.filter(message => message.role === "system").map(message => message.content).join("\n");
   }
   try {
-    await promisify(execFile)("go", ["build", "-o", binary, "./cmd/kn"], { cwd: repo, timeout: 60_000 });
     await start();
     assert.equal((await fetch(baseUrl + "/v1/prompts")).status, 401);
     let { storage, settings, prompts } = modules();

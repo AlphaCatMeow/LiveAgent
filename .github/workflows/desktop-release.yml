@@ -37,105 +37,10 @@ jobs:
           RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: node scripts/release/prepare-app-version-from-tag.mjs "$RELEASE_TAG" --github-output "$GITHUB_OUTPUT" --json
 
-  kbrain-backend:
-    name: Build K-brain backend (${{ matrix.target }})
-    runs-on: ubuntu-latest
-    needs: release-metadata
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: x86_64-apple-darwin
-            goos: darwin
-            goarch: amd64
-            backend_asset: k-brain-darwin-x64
-            computer_asset: k-brain-computer-darwin-x64
-          - target: aarch64-apple-darwin
-            goos: darwin
-            goarch: arm64
-            backend_asset: k-brain-darwin-arm64
-            computer_asset: k-brain-computer-darwin-arm64
-          - target: x86_64-unknown-linux-gnu
-            goos: linux
-            goarch: amd64
-            backend_asset: k-brain-linux-x64
-            computer_asset: k-brain-computer-linux-x64
-          - target: x86_64-pc-windows-msvc
-            goos: windows
-            goarch: amd64
-            backend_asset: k-brain-windows-x64.exe
-            computer_asset: k-brain-computer-windows-x64.exe
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.release-metadata.outputs.release_tag }}
-
-      - name: Read locked K-brain source revision
-        id: lock
-        shell: bash
-        run: |
-          set -euo pipefail
-          revision="$(node -e 'console.log(JSON.parse(require("fs").readFileSync("scripts/release/kbrain.lock.json", "utf8")).sourceRevision)')"
-          repository="$(node -e 'console.log(JSON.parse(require("fs").readFileSync("scripts/release/kbrain.lock.json", "utf8")).repository)')"
-          test "$repository" = "https://github.com/Stack-Cairn/K-brain"
-          echo "revision=$revision" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout locked K-brain source
-        shell: bash
-        run: |
-          set -euo pipefail
-          git clone --no-checkout https://github.com/Stack-Cairn/K-brain.git "$RUNNER_TEMP/k-brain"
-          git -C "$RUNNER_TEMP/k-brain" checkout --detach "${{ steps.lock.outputs.revision }}"
-          grep -q -- '-parent-stdio' "$RUNNER_TEMP/k-brain/cmd/kn/backend.go"
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.27.0'
-          cache: false
-
-      - name: Build locked K-brain backend
-        shell: bash
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: '0'
-        run: |
-          set -euo pipefail
-          mkdir -p .liveagent/kbrain-artifact
-          go -C "$RUNNER_TEMP/k-brain" build -trimpath -ldflags "-s -w -X main.version=${{ steps.lock.outputs.revision }}" \
-            -o "$GITHUB_WORKSPACE/.liveagent/kbrain-artifact/${{ matrix.backend_asset }}" ./cmd/kn
-          go -C "$RUNNER_TEMP/k-brain" build -trimpath -ldflags "-s -w" \
-            -o "$GITHUB_WORKSPACE/.liveagent/kbrain-artifact/${{ matrix.computer_asset }}" ./cmd/k-brain-computer
-          backend_sha256="$(sha256sum ".liveagent/kbrain-artifact/${{ matrix.backend_asset }}" | awk '{print $1}')"
-          computer_sha256="$(sha256sum ".liveagent/kbrain-artifact/${{ matrix.computer_asset }}" | awk '{print $1}')"
-          cat > .liveagent/kbrain-artifact/kbrain-artifact.json <<EOF
-          {
-            "schemaVersion": 1,
-            "repository": "https://github.com/Stack-Cairn/K-brain",
-            "sourceRevision": "${{ steps.lock.outputs.revision }}",
-            "protocol": "kbrain.agent.v1",
-            "platforms": {
-              "${{ matrix.target }}": {
-                "assets": { "backend": "${{ matrix.backend_asset }}", "computer": "${{ matrix.computer_asset }}" },
-                "sha256": { "backend": "$backend_sha256", "computer": "$computer_sha256" }
-              }
-            }
-          }
-          EOF
-          test -s ".liveagent/kbrain-artifact/${{ matrix.backend_asset }}"
-          test -s ".liveagent/kbrain-artifact/${{ matrix.computer_asset }}"
-          test -s .liveagent/kbrain-artifact/kbrain-artifact.json
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: kbrain-source-${{ matrix.target }}
-          path: .liveagent/kbrain-artifact/*
-          if-no-files-found: error
-
   macos:
     name: macOS ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
-    needs: [release-metadata, kbrain-backend]
+    needs: release-metadata
     env:
       LIVEAGENT_APP_VERSION: ${{ needs.release-metadata.outputs.app_version }}
       LIVEAGENT_IS_PRERELEASE: ${{ needs.release-metadata.outputs.is_prerelease }}
@@ -156,11 +61,6 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.release-metadata.outputs.release_tag }}
-
-      - uses: actions/download-artifact@v8
-        with:
-          name: kbrain-source-${{ matrix.target }}
-          path: .liveagent/kbrain-artifact
 
       - uses: actions/setup-node@v6
         with:
@@ -290,7 +190,7 @@ jobs:
   windows:
     name: Windows x64
     runs-on: windows-latest
-    needs: [release-metadata, kbrain-backend]
+    needs: release-metadata
     env:
       LIVEAGENT_APP_VERSION: ${{ needs.release-metadata.outputs.app_version }}
       LIVEAGENT_IS_PRERELEASE: ${{ needs.release-metadata.outputs.is_prerelease }}
@@ -299,11 +199,6 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.release-metadata.outputs.release_tag }}
-
-      - uses: actions/download-artifact@v8
-        with:
-          name: kbrain-source-x86_64-pc-windows-msvc
-          path: .liveagent/kbrain-artifact
 
       - uses: actions/setup-node@v6
         with:
@@ -395,7 +290,7 @@ jobs:
     # 若用 ubuntu-latest(24.04, glibc 2.39)构建,二进制会引用 GLIBC_2.38/2.39,在 22.04 上启动即退出 (#714)。
     # 该 runner 与 Ubuntu 22.04 LTS 标准支持同在 2027-04 前退役;届时需迁移到 ubuntu:22.04 容器构建。
     runs-on: ubuntu-22.04
-    needs: [release-metadata, kbrain-backend]
+    needs: release-metadata
     env:
       LIVEAGENT_APP_VERSION: ${{ needs.release-metadata.outputs.app_version }}
       LIVEAGENT_IS_PRERELEASE: ${{ needs.release-metadata.outputs.is_prerelease }}
@@ -404,11 +299,6 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.release-metadata.outputs.release_tag }}
-
-      - uses: actions/download-artifact@v8
-        with:
-          name: kbrain-source-x86_64-unknown-linux-gnu
-          path: .liveagent/kbrain-artifact
 
       - uses: actions/setup-node@v6
         with:

@@ -5,30 +5,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { kbrainSource } from "./kbrain-source.mjs";
-
-const source = kbrainSource;
-
-async function buildBackend(directory) {
-  const binary = path.join(directory, "kn");
-  await new Promise((resolve, reject) => {
-    const child = spawn("go", ["build", "-o", binary, "./cmd/kn"], {
-      cwd: source,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let output = "";
-    child.stdout.on("data", (data) => { output += data; });
-    child.stderr.on("data", (data) => { output += data; });
-    const timer = setTimeout(() => { child.kill("SIGKILL"); }, 180_000);
-    child.once("error", (error) => { clearTimeout(timer); reject(error); });
-    child.once("close", (code) => {
-      clearTimeout(timer);
-      if (code === 0) resolve();
-      else reject(new Error(`Build actual K-brain backend (${source}) failed (${code}):\n${output}`));
-    });
-  });
-  return binary;
-}
+import { getKBrainBinary } from "./kbrain-binary.mjs";
 
 function stream(response, delta, finishReason) {
   response.setHeader("Content-Type", "text/event-stream");
@@ -67,7 +44,7 @@ export async function startTrajectoryFixture(t, { includeChild = false } = {}) {
     }
     assert.deepEqual(failures, [], "deterministic upstream must accept every provider request");
   });
-  const binary = await buildBackend(directory);
+  const binary = await getKBrainBinary();
   const workspace = path.join(directory, "workspace");
   await mkdir(workspace);
   const marker = `trajectory-real-tool-output-${randomUUID()}`;

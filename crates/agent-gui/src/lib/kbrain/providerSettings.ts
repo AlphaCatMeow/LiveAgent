@@ -1,3 +1,4 @@
+import { findCatalogModelAcrossProviders } from "@liveagent/ui/lib/models/modelCatalog";
 import { resolveProviderApi } from "@liveagent/ui/lib/providers/providerCapabilities";
 import {
   type AppSettings,
@@ -61,12 +62,40 @@ export function appProvidersFromKBrain(document: KBrainSettingsDocument): Custom
   return document.providers.map(customProviderFromKBrain);
 }
 
+type ProviderModel = CustomProvider["models"][number];
+
+/**
+ * K-brain 只按设置里的 inputModalities/vision 判定模型能否接收图片；中转供应商
+ * 的 /models 通常不返回模态，模型就被当成纯文本，Read 到的图片会被丢弃。
+ * 推送时按与模型选择器「视觉」标记相同的规则补齐：显式配置优先，其次按模型 id
+ * 查本地模型目录。同一 id 跨供应商取同一结果（K-brain 要求共享模型元数据一致），
+ * 因此任一供应商显式配置过的模态会作用于该 id 的全部未配置条目。
+ */
+function resolvePushedInputModalities(providers: readonly CustomProvider[]) {
+  const explicit = new Map<string, ProviderModel["inputModalities"]>();
+  for (const provider of providers) {
+    for (const model of provider.models ?? []) {
+      if (model.inputModalities?.length && !explicit.has(model.id)) {
+        explicit.set(model.id, model.inputModalities);
+      }
+    }
+  }
+  return (model: ProviderModel): ProviderModel => {
+    if (model.inputModalities?.length) return model;
+    const shared = explicit.get(model.id);
+    if (shared) return { ...model, inputModalities: shared };
+    const catalog = findCatalogModelAcrossProviders(model.id)?.inputModalities;
+    return catalog?.includes("image") ? { ...model, inputModalities: ["text", "image"] } : model;
+  };
+}
+
 function settingsUpdateFromProviders(
   previousProviders: readonly CustomProvider[],
   providersInput: readonly CustomProvider[],
   selectedModel?: AppSettings["selectedModel"],
 ): KBrainSettingsUpdate {
   const previousById = new Map(previousProviders.map((provider) => [provider.id, provider]));
+  const withInputModalities = resolvePushedInputModalities(providersInput);
   const providers = providersInput.map((provider) => {
     const { apiKey, apiKeyConfigured: _configured, ...metadata } = provider;
     const clearApiKey =
@@ -75,6 +104,7 @@ function settingsUpdateFromProviders(
       previousById.get(provider.id)?.apiKeyConfigured === true;
     return {
       ...metadata,
+      ...(provider.models ? { models: provider.models.map(withInputModalities) } : {}),
       api: resolveProviderApi(provider.type, provider.requestFormat),
       ...(clearApiKey ? { clearApiKey: true } : apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
     };
@@ -108,6 +138,26 @@ export function kBrainSettingsUpdateFromLegacyProviders(
   selectedModel?: AppSettings["selectedModel"],
 ): KBrainSettingsUpdate {
   return settingsUpdateFromProviders(previousProviders, providers, selectedModel);
+}
+
+/**
+ * 启动对账：后端里缺少输入模态、但本地模型目录能确认支持图片的模型，补推一次。
+ * 不依赖用户下次保存设置；没有需要补齐的模型时返回 undefined，不产生写入。
+ */
+export function kBrainSettingsUpdateForMissingInputModalities(
+  providers: readonly CustomProvider[],
+  selectedModel?: AppSettings["selectedModel"],
+): KBrainSettingsUpdate | undefined {
+  const withInputModalities = resolvePushedInputModalities(providers);
+  const needsBackfill = providers.some((provider) =>
+    (provider.models ?? []).some(
+      (model) => !model.inputModalities?.length && withInputModalities(model) !== model,
+    ),
+  );
+  if (!needsBackfill) return undefined;
+  const update = settingsUpdateFromProviders(providers, providers, selectedModel);
+  delete update.deleteProviders;
+  return update;
 }
 
 /** Import only providers absent from the backend; existing backend records are untouched. */

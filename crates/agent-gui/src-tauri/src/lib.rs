@@ -321,6 +321,7 @@ macro_rules! app_invoke_handler {
             commands::system::system_import_uploaded_readable_files,
             commands::system::system_pick_readable_files,
             commands::system::system_read_uploaded_image_preview,
+            commands::system::system_upload_staging_base,
             commands::system::system_open_uploaded_image,
             commands::system::system_prepare_preview_file_save,
             commands::system::system_write_preview_file,

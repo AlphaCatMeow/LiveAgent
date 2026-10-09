@@ -43,6 +43,14 @@ import {
   type Theme,
   workspaceProjectPathKey,
 } from "./index";
+import {
+  clearRejectedLegacyProviders,
+  legacyProvidersToImport,
+  nextRejectedLegacyProviders,
+  readRejectedLegacyProviders,
+  refreshRejectedLegacyProviders,
+  writeRejectedLegacyProviders,
+} from "./legacyProviderImport";
 
 const LOCAL_UI_SETTINGS_STORAGE_KEY = "liveagent.ui-settings.v1";
 const BROWSER_SETTINGS_STORAGE_KEY = "liveagent.kbrain-browser-settings.v1";
@@ -475,6 +483,19 @@ function isKBrainRejection(error: unknown): boolean {
   return typeof status === "number" && status >= 400 && status < 500;
 }
 
+/** Re-runs the legacy import after the user asks for it from the settings UI. */
+export async function retryRejectedLegacyProviderImport(): Promise<void> {
+  clearRejectedLegacyProviders();
+  const settings = await loadPersistedSettings();
+  void refreshRejectedLegacyProviders();
+  void settings;
+}
+
+function kBrainRejectionReason(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return message.trim().slice(0, 300) || "rejected by K-brain";
+}
+
 // 旧配置的中转模型没有输入模态，K-brain 会把它们当成纯文本、丢弃 Read 到的图片。
 // 每次加载时对账补齐；失败只记日志，绝不影响设置加载。
 async function backfillKBrainInputModalities(
@@ -504,7 +525,9 @@ async function loadAndMaybeImportKBrainProviders(
     legacyProviders,
     legacySelectedModel,
   );
-  return backfillKBrainInputModalities(loaded.document, loaded.providers);
+  const settings = await backfillKBrainInputModalities(loaded.document, loaded.providers);
+  refreshRejectedLegacyProviders();
+  return settings;
 }
 
 async function loadAndMaybeImportLegacyKBrainProviders(
@@ -514,8 +537,19 @@ async function loadAndMaybeImportLegacyKBrainProviders(
   const backend = await loadKBrainProviderSettings();
   const backendProviders = appProvidersFromKBrain(backend);
   const backendIds = new Set(backendProviders.map((provider) => provider.id));
-  const missingLegacyProviders = legacyProviders.filter((provider) => !backendIds.has(provider.id));
+  const allMissingLegacyProviders = legacyProviders.filter(
+    (provider) => !backendIds.has(provider.id),
+  );
+  const previouslyRejected = readRejectedLegacyProviders();
+  // Providers K-brain already rejected with this exact config would only fail again.
+  const missingLegacyProviders = legacyProvidersToImport(
+    allMissingLegacyProviders,
+    previouslyRejected,
+  );
   if (missingLegacyProviders.length === 0) {
+    writeRejectedLegacyProviders(
+      nextRejectedLegacyProviders(previouslyRejected, allMissingLegacyProviders, []),
+    );
     return { document: backend, providers: backendProviders };
   }
   const backendSelectedModel =
@@ -535,6 +569,15 @@ async function loadAndMaybeImportLegacyKBrainProviders(
   // whole settings load: that used to drop every setting back to defaults on each launch.
   try {
     const imported = await importProviders(backendProviders, missingLegacyProviders);
+    writeRejectedLegacyProviders(
+      nextRejectedLegacyProviders(
+        previouslyRejected,
+        allMissingLegacyProviders.filter(
+          (provider) => !missingLegacyProviders.some((item) => item.id === provider.id),
+        ),
+        [],
+      ),
+    );
     return { document: imported, providers: appProvidersFromKBrain(imported) };
   } catch (batchError) {
     // Transient/backend failures keep surfacing (and retry on the next launch); only a
@@ -544,18 +587,29 @@ async function loadAndMaybeImportLegacyKBrainProviders(
   }
   let document = backend;
   let providers = backendProviders;
+  const rejectedNow: { provider: CustomProvider; reason: string }[] = [];
   for (const legacy of missingLegacyProviders) {
     try {
       document = await importProviders(providers, [legacy]);
       providers = appProvidersFromKBrain(document);
     } catch (error) {
       if (!isKBrainRejection(error)) throw error;
+      rejectedNow.push({ provider: legacy, reason: kBrainRejectionReason(error) });
       console.warn(
         `Skipped legacy provider "${legacy.name || legacy.id}" during K-brain import`,
         error,
       );
     }
   }
+  const importedIds = new Set(providers.map((provider) => provider.id));
+  writeRejectedLegacyProviders(
+    nextRejectedLegacyProviders(
+      previouslyRejected,
+      allMissingLegacyProviders.filter((provider) => !importedIds.has(provider.id)),
+      rejectedNow,
+    ),
+  );
+  refreshRejectedLegacyProviders();
   return { document, providers };
 }
 

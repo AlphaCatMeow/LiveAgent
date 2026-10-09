@@ -515,7 +515,11 @@ export const ZH_CN_SETTINGS_TRANSLATIONS = {
   "settings.toolBadgeBuiltin": "内置",
   "settings.toolBadgeCustom": "自定义",
   "settings.toolConditionalNote": "按条件注册",
-  "settings.addProvider": "新增供应商",
+  "settings.legacyProviderImportFailed": "{count} 个旧供应商未能导入 K-brain",
+  "settings.legacyProviderImportFailedHint":
+    "这些供应商与已有供应商共用同名模型，但模型参数不一致，K-brain 拒绝了它们。它们的模型在当前版本中不可用；修改供应商配置后会自动重试。",
+  "settings.legacyProviderImportRetry": "重试导入",
+"settings.addProvider": "新增供应商",
   "settings.addProviderShort": "新增",
   "settings.importProviders": "导入",
   "settings.importProvidersHint": "从桌面开发工具导入供应商",

@@ -540,7 +540,11 @@ export const EN_US_SETTINGS_TRANSLATIONS = {
   "settings.toolBadgeBuiltin": "Built-in",
   "settings.toolBadgeCustom": "Custom",
   "settings.toolConditionalNote": "Conditional",
-  "settings.addProvider": "Add Provider",
+  "settings.legacyProviderImportFailed": "{count} legacy provider(s) could not be imported into K-brain",
+  "settings.legacyProviderImportFailedHint":
+    "These providers share model ids with providers already imported, but the model metadata differs, so K-brain rejected them. Their models are unavailable in this version; editing a provider retries the import automatically.",
+  "settings.legacyProviderImportRetry": "Retry import",
+"settings.addProvider": "Add Provider",
   "settings.addProviderShort": "Add",
   "settings.importProviders": "Import",
   "settings.importProvidersHint": "Import providers from desktop developer tools",

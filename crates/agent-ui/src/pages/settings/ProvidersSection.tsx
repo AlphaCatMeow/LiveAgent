@@ -19,7 +19,10 @@ import {
   updateCustomSettings,
   updateModelFailover,
 } from "@liveagent/app/lib/settings";
-import type { SettingsSectionProps } from "@liveagent/app/pages/settings/types";
+import type {
+  SettingsRejectedLegacyProvider,
+  SettingsSectionProps,
+} from "@liveagent/app/pages/settings/types";
 import {
   Activity,
   ChevronDown,
@@ -1001,10 +1004,19 @@ export function ProvidersSection(
   props: SettingsSectionProps & {
     initialProviderId?: string;
     onInitialProviderHandled?: () => void;
+    rejectedLegacyProviders?: SettingsRejectedLegacyProvider[];
+    onRetryRejectedLegacyProviders?: () => void | Promise<void>;
   },
 ) {
   const { t } = useLocale();
-  const { settings, setSettings, initialProviderId, onInitialProviderHandled } = props;
+  const {
+    settings,
+    setSettings,
+    initialProviderId,
+    onInitialProviderHandled,
+    rejectedLegacyProviders,
+    onRetryRejectedLegacyProviders,
+  } = props;
 
   const [activeTab, setActiveTab] = useState<ProviderId>("claude_code");
   const [modalOpen, setModalOpen] = useState(false);
@@ -1100,6 +1112,33 @@ export function ProvidersSection(
         }}
         className="flex min-h-0 flex-1 flex-col gap-4"
       >
+        {rejectedLegacyProviders && rejectedLegacyProviders.length > 0 ? (
+          <SettingsNotice variant="warning" className="flex flex-col gap-1.5" role="status">
+            <span>
+              {t("settings.legacyProviderImportFailed").replace(
+                "{count}",
+                String(rejectedLegacyProviders.length),
+              )}
+            </span>
+            <span className="opacity-80">
+              {rejectedLegacyProviders
+                .map((provider) => `${provider.name}（${provider.id.slice(0, 8)}）`)
+                .join("、")}
+            </span>
+            <span className="opacity-80">{t("settings.legacyProviderImportFailedHint")}</span>
+            {onRetryRejectedLegacyProviders ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="self-start"
+                onClick={() => void onRetryRejectedLegacyProviders()}
+              >
+                {t("settings.legacyProviderImportRetry")}
+              </Button>
+            ) : null}
+          </SettingsNotice>
+        ) : null}
         <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
           <div className="max-w-full overflow-x-auto pb-1">
             <TabsList variant="segmented" aria-label={t("settings.providerServices")}>

@@ -12,6 +12,7 @@ import {
   upsertToolCallToRound,
 } from "../../../lib/chat/messages/uiMessages";
 import { getKBrainHistoryWindow } from "../../../lib/kbrain/history";
+import { canonicalKBrainToolPolicies } from "../../../lib/kbrain/toolPolicies";
 import { runKBrainTurn } from "../../../lib/kbrain/turn";
 import type {
   KBrainQuestionAnswer,
@@ -43,16 +44,9 @@ function canonicalRunOptions(params: Params, uploadsRoot?: string): KBrainRunOpt
   ].filter((root) => root.path.trim());
   const roots = withUploadStagingRoot(workspaceRoots, uploadsRoot);
   const configured = agentMode ? params.getToolPolicies?.() : undefined;
-  const policies = Object.fromEntries(
-    Object.entries(configured ?? {})
-      .filter(
-        ([name, policy]) =>
-          !name.startsWith("group:") &&
-          !name.startsWith("server:") &&
-          (policy === "ask" || policy === "allow" || policy === "deny"),
-      )
-      .sort(([left], [right]) => left.localeCompare(right)),
-  ) as Record<string, "ask" | "allow" | "deny">;
+  // Only policies for tools K-brain registers may be forwarded; a stale entry for a
+  // frontend-only tool (e.g. Browser) would otherwise reject every run.
+  const policies = canonicalKBrainToolPolicies(configured);
   const safety = agentMode && "commandSafetyMode" in params ? params.commandSafetyMode : undefined;
   const reasoning = params.runtime.reasoning;
   return {

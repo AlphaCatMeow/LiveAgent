@@ -524,7 +524,7 @@ export const ZH_CN_SETTINGS_TRANSLATIONS = {
   "settings.legacyProviderImportDismissDescription":
     "关闭后会忽略这些供应商的导入失败，以后不再提示。此操作不可撤销。这些供应商仍然不会导入 K-brain；如果之后修改了它们的配置，系统会重新尝试导入。",
   "settings.legacyProviderImportDismissConfirm": "关闭并不再提示",
-"settings.addProvider": "新增供应商",
+  "settings.addProvider": "新增供应商",
   "settings.addProviderShort": "新增",
   "settings.importProviders": "导入",
   "settings.importProvidersHint": "从桌面开发工具导入供应商",

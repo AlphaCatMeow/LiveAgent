@@ -550,8 +550,8 @@ export default function App() {
   );
 
   // 旧供应商导入失败的记录（K-brain 拒绝的），在供应商设置里可见；失败不阻塞设置加载。
-  const [rejectedLegacyProviderEntries, setRejectedLegacyProviderEntries] = useState(
-    () => rejectedLegacyProviders(),
+  const [rejectedLegacyProviderEntries, setRejectedLegacyProviderEntries] = useState(() =>
+    rejectedLegacyProviders(),
   );
   useEffect(() => subscribeRejectedLegacyProviders(setRejectedLegacyProviderEntries), []);
 

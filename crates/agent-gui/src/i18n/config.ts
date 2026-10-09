@@ -24,6 +24,22 @@ export const GUI_TRANSLATION_OVERRIDES: Record<Locale, Record<string, string>> =
     "historyImport.empty": "未发现可导入的旧对话；已明确删除的记录会跳过。",
     "historyImport.partial": "{count} 条对话正文已导入，但文件回滚记录尚不完整，可稍后重试。",
     "historyImport.failures": "查看失败详情（可再次点击导入重试）",
+    "historyImport.failedList": "{count} 条旧对话没能迁移",
+    "historyImport.reason.too_large":
+      "对话太大：超过 K-brain 单次导入的 4 MB 上限。需要等 K-brain 支持分批导入，届时点「导入旧版对话」重试。",
+    "historyImport.reason.conflict": "K-brain 里已有同一条对话，但内容不一样，K-brain 拒绝覆盖。",
+    "historyImport.reason.rejected": "K-brain 认为这条对话的数据无效，拒绝导入。",
+    "historyImport.reason.transient": "连接中断或后端出错，下次启动会自动重试。",
+    "historyImport.notice.title": "{count} 条旧对话没能迁移到 K-brain",
+    "historyImport.notice.description":
+      "这些对话在当前版本里看不到。旧数据没有删除，启动时也不会再反复上传。",
+    "historyImport.notice.view": "查看详情",
+    "historyImport.notice.dismiss": "关闭提示",
+    "historyImport.notice.dismissTitle": "关闭这条提示？",
+    "historyImport.notice.dismissDescription":
+      "关闭后不再提示这些对话的迁移失败，此操作不可撤销。设置里的失败清单仍会保留；对话内容变化后如果再次失败，会重新提示。",
+    "historyImport.notice.dismissConfirm": "关闭并不再提示",
+    "historyImport.notice.cancel": "取消",
     "app.windowPinned": "已置顶",
     "app.windowPinnedHint": "窗口已置顶，浮在其他应用上方。点击取消置顶。",
     "app.settingsLoadFailed": "加载设置失败，已回退到默认配置。",
@@ -330,6 +346,24 @@ export const GUI_TRANSLATION_OVERRIDES: Record<Locale, Record<string, string>> =
     "historyImport.partial":
       "{count} conversation transcripts were imported, but file rollback records are incomplete. You can retry later.",
     "historyImport.failures": "View failures (click Import again to retry)",
+    "historyImport.failedList": "{count} old conversation(s) could not be migrated",
+    "historyImport.reason.too_large":
+      "Too large: exceeds K-brain's 4 MB single-import limit. Retry with Import old conversations once K-brain supports chunked imports.",
+    "historyImport.reason.conflict":
+      "K-brain already holds this conversation with different content and refused to overwrite it.",
+    "historyImport.reason.rejected": "K-brain rejected this conversation's data as invalid.",
+    "historyImport.reason.transient":
+      "The connection dropped or the backend failed; it is retried on the next launch.",
+    "historyImport.notice.title": "{count} old conversation(s) were not migrated into K-brain",
+    "historyImport.notice.description":
+      "They are not visible in this version. The old data is kept and is no longer re-uploaded on every launch.",
+    "historyImport.notice.view": "View details",
+    "historyImport.notice.dismiss": "Dismiss",
+    "historyImport.notice.dismissTitle": "Dismiss this notice?",
+    "historyImport.notice.dismissDescription":
+      "These migration failures will no longer be announced. This cannot be undone. Settings keeps the list; a conversation that changes and fails again is announced anew.",
+    "historyImport.notice.dismissConfirm": "Dismiss permanently",
+    "historyImport.notice.cancel": "Cancel",
     "app.windowPinned": "Pinned",
     "app.windowPinnedHint": "Window is pinned above other apps. Click to unpin.",
     "app.settingsLoadFailed": "Failed to load settings. Default settings have been restored.",

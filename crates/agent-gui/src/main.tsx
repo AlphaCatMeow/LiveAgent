@@ -30,9 +30,12 @@ function renderBootstrapError(error: unknown, retry: () => void) {
 const bootstrap = createKBrainBootstrapRunner(async () => {
   try {
     await connectKBrainBackendWithRetry();
+    // Startup skips conversations that already failed deterministically with unchanged
+    // content; they are listed in Settings and in the app notice instead of re-uploaded.
     const migration = await migrateAllHistoryOnce();
-    if (migration.failures.length > 0) {
-      console.warn("Legacy history migration incomplete", migration.failures);
+    const newFailures = migration.failures.filter((failure) => !failure.skipped);
+    if (newFailures.length > 0) {
+      console.warn("Legacy history migration incomplete", newFailures);
     }
     const { default: App } = await import("./App");
     root.render(

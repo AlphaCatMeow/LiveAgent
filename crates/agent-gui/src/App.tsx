@@ -40,6 +40,7 @@ import { WindowsSettingsHeader } from "./components/WindowsSettingsHeader";
 import { WindowsTitleBar } from "./components/WindowsTitleBar";
 import { useAppUpdateController } from "./lib/appUpdates";
 import { isKBrainBrowserHost } from "./lib/host";
+import { HistoryMigrationNoticeBanner } from "./lib/kbrain/HistoryMigrationNoticeBanner";
 import { requestPlanning } from "./lib/planning/kbrain";
 import { TimeZoneNoticeBanner } from "./lib/planning/TimeZoneNoticeBanner";
 import { setRetryErrorExtension } from "./lib/providers/runtime/streamRetry";
@@ -799,7 +800,14 @@ export default function App() {
   return (
     <LocaleContext.Provider value={localeContextValue}>
       <Toaster />
-      <AppChrome notice={<TimeZoneNoticeBanner onOpenSettings={() => openSettings("system")} />}>
+      <AppChrome
+        notice={
+          <>
+            <HistoryMigrationNoticeBanner onOpenSettings={() => openSettings("system")} />
+            <TimeZoneNoticeBanner onOpenSettings={() => openSettings("system")} />
+          </>
+        }
+      >
         {backgroundHostsReady ? (
           <Suspense fallback={null}>
             <CronPromptRunner settings={settings} />

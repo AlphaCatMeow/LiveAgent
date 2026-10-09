@@ -36,7 +36,8 @@ export function importOldConversations(): Promise<void> {
   update({ running: true });
   pending = (async () => {
     try {
-      const result = await migrateAllHistoryOnce();
+      // An explicit user action retries everything, including known oversized/conflicting ones.
+      const result = await migrateAllHistoryOnce({ retryKnownFailures: true });
       update({ running: false, result });
       if (result.results.length) for (const listener of importedListeners) listener();
     } catch (error) {

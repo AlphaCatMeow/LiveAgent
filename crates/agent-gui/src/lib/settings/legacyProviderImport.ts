@@ -8,6 +8,13 @@ import type { CustomProvider } from "@liveagent/ui/lib/settings/types";
  * user edits that provider (different fingerprint) it becomes eligible for import again.
  */
 export const LEGACY_PROVIDER_IMPORT_STORAGE_KEY = "liveagent.kbrain-legacy-provider-import.v1";
+/**
+ * Rejections the user chose to ignore from the settings banner. Dismissal is permanent: a
+ * dismissed record (same provider id and config fingerprint) is never shown again, and the
+ * "retry import" action does not resurrect it.
+ */
+export const LEGACY_PROVIDER_IMPORT_DISMISSED_STORAGE_KEY =
+  "liveagent.kbrain-legacy-provider-import-dismissed.v1";
 
 export type RejectedLegacyProvider = {
   id: string;
@@ -115,19 +122,67 @@ export function nextRejectedLegacyProviders(
   return [...byId.values()].sort((left, right) => left.id.localeCompare(right.id));
 }
 
+function dismissalKey(entry: Pick<RejectedLegacyProvider, "id" | "fingerprint">): string {
+  return `${entry.id}:${entry.fingerprint}`;
+}
+
+export function readDismissedLegacyProviderKeys(
+  storage: Storage | null = defaultStorage(),
+): Set<string> {
+  if (!storage) return new Set();
+  try {
+    const raw = storage.getItem(LEGACY_PROVIDER_IMPORT_DISMISSED_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return new Set(Array.isArray(parsed) ? parsed.filter((key) => typeof key === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/** Rejections still worth showing: everything the user has not dismissed. */
+export function visibleRejectedLegacyProviders(
+  entries: readonly RejectedLegacyProvider[],
+  dismissed: ReadonlySet<string>,
+): RejectedLegacyProvider[] {
+  return entries.filter((entry) => !dismissed.has(dismissalKey(entry)));
+}
+
 type Listener = (entries: RejectedLegacyProvider[]) => void;
 
 let cached: RejectedLegacyProvider[] = [];
 const listeners = new Set<Listener>();
 
-/** Latest snapshot for the settings UI; empty until the first settings load. */
+/** Latest snapshot for the settings UI (dismissed entries excluded). */
 export function rejectedLegacyProviders(): RejectedLegacyProvider[] {
   return cached;
 }
 
 function publish(entries: RejectedLegacyProvider[]): void {
-  cached = entries;
-  for (const listener of listeners) listener(entries);
+  cached = visibleRejectedLegacyProviders(entries, readDismissedLegacyProviderKeys());
+  for (const listener of listeners) listener(cached);
+}
+
+/**
+ * Permanently ignores the given rejections. Irreversible by design: there is no API to undo it,
+ * and the banner never shows these records again (a later config edit yields a new fingerprint
+ * and therefore a new, visible record).
+ */
+export function dismissRejectedLegacyProviders(
+  entries: readonly Pick<RejectedLegacyProvider, "id" | "fingerprint">[],
+  storage: Storage | null = defaultStorage(),
+): void {
+  const keys = readDismissedLegacyProviderKeys(storage);
+  for (const entry of entries) keys.add(dismissalKey(entry));
+  if (storage) {
+    try {
+      storage.setItem(LEGACY_PROVIDER_IMPORT_DISMISSED_STORAGE_KEY, JSON.stringify([...keys]));
+    } catch {
+      // Best effort; the in-memory snapshot below still hides the banner for this session.
+    }
+  }
+  const dismissed = new Set(keys);
+  cached = cached.filter((entry) => !dismissed.has(dismissalKey(entry)));
+  for (const listener of listeners) listener(cached);
 }
 
 export function subscribeRejectedLegacyProviders(listener: Listener): () => void {

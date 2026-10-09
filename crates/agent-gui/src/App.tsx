@@ -60,6 +60,7 @@ import { mergeBackendOwnedSettings } from "./lib/settings/backendOwnedMerge";
 import { getSettingsErrorMessage, SettingsStorageError } from "./lib/settings/errors";
 import {
   clearRejectedLegacyProviders,
+  dismissRejectedLegacyProviders,
   rejectedLegacyProviders,
   subscribeRejectedLegacyProviders,
 } from "./lib/settings/legacyProviderImport";
@@ -564,6 +565,10 @@ export default function App() {
     }
   }, [setSettings]);
 
+  const dismissRejectedLegacyProviderNotice = useCallback(() => {
+    dismissRejectedLegacyProviders(rejectedLegacyProviders());
+  }, []);
+
   // Authoritative live read for tool write paths: settingsRef is updated
   // synchronously by setSettings, so read-modify-write sequences that stay in
   // one synchronous segment can never observe a stale snapshot.
@@ -882,6 +887,7 @@ export default function App() {
                     reloadSettings={reloadPersistedSettings}
                     rejectedLegacyProviders={rejectedLegacyProviderEntries}
                     onRetryRejectedLegacyProviders={retryRejectedLegacyProviderImport}
+                    onDismissRejectedLegacyProviders={dismissRejectedLegacyProviderNotice}
                   />
                 </Suspense>
               </AppErrorBoundary>

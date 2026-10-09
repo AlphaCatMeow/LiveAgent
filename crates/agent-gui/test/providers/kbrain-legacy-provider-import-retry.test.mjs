@@ -87,3 +87,28 @@ test("the settings load path publishes rejections and never re-imports them", ()
   assert.match(source, /refreshRejectedLegacyProviders\(\)/);
   assert.match(source, /nextRejectedLegacyProviders\(/);
 });
+
+test("dismissed rejections stay hidden, retry does not bring them back", () => {
+  const storage = memoryStorage();
+  const target = provider("p1", "中转 A");
+  const entry = { id: "p1", name: "中转 A", fingerprint: mod.legacyProviderFingerprint(target), reason: "r", rejectedAt: 1 };
+  mod.dismissRejectedLegacyProviders([entry], storage);
+  const dismissed = mod.readDismissedLegacyProviderKeys(storage);
+  assert.deepEqual(mod.visibleRejectedLegacyProviders([entry], dismissed), []);
+  // "retry" only clears the rejection list; the dismissal key survives.
+  mod.writeRejectedLegacyProviders([], storage);
+  assert.equal(mod.readDismissedLegacyProviderKeys(storage).size, 1);
+});
+
+test("a config edit after dismissal shows a new notice", () => {
+  const storage = memoryStorage();
+  const before = provider("p1", "中转 A");
+  const after = provider("p1", "中转 A", { baseUrl: "https://changed.test/v1" });
+  mod.dismissRejectedLegacyProviders(
+    [{ id: "p1", fingerprint: mod.legacyProviderFingerprint(before) }],
+    storage,
+  );
+  const fresh = { id: "p1", name: "中转 A", fingerprint: mod.legacyProviderFingerprint(after), reason: "r", rejectedAt: 2 };
+  const dismissed = mod.readDismissedLegacyProviderKeys(storage);
+  assert.deepEqual(mod.visibleRejectedLegacyProviders([fresh], dismissed), [fresh]);
+});

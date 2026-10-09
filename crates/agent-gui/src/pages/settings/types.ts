@@ -46,6 +46,8 @@ export type SettingsPageProps = {
   rejectedLegacyProviders?: SettingsRejectedLegacyProvider[];
   /** 用户点击“重试导入”时调用。 */
   onRetryRejectedLegacyProviders?: () => void | Promise<void>;
+  /** 用户确认关闭提示后调用；关闭不可撤销。 */
+  onDismissRejectedLegacyProviders?: () => void;
 };
 
 /** 一条旧供应商导入失败的本地记录（与 agent-gui 的持久化结构一致）。 */

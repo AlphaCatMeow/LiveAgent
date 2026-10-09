@@ -51,6 +51,7 @@ export function SettingsPage(props: SettingsPageProps) {
     onSttProviderChange,
     rejectedLegacyProviders,
     onRetryRejectedLegacyProviders,
+    onDismissRejectedLegacyProviders,
   } = props;
   const [pendingProviderId, setPendingProviderId] = useState(initialProviderId);
   const [sttSelectedProvider, setSttSelectedProvider] = useState<SttProviderId>(
@@ -105,6 +106,7 @@ export function SettingsPage(props: SettingsPageProps) {
             onInitialProviderHandled={() => setPendingProviderId(undefined)}
             rejectedLegacyProviders={rejectedLegacyProviders}
             onRetryRejectedLegacyProviders={onRetryRejectedLegacyProviders}
+            onDismissRejectedLegacyProviders={onDismissRejectedLegacyProviders}
           />
         ),
       },

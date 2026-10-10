@@ -10,13 +10,6 @@
  * legacy conversation changes, the record no longer matches and startup retries it.
  */
 
-/**
- * K-brain caps every JSON request body at 4 MiB (`maxBodyBytes`,
- * K-brain `internal/backend/server.go`). Oversized bodies are cut off mid-read, which the
- * WebView only reports as `TypeError: Failed to fetch`. Keep in sync with K-brain.
- */
-export const KBRAIN_REQUEST_BODY_LIMIT_BYTES = 4 << 20;
-
 export type HistoryMigrationFailureKind =
   /** Request body exceeds K-brain's limit; needs K-brain to accept larger imports. */
   | "too_large"
@@ -53,15 +46,11 @@ export function classifyHistoryMigrationFailure(input: {
   message: string;
   bytes?: number;
 }): HistoryMigrationFailureKind {
-  const { status, bytes } = input;
+  const { status } = input;
   if (status === 413) return "too_large";
   if (status === 409) return "conflict";
-  if (typeof status === "number" && status >= 400 && status < 500) return "rejected";
-  // No HTTP status: the connection was dropped. An oversized body is the only
-  // deterministic cause; anything else may be a passing backend restart.
-  if (status === undefined && bytes !== undefined && bytes > KBRAIN_REQUEST_BODY_LIMIT_BYTES) {
-    return "too_large";
-  }
+  if (status === 400 || status === 422) return "rejected";
+  // Network errors and authentication/rate-limit failures can recover without payload changes.
   return "transient";
 }
 
@@ -71,7 +60,7 @@ export function isDeterministicHistoryMigrationFailure(kind: HistoryMigrationFai
 }
 
 function recordsKey(scope: string) {
-  return `liveagent.kbrain-history-migration-failures.v1:${scope}`;
+  return `liveagent.kbrain-history-migration-failures.v2:${scope}`;
 }
 
 function dismissedKey(scope: string) {

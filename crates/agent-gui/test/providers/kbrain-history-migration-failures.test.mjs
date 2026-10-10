@@ -53,9 +53,9 @@ function page(id = "big-one", text = "old question") {
 }
 
 test("classification separates deterministic failures from transient ones", () => {
-  const limit = failures.KBRAIN_REQUEST_BODY_LIMIT_BYTES;
+  const limit = 4 << 20;
   const classify = failures.classifyHistoryMigrationFailure;
-  assert.equal(classify({ message: "Failed to fetch", bytes: limit + 1 }), "too_large");
+  assert.equal(classify({ message: "Failed to fetch", bytes: limit + 1 }), "transient");
   assert.equal(classify({ message: "Failed to fetch", bytes: limit - 1 }), "transient");
   assert.equal(classify({ message: "Failed to fetch" }), "transient");
   assert.equal(classify({ status: 413, message: "too big" }), "too_large");
@@ -102,14 +102,14 @@ test("startup skips a conversation that already failed for size; manual import r
     token: "",
     protocolVersion: "kbrain.agent.v1",
   });
-  // Big enough to exceed the 4 MiB body limit once serialized.
-  const bigPage = () => page("big-one", "x".repeat(failures.KBRAIN_REQUEST_BODY_LIMIT_BYTES));
+  // A payload supported by newer backends but rejected by older backends.
+  const bigPage = () => page("big-one", "x".repeat(4 << 20));
   let posts = 0;
   let accept = false;
   const fetch = async (_url, init) => {
     if (init.method === "POST") {
       posts++;
-      if (!accept) throw new TypeError("Failed to fetch");
+      if (!accept) return new Response(JSON.stringify({ error: "import too large" }), { status: 413 });
       return new Response(
         JSON.stringify({
           source_id: "big-one",
@@ -127,7 +127,7 @@ test("startup skips a conversation that already failed for size; manual import r
     const first = await migration.migrateLegacyHistoryPage(bigPage(), { fetch });
     assert.equal(posts, 1);
     assert.equal(first.failures[0].kind, "too_large");
-    assert.ok(first.failures[0].bytes > failures.KBRAIN_REQUEST_BODY_LIMIT_BYTES);
+    assert.ok(first.failures[0].bytes > (4 << 20));
 
     // Next launch: same content, no re-upload, but still reported (as skipped).
     const second = await migration.migrateLegacyHistoryPage(bigPage(), { fetch });
@@ -167,8 +167,8 @@ test("a transient failure is retried on the next launch", async () => {
     return new Response("{}", { status: 404 });
   };
   try {
-    await migration.migrateLegacyHistoryPage(page("small"), { fetch });
-    await migration.migrateLegacyHistoryPage(page("small"), { fetch });
+    await migration.migrateLegacyHistoryPage(page("large-transient", "x".repeat(5 << 20)), { fetch });
+    await migration.migrateLegacyHistoryPage(page("large-transient", "x".repeat(5 << 20)), { fetch });
     assert.equal(posts, 2);
   } finally {
     runtime.clearKBrainRuntimeConnection();
@@ -184,3 +184,16 @@ test("only the import POST can produce a deterministic failure record", async ()
   assert.match(source, /importAttempted = true;\s+const result = await client\.importLegacyHistory/);
   assert.match(source, /const kind = importAttempted\s+\? classifyHistoryMigrationFailure/);
 });
+
+ test("recoverable HTTP failures are not cached as permanent rejection", () => {
+  for (const status of [401, 403, 404, 408, 425, 429, 502, 503]) {
+    assert.equal(failures.classifyHistoryMigrationFailure({ status, message: "retry", bytes: 5 << 20 }), "transient");
+  }
+ });
+ test("old size-inferred failures do not suppress migration after upgrade", () => {
+  const storage = memoryStorage();
+  storage.setItem("liveagent.kbrain-history-migration-failures.v1:upgrade", JSON.stringify([
+    { sourceId: "old", fingerprint: "f", kind: "too_large", message: "Failed to fetch" },
+  ]));
+  assert.deepEqual(failures.readHistoryMigrationFailures("upgrade", storage), []);
+ });

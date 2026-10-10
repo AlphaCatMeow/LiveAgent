@@ -26,7 +26,7 @@ export const GUI_TRANSLATION_OVERRIDES: Record<Locale, Record<string, string>> =
     "historyImport.failures": "查看失败详情（可再次点击导入重试）",
     "historyImport.failedList": "{count} 条旧对话没能迁移",
     "historyImport.reason.too_large":
-      "对话太大：超过 K-brain 单次导入的 4 MB 上限。需要等 K-brain 支持分批导入，届时点「导入旧版对话」重试。",
+      "对话超过当前 K-brain 的单次导入大小限制。升级后端后，可点「导入旧版对话」重试。",
     "historyImport.reason.conflict": "K-brain 里已有同一条对话，但内容不一样，K-brain 拒绝覆盖。",
     "historyImport.reason.rejected": "K-brain 认为这条对话的数据无效，拒绝导入。",
     "historyImport.reason.transient": "连接中断或后端出错，下次启动会自动重试。",
@@ -348,7 +348,7 @@ export const GUI_TRANSLATION_OVERRIDES: Record<Locale, Record<string, string>> =
     "historyImport.failures": "View failures (click Import again to retry)",
     "historyImport.failedList": "{count} old conversation(s) could not be migrated",
     "historyImport.reason.too_large":
-      "Too large: exceeds K-brain's 4 MB single-import limit. Retry with Import old conversations once K-brain supports chunked imports.",
+      "The conversation exceeds the current K-brain import size limit. After upgrading the backend, retry with Import old conversations.",
     "historyImport.reason.conflict":
       "K-brain already holds this conversation with different content and refused to overwrite it.",
     "historyImport.reason.rejected": "K-brain rejected this conversation's data as invalid.",

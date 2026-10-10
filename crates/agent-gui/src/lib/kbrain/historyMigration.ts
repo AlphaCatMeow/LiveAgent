@@ -106,7 +106,48 @@ export type HistoryMigrationOptions = {
    * Startup leaves this off; the manual "Import old conversations" action turns it on.
    */
   retryKnownFailures?: boolean;
+  /** Shared across pages so one migration pass lists K-brain sessions at most once. */
+  sessionExists?: (backendId: string) => Promise<boolean>;
 };
+
+type ExistenceClient = Pick<ReturnType<typeof createKBrainClient>, "listSessions" | "getSession">;
+
+/**
+ * Existence check for cached migration results. Looking a session up by id makes K-brain read
+ * and parse its whole transcript (one ~10 MB conversation took ~1.2 s), and startup checked
+ * every cached conversation that way. One paged listing answers the common case instead; a
+ * session missing from the listing (or a listing that fails) is still confirmed by id, so a
+ * listing gap can never trigger a re-upload and only a real 404 does.
+ */
+export function createSessionExistenceCheck(client: ExistenceClient, signal?: AbortSignal) {
+  let listed: Promise<Set<string> | null> | undefined;
+  const list = () => {
+    listed ??= (async () => {
+      try {
+        const ids = new Set<string>();
+        for (let page = 1; page <= 1000; page += 1) {
+          const result = await client.listSessions({ page, pageSize: 200 });
+          for (const session of result.sessions) ids.add(session.id);
+          if (result.sessions.length === 0 || ids.size >= result.total_count) break;
+        }
+        return ids;
+      } catch {
+        return null;
+      }
+    })();
+    return listed;
+  };
+  return async (backendId: string) => {
+    if ((await list())?.has(backendId)) return true;
+    try {
+      await client.getSession(backendId, signal);
+      return true;
+    } catch (error) {
+      if (historyErrorStatus(error) !== 404) throw error;
+      return false;
+    }
+  };
+}
 
 function modelFor(item: LegacyConversation): KBrainModelRef {
   try {
@@ -327,8 +368,17 @@ function writeMigrationCache(baseUrl: string, cache: Record<string, CachedMigrat
   }
 }
 
+// A result that re-sending the same payload cannot change, so it can be cached by fingerprint.
+// "partial" is computed by K-brain purely from the payload (missing blobs, invalid ledger lines,
+// directory markers, turns without a message), so an unchanged conversation stays partial; the
+// fingerprint covers the checkpoint export, so new artifacts produce a new fingerprint and a
+// fresh import. "unresolved" stays retryable: the export may not have been readable yet.
 function isStableMigrationResult(result: MigrationImportResult) {
-  return result.checkpoint === "available" || result.checkpoint === "not_found";
+  return (
+    result.checkpoint === "available" ||
+    result.checkpoint === "not_found" ||
+    result.checkpoint === "partial"
+  );
 }
 
 export function historyErrorStatus(error: unknown): number | undefined {
@@ -351,6 +401,8 @@ export async function migrateLegacyHistoryPage(
   });
   const results: MigrationImportResult[] = [];
   const failures: MigrationFailure[] = [];
+  const sessionExists =
+    options.sessionExists ?? createSessionExistenceCheck(client, options.signal);
   const scope = kBrainStorageScope();
   const cache = readMigrationCache(scope);
   let cacheChanged = false;
@@ -383,15 +435,13 @@ export async function migrateLegacyHistoryPage(
         continue;
       }
       const cached = cache[item.id];
-      if (cached?.fingerprint === sourceFingerprint && isStableMigrationResult(cached.result)) {
-        let exists = true;
-        try {
-          await client.getSession(cached.result.backend_id, options.signal);
-        } catch (error) {
-          if (historyErrorStatus(error) !== 404) throw error;
-          exists = false;
-        }
-        if (exists) {
+      // The manual "Import old conversations" action re-sends partial results on purpose.
+      const reusable =
+        cached?.fingerprint === sourceFingerprint &&
+        isStableMigrationResult(cached.result) &&
+        !(options.retryKnownFailures && cached.result.checkpoint === "partial");
+      if (cached && reusable) {
+        if (await sessionExists(cached.result.backend_id)) {
           const cachedResult: MigrationImportResult = {
             ...cached.result,
             status: "already_imported",
@@ -608,9 +658,15 @@ export async function migratePiHistoryOnce(options: HistoryMigrationOptions = {}
 }
 
 export async function migrateAllHistoryOnce(options: HistoryMigrationOptions = {}) {
+  const shared: HistoryMigrationOptions = {
+    ...options,
+    sessionExists:
+      options.sessionExists ??
+      createSessionExistenceCheck(createKBrainClient({ fetch: options.fetch }), options.signal),
+  };
   const [legacy, pi] = await Promise.all([
-    migrateLegacyHistoryOnce(options),
-    migratePiHistoryOnce(options),
+    migrateLegacyHistoryOnce(shared),
+    migratePiHistoryOnce(shared),
   ]);
   return {
     results: [...legacy.results, ...pi.results],

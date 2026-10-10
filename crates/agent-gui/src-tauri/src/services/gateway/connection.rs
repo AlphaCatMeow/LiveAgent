@@ -628,7 +628,7 @@ impl GatewayController {
             .lock()
             .map_err(|_| "gateway outbound sender lock poisoned".to_string())?
             .clone()
-            .ok_or_else(|| "gateway outbound stream is offline".to_string())
+            .ok_or_else(|| GATEWAY_OUTBOUND_OFFLINE_ERROR.to_string())
     }
 
     pub(crate) fn current_outbound_control_sender(&self) -> Result<GatewayOutboundSender, String> {
@@ -877,6 +877,18 @@ pub(crate) fn ensure_rustls_crypto_provider() {
 
 pub(crate) fn is_remote_configured(config: &RemoteSettingsPayload) -> bool {
     !config.gateway_url.trim().is_empty() && !config.token.trim().is_empty()
+}
+
+pub(crate) const GATEWAY_OUTBOUND_OFFLINE_ERROR: &str = "gateway outbound stream is offline";
+
+/// Best-effort publishes (queue snapshots, runtime status) have nothing to
+/// deliver while the Gateway is disabled or disconnected; that is the normal
+/// state, not a failure. Real send errors still propagate.
+pub(crate) fn ignore_gateway_outbound_offline(result: Result<(), String>) -> Result<(), String> {
+    match result {
+        Err(error) if error == GATEWAY_OUTBOUND_OFFLINE_ERROR => Ok(()),
+        other => other,
+    }
 }
 
 pub(crate) fn effective_agent_id(config: &RemoteSettingsPayload) -> Result<String, String> {

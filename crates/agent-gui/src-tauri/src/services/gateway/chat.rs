@@ -398,18 +398,26 @@ impl GatewayController {
         &self,
         input: GatewayChatQueueEventInput,
     ) -> Result<(), String> {
-        self.send_agent_envelope(proto::AgentEnvelope {
-            request_id: format!("chat-queue-event-{}", Uuid::new_v4()),
-            timestamp: now_unix_seconds(),
-            payload: Some(proto::agent_envelope::Payload::ChatQueueEvent(
-                proto::ChatQueueEvent {
-                    conversation_id: input.conversation_id,
-                    snapshot_json: input.snapshot_json,
-                    revision: input.revision,
-                },
-            )),
-        })
-        .await
+        let result = self
+            .send_agent_envelope(build_chat_queue_event_envelope(input))
+            .await;
+        ignore_gateway_outbound_offline(result)
+    }
+}
+
+pub(crate) fn build_chat_queue_event_envelope(
+    input: GatewayChatQueueEventInput,
+) -> proto::AgentEnvelope {
+    proto::AgentEnvelope {
+        request_id: format!("chat-queue-event-{}", Uuid::new_v4()),
+        timestamp: now_unix_seconds(),
+        payload: Some(proto::agent_envelope::Payload::ChatQueueEvent(
+            proto::ChatQueueEvent {
+                conversation_id: input.conversation_id,
+                snapshot_json: input.snapshot_json,
+                revision: input.revision,
+            },
+        )),
     }
 }
 

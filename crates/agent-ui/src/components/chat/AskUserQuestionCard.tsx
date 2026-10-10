@@ -113,7 +113,7 @@ export function AskUserQuestionCard({
 
   const isSettled = (answers?.length ?? 0) > 0;
   const selections = isSettled ? settledSelections : draftSelections;
-  const countdownActive = interactive && !isSettled && !cancelled;
+  const countdownActive = interactive && !isSettled && !cancelled && !timedOut;
   const remainingMs = useAnswerCountdown(countdownActive, deadlineAt);
   const countdownExpired = countdownActive && remainingMs <= 0;
   const canInteract = countdownActive && remainingMs > 0 && !submitting;
@@ -444,8 +444,15 @@ export function AskUserQuestionCard({
             <span className="text-right text-xs leading-1p35 text-muted-foreground/70">
               {t("chat.askUser.cancelled")}
             </span>
+          ) : timedOut && !isSettled ? (
+            // K-brain no longer picks an option on timeout, so a timed-out card can carry no
+            // answers; it is finished all the same and must say nothing was chosen.
+            <span className="text-right text-xs leading-1p35 text-amber-600 dark:text-amber-400">
+              {t("chat.askUser.timedOutNoSelection")}
+            </span>
           ) : isSettled ? (
             timedOut ? (
+              // Older backends and the local tool still auto-select on timeout.
               <span className="text-right text-xs leading-1p35 text-amber-600 dark:text-amber-400">
                 {t("chat.askUser.timedOut")}
               </span>

@@ -756,6 +756,7 @@ export const EN_US_COMMON_TRANSLATIONS = {
   "chat.askUser.answered": "Answers submitted",
   "chat.askUser.cancelled": "This question was cancelled without an answer.",
   "chat.askUser.submitFailed": "Submit failed. Please retry.",
+  "chat.askUser.timedOutNoSelection": "Timed out — no option was selected",
   "chat.askUser.timedOut": "Timed out — continued with the recommended options",
   "chat.askUser.timeoutHint": "until the recommended options are auto-selected",
   "chat.planMode.cardTitle": "Implementation plan",

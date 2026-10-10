@@ -707,6 +707,7 @@ export const ZH_CN_COMMON_TRANSLATIONS = {
   "chat.askUser.answered": "已提交回答",
   "chat.askUser.cancelled": "本次提问已取消，未提交任何选择",
   "chat.askUser.submitFailed": "提交失败，请重试",
+  "chat.askUser.timedOutNoSelection": "应答超时，没有替你做选择",
   "chat.askUser.timedOut": "应答超时，已按推荐项继续执行",
   "chat.askUser.timeoutHint": "后自动选择推荐项",
   "chat.planMode.cardTitle": "实施计划",

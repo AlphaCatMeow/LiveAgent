@@ -1,13 +1,14 @@
 use super::{
-    attach_stt_secret_sync, build_gateway_runtime_status_envelope,
+    attach_stt_secret_sync, build_chat_queue_event_envelope, build_gateway_runtime_status_envelope,
     build_local_settings_update_event_payload, effective_agent_id,
     gateway_connection_needs_restart, gateway_connection_stale_after, gateway_reconnect_backoff,
-    history_share_resolve_error_code, is_chat_runtime_wake_request_id,
-    merge_settings_sync_snapshot, merge_settings_update_into_snapshot, proto,
-    removed_workspace_project_ids, required_terminal_project_path_key, set_disconnected_status,
+    history_share_resolve_error_code, ignore_gateway_outbound_offline,
+    is_chat_runtime_wake_request_id, merge_settings_sync_snapshot,
+    merge_settings_update_into_snapshot, proto, removed_workspace_project_ids,
+    required_terminal_project_path_key, set_disconnected_status, GatewayChatQueueEventInput,
     GatewayChatRequestEvent, GatewayController, GatewayStatusSnapshot, RemoteChatInboxRecord,
-    GATEWAY_CHAT_LEASE_MS, GATEWAY_CHAT_RUNNING_LEASE_MS, GATEWAY_RECONNECT_MAX,
-    GATEWAY_RECONNECT_MIN, GATEWAY_RECONNECT_STABLE_AFTER,
+    GATEWAY_CHAT_LEASE_MS, GATEWAY_CHAT_RUNNING_LEASE_MS, GATEWAY_OUTBOUND_OFFLINE_ERROR,
+    GATEWAY_RECONNECT_MAX, GATEWAY_RECONNECT_MIN, GATEWAY_RECONNECT_STABLE_AFTER,
     GATEWAY_RUNTIME_STATUS_REPUBLISH_MAX_AGE, GATEWAY_WEBVIEW_REPORT_FRESH_WINDOW,
 };
 use crate::commands::settings::RemoteSettingsPayload;
@@ -903,4 +904,46 @@ fn stalled_webview_status_refreshes_running_ledger_only_inside_grace_window() {
             now + GATEWAY_WEBVIEW_REPORT_FRESH_WINDOW + Duration::from_secs(1),
         )
     );
+}
+
+#[test]
+fn gateway_offline_is_ignored_for_best_effort_publishes() {
+    assert_eq!(
+        ignore_gateway_outbound_offline(Err(GATEWAY_OUTBOUND_OFFLINE_ERROR.to_string())),
+        Ok(())
+    );
+    assert_eq!(ignore_gateway_outbound_offline(Ok(())), Ok(()));
+}
+
+#[test]
+fn gateway_publish_keeps_real_send_failures() {
+    for error in [
+        "gateway outbound sender lock poisoned",
+        "gateway outbound control lane is offline",
+        "gateway outbound lane closed",
+    ] {
+        assert_eq!(
+            ignore_gateway_outbound_offline(Err(error.to_string())),
+            Err(error.to_string())
+        );
+    }
+}
+
+#[test]
+fn chat_queue_event_envelope_carries_snapshot() {
+    let envelope = build_chat_queue_event_envelope(GatewayChatQueueEventInput {
+        conversation_id: "conversation-1".to_string(),
+        snapshot_json: r#"{"items":[]}"#.to_string(),
+        revision: 7,
+    });
+
+    assert!(envelope.request_id.starts_with("chat-queue-event-"));
+    match envelope.payload {
+        Some(proto::agent_envelope::Payload::ChatQueueEvent(event)) => {
+            assert_eq!(event.conversation_id, "conversation-1");
+            assert_eq!(event.snapshot_json, r#"{"items":[]}"#);
+            assert_eq!(event.revision, 7);
+        }
+        other => panic!("unexpected payload: {other:?}"),
+    }
 }

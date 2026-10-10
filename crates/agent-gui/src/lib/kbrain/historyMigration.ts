@@ -2,6 +2,15 @@ import type { Message } from "@liveagent/app/lib/agentTypes";
 import { invoke } from "@liveagent/app/shims/tauriCore";
 import { isTauriHost } from "../host";
 import { createKBrainClient } from "./client";
+import {
+  classifyHistoryMigrationFailure,
+  type HistoryMigrationFailureKind,
+  type HistoryMigrationFailureRecord,
+  knownDeterministicFailure,
+  mergeHistoryMigrationFailures,
+  readHistoryMigrationFailures,
+  writeHistoryMigrationFailures,
+} from "./historyMigrationFailures";
 import { kBrainStorageScope, setKBrainSessionId } from "./mapping";
 import { getConfiguredKBrainConnection } from "./runtimeConnection";
 import { contextToKBrainMessages } from "./turn";
@@ -78,7 +87,26 @@ export type MigrationImportResult = {
   checkpoint: "available" | "partial" | "not_found" | "unresolved";
   checkpoint_reason?: string;
 };
-export type MigrationFailure = { sourceId: string; error: string };
+export type MigrationFailure = {
+  sourceId: string;
+  error: string;
+  /** Present for per-conversation failures; absent for source-level paging errors. */
+  kind?: HistoryMigrationFailureKind;
+  title?: string;
+  bytes?: number;
+  /** True when startup skipped it because the same content already failed deterministically. */
+  skipped?: boolean;
+};
+
+export type HistoryMigrationOptions = {
+  fetch?: typeof globalThis.fetch;
+  signal?: AbortSignal;
+  /**
+   * Re-send conversations that already failed deterministically with unchanged content.
+   * Startup leaves this off; the manual "Import old conversations" action turns it on.
+   */
+  retryKnownFailures?: boolean;
+};
 
 function modelFor(item: LegacyConversation): KBrainModelRef {
   try {
@@ -309,7 +337,7 @@ export function historyErrorStatus(error: unknown): number | undefined {
 
 export async function migrateLegacyHistoryPage(
   page: LegacyPage,
-  options: { fetch?: typeof globalThis.fetch; signal?: AbortSignal } = {},
+  options: HistoryMigrationOptions = {},
 ): Promise<{
   results: MigrationImportResult[];
   failures: MigrationFailure[];
@@ -326,11 +354,34 @@ export async function migrateLegacyHistoryPage(
   const scope = kBrainStorageScope();
   const cache = readMigrationCache(scope);
   let cacheChanged = false;
+  const knownFailures = readHistoryMigrationFailures(scope);
+  const failedRecords: HistoryMigrationFailureRecord[] = [];
+  const succeededIds: string[] = [];
   for (const item of page.conversations) {
+    let sourceFingerprint = "";
+    let bodyBytes: number | undefined;
+    // Only the import POST speaks for the payload; earlier existence checks (GET) failing
+    // with 401/403/500 say nothing about whether this conversation can ever be imported.
+    let importAttempted = false;
     try {
       validateCheckpointExport(item.checkpoint);
       const messages = canonicalMessagesForMigration(item);
-      const sourceFingerprint = await fingerprint({ item, messages });
+      sourceFingerprint = await fingerprint({ item, messages });
+      const known = options.retryKnownFailures
+        ? undefined
+        : knownDeterministicFailure(knownFailures, item.id, sourceFingerprint);
+      if (known) {
+        // Same content failed the same way before; re-sending would only fail again.
+        failures.push({
+          sourceId: item.id,
+          error: known.message,
+          kind: known.kind,
+          title: known.title,
+          bytes: known.bytes,
+          skipped: true,
+        });
+        continue;
+      }
       const cached = cache[item.id];
       if (cached?.fingerprint === sourceFingerprint && isStableMigrationResult(cached.result)) {
         let exists = true;
@@ -398,6 +449,8 @@ export async function migrateLegacyHistoryPage(
           },
         },
       };
+      bodyBytes = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+      importAttempted = true;
       const result = await client.importLegacyHistory(payload, options.signal);
       if (
         result.source_id !== item.id ||
@@ -411,17 +464,53 @@ export async function migrateLegacyHistoryPage(
         cache[item.id] = { fingerprint: sourceFingerprint, result };
         cacheChanged = true;
       }
+      succeededIds.push(item.id);
       results.push(result);
     } catch (error) {
+      const status = historyErrorStatus(error);
       // The backend persists deletion intent across restarts and clients.
-      if (historyErrorStatus(error) === 410) continue;
+      if (status === 410) {
+        succeededIds.push(item.id);
+        continue;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      const kind = importAttempted
+        ? classifyHistoryMigrationFailure({
+            status: Number.isFinite(status) ? status : undefined,
+            message,
+            bytes: bodyBytes,
+          })
+        : "transient";
       failures.push({
         sourceId: item.id,
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
+        kind,
+        title: item.title,
+        bytes: bodyBytes,
       });
+      if (sourceFingerprint) {
+        failedRecords.push({
+          sourceId: item.id,
+          title: item.title,
+          fingerprint: sourceFingerprint,
+          kind,
+          bytes: bodyBytes,
+          message,
+          failedAt: Date.now(),
+        });
+      }
     }
   }
   if (cacheChanged) writeMigrationCache(scope, cache);
+  if (failedRecords.length > 0 || succeededIds.length > 0) {
+    writeHistoryMigrationFailures(
+      scope,
+      mergeHistoryMigrationFailures(readHistoryMigrationFailures(scope), {
+        succeeded: succeededIds,
+        failed: failedRecords,
+      }),
+    );
+  }
   return {
     results,
     failures,
@@ -475,7 +564,7 @@ export async function recoverLegacyHistory(id: string): Promise<boolean> {
 
 async function migrateHistorySourceOnce(
   command: "legacy_history_migration_page" | "pi_history_migration_page",
-  options: { fetch?: typeof globalThis.fetch; signal?: AbortSignal } = {},
+  options: HistoryMigrationOptions = {},
 ) {
   if (!isTauriHost() || !getConfiguredKBrainConnection()) {
     return { results: [], failures: [], complete: true };
@@ -510,21 +599,15 @@ async function migrateHistorySourceOnce(
   };
 }
 
-export async function migrateLegacyHistoryOnce(
-  options: { fetch?: typeof globalThis.fetch; signal?: AbortSignal } = {},
-) {
+export async function migrateLegacyHistoryOnce(options: HistoryMigrationOptions = {}) {
   return migrateHistorySourceOnce("legacy_history_migration_page", options);
 }
 
-export async function migratePiHistoryOnce(
-  options: { fetch?: typeof globalThis.fetch; signal?: AbortSignal } = {},
-) {
+export async function migratePiHistoryOnce(options: HistoryMigrationOptions = {}) {
   return migrateHistorySourceOnce("pi_history_migration_page", options);
 }
 
-export async function migrateAllHistoryOnce(
-  options: { fetch?: typeof globalThis.fetch; signal?: AbortSignal } = {},
-) {
+export async function migrateAllHistoryOnce(options: HistoryMigrationOptions = {}) {
   const [legacy, pi] = await Promise.all([
     migrateLegacyHistoryOnce(options),
     migratePiHistoryOnce(options),

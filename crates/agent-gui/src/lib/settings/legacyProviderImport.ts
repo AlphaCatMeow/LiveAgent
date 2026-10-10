@@ -1,4 +1,6 @@
 import type { CustomProvider } from "@liveagent/ui/lib/settings/types";
+import { kBrainStorageScope } from "../kbrain/mapping";
+import { getConfiguredKBrainConnection } from "../kbrain/runtimeConnection";
 
 /**
  * Remembers legacy providers K-brain rejected during import, so a provider that can never be
@@ -7,7 +9,7 @@ import type { CustomProvider } from "@liveagent/ui/lib/settings/types";
  * A record is keyed by provider id and stores a fingerprint of the provider config. When the
  * user edits that provider (different fingerprint) it becomes eligible for import again.
  */
-export const LEGACY_PROVIDER_IMPORT_STORAGE_KEY = "liveagent.kbrain-legacy-provider-import.v1";
+export const LEGACY_PROVIDER_IMPORT_STORAGE_KEY = "liveagent.kbrain-legacy-provider-import.v2";
 /**
  * Rejections the user chose to ignore from the settings banner. Dismissal is permanent: a
  * dismissed record (same provider id and config fingerprint) is never shown again, and the
@@ -15,6 +17,15 @@ export const LEGACY_PROVIDER_IMPORT_STORAGE_KEY = "liveagent.kbrain-legacy-provi
  */
 export const LEGACY_PROVIDER_IMPORT_DISMISSED_STORAGE_KEY =
   "liveagent.kbrain-legacy-provider-import-dismissed.v1";
+
+function scopedStorageKey(key: string): string {
+  return `${key}:${kBrainStorageScope(getConfiguredKBrainConnection()?.baseUrl)}`;
+}
+
+export function isPermanentLegacyProviderRejection(error: unknown): boolean {
+  const status = (error as { status?: unknown } | null)?.status;
+  return status === 400 || status === 409 || status === 413 || status === 422;
+}
 
 export type RejectedLegacyProvider = {
   id: string;
@@ -57,7 +68,7 @@ export function readRejectedLegacyProviders(
 ): RejectedLegacyProvider[] {
   if (!storage) return [];
   try {
-    const raw = storage.getItem(LEGACY_PROVIDER_IMPORT_STORAGE_KEY);
+    const raw = storage.getItem(scopedStorageKey(LEGACY_PROVIDER_IMPORT_STORAGE_KEY));
     const parsed = raw ? JSON.parse(raw) : null;
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(
@@ -78,7 +89,7 @@ export function writeRejectedLegacyProviders(
 ): void {
   if (!storage) return;
   try {
-    storage.setItem(LEGACY_PROVIDER_IMPORT_STORAGE_KEY, JSON.stringify(entries));
+    storage.setItem(scopedStorageKey(LEGACY_PROVIDER_IMPORT_STORAGE_KEY), JSON.stringify(entries));
   } catch {
     // Storage is a best-effort cache; failing to persist only means one more retry next launch.
   }
@@ -131,7 +142,7 @@ export function readDismissedLegacyProviderKeys(
 ): Set<string> {
   if (!storage) return new Set();
   try {
-    const raw = storage.getItem(LEGACY_PROVIDER_IMPORT_DISMISSED_STORAGE_KEY);
+    const raw = storage.getItem(scopedStorageKey(LEGACY_PROVIDER_IMPORT_DISMISSED_STORAGE_KEY));
     const parsed = raw ? JSON.parse(raw) : null;
     return new Set(Array.isArray(parsed) ? parsed.filter((key) => typeof key === "string") : []);
   } catch {
@@ -175,7 +186,10 @@ export function dismissRejectedLegacyProviders(
   for (const entry of entries) keys.add(dismissalKey(entry));
   if (storage) {
     try {
-      storage.setItem(LEGACY_PROVIDER_IMPORT_DISMISSED_STORAGE_KEY, JSON.stringify([...keys]));
+      storage.setItem(
+        scopedStorageKey(LEGACY_PROVIDER_IMPORT_DISMISSED_STORAGE_KEY),
+        JSON.stringify([...keys]),
+      );
     } catch {
       // Best effort; the in-memory snapshot below still hides the banner for this session.
     }

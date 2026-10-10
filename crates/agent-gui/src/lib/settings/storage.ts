@@ -45,6 +45,7 @@ import {
 } from "./index";
 import {
   clearRejectedLegacyProviders,
+  isPermanentLegacyProviderRejection,
   legacyProvidersToImport,
   nextRejectedLegacyProviders,
   readRejectedLegacyProviders,
@@ -478,11 +479,6 @@ export type PersistedSettingsLoadResult = {
   defaultWorkdir: string;
 };
 
-function isKBrainRejection(error: unknown): boolean {
-  const status = (error as { status?: unknown } | null)?.status;
-  return typeof status === "number" && status >= 400 && status < 500;
-}
-
 /** Re-runs the legacy import after the user asks for it from the settings UI. */
 export async function retryRejectedLegacyProviderImport(): Promise<void> {
   clearRejectedLegacyProviders();
@@ -581,8 +577,8 @@ async function loadAndMaybeImportLegacyKBrainProviders(
     return { document: imported, providers: appProvidersFromKBrain(imported) };
   } catch (batchError) {
     // Transient/backend failures keep surfacing (and retry on the next launch); only a
-    // validation rejection (4xx) means some legacy record can never be imported as-is.
-    if (!isKBrainRejection(batchError)) throw batchError;
+    // payload validation rejection means some legacy record can never be imported as-is.
+    if (!isPermanentLegacyProviderRejection(batchError)) throw batchError;
     console.warn("K-brain legacy provider import rejected; retrying per provider", batchError);
   }
   let document = backend;
@@ -593,7 +589,7 @@ async function loadAndMaybeImportLegacyKBrainProviders(
       document = await importProviders(providers, [legacy]);
       providers = appProvidersFromKBrain(document);
     } catch (error) {
-      if (!isKBrainRejection(error)) throw error;
+      if (!isPermanentLegacyProviderRejection(error)) throw error;
       rejectedNow.push({ provider: legacy, reason: kBrainRejectionReason(error) });
       console.warn(
         `Skipped legacy provider "${legacy.name || legacy.id}" during K-brain import`,

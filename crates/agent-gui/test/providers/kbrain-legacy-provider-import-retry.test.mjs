@@ -112,3 +112,36 @@ test("a config edit after dismissal shows a new notice", () => {
   const dismissed = mod.readDismissedLegacyProviderKeys(storage);
   assert.deepEqual(mod.visibleRejectedLegacyProviders([fresh], dismissed), [fresh]);
 });
+
+ test("authentication, timeout and rate limiting remain retryable", () => {
+  for (const status of [401, 403, 404, 408, 425, 429, 500, 503]) {
+    assert.equal(mod.isPermanentLegacyProviderRejection({ status }), false);
+  }
+  for (const status of [400, 409, 413, 422]) {
+    assert.equal(mod.isPermanentLegacyProviderRejection({ status }), true);
+  }
+ });
+ test("unscoped rejection records are retried after upgrading", () => {
+  const storage = memoryStorage();
+  storage.setItem("liveagent.kbrain-legacy-provider-import.v1", JSON.stringify([
+    { id: "p1", fingerprint: "old", reason: "429" },
+  ]));
+  assert.deepEqual(mod.readRejectedLegacyProviders(storage), []);
+ });
+
+test("rejections and dismissals are isolated by backend storage scope", () => {
+  let baseUrl = "http://backend-a.test";
+  const isolated = createTsModuleLoader({ mocks: {
+    "../kbrain/runtimeConnection": { getConfiguredKBrainConnection: () => ({ baseUrl }) },
+  } }).loadModule("src/lib/settings/legacyProviderImport.ts");
+  const storage = memoryStorage();
+  const record = { id: "p1", name: "A", fingerprint: "f", reason: "400", rejectedAt: 1 };
+  isolated.writeRejectedLegacyProviders([record], storage);
+  isolated.dismissRejectedLegacyProviders([record], storage);
+  baseUrl = "http://backend-b.test";
+  assert.deepEqual(isolated.readRejectedLegacyProviders(storage), []);
+  assert.equal(isolated.readDismissedLegacyProviderKeys(storage).size, 0);
+  baseUrl = "http://backend-a.test";
+  assert.equal(isolated.readRejectedLegacyProviders(storage).length, 1);
+  assert.equal(isolated.readDismissedLegacyProviderKeys(storage).size, 1);
+});

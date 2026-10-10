@@ -515,6 +515,15 @@ export const ZH_CN_SETTINGS_TRANSLATIONS = {
   "settings.toolBadgeBuiltin": "内置",
   "settings.toolBadgeCustom": "自定义",
   "settings.toolConditionalNote": "按条件注册",
+  "settings.legacyProviderImportFailed": "{count} 个旧供应商未能导入 K-brain",
+  "settings.legacyProviderImportFailedHint":
+    "这些供应商与已有供应商共用同名模型，但模型参数不一致，K-brain 拒绝了它们。它们的模型在当前版本中不可用；修改供应商配置后会自动重试。",
+  "settings.legacyProviderImportRetry": "重试导入",
+  "settings.legacyProviderImportDismiss": "关闭提示",
+  "settings.legacyProviderImportDismissTitle": "关闭这条提示？",
+  "settings.legacyProviderImportDismissDescription":
+    "关闭后会忽略这些供应商的导入失败，以后不再提示。此操作不可撤销。这些供应商仍然不会导入 K-brain；如果之后修改了它们的配置，系统会重新尝试导入。",
+  "settings.legacyProviderImportDismissConfirm": "关闭并不再提示",
   "settings.addProvider": "新增供应商",
   "settings.addProviderShort": "新增",
   "settings.importProviders": "导入",

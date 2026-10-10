@@ -59,6 +59,12 @@ import {
 import { mergeBackendOwnedSettings } from "./lib/settings/backendOwnedMerge";
 import { getSettingsErrorMessage, SettingsStorageError } from "./lib/settings/errors";
 import {
+  clearRejectedLegacyProviders,
+  dismissRejectedLegacyProviders,
+  rejectedLegacyProviders,
+  subscribeRejectedLegacyProviders,
+} from "./lib/settings/legacyProviderImport";
+import {
   loadPersistedSettingsWithDefaults,
   persistSettings,
   publishGatewaySettingsSync,
@@ -270,6 +276,7 @@ export default function App() {
   // crypto.randomUUID() inside caller updaters) twice per call.
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: Saved provider changes invalidate the temporary card selection.
   useEffect(() => {
     setSttProviderOverride(null);
@@ -541,6 +548,26 @@ export default function App() {
     },
     [queueSettingsSave],
   );
+
+  // 旧供应商导入失败的记录（K-brain 拒绝的），在供应商设置里可见；失败不阻塞设置加载。
+  const [rejectedLegacyProviderEntries, setRejectedLegacyProviderEntries] = useState(() =>
+    rejectedLegacyProviders(),
+  );
+  useEffect(() => subscribeRejectedLegacyProviders(setRejectedLegacyProviderEntries), []);
+
+  const retryRejectedLegacyProviderImport = useCallback(async () => {
+    clearRejectedLegacyProviders();
+    try {
+      const { settings: reloaded } = await loadPersistedSettingsWithDefaults();
+      setSettings(() => reloaded);
+    } catch (error) {
+      console.error("retry legacy provider import failed", error);
+    }
+  }, [setSettings]);
+
+  const dismissRejectedLegacyProviderNotice = useCallback(() => {
+    dismissRejectedLegacyProviders(rejectedLegacyProviders());
+  }, []);
 
   // Authoritative live read for tool write paths: settingsRef is updated
   // synchronously by setSettings, so read-modify-write sequences that stay in
@@ -858,6 +885,9 @@ export default function App() {
                     sttSettingsService={desktopSttSettingsService}
                     onSttProviderChange={setSttProviderOverride}
                     reloadSettings={reloadPersistedSettings}
+                    rejectedLegacyProviders={rejectedLegacyProviderEntries}
+                    onRetryRejectedLegacyProviders={retryRejectedLegacyProviderImport}
+                    onDismissRejectedLegacyProviders={dismissRejectedLegacyProviderNotice}
                   />
                 </Suspense>
               </AppErrorBoundary>

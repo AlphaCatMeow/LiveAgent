@@ -33,6 +33,9 @@ test("stable migration verifies existence, repairs only 404, and honors backend 
   let posts = 0;
   let gets = 0;
   const fetch = async (_url, init) => {
+    // The session listing is a separate existence source; an empty listing keeps every
+    // assertion below about the per-session lookup meaningful.
+    if (String(_url).includes("/v1/sessions?")) return new Response(JSON.stringify({ sessions: [], total_count: 0 }), { status: 200 });
     if (init.method === "POST") {
       posts++;
       if (deleted) return new Response(JSON.stringify({ error: "history was explicitly deleted" }), { status: 410 });
@@ -263,4 +266,36 @@ test("malformed checkpoint exports fail before transport", async () => {
     assert.match(result.failures[0].error, /invalid legacy checkpoint record/);
     assert.equal(result.complete, false);
   } finally { runtime.clearKBrainRuntimeConnection(); }
+});
+
+test("one session listing answers existence checks without a lookup per conversation", async () => {
+  const values = new Map();
+  globalThis.localStorage = { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, String(value)) };
+  runtime.setKBrainRuntimeConnection({ baseUrl: "http://migration-listing.test", token: "", protocolVersion: "kbrain.agent.v1" });
+  let posts = 0;
+  let listings = 0;
+  let lookups = 0;
+  const fetch = async (url, init) => {
+    if (String(url).includes("/v1/sessions?")) {
+      listings++;
+      return new Response(JSON.stringify({ sessions: [{ id: "recoverable" }], total_count: 1 }), { status: 200 });
+    }
+    if (init.method === "POST") {
+      posts++;
+      return new Response(JSON.stringify({ source_id: "recoverable", backend_id: "recoverable", status: "imported", checkpoint: "not_found", fingerprint: "fp" }), { status: 200 });
+    }
+    lookups++;
+    return new Response(JSON.stringify({ id: "recoverable" }), { status: 200 });
+  };
+  try {
+    await migration.migrateLegacyHistoryPage(stablePage(), { fetch });
+    assert.equal(posts, 1);
+    const again = await migration.migrateLegacyHistoryPage(stablePage(), { fetch });
+    assert.equal(again.results[0].status, "already_imported");
+    assert.equal(posts, 1);
+    assert.equal(lookups, 0);
+    assert.ok(listings >= 1);
+  } finally {
+    runtime.clearKBrainRuntimeConnection();
+  }
 });

@@ -197,3 +197,54 @@ test("only the import POST can produce a deterministic failure record", async ()
   ]));
   assert.deepEqual(failures.readHistoryMigrationFailures("upgrade", storage), []);
  });
+
+test("a partial checkpoint result is cached; startup stops re-uploading it, manual import still retries", async () => {
+  globalThis.localStorage = memoryStorage();
+  runtime.setKBrainRuntimeConnection({
+    baseUrl: "http://migration-partial.test",
+    token: "",
+    protocolVersion: "kbrain.agent.v1",
+  });
+  let posts = 0;
+  let checkpoint = "partial";
+  const fetch = async (_url, init) => {
+    if (init.method === "POST") {
+      posts++;
+      return new Response(
+        JSON.stringify({
+          source_id: "partial-one",
+          backend_id: "partial-one",
+          status: posts === 1 ? "imported" : "already_imported",
+          checkpoint,
+          fingerprint: "fp",
+        }),
+        { status: 200 },
+      );
+    }
+    return new Response(JSON.stringify({ id: "partial-one" }), { status: 200 });
+  };
+  try {
+    await migration.migrateLegacyHistoryPage(page("partial-one"), { fetch });
+    assert.equal(posts, 1);
+    // Next launch: same content, served from the cache after an existence check.
+    const again = await migration.migrateLegacyHistoryPage(page("partial-one"), { fetch });
+    assert.equal(posts, 1);
+    assert.equal(again.results[0].status, "already_imported");
+    assert.equal(again.results[0].checkpoint, "partial");
+    assert.equal(again.complete, false);
+    // Manual import re-sends it.
+    await migration.migrateLegacyHistoryPage(page("partial-one"), { fetch, retryKnownFailures: true });
+    assert.equal(posts, 2);
+    // Changed content means a new fingerprint and a fresh upload.
+    await migration.migrateLegacyHistoryPage(page("partial-one", "edited"), { fetch });
+    assert.equal(posts, 3);
+
+    // "unresolved" stays retryable on every launch.
+    checkpoint = "unresolved";
+    await migration.migrateLegacyHistoryPage(page("unresolved-one"), { fetch });
+    await migration.migrateLegacyHistoryPage(page("unresolved-one"), { fetch });
+    assert.equal(posts, 5);
+  } finally {
+    runtime.clearKBrainRuntimeConnection();
+  }
+});

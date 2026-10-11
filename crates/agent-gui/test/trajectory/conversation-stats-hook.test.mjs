@@ -426,3 +426,65 @@ test("liveOwnership 语义沿用轨迹视图：authoritative 空集收敛僵尸�
   );
   await web.unmount();
 });
+
+for (const failedCursor of [2, 1]) {
+  test(`刷新在游标 ${failedCursor} 失败时保留完整读数，下一版本成功后才替换`, async () => {
+    clearConversationStatsCache();
+    const pages = [turnEvents(1), turnEvents(2), turnEvents(3)];
+    let phase = "initial";
+    const calls = [];
+    const host = {
+      loadWindow: async (_id, cursor) => {
+        calls.push({ phase, cursor });
+        if (phase === "initial" || phase === "recovered" || phase === "empty") {
+          const events = phase === "initial" ? pages.flat() : phase === "recovered" ? pages[2] : [];
+          return { eventsJson: JSON.stringify(events), oldestSegmentIndex: 0, hasMoreBefore: false, truncated: false };
+        }
+        if (cursor === failedCursor) throw new Error("测试历史分页失败");
+        const index = cursor === undefined ? 2 : cursor - 1;
+        return { eventsJson: JSON.stringify(pages[index]), oldestSegmentIndex: index, hasMoreBefore: index > 0, truncated: false };
+      },
+    };
+    const probe = mountHook({ conversationId: `refresh-page-error-${failedCursor}`, host, liveEvents: [], enabled: true });
+    const warn = console.warn;
+    try {
+      await probe.mount(); await drain();
+      const previous = probe.seen.current.stats;
+      assert.equal(previous.turns, 3);
+      phase = "failed"; console.warn = () => {};
+      await probe.update({ authoritativeRevision: 1 }); await drain();
+      assert.equal(probe.seen.current.stats, previous, "分页错误不能用部分结果覆盖完整快照");
+      assert.equal(probe.seen.current.loading, false);
+      const callsAfterFailure = calls.length;
+      await probe.update({ liveEvents: [] }); await drain();
+      assert.equal(probe.seen.current.stats, previous);
+      assert.equal(calls.length, callsAfterFailure, "失败后不自动重试");
+      phase = "recovered";
+      await probe.update({ authoritativeRevision: 2 }); await drain();
+      assert.equal(probe.seen.current.stats.turns, 1, "成功刷新允许历史缩减");
+      assert.equal(probe.seen.current.stats.approximate, false);
+      phase = "empty";
+      await probe.update({ authoritativeRevision: 3 }); await drain();
+      assert.equal(probe.seen.current.stats, null, "成功空历史清空旧读数");
+    } finally { console.warn = warn; await probe.unmount(); }
+  });
+}
+
+test("首次加载后续分页失败时保留已有窗口并标为近似", async () => {
+  clearConversationStatsCache();
+  const host = {
+    loadWindow: async (_id, cursor) => {
+      if (cursor !== undefined) throw new Error("测试首次分页失败");
+      return { eventsJson: JSON.stringify(turnEvents(3)), oldestSegmentIndex: 2, hasMoreBefore: true, truncated: false };
+    },
+  };
+  const probe = mountHook({ conversationId: "initial-page-error", host, liveEvents: [], enabled: true });
+  const warn = console.warn;
+  try {
+    console.warn = () => {};
+    await probe.mount(); await drain();
+    assert.equal(probe.seen.current.stats.turns, 1);
+    assert.equal(probe.seen.current.stats.approximate, true);
+    assert.equal(probe.seen.current.loading, false);
+  } finally { console.warn = warn; await probe.unmount(); }
+});

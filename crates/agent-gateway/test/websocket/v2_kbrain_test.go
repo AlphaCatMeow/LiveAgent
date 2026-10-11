@@ -25,6 +25,8 @@ import (
 // client request suppression, disconnect, after_seq replay, and one terminal.
 func TestV2KBrainRelayBrowserReconnect(t *testing.T) {
 	firstEventWritten := make(chan struct{})
+	releaseFirstEvents := make(chan struct{})
+	var firstReleaseOnce sync.Once
 	releaseEvents := make(chan struct{})
 	eventsDone := make(chan struct{})
 	sseHandlerDone := make(chan struct{})
@@ -60,6 +62,12 @@ func TestV2KBrainRelayBrowserReconnect(t *testing.T) {
 			if !ok {
 				t.Fatal("K-brain test server does not support streaming flush")
 			}
+			// 提交确认收帧器会跳过无关帧，确认去重完成后才发送首批事件。
+			select {
+			case <-releaseFirstEvents:
+			case <-r.Context().Done():
+				return
+			}
 			_, _ = fmt.Fprint(w, "data: {\"version\":\"kbrain.agent.v1\",\"seq\":1,\"conversation_id\":\"session-ws\",\"run_id\":\"kb-run-ws\",\"type\":\"run.accepted\"}\n\n")
 			_, _ = fmt.Fprint(w, "data: {\"version\":\"kbrain.agent.v1\",\"seq\":2,\"conversation_id\":\"session-ws\",\"run_id\":\"kb-run-ws\",\"type\":\"assistant.text.delta\",\"payload\":{\"text\":\"first\"}}\n\n")
 			flusher.Flush()
@@ -77,7 +85,12 @@ func TestV2KBrainRelayBrowserReconnect(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	defer kbrainServer.Close()
+	defer func() {
+		// 先释放夹具再关闭服务器，断言失败也不会留住 SSE 处理器。
+		firstReleaseOnce.Do(func() { close(releaseFirstEvents) })
+		releaseOnce.Do(func() { close(releaseEvents) })
+		kbrainServer.Close()
+	}()
 
 	cfg := newV2TestConfig()
 	cfg.KBrainURL = kbrainServer.URL
@@ -140,7 +153,12 @@ func TestV2KBrainRelayBrowserReconnect(t *testing.T) {
 		t.Fatalf("duplicate chat accepted = %#v, want deduped run %q", duplicateAccepted, accepted.GetRunId())
 	}
 
-	<-firstEventWritten
+	firstReleaseOnce.Do(func() { close(releaseFirstEvents) })
+	select {
+	case <-firstEventWritten:
+	case <-time.After(2 * time.Second):
+		t.Fatal("K-brain SSE did not emit first token after submit acknowledgements")
+	}
 	var firstTokenSeq int64
 	for {
 		frame := receiveWebFrame(t, browserConn)

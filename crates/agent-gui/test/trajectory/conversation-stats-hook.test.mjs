@@ -108,6 +108,81 @@ async function drain(rounds = 8) {
   }
 }
 
+test("同会话刷新等待期间保留读数，完成后允许历史缩减，切会话不串数据", async () => {
+  clearConversationStatsCache();
+  let release;
+  let delayed = false;
+  let pages = [turnEvents(1), turnEvents(2)];
+  const host = {
+    loadWindow: async () => {
+      if (delayed) await new Promise((resolve) => { release = resolve; });
+      return {
+        eventsJson: JSON.stringify(pages.flat()),
+        truncated: false,
+        oldestSegmentIndex: 0,
+        returnedSegmentCount: 1,
+        totalSegmentCount: 1,
+        hasMoreBefore: false,
+      };
+    },
+  };
+  const probe = mountHook({ conversationId: "refresh-stable", host, liveEvents: [], enabled: true });
+  try {
+    await probe.mount();
+    await drain();
+    assert.equal(probe.seen.current.stats.turns, 2);
+    delayed = true;
+    pages = [turnEvents(1)];
+    await probe.update({ authoritativeRevision: 1 });
+    assert.equal(probe.seen.current.stats?.turns, 2, "请求返回前不能变成空白或部分读数");
+    await act(async () => { release(); });
+    await drain();
+    assert.equal(probe.seen.current.stats.turns, 1, "新数据必须允许历史截断后的下降");
+    pages = [];
+    await probe.update({ conversationId: "other-empty" });
+    assert.equal(probe.seen.current.stats, null, "切会话不能保留旧会话读数");
+    await act(async () => { release(); });
+    await drain();
+    await probe.update({ enabled: false });
+    assert.equal(probe.seen.current.stats, null, "禁用必须清空展示");
+  } finally {
+    await probe.unmount();
+  }
+});
+
+test("刷新失败保留上次读数，成功返回空历史时才清空", async () => {
+  clearConversationStatsCache();
+  let fail = false;
+  let empty = false;
+  const original = createFakeHost([turnEvents(1)]).host;
+  const host = {
+    loadWindow: async (...args) => {
+      if (fail) throw new Error("测试刷新失败");
+      const payload = await original.loadWindow(...args);
+      return empty ? { ...payload, eventsJson: "[]" } : payload;
+    },
+  };
+  const probe = mountHook({ conversationId: "refresh-error", host, liveEvents: [], enabled: true });
+  const warn = console.warn;
+  try {
+    await probe.mount();
+    await drain();
+    fail = true;
+    console.warn = () => {};
+    await probe.update({ authoritativeRevision: 1 });
+    await drain();
+    assert.equal(probe.seen.current.stats.turns, 1, "请求失败不能清空旧读数");
+    fail = false;
+    empty = true;
+    await probe.update({ authoritativeRevision: 2 });
+    await drain();
+    assert.equal(probe.seen.current.stats, null, "成功的空历史不能残留旧读数");
+  } finally {
+    console.warn = warn;
+    await probe.unmount();
+  }
+});
+
 test("首窗读数立即可用，后台分页把更早的段补齐", async () => {
   clearConversationStatsCache();
   const pages = [turnEvents(1), turnEvents(2), turnEvents(3)];

@@ -269,5 +269,33 @@ export function useConversationStats(
     // eventVersion / liveVersion 是重建触发器：前者跟随分页，后者被节流到 1s。
   }, [conversationId, authoritativeRevision, enabled, liveOwnership, eventVersion, liveVersion]);
 
-  return { stats, loading };
+  // 刷新期间保留同一会话上次展示的快照，避免轮询清缓存时整条消失。
+  // 只保留展示结果，不把旧事件混进新账本；新版本分页完成后允许读数下降。
+  const displayedRef = useRef<{
+    conversationId: string;
+    revision: number;
+    stats: ConversationStats | null;
+  } | null>(null);
+  if (
+    !enabled ||
+    conversationId === "" ||
+    displayedRef.current?.conversationId !== conversationId
+  ) {
+    displayedRef.current = null;
+  }
+  const currentEntry = cache.get(conversationId);
+  const refreshing =
+    enabled &&
+    displayedRef.current !== null &&
+    displayedRef.current.revision !== authoritativeRevision &&
+    (currentEntry?.revision !== authoritativeRevision ||
+      !currentEntry.complete ||
+      currentEntry.oldestSegmentIndex === null);
+  if (!refreshing) {
+    displayedRef.current = enabled
+      ? { conversationId, revision: authoritativeRevision, stats }
+      : null;
+  }
+
+  return { stats: refreshing ? (displayedRef.current?.stats ?? stats) : stats, loading };
 }

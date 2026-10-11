@@ -48,8 +48,11 @@ import {
   isPermanentLegacyProviderRejection,
   legacyProvidersToImport,
   nextRejectedLegacyProviders,
+  partitionMissingLegacyProviders,
+  readImportedLegacyProviderIds,
   readRejectedLegacyProviders,
   refreshRejectedLegacyProviders,
+  writeImportedLegacyProviderIds,
   writeRejectedLegacyProviders,
 } from "./legacyProviderImport";
 
@@ -533,9 +536,18 @@ async function loadAndMaybeImportLegacyKBrainProviders(
   const backend = await loadKBrainProviderSettings();
   const backendProviders = appProvidersFromKBrain(backend);
   const backendIds = new Set(backendProviders.map((provider) => provider.id));
-  const allMissingLegacyProviders = legacyProviders.filter(
-    (provider) => !backendIds.has(provider.id),
-  );
+  // A legacy provider the user deleted in K-brain is still in the legacy store; only providers
+  // that never reached K-brain are candidates for import.
+  const { notYetImported: allMissingLegacyProviders, importedIds: migratedLegacyIds } =
+    partitionMissingLegacyProviders(legacyProviders, backendIds, readImportedLegacyProviderIds());
+  writeImportedLegacyProviderIds(migratedLegacyIds);
+  const recordImported = (providers: readonly CustomProvider[]) => {
+    for (const provider of providers) {
+      if (legacyProviders.some((legacy) => legacy.id === provider.id))
+        migratedLegacyIds.add(provider.id);
+    }
+    writeImportedLegacyProviderIds(migratedLegacyIds);
+  };
   const previouslyRejected = readRejectedLegacyProviders();
   // Providers K-brain already rejected with this exact config would only fail again.
   const missingLegacyProviders = legacyProvidersToImport(
@@ -565,6 +577,7 @@ async function loadAndMaybeImportLegacyKBrainProviders(
   // whole settings load: that used to drop every setting back to defaults on each launch.
   try {
     const imported = await importProviders(backendProviders, missingLegacyProviders);
+    recordImported(appProvidersFromKBrain(imported));
     writeRejectedLegacyProviders(
       nextRejectedLegacyProviders(
         previouslyRejected,
@@ -588,6 +601,7 @@ async function loadAndMaybeImportLegacyKBrainProviders(
     try {
       document = await importProviders(providers, [legacy]);
       providers = appProvidersFromKBrain(document);
+      recordImported(providers);
     } catch (error) {
       if (!isPermanentLegacyProviderRejection(error)) throw error;
       rejectedNow.push({ provider: legacy, reason: kBrainRejectionReason(error) });

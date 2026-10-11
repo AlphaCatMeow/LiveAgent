@@ -494,6 +494,9 @@ export default function App() {
           if (persistResult.conflict) {
             throw new SettingsStorageError(persistResult.conflict);
           }
+          if (persistResult.providerError) {
+            throw persistResult.providerError;
+          }
           if (publishSync) {
             // Gateway synchronization is a secondary broadcast. Keep it ordered, but do not
             // hold the local config write queue on a slow or temporarily unavailable Gateway.

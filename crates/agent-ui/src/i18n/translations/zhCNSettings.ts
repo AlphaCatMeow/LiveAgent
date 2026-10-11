@@ -536,6 +536,8 @@ export const ZH_CN_SETTINGS_TRANSLATIONS = {
   "settings.baseUrl": "Base URL",
   "settings.providerFullUrl": "完整 URL",
   "settings.providerFullUrlHint": "开启后，此地址将作为最终请求地址使用，不再自动拼接接口路径。",
+  "settings.providerBaseUrlInvalid":
+    "地址需要以 http:// 或 https:// 开头，且不能包含用户名、密码或 # 片段。",
   "settings.providerModelsUrl": "模型列表 URL（可选）",
   "settings.providerModelsUrlPlaceholder": "例如：https://api.example.com/v1/models",
   "settings.providerModelsUrlHint":

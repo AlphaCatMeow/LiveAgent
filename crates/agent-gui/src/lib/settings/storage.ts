@@ -98,6 +98,12 @@ export type PersistSettingsResult = {
   ssh?: AppSettings["ssh"];
   stt?: AppSettings["stt"];
   conflict?: "ssh_settings_changed";
+  /**
+   * K-brain rejected the provider payload itself (validation, 4xx). Re-sending it can only fail
+   * again, so it is not retried; customProviders then holds K-brain's current records so the UI
+   * drops the rejected edit instead of showing data that was never saved.
+   */
+  providerError?: SettingsStorageError;
 };
 
 async function invokeSettingsCommand<T>(
@@ -810,9 +816,21 @@ export async function persistSettings(
           result.customProviders = appProvidersFromKBrain(document);
           failedProviderSave = undefined;
         },
-        (error) => {
-          failedProviderSave = baseline;
-          throw new SettingsStorageError("save_failed", error);
+        async (error) => {
+          if (!isPermanentLegacyProviderRejection(error)) {
+            // Transient (offline, 5xx): keep the baseline so the next save retries this change.
+            failedProviderSave = baseline;
+            throw new SettingsStorageError("save_failed", error);
+          }
+          // A rejected payload used to become the retry baseline, so every later save, even a
+          // theme switch, re-sent it and reported the same failure until the app restarted.
+          failedProviderSave = undefined;
+          result.providerError = new SettingsStorageError("save_failed", error);
+          try {
+            result.customProviders = appProvidersFromKBrain(await loadKBrainProviderSettings());
+          } catch {
+            // Keep the in-memory providers if K-brain cannot be read back right now.
+          }
         },
       ),
     );

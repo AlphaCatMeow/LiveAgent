@@ -367,3 +367,18 @@ func TestSettingsReplacementClearsSelectedModelRemovedFromProvider(t *testing.T)
 		t.Fatalf("stale selected model was retained: %s", translated)
 	}
 }
+
+func TestAIApprovalSettingsPassThrough(t *testing.T) {
+	raw := json.RawMessage(`{"providers":[],"models":[],"aiApproval":{"mode":"auto","provider":"p","model":"small"}}`)
+	projected, err := settingsProjectionForGateway(raw)
+	if err != nil || !strings.Contains(string(projected), `"aiApproval":{"mode":"auto"`) {
+		t.Fatalf("projection=%s err=%v", projected, err)
+	}
+	update, err := settingsUpdateForKBrain(json.RawMessage(`{"aiApproval":{"mode":"risk_only","provider":"p","model":"small"}}`))
+	if err != nil || !strings.Contains(string(update), `"aiApproval"`) {
+		t.Fatalf("update=%s err=%v", update, err)
+	}
+	if _, err := settingsUpdateForKBrain(json.RawMessage(`{"aiApproval":null}`)); err == nil {
+		t.Fatal("accepted null")
+	}
+}

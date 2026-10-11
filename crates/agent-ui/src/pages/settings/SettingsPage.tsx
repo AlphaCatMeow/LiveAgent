@@ -19,6 +19,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SettingsSectionDefinition, UiExtensionRegistry } from "../../contracts/registry";
 import { AgentsSection } from "./AgentsSection";
+import { AIApprovalSection } from "./AIApprovalSection";
 import { CalendarSection } from "./CalendarSection";
 import { CronSection } from "./CronSection";
 import { HooksSection } from "./HooksSection";
@@ -168,7 +169,12 @@ export function SettingsPage(props: SettingsPageProps) {
         order: 20,
         labelKey: "settings.navSystemTools",
         icon: <Wrench className={extension.iconClassName} />,
-        render: () => <SystemToolsSection settings={settings} setSettings={setSettings} />,
+        render: () => (
+          <div className="space-y-7">
+            {props.settingsHost?.kbrain && <AIApprovalSection kbrain={props.settingsHost.kbrain} />}
+            <SystemToolsSection settings={settings} setSettings={setSettings} />
+          </div>
+        ),
       },
       {
         id: "stt",
@@ -230,6 +236,7 @@ export function SettingsPage(props: SettingsPageProps) {
     ],
     [
       extension,
+      props.settingsHost,
       handleSttProviderChange,
       pendingProviderId,
       saveState,

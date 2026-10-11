@@ -378,3 +378,17 @@ test("frontend tool registration fails before making a backend request", async (
     options: { client_tools: [{ name: "Browser", description: "client tool", parameters: { type: "object" } }] },
   }), /must execute in K-brain/);
 });
+
+test("AI review warnings stay outside assistant content", async () => {
+ storage.clear();
+ const warnings=[];
+ const reviewLoader=createTsModuleLoader({mocks:{"@liveagent/ui/components/ui/toast-manager":{toast:{warning:(...args)=>warnings.push(args)}}}});
+ const {runKBrainTurn:run}=reviewLoader.loadModule("src/lib/kbrain/turn.ts");
+ const text=[];
+ const fetch=makeFetch({calls:[],streams:[()=>stream(
+  event(2,"approval.reviewed",{tool:"Bash",phase:"action",automatic:false,report:{risk:"high",sandbox:"low",sensitive_data:"high",model_behavior:"unknown",injection:"low",reason:"Sensitive data upload requires confirmation"}})+event(3,"run.completed"))]});
+ await run({...baseParams,fetch,onTextDelta:value=>text.push(value)});
+ assert.equal(warnings.length,1);
+ assert.match(warnings[0][1].description,/Sensitive data/);
+ assert.deepEqual(text,[]);
+});

@@ -209,7 +209,7 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
         const settlement = await requestToolApproval({
           toolCallId: request.permission_id,
           toolName: request.tool,
-          summary: request.command ?? request.description,
+          summary: [request.command, request.description].filter(Boolean).join("\n\n"),
           conversationId: params.conversationId,
           signal: approvalController.signal,
         });

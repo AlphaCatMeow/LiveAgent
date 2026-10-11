@@ -587,6 +587,11 @@ func (r *Relay) execute(ctx context.Context, state *runState, cwd string, prompt
 			if event.RunID != accepted.RunID {
 				return nil
 			}
+			if event.Type == "permission.requested" {
+				if err := r.client.rejectUnsupportedPermission(readerCtx, event); err != nil {
+					return err
+				}
+			}
 			mappedEvent := event
 			mappedEvent.ConversationID = conversationID
 			chat, control, mapErr := ToChatEvent(mappedEvent)
@@ -808,6 +813,11 @@ func (r *Relay) resumeRun(state *runState) {
 			r.mu.Unlock()
 			if event.RunID != state.kbrainRunID {
 				return nil
+			}
+			if event.Type == "permission.requested" {
+				if err := r.client.rejectUnsupportedPermission(ctx, event); err != nil {
+					return err
+				}
 			}
 			mapped := event
 			mapped.ConversationID = state.conversationID

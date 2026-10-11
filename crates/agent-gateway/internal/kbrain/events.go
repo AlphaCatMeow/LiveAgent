@@ -66,6 +66,16 @@ func ToChatEvent(event Event) (*v2.ChatEvent, *v2.ChatControlEvent, error) {
 			}
 			payload["content"] = content
 		}
+	case "permission.requested":
+		base.Type = v2.ChatEvent_TOOL_STATUS
+		payload["status"] = "Manual approval required. This WebUI transport cannot confirm permissions; the action was rejected. Retry in LiveAgent desktop or K-brain TUI."
+	case "approval.reviewed":
+		base.Type = v2.ChatEvent_TOOL_STATUS
+		if object, ok := payloadAsMap(payload); ok {
+			if report, ok := object["report"].(map[string]any); ok {
+				object["status"] = fmt.Sprintf("AI review [%v]: %v", report["risk"], report["reason"])
+			}
+		}
 	case "tool.status":
 		base.Type = v2.ChatEvent_TOOL_STATUS
 	case "run.completed":

@@ -12,12 +12,14 @@ import (
 // settings and the selected model. Omitting other fields lets the frontend
 // retain its local settings instead of replacing them with fabricated defaults.
 type gatewaySettingsProjection struct {
+	AIApproval      json.RawMessage `json:"aiApproval,omitempty"`
 	Computer        json.RawMessage `json:"computer,omitempty"`
 	CustomProviders []any           `json:"customProviders"`
 	SelectedModel   map[string]any  `json:"selectedModel"`
 }
 
 type kbrainSettingsDocument struct {
+	AIApproval      json.RawMessage  `json:"aiApproval,omitempty"`
 	Computer        json.RawMessage  `json:"computer,omitempty"`
 	DefaultModel    string           `json:"defaultModel"`
 	DefaultProvider string           `json:"defaultProvider"`
@@ -193,7 +195,7 @@ func settingsProjectionForGateway(raw json.RawMessage) (json.RawMessage, error) 
 			"providerType":     providerTypeByID[document.DefaultProvider],
 		}
 	}
-	return json.Marshal(gatewaySettingsProjection{CustomProviders: providers, SelectedModel: selected, Computer: document.Computer})
+	return json.Marshal(gatewaySettingsProjection{CustomProviders: providers, SelectedModel: selected, Computer: document.Computer, AIApproval: document.AIApproval})
 }
 
 func decodeSettingsDocument(raw json.RawMessage) (kbrainSettingsDocument, error) {
@@ -219,7 +221,7 @@ func settingsUpdateForKBrain(raw json.RawMessage, previous ...json.RawMessage) (
 	}
 	for key := range input {
 		switch key {
-		case "selectedModel", "customProviders", "deleteProviders", "providerApiKeyUpdates", "providerUsageQuerySecretUpdates", "computer":
+		case "selectedModel", "customProviders", "deleteProviders", "providerApiKeyUpdates", "providerUsageQuerySecretUpdates", "computer", "aiApproval":
 		default:
 			return nil, fmt.Errorf("unsupported Gateway settings field %q: non-provider settings persistence is unavailable", key)
 		}
@@ -238,6 +240,13 @@ func settingsUpdateForKBrain(raw json.RawMessage, previous ...json.RawMessage) (
 		}
 	}
 	update := map[string]any{}
+	if value, ok := input["aiApproval"]; ok {
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(value, &object); err != nil || object == nil {
+			return nil, errors.New("aiApproval must be an object")
+		}
+		update["aiApproval"] = value
+	}
 	if computer, ok := input["computer"]; ok {
 		var object map[string]json.RawMessage
 		if err := json.Unmarshal(computer, &object); err != nil || object == nil {

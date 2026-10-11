@@ -20,6 +20,39 @@
   }
 }
 @layer components {
+  /* 统计条仅滚动变化的数字；标签、单位和分隔符不参与动画。 */
+  .stat-number {
+    display: inline-flex;
+    vertical-align: bottom;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat-digit-window {
+    display: inline-block;
+    width: 1ch;
+    height: 1em;
+    overflow: hidden;
+    line-height: 1;
+  }
+  .stat-digit-strip,
+  .stat-digit-cell {
+    display: block;
+    line-height: 1;
+  }
+  .stat-digit-cell {
+    height: 1em;
+  }
+  .stat-digit-cell::before {
+    content: attr(data-digit);
+  }
+  .stat-digit-ready {
+    transition: transform var(--ui-duration-160ms) var(--ease-ui-enter);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .stat-digit-ready {
+      transition: none;
+    }
+  }
+
   /* Compaction band — shared chrome for the live "compressing context"
      status and the settled in-reply seam. */
   @keyframes compactionBandSweep {

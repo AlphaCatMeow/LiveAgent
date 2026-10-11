@@ -25,6 +25,8 @@ import (
 // client request suppression, disconnect, after_seq replay, and one terminal.
 func TestV2KBrainRelayBrowserReconnect(t *testing.T) {
 	firstEventWritten := make(chan struct{})
+	releaseFirstEvents := make(chan struct{})
+	var firstReleaseOnce sync.Once
 	releaseEvents := make(chan struct{})
 	eventsDone := make(chan struct{})
 	sseHandlerDone := make(chan struct{})
@@ -60,6 +62,12 @@ func TestV2KBrainRelayBrowserReconnect(t *testing.T) {
 			if !ok {
 				t.Fatal("K-brain test server does not support streaming flush")
 			}
+			// 提交确认收帧器会跳过无关帧，确认去重完成后才发送首批事件。
+			select {
+			case <-releaseFirstEvents:
+			case <-r.Context().Done():
+				return
+			}
 			_, _ = fmt.Fprint(w, "data: {\"version\":\"kbrain.agent.v1\",\"seq\":1,\"conversation_id\":\"session-ws\",\"run_id\":\"kb-run-ws\",\"type\":\"run.accepted\"}\n\n")
 			_, _ = fmt.Fprint(w, "data: {\"version\":\"kbrain.agent.v1\",\"seq\":2,\"conversation_id\":\"session-ws\",\"run_id\":\"kb-run-ws\",\"type\":\"assistant.text.delta\",\"payload\":{\"text\":\"first\"}}\n\n")
 			flusher.Flush()
@@ -77,7 +85,12 @@ func TestV2KBrainRelayBrowserReconnect(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	defer kbrainServer.Close()
+	defer func() {
+		// 先释放夹具再关闭服务器，断言失败也不会留住 SSE 处理器。
+		firstReleaseOnce.Do(func() { close(releaseFirstEvents) })
+		releaseOnce.Do(func() { close(releaseEvents) })
+		kbrainServer.Close()
+	}()
 
 	cfg := newV2TestConfig()
 	cfg.KBrainURL = kbrainServer.URL
@@ -140,7 +153,12 @@ func TestV2KBrainRelayBrowserReconnect(t *testing.T) {
 		t.Fatalf("duplicate chat accepted = %#v, want deduped run %q", duplicateAccepted, accepted.GetRunId())
 	}
 
-	<-firstEventWritten
+	firstReleaseOnce.Do(func() { close(releaseFirstEvents) })
+	select {
+	case <-firstEventWritten:
+	case <-time.After(2 * time.Second):
+		t.Fatal("K-brain SSE did not emit first token after submit acknowledgements")
+	}
 	var firstTokenSeq int64
 	for {
 		frame := receiveWebFrame(t, browserConn)
@@ -161,6 +179,14 @@ func TestV2KBrainRelayBrowserReconnect(t *testing.T) {
 		t.Fatalf("first token seq = %d, want positive sequence", firstTokenSeq)
 	}
 
+	// 浏览器断开后，独立观察 Gateway 接收事件的边界。
+	// SSE Flush 或处理器返回只表示生产端已发送，不能证明中继已写入重放缓冲区。
+	ingested := sm.SubscribeConversationStream(cfg.KBrainAgentID, conversationID, firstTokenSeq, streamEpoch)
+	if ingested == nil {
+		t.Fatal("Gateway ingestion subscription is nil")
+	}
+	defer ingested.Cleanup()
+
 	// Close only the browser connection. Relay and K-brain continue on their
 	// own context, so the later events remain in the Gateway replay ring.
 	_ = browserConn.Close()
@@ -174,6 +200,23 @@ func TestV2KBrainRelayBrowserReconnect(t *testing.T) {
 	case <-sseHandlerDone:
 	case <-time.After(2 * time.Second):
 		t.Fatal("K-brain SSE handler did not return after release")
+	}
+
+	ingestionTimeout := time.NewTimer(2 * time.Second)
+	defer ingestionTimeout.Stop()
+waitForTerminal:
+	for {
+		select {
+		case event, ok := <-ingested.EventCh:
+			if !ok {
+				t.Fatal("Gateway ingestion subscription closed before terminal event")
+			}
+			if event.Type == "run_finished" {
+				break waitForTerminal
+			}
+		case <-ingestionTimeout.C:
+			t.Fatal("Gateway did not ingest terminal event after browser disconnect")
+		}
 	}
 
 	reconnected, reconnectCleanup := dialV2Path(t, mux, "/ws/v2")

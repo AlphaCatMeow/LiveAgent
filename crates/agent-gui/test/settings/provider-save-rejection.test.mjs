@@ -24,6 +24,8 @@ async function startKBrain() {
   let stored = [{ id: "p1", name: "Relay", type: "codex", apiKeyConfigured: true, models: [{ id: "a" }] }];
   let puts = 0;
   let outage = false;
+  let readOutage = false;
+  const payloads = [];
   const server = createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
@@ -35,16 +37,21 @@ async function startKBrain() {
       puts++;
       if (outage) return reply(503, { error: "backend restarting" });
       const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      payloads.push(body);
+      if (body.defaultModel === "invalid-default") return reply(400, { error: "invalid default" });
       const ids = (body.providers?.[0]?.models ?? []).map((m) => m.id);
       if (new Set(ids).size !== ids.length) return reply(400, { error: "models require unique IDs" });
       stored = body.providers.map((p) => ({ id: p.id, name: p.name, type: p.type, apiKeyConfigured: true, models: p.models }));
     }
+    if (request.method === "GET" && readOutage) return reply(503, { error: "read unavailable" });
     reply(200, { version: "kbrain.agent.v1", mode: "kbrain", providers: stored });
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   return {
     baseUrl: `http://127.0.0.1:${server.address().port}`,
     puts: () => puts,
+    payloads,
+    setReadOutage: (value) => { readOutage = value; },
     setOutage: (value) => {
       outage = value;
     },
@@ -112,4 +119,96 @@ test("a transient provider save failure is still retried on the next save", asyn
     runtime.clearKBrainRuntimeConnection();
     await kbrain.close();
   }
+});
+
+async function drainQueuedSaves(storage, base, snapshots) {
+  let current = snapshots.at(-1);
+  let previous = base;
+  for (let index = 0; index < snapshots.length; index++) {
+    const next = snapshots[index];
+    const result = await storage.persistSettings(previous, next);
+    // App only merges the newest sequence, even though older writes finish first.
+    if (index === snapshots.length - 1 && result.customProviders) {
+      current = { ...current, customProviders: result.customProviders };
+    }
+    previous = next;
+  }
+  return current;
+}
+
+test("queued theme changes consume provider rollback without another rejected PUT", async () => {
+  const { kbrain, runtime, storage, base } = await setup();
+  try {
+    const bad = { ...base, customProviders: [provider([{ id: "dup" }, { id: "dup" }])] };
+    const current = await drainQueuedSaves(storage, base, [bad, { ...bad, theme: "dark" }, { ...bad, theme: "light" }]);
+    assert.deepEqual(current.customProviders[0].models.map(m => m.id), ["a"]);
+    assert.equal(current.theme, "light");
+    assert.equal(kbrain.puts(), 1);
+  } finally { runtime.clearKBrainRuntimeConnection(); await kbrain.close(); }
+});
+
+test("queued valid provider edit supersedes rollback and remains authoritative", async () => {
+  const { kbrain, runtime, storage, base } = await setup();
+  try {
+    const bad = { ...base, customProviders: [provider([{ id: "dup" }, { id: "dup" }])] };
+    const fixed = { ...bad, customProviders: [provider([{ id: "a" }, { id: "new" }])], theme: "dark" };
+    const current = await drainQueuedSaves(storage, base, [bad, fixed]);
+    assert.deepEqual(current.customProviders[0].models.map(m => m.id), ["a", "new"]);
+    assert.equal(kbrain.puts(), 2);
+    const later = await storage.persistSettings(current, { ...current, theme: "light" });
+    assert.equal(later.customProviders, undefined);
+  } finally { runtime.clearKBrainRuntimeConnection(); await kbrain.close(); }
+});
+
+test("failed rollback GET is retried without repeating rejected providers", async () => {
+  const { kbrain, runtime, storage, base } = await setup();
+  try {
+    const bad = { ...base, customProviders: [provider([{ id: "dup" }, { id: "dup" }])] };
+    kbrain.setReadOutage(true);
+    const failed = await storage.persistSettings(base, bad);
+    assert.ok(failed.providerError);
+    assert.equal(failed.customProviders, undefined);
+    await assert.rejects(storage.persistSettings(bad, { ...bad, theme: "dark" }));
+    kbrain.setReadOutage(false);
+    const recovered = await storage.persistSettings(bad, { ...bad, theme: "light" });
+    assert.deepEqual(recovered.customProviders[0].models.map(m => m.id), ["a"]);
+    assert.equal(kbrain.puts(), 1);
+  } finally { runtime.clearKBrainRuntimeConnection(); await kbrain.close(); }
+});
+
+test("a corrected edit uses the accepted baseline when clearing a stored key", async () => {
+  const { kbrain, runtime, storage, base } = await setup();
+  try {
+    const bad = { ...base, customProviders: [{ ...provider([{ id: "dup" }, { id: "dup" }]), apiKeyConfigured: false }] };
+    await storage.persistSettings(base, bad);
+    const fixed = { ...bad, customProviders: [{ ...provider([{ id: "a" }]), apiKeyConfigured: false }] };
+    await storage.persistSettings(bad, fixed);
+    assert.equal(kbrain.payloads.at(-1).providers[0].clearApiKey, true);
+  } finally { runtime.clearKBrainRuntimeConnection(); await kbrain.close(); }
+});
+
+test("changing backend connection discards rejected-save recovery", async () => {
+  const { kbrain, runtime, storage, base } = await setup();
+  const other = await startKBrain();
+  try {
+    const bad = { ...base, customProviders: [provider([{ id: "dup" }, { id: "dup" }])] };
+    await storage.persistSettings(base, bad);
+    runtime.setKBrainRuntimeConnection({ baseUrl: other.baseUrl, token: "t", protocolVersion: "kbrain.agent.v1" });
+    const result = await storage.persistSettings(base, { ...base, theme: "dark" });
+    assert.equal(result.customProviders, undefined);
+    assert.equal(other.puts(), 0);
+  } finally { runtime.clearKBrainRuntimeConnection(); await other.close(); await kbrain.close(); }
+});
+
+test("correcting only a rejected selected model remains saveable", async () => {
+ const { kbrain, runtime, storage, base } = await setup();
+ try {
+  const bad={...base,selectedModel:{customProviderId:"p1",model:"invalid-default"}};
+  assert.ok((await storage.persistSettings(base,bad)).providerError);
+  const fixed={...base,selectedModel:{customProviderId:"p1",model:"a"}};
+  const result=await storage.persistSettings(bad,fixed);
+  assert.equal(result.providerError,undefined);
+  assert.equal(kbrain.puts(),2);
+  assert.equal(kbrain.payloads.at(-1).defaultModel,"a");
+ } finally {runtime.clearKBrainRuntimeConnection();await kbrain.close();}
 });

@@ -334,6 +334,7 @@ export const ZH_CN_SETTINGS_TRANSLATIONS = {
   "settings.fontSizeSidebar": "会话列表",
   "settings.fontSizeChat": "聊天区域",
   "settings.fontSizeRightDock": "工具面板",
+  "settings.fontSizeSettings": "设置窗口",
   "settings.fontSizeSmall": "小",
   "settings.fontSizeStandard": "标准",
   "settings.fontSizeLarge": "大",

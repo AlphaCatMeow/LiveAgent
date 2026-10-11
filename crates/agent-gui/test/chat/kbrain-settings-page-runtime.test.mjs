@@ -7,6 +7,7 @@ const settings = {
   stt: { provider: "tencent_cloud" },
   system: {},
   customProviders: [],
+  customSettings: { fontScale: { sidebar: 1, chat: 1, rightDock: 1, settings: 1 } },
 };
 
 test("SettingsPage keeps the original provider interface and label for a K-brain host", async () => {

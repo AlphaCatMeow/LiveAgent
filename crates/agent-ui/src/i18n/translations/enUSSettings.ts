@@ -354,6 +354,7 @@ export const EN_US_SETTINGS_TRANSLATIONS = {
   "settings.fontSizeSidebar": "Sidebar",
   "settings.fontSizeChat": "Chat Area",
   "settings.fontSizeRightDock": "Tools Panel",
+  "settings.fontSizeSettings": "Settings Window",
   "settings.fontSizeSmall": "Small",
   "settings.fontSizeStandard": "Standard",
   "settings.fontSizeLarge": "Large",

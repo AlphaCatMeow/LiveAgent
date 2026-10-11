@@ -1,7 +1,7 @@
 import { useThinkingLiveVersion } from "@liveagent/ui/lib/models/useThinkingLive";
 import type { SidebarStore } from "@liveagent/ui/lib/sidebar/store";
 import type { SidebarConversation } from "@liveagent/ui/lib/sidebar/types";
-import { type MutableRefObject, useCallback, useEffect, useMemo } from "react";
+import { type MutableRefObject, useCallback, useEffect, useMemo, useRef } from "react";
 import { setChatHistoryModel } from "../../../lib/chat/history/chatHistory";
 import { buildModelOptions } from "../../../lib/chat/page/chatPageHelpers";
 import { toModelValue } from "../../../lib/providers/llm";
@@ -62,6 +62,55 @@ export function useChatModelSelection(params: UseChatModelSelectionParams) {
     updateConversationRuntimeEntry,
   } = params;
 
+  // Keep local intent until the saved sidebar projection acknowledges it. Requests
+  // are serialized per conversation so the backend cannot finish an older write last.
+  const localSelectionsRef = useRef(
+    new Map<string, { selection: SelectedModel; saved: boolean; errorMessage?: string }>(),
+  );
+  const modelSaveQueuesRef = useRef(new Map<string, Promise<void>>());
+  const persistConversationSelection = useCallback(
+    (conversationId: string, selection: SelectedModel, failureMessage: string) => {
+      const persistedRow = sidebarStore.peek(conversationId);
+      const selectedModelJson = serializeSelectedModelJson(selection);
+      if (!persistedRow || persistedRow.isPending || !selectedModelJson) return;
+      const previous = localSelectionsRef.current.get(conversationId);
+      const intent = { selection, saved: false, errorMessage: undefined as string | undefined };
+      localSelectionsRef.current.set(conversationId, intent);
+      if (previous?.errorMessage) {
+        updateConversationRuntimeEntry(conversationId, (prev) =>
+          prev.errorMessage === previous.errorMessage ? { ...prev, errorMessage: null } : prev,
+        );
+      }
+      const queued = (modelSaveQueuesRef.current.get(conversationId) ?? Promise.resolve())
+        .then(async () => {
+          try {
+            const summary = await setChatHistoryModel(conversationId, selectedModelJson);
+            if (localSelectionsRef.current.get(conversationId) !== intent) return;
+            // Do not release the guard until React has seen this projection.
+            intent.saved = true;
+            sidebarStore.upsertLocal({ ...summary, isPending: undefined });
+          } catch (error) {
+            if (localSelectionsRef.current.get(conversationId) !== intent) return;
+            const detail = asErrorMessage(error, failureMessage);
+            const errorMessage =
+              detail === failureMessage ? failureMessage : `${failureMessage} ${detail}`;
+            intent.errorMessage = errorMessage;
+            updateConversationRuntimeEntry(conversationId, (prev) => ({
+              ...prev,
+              errorMessage,
+            }));
+          }
+        })
+        .finally(() => {
+          if (modelSaveQueuesRef.current.get(conversationId) === queued) {
+            modelSaveQueuesRef.current.delete(conversationId);
+          }
+        });
+      modelSaveQueuesRef.current.set(conversationId, queued);
+    },
+    [sidebarStore, updateConversationRuntimeEntry],
+  );
+
   const modelOptions = useMemo(
     () =>
       buildModelOptions(
@@ -109,6 +158,11 @@ export function useChatModelSelection(params: UseChatModelSelectionParams) {
       settings.customProviders,
     );
     if (!parsed) return;
+    const localSelection = localSelectionsRef.current.get(currentConversationId);
+    if (localSelection) {
+      if (!localSelection.saved || !selectedModelsMatch(localSelection.selection, parsed)) return;
+      localSelectionsRef.current.delete(currentConversationId);
+    }
     const entry = conversationRuntimeCacheRef.current.get(currentConversationId);
     if (!entry || entry.isSending) return;
     if (selectedModelsMatch(entry.selectedModel, parsed)) return;
@@ -169,18 +223,11 @@ export function useChatModelSelection(params: UseChatModelSelectionParams) {
           ...prev,
           selectedModel: selection,
         }));
-        const persistedRow = sidebarStore.peek(conversationId);
-        const selectedModelJson = serializeSelectedModelJson(selection);
-        if (persistedRow && !persistedRow.isPending && selectedModelJson) {
-          void setChatHistoryModel(conversationId, selectedModelJson)
-            .then((summary) => sidebarStore.upsertLocal({ ...summary, isPending: undefined }))
-            .catch((error) => {
-              updateConversationRuntimeEntry(conversationId, (prev) => ({
-                ...prev,
-                errorMessage: asErrorMessage(error, "保存会话思考设置失败。"),
-              }));
-            });
-        }
+        persistConversationSelection(
+          conversationId,
+          selection,
+          "保存会话思考设置失败，请重新选择重试。",
+        );
       }
       setSettings((prev) => ({
         ...prev,
@@ -197,7 +244,7 @@ export function useChatModelSelection(params: UseChatModelSelectionParams) {
       chatRuntimeReasoningParams,
       currentConversationIdRef,
       setSettings,
-      sidebarStore,
+      persistConversationSelection,
       updateConversationRuntimeEntry,
     ],
   );
@@ -222,18 +269,11 @@ export function useChatModelSelection(params: UseChatModelSelectionParams) {
           ? prev
           : { ...prev, selectedModel: nextSelection },
       );
-      const persistedRow = sidebarStore.peek(conversationId);
-      const selectedModelJson = serializeSelectedModelJson(nextSelection);
-      if (persistedRow && !persistedRow.isPending && selectedModelJson) {
-        void setChatHistoryModel(conversationId, selectedModelJson)
-          .then((summary) => sidebarStore.upsertLocal({ ...summary, isPending: undefined }))
-          .catch((error) => {
-            updateConversationRuntimeEntry(conversationId, (prev) => ({
-              ...prev,
-              errorMessage: asErrorMessage(error, "保存会话模型选择失败。"),
-            }));
-          });
-      }
+      persistConversationSelection(
+        conversationId,
+        nextSelection,
+        "保存会话模型选择失败，请重新选择重试。",
+      );
       // Also the default for new conversations. On K-brain this is saved as the backend
       // default model, which is what the composer restores after a restart.
       setSettings((prev) => setSelectedModel(prev, selection));
@@ -244,7 +284,7 @@ export function useChatModelSelection(params: UseChatModelSelectionParams) {
       currentConversationIdRef,
       settings.chatRuntimeControls,
       setSettings,
-      sidebarStore,
+      persistConversationSelection,
       updateConversationRuntimeEntry,
     ],
   );

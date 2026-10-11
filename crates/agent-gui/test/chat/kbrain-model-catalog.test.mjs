@@ -110,7 +110,10 @@ test("real catalog and selection hooks fetch /v1/models with the runtime connect
     const entryRef = { current: new Map([["conversation", { isSending: false }]]) };
     const idRef = { current: "conversation" };
     const rows = new Map();
-    const sidebarStore = { peek: () => ({ id: "conversation", isPending: false }), upsertLocal() {} };
+    const sidebarStore = {
+      peek: () => rows.get("conversation") ?? { id: "conversation", isPending: false },
+      upsertLocal(summary) { rows.set(summary.id, summary); },
+    };
     function Page({ theme = direct.theme }) {
       const [selectedModel, setSelectedModel] = React.useState();
       const settings = React.useMemo(() => ({ ...direct, theme }), [theme]);

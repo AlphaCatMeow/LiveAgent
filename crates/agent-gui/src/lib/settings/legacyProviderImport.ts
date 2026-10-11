@@ -18,6 +18,14 @@ export const LEGACY_PROVIDER_IMPORT_STORAGE_KEY = "liveagent.kbrain-legacy-provi
 export const LEGACY_PROVIDER_IMPORT_DISMISSED_STORAGE_KEY =
   "liveagent.kbrain-legacy-provider-import-dismissed.v1";
 
+/**
+ * Legacy provider ids that already reached K-brain once. The legacy store (config.sqlite
+ * `provider_settings`) is never pruned when the user deletes a provider in K-brain, so without
+ * this record every launch saw a deleted provider as "not migrated yet" and imported it again.
+ * An id in this set that is missing from K-brain was removed by the user and stays removed.
+ */
+export const LEGACY_PROVIDER_IMPORTED_STORAGE_KEY = "liveagent.kbrain-legacy-provider-imported.v1";
+
 function scopedStorageKey(key: string): string {
   return `${key}:${kBrainStorageScope(getConfiguredKBrainConnection()?.baseUrl)}`;
 }
@@ -216,4 +224,55 @@ export function refreshRejectedLegacyProviders(): RejectedLegacyProvider[] {
 export function clearRejectedLegacyProviders(): void {
   writeRejectedLegacyProviders([]);
   publish([]);
+}
+
+export function readImportedLegacyProviderIds(
+  storage: Storage | null = defaultStorage(),
+): Set<string> {
+  if (!storage) return new Set();
+  try {
+    const raw = storage.getItem(scopedStorageKey(LEGACY_PROVIDER_IMPORTED_STORAGE_KEY));
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    return new Set(
+      Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [],
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+export function writeImportedLegacyProviderIds(
+  ids: Iterable<string>,
+  storage: Storage | null = defaultStorage(),
+): void {
+  if (!storage) return;
+  try {
+    storage.setItem(
+      scopedStorageKey(LEGACY_PROVIDER_IMPORTED_STORAGE_KEY),
+      JSON.stringify([...new Set(ids)].sort()),
+    );
+  } catch {
+    // Best effort: losing the record only means a deleted provider may be imported once more.
+  }
+}
+
+/**
+ * Splits the legacy providers K-brain does not have into ones still waiting for their first
+ * import and ones the user deleted after they were imported. Legacy ids K-brain already holds
+ * are added to the record, so installs migrated before this record existed are covered too.
+ */
+export function partitionMissingLegacyProviders(
+  legacy: readonly CustomProvider[],
+  backendIds: ReadonlySet<string>,
+  importedIds: ReadonlySet<string>,
+): { notYetImported: CustomProvider[]; deleted: CustomProvider[]; importedIds: Set<string> } {
+  const nextImported = new Set(importedIds);
+  const notYetImported: CustomProvider[] = [];
+  const deleted: CustomProvider[] = [];
+  for (const provider of legacy) {
+    if (backendIds.has(provider.id)) nextImported.add(provider.id);
+    else if (importedIds.has(provider.id)) deleted.push(provider);
+    else notYetImported.push(provider);
+  }
+  return { notYetImported, deleted, importedIds: nextImported };
 }

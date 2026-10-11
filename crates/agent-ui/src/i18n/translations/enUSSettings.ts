@@ -563,6 +563,8 @@ export const EN_US_SETTINGS_TRANSLATIONS = {
   "settings.providerFullUrl": "Full URL",
   "settings.providerFullUrlHint":
     "When enabled, this address is used as the final request URL without appending an API path.",
+  "settings.providerBaseUrlInvalid":
+    "The address must start with http:// or https:// and cannot contain a username, password, or # fragment.",
   "settings.providerModelsUrl": "Models URL (optional)",
   "settings.providerModelsUrlPlaceholder": "For example: https://api.example.com/v1/models",
   "settings.providerModelsUrlHint":

@@ -17,6 +17,7 @@ import {
   loadKBrainProviderSettings,
   saveKBrainProviderSettings,
 } from "../kbrain/providerSettings";
+import { getConfiguredKBrainConnection } from "../kbrain/runtimeConnection";
 import type { KBrainSettingsDocument } from "../kbrain/types";
 import { SettingsStorageError, type SettingsStorageErrorCode } from "./errors";
 import {
@@ -101,6 +102,12 @@ export type PersistSettingsResult = {
   ssh?: AppSettings["ssh"];
   stt?: AppSettings["stt"];
   conflict?: "ssh_settings_changed";
+  /**
+   * K-brain rejected the provider payload itself (validation, 4xx). Re-sending it can only fail
+   * again, so it is not retried; customProviders then holds K-brain's current records so the UI
+   * drops the rejected edit instead of showing data that was never saved.
+   */
+  providerError?: SettingsStorageError;
 };
 
 async function invokeSettingsCommand<T>(
@@ -742,6 +749,14 @@ export async function loadPersistedSettings(): Promise<AppSettings> {
 }
 
 let failedProviderSave: AppSettings | undefined;
+let providerSaveConnection: string | undefined;
+let rejectedProviderSave:
+  | { fingerprint: string; baseline: AppSettings; authoritative?: AppSettings["customProviders"] }
+  | undefined;
+
+function providerSaveFingerprint(settings: AppSettings): string {
+  return JSON.stringify([settings.customProviders, settings.selectedModel ?? null]);
+}
 
 function projectPromptFields(settings: AppSettings, path: string) {
   const entry = settings.system.workspaceResourceSettings[path];
@@ -810,23 +825,71 @@ export async function persistSettings(
 ): Promise<PersistSettingsResult> {
   const tasks: Promise<unknown>[] = [];
   const result: PersistSettingsResult = {};
+  const connection = getConfiguredKBrainConnection();
+  const connectionKey = JSON.stringify([connection?.baseUrl, connection?.token]);
+  if (providerSaveConnection !== connectionKey) {
+    providerSaveConnection = connectionKey;
+    failedProviderSave = undefined;
+    rejectedProviderSave = undefined;
+  }
+  const recovery = rejectedProviderSave;
+  if (recovery && providerSaveFingerprint(next) === recovery.fingerprint) {
+    // Queued unrelated saves still contain the rejected optimistic provider snapshot.
+    const restore = async () => {
+      recovery.authoritative ??= appProvidersFromKBrain(await loadKBrainProviderSettings());
+      result.customProviders = recovery.authoritative;
+    };
+    tasks.push(
+      restore().catch((error) => {
+        throw new SettingsStorageError("save_failed", error);
+      }),
+    );
+  }
+  const staleRejectedProviders = recovery && providerSaveFingerprint(next) === recovery.fingerprint;
   const providersChanged =
     hasChanged(prev.customProviders, next.customProviders) ||
     hasChanged(prev.selectedModel ?? null, next.selectedModel ?? null);
   // Provider records go to K-brain. A failure there must not stop the other domains from
   // saving: it used to throw before the local UI write, and failedProviderSave then made every
   // later save retry and throw again, so theme/locale/font changes were never persisted.
-  if (providersChanged || failedProviderSave) {
-    const baseline = failedProviderSave ?? prev;
+  if (!staleRejectedProviders && (providersChanged || failedProviderSave)) {
+    const baseline =
+      failedProviderSave ??
+      (recovery
+        ? {
+            ...recovery.baseline,
+            customProviders: recovery.authoritative ?? recovery.baseline.customProviders,
+          }
+        : prev);
     tasks.push(
       saveKBrainProviderSettings(kBrainSettingsUpdateFromAppSettings(baseline, next)).then(
         (document) => {
           result.customProviders = appProvidersFromKBrain(document);
           failedProviderSave = undefined;
+          rejectedProviderSave = undefined;
         },
-        (error) => {
-          failedProviderSave = baseline;
-          throw new SettingsStorageError("save_failed", error);
+        async (error) => {
+          if (!isPermanentLegacyProviderRejection(error)) {
+            // Transient (offline, 5xx): keep the baseline so the next save retries this change.
+            failedProviderSave = baseline;
+            throw new SettingsStorageError("save_failed", error);
+          }
+          // A rejected payload used to become the retry baseline, so every later save, even a
+          // theme switch, re-sent it and reported the same failure until the app restarted.
+          failedProviderSave = undefined;
+          result.providerError = new SettingsStorageError("save_failed", error);
+          const rejected = {
+            fingerprint: providerSaveFingerprint(next),
+            baseline,
+            authoritative: undefined as AppSettings["customProviders"] | undefined,
+          };
+          rejectedProviderSave = rejected;
+          try {
+            result.customProviders = appProvidersFromKBrain(await loadKBrainProviderSettings());
+            rejected.authoritative = result.customProviders;
+          } catch {
+            // The next queued save retries the read, never the rejected payload.
+          }
         },
       ),
     );

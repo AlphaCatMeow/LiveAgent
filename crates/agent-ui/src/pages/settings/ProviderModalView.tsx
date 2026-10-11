@@ -149,6 +149,7 @@ export function ProviderModalView({ viewModel }: { viewModel: ProviderModalViewM
     headerKeyRefs,
     headerValidationSubmitted,
     headerValueRefs,
+    baseUrlInvalid,
     dialogOpen,
     isEditing,
     isFullUrl,
@@ -365,14 +366,26 @@ export function ProviderModalView({ viewModel }: { viewModel: ProviderModalViewM
                       id="modal-baseurl"
                       className="h-10 shadow-none"
                       value={baseUrl}
+                      aria-invalid={baseUrlInvalid ? true : undefined}
+                      aria-describedby={baseUrlInvalid ? "modal-baseurl-error" : undefined}
                       onChange={(event) => setBaseUrl(event.currentTarget.value)}
                     />
-                    <FormFieldDescription
-                      className={cn(!isFullUrl && "invisible")}
-                      aria-hidden={!isFullUrl}
-                    >
-                      {t("settings.providerFullUrlHint")}
-                    </FormFieldDescription>
+                    {baseUrlInvalid ? (
+                      <p
+                        id="modal-baseurl-error"
+                        className="text-xs leading-relaxed text-destructive"
+                        role="alert"
+                      >
+                        {t("settings.providerBaseUrlInvalid")}
+                      </p>
+                    ) : (
+                      <FormFieldDescription
+                        className={cn(!isFullUrl && "invisible")}
+                        aria-hidden={!isFullUrl}
+                      >
+                        {t("settings.providerFullUrlHint")}
+                      </FormFieldDescription>
+                    )}
                   </div>
                 </div>
                 <div

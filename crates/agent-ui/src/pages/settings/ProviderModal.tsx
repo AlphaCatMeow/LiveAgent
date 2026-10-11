@@ -124,6 +124,27 @@ function reconcileModelOrder(
   return next;
 }
 
+/**
+ * Mirrors K-brain's provider URL rule (HTTP(S), no user credentials, no fragment). An empty
+ * value is allowed: K-brain falls back to the provider type's default endpoint.
+ */
+export function isAcceptedProviderBaseUrl(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return false;
+  }
+  return (
+    (url.protocol === "http:" || url.protocol === "https:") &&
+    !url.username &&
+    !url.password &&
+    !trimmed.includes("#")
+  );
+}
+
 function useProviderModalController({
   providerType: defaultProviderType,
   initialData,
@@ -141,7 +162,14 @@ function useProviderModalController({
     initialApiKey.trim() === "" &&
     initialData?.apiKeyConfigured === true;
   const [name, setName] = useState(initialData?.name ?? "");
-  const [baseUrl, setBaseUrl] = useState(initialData?.baseUrl ?? "");
+  const [baseUrl, setBaseUrlState] = useState(initialData?.baseUrl ?? "");
+  // Only flag the URL after a save attempt, so typing "https://" is not shown as an error.
+  const [baseUrlValidationSubmitted, setBaseUrlValidationSubmitted] = useState(false);
+  const setBaseUrl = (value: string) => {
+    setBaseUrlState(value);
+    setBaseUrlValidationSubmitted(false);
+  };
+  const baseUrlInvalid = baseUrlValidationSubmitted && !isAcceptedProviderBaseUrl(baseUrl);
   const [isFullUrl, setIsFullUrl] = useState(initialData?.isFullUrl ?? false);
   const [modelsUrl, setModelsUrl] = useState(
     providerType === "gemini" ? "" : (initialData?.modelsUrl ?? ""),
@@ -734,6 +762,13 @@ function useProviderModalController({
   }
   async function handleSave() {
     if (!name.trim()) return;
+    if (!isAcceptedProviderBaseUrl(baseUrl)) {
+      // K-brain would reject the whole save; keep the dialog open with the reason instead.
+      setBaseUrlValidationSubmitted(true);
+      setActivePanel("general");
+      requestAnimationFrame(() => document.getElementById("modal-baseurl")?.focus());
+      return;
+    }
     const nextModels = modelsWithEditingDraft();
     if (!nextModels) return;
     const invalidHeaderIndex = customHeaders.findIndex(
@@ -972,6 +1007,7 @@ function useProviderModalController({
     headerKeyRefs,
     headerValidationSubmitted,
     headerValueRefs,
+    baseUrlInvalid,
     dialogOpen,
     isEditing,
     isFullUrl,

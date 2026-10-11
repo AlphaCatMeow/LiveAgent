@@ -17,7 +17,14 @@ export type KBrainSettingsModel = {
   vision?: boolean;
 };
 
+export type AIApprovalConfig = {
+  mode: "off" | "risk_only" | "auto";
+  provider?: string;
+  model?: string;
+};
+
 export type KBrainSettingsDocument = {
+  aiApproval?: AIApprovalConfig;
   computer?: KBrainComputerConfig;
   mode: "kbrain";
   defaultModel: string;

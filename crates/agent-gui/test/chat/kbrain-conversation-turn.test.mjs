@@ -290,7 +290,7 @@ for (const [mode, runTurn, decision, expectedDecision] of [
         event("assistant.thinking.delta", { text: "Checking" });
         event("assistant.text.delta", { text: "Hello" });
         event("tool.call", { tool_call: { id: "call", name: "read_file", arguments: { path: "README.md" } } });
-        event("permission.requested", { permission_id: "permission", tool: "read_file", command: "README.md" });
+        event("permission.requested", { permission_id: "permission", tool: "read_file", command: "README.md", description: "AI review: sensitive information risk" });
         return;
       }
       if (request.url === "/v1/sessions/session/permissions/permission") {
@@ -339,6 +339,7 @@ for (const [mode, runTurn, decision, expectedDecision] of [
     const conversationId = `conversation-${mode}`;
     const dispose = approval.subscribeToolApprovalsForConversation(conversationId, () => {
       for (const pending of approval.listPendingToolApprovalsForConversation(conversationId)) {
+        assert.match(pending.summary, /AI review: sensitive information risk/);
         approval.answerToolApproval(pending.toolCallId, decision, { conversationId });
       }
     });

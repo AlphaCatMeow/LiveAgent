@@ -5,6 +5,7 @@ import type {
   ToolCall,
   ToolResultMessage,
 } from "@liveagent/app/lib/agentTypes";
+import { toast } from "@liveagent/ui/components/ui/toast-manager";
 import type { HostedSearchBlock } from "@liveagent/ui/lib/chat/hostedSearch";
 import type { ConversationViewState } from "../chat/conversation/conversationState";
 import { appendMessagesToConversation } from "../chat/conversation/conversationState";
@@ -511,6 +512,32 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
             : payload;
         if (subagent && typeof subagent === "object" && "id" in subagent && "model" in subagent) {
           params.onSubagent?.(subagent as KBrainSubagent);
+        }
+        break;
+      }
+      case "approval.reviewed": {
+        const review = eventPayload<{
+          phase: string;
+          tool: string;
+          automatic: boolean;
+          report: {
+            risk: string;
+            reason: string;
+            sandbox: string;
+            sensitive_data: string;
+            model_behavior: string;
+            injection: string;
+          };
+        }>(event);
+        if (
+          review &&
+          Object.entries(review.report).some(([key, value]) => key !== "reason" && value !== "low")
+        ) {
+          toast.warning(`AI review · ${review.tool}`, {
+            description: review.report.reason,
+            id: `ai-review-${params.conversationId}`,
+            duration: 15000,
+          });
         }
         break;
       }

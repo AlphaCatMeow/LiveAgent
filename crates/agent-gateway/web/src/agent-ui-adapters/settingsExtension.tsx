@@ -49,7 +49,12 @@ const computerSettingsAdapter: KBrainSettingsAdapter = {
       defaultModel: "",
       defaultProvider: "",
       providers: [],
-      models: [],
+      models: document.customProviders.flatMap((p) =>
+        p.models
+          .filter((m) => !p.activeModels || p.activeModels.includes(m.id))
+          .map((m) => ({ provider: p.id, id: m.id, name: m.displayName || m.id })),
+      ),
+      aiApproval: document.aiApproval,
       computer: document.computer,
     };
   },

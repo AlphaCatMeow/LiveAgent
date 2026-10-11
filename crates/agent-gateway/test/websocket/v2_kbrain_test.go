@@ -161,6 +161,14 @@ func TestV2KBrainRelayBrowserReconnect(t *testing.T) {
 		t.Fatalf("first token seq = %d, want positive sequence", firstTokenSeq)
 	}
 
+	// 浏览器断开后，独立观察 Gateway 接收事件的边界。
+	// SSE Flush 或处理器返回只表示生产端已发送，不能证明中继已写入重放缓冲区。
+	ingested := sm.SubscribeConversationStream(cfg.KBrainAgentID, conversationID, firstTokenSeq, streamEpoch)
+	if ingested == nil {
+		t.Fatal("Gateway ingestion subscription is nil")
+	}
+	defer ingested.Cleanup()
+
 	// Close only the browser connection. Relay and K-brain continue on their
 	// own context, so the later events remain in the Gateway replay ring.
 	_ = browserConn.Close()
@@ -174,6 +182,23 @@ func TestV2KBrainRelayBrowserReconnect(t *testing.T) {
 	case <-sseHandlerDone:
 	case <-time.After(2 * time.Second):
 		t.Fatal("K-brain SSE handler did not return after release")
+	}
+
+	ingestionTimeout := time.NewTimer(2 * time.Second)
+	defer ingestionTimeout.Stop()
+waitForTerminal:
+	for {
+		select {
+		case event, ok := <-ingested.EventCh:
+			if !ok {
+				t.Fatal("Gateway ingestion subscription closed before terminal event")
+			}
+			if event.Type == "run_finished" {
+				break waitForTerminal
+			}
+		case <-ingestionTimeout.C:
+			t.Fatal("Gateway did not ingest terminal event after browser disconnect")
+		}
 	}
 
 	reconnected, reconnectCleanup := dialV2Path(t, mux, "/ws/v2")

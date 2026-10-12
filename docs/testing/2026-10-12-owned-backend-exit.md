@@ -48,6 +48,9 @@ executed on a Windows host in this verification.
 ## Delivery
 
 Both source patches are needed for the measured graceful active-task shutdown.
-LA's backend release lock still points at the existing published artifact; no local
-binary is committed and no new release or installed-app replacement is performed.
-The changed KB must be released and the LA backend lock updated before shipping.
+K-brain v0.107.6-beta.9 publishes commit 7728f5054eab45cef6b680b4a43c78fd4cb131e6,
+including the memory-retention fix. The desktop lock now pins that release and
+its verified SHA-256 values for all four desktop targets. No local binary is
+committed; desktop release CI downloads the published backend/helper artifacts.
+The intended desktop release is v2.0.0-beta.13. Installed user apps were not replaced
+by the verification tests.

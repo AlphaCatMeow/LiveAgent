@@ -209,12 +209,13 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Install Tauri Linux dependencies
-        uses: awalsh128/cache-apt-pkgs-action@v1
-        with:
-          packages: protobuf-compiler libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
-          version: 1.0
-          # 缓存恢复时执行安装脚本(如 ldconfig 触发器),保证测试运行期动态链接可用。
-          execute_install_scripts: true
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            protobuf-compiler libglib2.0-dev libwebkit2gtk-4.1-dev \
+            libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+          pkg-config --atleast-version=2.70 glib-2.0
+          pkg-config --exists gtk+-3.0 webkit2gtk-4.1
 
       - name: Install mold linker
         uses: rui314/setup-mold@v1
@@ -248,6 +249,7 @@ jobs:
         run: >
           cargo test --manifest-path crates/agent-gui/src-tauri/Cargo.toml --lib --
           chat_history ssh_local_forward shell_runner integration_commands::mcp
+          services::system_proxy services::kbrain_backend
 
   ui-boundaries:
     name: Shared UI Boundaries

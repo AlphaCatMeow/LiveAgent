@@ -14,11 +14,15 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
 
 use crate::runtime::process::terminate_child_process_tree;
+use crate::services::system_proxy;
 
 const BACKEND_DIR: &str = "kbrain";
 #[cfg(test)]
 const CONFIG_FILE: &str = "config.json";
 const TOKEN_ENV: &str = "K_BRAIN_BACKEND_TOKEN";
+/// 应用代理取值（见 `system_proxy::kbrain_proxy_value`）；必须总是设置，
+/// 否则 K-brain 会回退到继承的 HTTP(S)_PROXY。
+const PROXY_ENV: &str = "LIVEAGENT_KBRAIN_PROXY";
 const DEBUG_BINARY_ENV: &str = "LIVEAGENT_KBRAIN_BINARY";
 #[cfg(test)]
 const TEST_BINARY_ENV: &str = "LIVEAGENT_KBRAIN_TEST_BINARY";
@@ -120,6 +124,7 @@ impl KBrainBackendManager {
             .arg("-parent-stdio")
             .env(TOKEN_ENV, &token)
             .env("LIVEAGENT_HOME", &backend_dir)
+            .env(PROXY_ENV, system_proxy::kbrain_proxy_value())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -377,6 +382,45 @@ impl KBrainBackendState {
             manager.shutdown();
         }
     }
+
+    /// 把当前应用代理推给运行中的 K-brain（best effort）。持有 start_lock，
+    /// 避免与并发启动竞争：启动中的进程要么已用新值 spawn，要么在此之后收到推送。
+    /// 未运行时无需推送，下次 spawn 会经 env 读取最新值。
+    pub fn push_proxy_setting(&self) {
+        let Ok(_start_guard) = self.start_lock.lock() else {
+            return;
+        };
+        let manager = self
+            .manager
+            .lock()
+            .ok()
+            .and_then(|guard| guard.as_ref().cloned());
+        let Some(manager) = manager.filter(|manager| manager.is_running()) else {
+            return;
+        };
+        let proxy = system_proxy::kbrain_proxy_value();
+        if let Err(error) = put_proxy_setting(&manager.connection(), &proxy) {
+            eprintln!("failed to push proxy setting to K-brain backend: {error}");
+        }
+    }
+}
+
+fn put_proxy_setting(connection: &KBrainBackendConnection, proxy: &str) -> Result<(), String> {
+    let client = Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .map_err(|error| format!("failed to create K-brain client: {error}"))?;
+    // 错误信息只带状态码，不带代理 URL/凭据。
+    client
+        .put(format!("{}/v1/network/proxy", connection.base_url))
+        .header(AUTHORIZATION, format!("Bearer {}", connection.token))
+        .json(&serde_json::json!({ "proxy": proxy }))
+        .send()
+        .map_err(|error| format!("request failed: {}", error.without_url()))?
+        .error_for_status()
+        .map(|_| ())
+        .map_err(|error| format!("unexpected status {:?}", error.status()))
 }
 
 impl Drop for KBrainBackendManager {
@@ -599,6 +643,67 @@ mod tests {
             .prefix("kbrain-native-")
             .tempdir_in(root)
             .expect("test directory")
+    }
+
+    /// 单请求 HTTP 桩：返回给定状态码，并把收到的原始请求交回。
+    fn proxy_endpoint_stub(status: &'static str) -> (String, thread::JoinHandle<String>) {
+        use std::io::Write;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind stub");
+        let base_url = format!("http://{}", listener.local_addr().expect("stub addr"));
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut request = Vec::new();
+            let mut chunk = [0_u8; 1024];
+            loop {
+                let read = stream.read(&mut chunk).expect("read request");
+                request.extend_from_slice(&chunk[..read]);
+                let text = String::from_utf8_lossy(&request);
+                if read == 0
+                    || text
+                        .split_once("\r\n\r\n")
+                        .is_some_and(|(_, b)| b.ends_with('}'))
+                {
+                    break;
+                }
+            }
+            let response =
+                format!("HTTP/1.1 {status}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+            String::from_utf8_lossy(&request).into_owned()
+        });
+        (base_url, handle)
+    }
+
+    #[test]
+    fn put_proxy_setting_sends_authorized_json_and_hides_value_on_failure() {
+        let proxy = "socks5h://user:secret@proxy.local:1080";
+        let connection = |base_url: String| KBrainBackendConnection {
+            base_url,
+            token: "test-token".into(),
+            protocol_version: PROTOCOL_VERSION.into(),
+        };
+
+        let (base_url, handle) = proxy_endpoint_stub("200 OK");
+        put_proxy_setting(&connection(base_url), proxy).expect("push accepted");
+        let request = handle.join().expect("stub thread");
+        assert!(request.starts_with("PUT /v1/network/proxy HTTP/1.1\r\n"));
+        assert!(request
+            .to_ascii_lowercase()
+            .contains("authorization: bearer test-token\r\n"));
+        assert!(request.ends_with(r#"{"proxy":"socks5h://user:secret@proxy.local:1080"}"#));
+
+        let (base_url, handle) = proxy_endpoint_stub("400 Bad Request");
+        let error = put_proxy_setting(&connection(base_url), proxy).expect_err("push rejected");
+        handle.join().expect("stub thread");
+        assert!(error.contains("400"), "{error}");
+        assert!(!error.contains("secret") && !error.contains("proxy.local"));
+    }
+
+    #[test]
+    fn push_proxy_setting_is_a_noop_without_a_running_backend() {
+        KBrainBackendState::default().push_proxy_setting();
     }
 
     #[test]

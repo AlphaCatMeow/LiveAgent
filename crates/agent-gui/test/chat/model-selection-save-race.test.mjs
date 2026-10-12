@@ -136,3 +136,32 @@ test("conversation saves are independent and remote synchronization resumes afte
     assert.equal(cache.current.get("one").selectedModel.model, "c");
   });
 });
+
+
+test("a save completed in an inactive conversation must not block later remote updates", async () => {
+  await mount(async ({ cache, rows, idRef, pick, render, settle }) => {
+    await pick("b");
+    idRef.current = "two";
+    await render();
+    await settle(requests[0]);
+    rows.set("one", { id: "one", selectedModelJson: JSON.stringify(model("c")) });
+    await render();
+    idRef.current = "one";
+    await render();
+    assert.equal(cache.current.get("one").selectedModel.model, "c");
+  });
+});
+
+
+test("a remote update batched with save completion is accepted", async () => {
+  await mount(async ({ cache, rows, pick, render }) => {
+    await pick("b");
+    await act(async () => {
+      requests[0].resolve({ id: "one", selectedModelJson: requests[0].json });
+      await new Promise(resolve => setTimeout(resolve, 0));
+      rows.set("one", { id: "one", selectedModelJson: JSON.stringify(model("c")) });
+    });
+    await render();
+    assert.equal(cache.current.get("one").selectedModel.model, "c");
+  });
+});

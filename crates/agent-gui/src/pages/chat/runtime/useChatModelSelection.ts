@@ -62,10 +62,9 @@ export function useChatModelSelection(params: UseChatModelSelectionParams) {
     updateConversationRuntimeEntry,
   } = params;
 
-  // Keep local intent until the saved sidebar projection acknowledges it. Requests
-  // are serialized per conversation so the backend cannot finish an older write last.
+  // Serialize writes per conversation and protect local intent until persistence completes.
   const localSelectionsRef = useRef(
-    new Map<string, { selection: SelectedModel; saved: boolean; errorMessage?: string }>(),
+    new Map<string, { selection: SelectedModel; errorMessage?: string }>(),
   );
   const modelSaveQueuesRef = useRef(new Map<string, Promise<void>>());
   const persistConversationSelection = useCallback(
@@ -74,7 +73,7 @@ export function useChatModelSelection(params: UseChatModelSelectionParams) {
       const selectedModelJson = serializeSelectedModelJson(selection);
       if (!persistedRow || persistedRow.isPending || !selectedModelJson) return;
       const previous = localSelectionsRef.current.get(conversationId);
-      const intent = { selection, saved: false, errorMessage: undefined as string | undefined };
+      const intent = { selection, errorMessage: undefined as string | undefined };
       localSelectionsRef.current.set(conversationId, intent);
       if (previous?.errorMessage) {
         updateConversationRuntimeEntry(conversationId, (prev) =>
@@ -86,9 +85,10 @@ export function useChatModelSelection(params: UseChatModelSelectionParams) {
           try {
             const summary = await setChatHistoryModel(conversationId, selectedModelJson);
             if (localSelectionsRef.current.get(conversationId) !== intent) return;
-            // Do not release the guard until React has seen this projection.
-            intent.saved = true;
             sidebarStore.upsertLocal({ ...summary, isPending: undefined });
+            if (localSelectionsRef.current.get(conversationId) === intent) {
+              localSelectionsRef.current.delete(conversationId);
+            }
           } catch (error) {
             if (localSelectionsRef.current.get(conversationId) !== intent) return;
             const detail = asErrorMessage(error, failureMessage);
@@ -152,17 +152,15 @@ export function useChatModelSelection(params: UseChatModelSelectionParams) {
   // 写回当前会话的 runtime entry；值相等或发送中不动，无回环。
   const displayedConversationPersistedModelJson =
     sidebarConversationsById.get(currentConversationId)?.selectedModelJson;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the projection triggers synchronization; peek reads the latest committed value.
   useEffect(() => {
     const parsed = normalizeSelectedModelForProviders(
-      parseSelectedModelJson(displayedConversationPersistedModelJson),
+      // Read the committed store value, not a projection captured before a save completed.
+      parseSelectedModelJson(sidebarStore.peek(currentConversationId)?.selectedModelJson),
       settings.customProviders,
     );
     if (!parsed) return;
-    const localSelection = localSelectionsRef.current.get(currentConversationId);
-    if (localSelection) {
-      if (!localSelection.saved || !selectedModelsMatch(localSelection.selection, parsed)) return;
-      localSelectionsRef.current.delete(currentConversationId);
-    }
+    if (localSelectionsRef.current.has(currentConversationId)) return;
     const entry = conversationRuntimeCacheRef.current.get(currentConversationId);
     if (!entry || entry.isSending) return;
     if (selectedModelsMatch(entry.selectedModel, parsed)) return;
@@ -174,6 +172,7 @@ export function useChatModelSelection(params: UseChatModelSelectionParams) {
     conversationRuntimeCacheRef,
     currentConversationId,
     displayedConversationPersistedModelJson,
+    sidebarStore,
     settings.customProviders,
     updateConversationRuntimeEntry,
   ]);

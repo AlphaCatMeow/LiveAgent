@@ -261,6 +261,7 @@ export function SettingsPage(props: SettingsPageProps) {
       onBack={onBack}
       initialSection={initialSection}
       hiddenSections={hiddenSections}
+      fontScale={settings.customSettings.fontScale.settings}
     />
   );
 }

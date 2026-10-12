@@ -149,6 +149,7 @@ export type FontScaleSettings = {
   sidebar: number;
   chat: number;
   rightDock: number;
+  settings: number;
 };
 
 export type ChatTranscriptSettings = {

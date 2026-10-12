@@ -167,6 +167,7 @@ export function SystemSettingsForm(props: SettingsSectionProps) {
     { key: "sidebar", label: t("settings.fontSizeSidebar") },
     { key: "chat", label: t("settings.fontSizeChat") },
     { key: "rightDock", label: t("settings.fontSizeRightDock") },
+    { key: "settings", label: t("settings.fontSizeSettings") },
   ];
 
   function getFontScaleLabel(value: number) {

@@ -2759,20 +2759,20 @@ test("mcp auth config keeps oauth with trimmed fields and drops none/invalid sha
 
 test("font scale settings normalize invalid values to 1 and clamp out-of-range values", () => {
   const defaults = settings.normalizeFontScaleSettings(undefined);
-  assert.deepEqual(defaults, { sidebar: 1, chat: 1, rightDock: 1 });
+  assert.deepEqual(defaults, { sidebar: 1, chat: 1, rightDock: 1, settings: 1 });
 
   const normalized = settings.normalizeFontScaleSettings({
     sidebar: "big",
     chat: 2.5,
     rightDock: 0.5,
   });
-  assert.deepEqual(normalized, { sidebar: 1, chat: 1.4, rightDock: 0.8 });
+  assert.deepEqual(normalized, { sidebar: 1, chat: 1.4, rightDock: 0.8, settings: 1 });
 
   const kept = settings.normalizeFontScaleSettings({ sidebar: 0.9, chat: 1.1, rightDock: 1.2 });
-  assert.deepEqual(kept, { sidebar: 0.9, chat: 1.1, rightDock: 1.2 });
+  assert.deepEqual(kept, { sidebar: 0.9, chat: 1.1, rightDock: 1.2, settings: 1 });
 
   const custom = settings.normalizeCustomSettings({ fontScale: { chat: 1.2 } }, []);
-  assert.deepEqual(custom.fontScale, { sidebar: 1, chat: 1.2, rightDock: 1 });
+  assert.deepEqual(custom.fontScale, { sidebar: 1, chat: 1.2, rightDock: 1, settings: 1 });
 });
 
 test("chat transcript width defaults, clamps, and updates locally", () => {

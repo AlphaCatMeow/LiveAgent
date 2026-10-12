@@ -3,7 +3,7 @@ use std::fs;
 use std::io::{self, BufRead, BufReader, Read};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -80,6 +80,7 @@ pub struct KBrainBackendState {
     manager: Mutex<Option<Arc<KBrainBackendManager>>>,
     start_lock: Mutex<()>,
     shutdown_epoch: AtomicU64,
+    exiting: AtomicBool,
 }
 
 impl Default for KBrainBackendState {
@@ -88,6 +89,7 @@ impl Default for KBrainBackendState {
             manager: Mutex::new(None),
             start_lock: Mutex::new(()),
             shutdown_epoch: AtomicU64::new(0),
+            exiting: AtomicBool::new(false),
         }
     }
 }
@@ -317,7 +319,10 @@ impl KBrainBackendState {
         legacy_desktop_dir: Option<PathBuf>,
     ) -> Result<KBrainBackendConnection, String> {
         let epoch = self.shutdown_epoch.load(Ordering::SeqCst);
-        let cancelled = || self.shutdown_epoch.load(Ordering::SeqCst) != epoch;
+        let cancelled = || {
+            self.exiting.load(Ordering::SeqCst)
+                || self.shutdown_epoch.load(Ordering::SeqCst) != epoch
+        };
         let _start_guard = self
             .start_lock
             .lock()
@@ -381,6 +386,11 @@ impl KBrainBackendState {
         if let Some(manager) = manager {
             manager.shutdown();
         }
+    }
+
+    pub fn shutdown_for_exit(&self) {
+        self.exiting.store(true, Ordering::SeqCst);
+        self.shutdown();
     }
 
     /// 把当前应用代理推给运行中的 K-brain（best effort）。持有 start_lock，
@@ -738,6 +748,7 @@ import json
 import os
 from pathlib import Path
 import select
+import signal
 import socket
 import sys
 import threading
@@ -780,6 +791,8 @@ def parent_watch():
         os._exit(0)
 
 threading.Thread(target=parent_watch, daemon=True).start()
+if mode == "stubborn":
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
 token = os.environ["K_BRAIN_BACKEND_TOKEN"]
 while True:
     ready, _, _ = select.select([server], [], [], 0.1)
@@ -937,6 +950,86 @@ while True:
             state.shutdown();
             assert_fixture_reaped(&data);
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exit_stops_only_owned_backend_and_prevents_restart() {
+        let _serial = CHILD_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let temp = test_dir();
+        let binary = fixture_binary(&temp, "parent-loss");
+        let state = KBrainBackendState::default();
+        let other = KBrainBackendState::default();
+        let own_data = temp.path().join("owned");
+        let other_data = temp.path().join("other");
+        state
+            .ensure_started_with_binary(binary.clone(), own_data.clone())
+            .expect("owned backend");
+        other
+            .ensure_started_with_binary(binary.clone(), other_data.clone())
+            .expect("other backend");
+        let started = Instant::now();
+        state.shutdown_for_exit();
+        assert!(started.elapsed() < Duration::from_secs(3));
+        assert_fixture_reaped(&own_data);
+        assert!(other.manager.lock().unwrap().as_ref().unwrap().is_running());
+        assert!(state
+            .ensure_started_with_binary(binary, own_data)
+            .unwrap_err()
+            .contains("cancelled"));
+        state.shutdown_for_exit();
+        other.shutdown_for_exit();
+        assert_fixture_reaped(&other_data);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exit_force_stops_unresponsive_owned_backend() {
+        let _serial = CHILD_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let temp = test_dir();
+        let state = KBrainBackendState::default();
+        let data = temp.path().join("data");
+        state
+            .ensure_started_with_binary(fixture_binary(&temp, "stubborn"), data.clone())
+            .expect("backend");
+        let started = Instant::now();
+        state.shutdown_for_exit();
+        assert!(started.elapsed() < STOP_GRACE + Duration::from_secs(1));
+        assert_fixture_reaped(&data);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn exit_cancels_inflight_startup_and_stays_closed() {
+        let _serial = CHILD_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let temp = test_dir();
+        let binary = fixture_binary(&temp, "health-hang");
+        let data = temp.path().join("data");
+        let state = Arc::new(KBrainBackendState::default());
+        let worker_state = Arc::clone(&state);
+        let worker_data = data.clone();
+        let worker_binary = binary.clone();
+        let worker = thread::spawn(move || {
+            worker_state.ensure_started_with_binary(worker_binary, worker_data)
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !data.join("health-started").exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(data.join("health-started").exists());
+        state.shutdown_for_exit();
+        assert!(worker.join().unwrap().unwrap_err().contains("cancelled"));
+        assert_fixture_reaped(&data);
+        assert!(state
+            .ensure_started_with_binary(binary, data)
+            .unwrap_err()
+            .contains("cancelled"));
     }
 
     #[cfg(unix)]

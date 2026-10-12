@@ -331,6 +331,17 @@ pub fn current_proxy_url() -> Result<Option<reqwest::Url>, String> {
     }
 }
 
+/// 传给 K-brain 的代理取值（启动 env `LIVEAGENT_KBRAIN_PROXY` 与
+/// `PUT /v1/network/proxy` 共用）：未启用 → `direct`，已启用但配置无效 →
+/// `invalid`（K-brain 侧走代理的请求 fail fast），否则为代理 URL（socks5 为 `socks5h://`）。
+pub fn kbrain_proxy_value() -> String {
+    match current_snapshot().mode {
+        ProxyMode::Disabled => "direct".to_string(),
+        ProxyMode::Invalid(_) => "invalid".to_string(),
+        ProxyMode::Enabled(config) => config.proxy_url(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -484,6 +495,29 @@ mod tests {
             "enabled": true, "type": "http", "host": "bad host/@", "port": 8080
         })));
         assert!(current_proxy_url().is_err());
+
+        set_config(None);
+        // K-brain 取值与上面共用同一全局状态，放在同一个测试里避免并行测试互相覆盖。
+        assert_eq!(kbrain_proxy_value(), "direct");
+
+        set_config(Some(&json!({
+            "enabled": false, "type": "http", "host": "proxy.local", "port": 8080
+        })));
+        assert_eq!(kbrain_proxy_value(), "direct");
+
+        set_config(Some(&json!({
+            "enabled": true, "type": "socks5", "host": "proxy.local", "port": 1080,
+            "username": "u@x", "password": "p:w"
+        })));
+        assert_eq!(
+            kbrain_proxy_value(),
+            "socks5h://u%40x:p%3Aw@proxy.local:1080"
+        );
+
+        set_config(Some(&json!({
+            "enabled": true, "type": "http", "host": "bad host/@", "port": 8080
+        })));
+        assert_eq!(kbrain_proxy_value(), "invalid");
 
         // reset so other tests in this module observe the default disabled state
         set_config(None);

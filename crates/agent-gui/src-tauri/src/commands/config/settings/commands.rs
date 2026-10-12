@@ -34,12 +34,20 @@ pub async fn settings_save_providers(payload: Value) -> Result<(), String> {
 pub async fn settings_save_system(
     payload: Value,
     automation_scheduler: tauri::State<'_, Arc<AutomationScheduler>>,
+    kbrain_backend: tauri::State<'_, Arc<crate::services::kbrain_backend::KBrainBackendState>>,
 ) -> Result<(), String> {
+    let kbrain_backend = Arc::clone(kbrain_backend.inner());
     tauri::async_runtime::spawn_blocking(move || {
         let mut conn = open_db()?;
         save_system(&mut conn, payload)?;
         // 保存成功后刷新全局代理状态，让 shell env 注入与出网代理即时生效。
-        refresh_system_proxy_state(&conn)
+        let proxy_revision = crate::services::system_proxy::revision();
+        refresh_system_proxy_state(&conn)?;
+        // 代理真实变化时推给运行中的 K-brain（best effort，失败只记日志）。
+        if crate::services::system_proxy::revision() != proxy_revision {
+            kbrain_backend.push_proxy_setting();
+        }
+        Ok::<(), String>(())
     })
     .await
     .map_err(|e| format!("settings_save_system join 失败：{e}"))??;

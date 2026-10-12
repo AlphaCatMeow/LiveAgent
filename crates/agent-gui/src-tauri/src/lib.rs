@@ -1059,22 +1059,31 @@ pub fn run() {
                     ) {
                         eprintln!("failed to request terminal exit confirmation: {error}");
                     }
+                    api.prevent_exit();
+                    return;
                 }
-                api.prevent_exit();
-            } else {
-                // Real exit: reclaim every non-isolated managed process
-                // before the OS tears us down (Drop is not guaranteed).
-                terminal_registry.shutdown_cleanup();
-                shell_session_manager.shutdown_cleanup();
-                managed_process_registry.shutdown_cleanup();
+            }
+            {
+                // Stop our backend before other cleanup can block or the OS exits.
                 if let Some(backend) =
                     _app.try_state::<Arc<services::kbrain_backend::KBrainBackendState>>()
                 {
-                    backend.shutdown();
+                    backend.shutdown_for_exit();
                 }
+                terminal_registry.shutdown_cleanup();
+                shell_session_manager.shutdown_cleanup();
+                managed_process_registry.shutdown_cleanup();
                 git_clone_task_registry.shutdown_cleanup();
                 browser_manager.shutdown_cleanup();
                 power_activity.clear_all();
+            }
+        }
+        tauri::RunEvent::Exit => {
+            // Native macOS termination can bypass ExitRequested; Drop is not guaranteed.
+            if let Some(backend) =
+                _app.try_state::<Arc<services::kbrain_backend::KBrainBackendState>>()
+            {
+                backend.shutdown_for_exit();
             }
         }
         _ => {}

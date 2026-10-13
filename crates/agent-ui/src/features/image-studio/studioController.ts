@@ -63,7 +63,6 @@ export class ImageStudioController {
   private pendingSubmit = false;
   private submissions = new Map<string, FrozenSubmission | null>();
   private submissionHistories = new Map<string, FrozenSubmission[]>();
-  private checkingHistory = new Set<string>();
   private inputRevision = 0;
   private targetRefresh = 0;
   private uploadAbort?: AbortController;
@@ -330,7 +329,7 @@ export class ImageStudioController {
         const stored = this.submissions.has(key)
           ? (this.submissions.get(key) ?? null)
           : restoreSubmission(saved, scope);
-        const storedHistory = this.submissionHistories.get(key) ?? restoreSubmissionHistory(saved, scope);
+        this.submissionHistories.get(key) ?? restoreSubmissionHistory(saved, scope);
         const restored = await restoreDraft(raw, scope, this.view.targets, async (id) => {
           await this.client.readAsset(id, "thumbnail", signal);
           return true;

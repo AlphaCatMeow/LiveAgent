@@ -315,6 +315,7 @@ macro_rules! app_invoke_handler {
             commands::system::system_pick_file,
             commands::system::system_sandbox_capability,
             commands::system::system_save_preview_file,
+            commands::image_export::image_export_asset,
             commands::system::system_create_project_folder,
             commands::system::system_import_pasted_texts,
             commands::system::system_import_readable_file_paths,

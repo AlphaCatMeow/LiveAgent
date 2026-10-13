@@ -23,6 +23,7 @@ import {
   WorkspaceToolsPanel,
 } from "@liveagent/ui/components/project-tools/WorkspacePanels";
 import { TrajectoryView } from "@liveagent/ui/components/trajectory/TrajectoryView";
+import { Button } from "@liveagent/ui/components/ui/button";
 import { ScrollArea } from "@liveagent/ui/components/ui/scroll-area";
 import { Toaster } from "@liveagent/ui/components/ui/toaster";
 import { PaneChrome } from "@liveagent/ui/components/workbench/PaneChrome";
@@ -82,6 +83,10 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import {
+  type TrustedGatewayImageIdentity,
+  useWebImageStudioHost,
+} from "@/agent-ui-adapters/imageStudio";
 import { createGatewayTrajectoryHost } from "@/agent-ui-adapters/trajectory";
 import { GatewayTranscript } from "@/components/GatewayTranscript";
 import { executeClarifyPromptTurn } from "@/lib/chat/clarifyPromptTurn";
@@ -134,7 +139,18 @@ import {
 import { GatewayTerminalPaneHost } from "./workbench/GatewayTerminalPaneHost";
 import { sessionWorkbench } from "./workbench/sessionWorkbench";
 
-export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }) {
+export function GatewayAppView({
+  viewModel,
+  imageStudioIdentity,
+}: {
+  viewModel: GatewayAppViewModel;
+  imageStudioIdentity?: TrustedGatewayImageIdentity;
+}) {
+  const imageStudio = useWebImageStudioHost(
+    viewModel.imageStudioToken,
+    imageStudioIdentity,
+    viewModel.activeWorkspaceProjectPath,
+  );
   const chatFrameRef = useRef<HTMLDivElement | null>(null);
   useWindowFileDropGuard();
   const {
@@ -1500,8 +1516,27 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
                   <main className={GATEWAY_MAIN_SHELL_CLASS}>
                     <div className={GATEWAY_MAIN_BACKDROP_CLASS} />
 
+                    {activeView === "image-studio-hub" && !imageStudio.host && (
+                      <section className="relative flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+                        <h1 className="text-lg font-semibold">图像工作台</h1>
+                        <p role="status" className="max-w-lg text-sm text-muted-foreground">
+                          {imageStudio.unavailable}
+                        </p>
+                        {imageStudioIdentity && (
+                          <Button variant="outline" onClick={imageStudio.retry}>
+                            重试连接
+                          </Button>
+                        )}
+                      </section>
+                    )}
                     <ApplicationView
                       activeView={activeView}
+                      imageStudioHost={
+                        imageStudio.host && {
+                          ...imageStudio.host,
+                          onOpenSettings: () => openSettings("image-studio"),
+                        }
+                      }
                       settings={settings}
                       setSettings={setSettings}
                       resourceHost={nativeResourceHostCapabilities}
@@ -1509,7 +1544,11 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
                       initialSkills={availableSkills}
                       initialSkillsRootDir={skillsRootDir}
                       onOpenView={setActiveView}
-                      className="contents"
+                      className={
+                        activeView === "image-studio-hub" && !imageStudio.host
+                          ? "hidden"
+                          : "contents"
+                      }
                       chat={{
                         containerRef: chatFrameRef,
                         containerProps: {
@@ -2124,6 +2163,8 @@ export function GatewayAppView({ viewModel }: { viewModel: GatewayAppViewModel }
               onTransitionEnd={handleSettingsTransitionEnd}
             >
               <SettingsPage
+                imageClient={imageStudio.host?.client}
+                registerLeaveGuard={viewModel.registerSettingsLeaveGuard}
                 settings={settings}
                 settingsHost={settingsHostAdapter}
                 setSettings={setSettings}

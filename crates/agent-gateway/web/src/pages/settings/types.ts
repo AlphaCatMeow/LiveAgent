@@ -1,3 +1,4 @@
+import type { ImageStudioClient } from "@liveagent/ui/lib/imaging/types";
 import type { SttSettingsService } from "@liveagent/ui/lib/stt/types";
 import type { AppSettings, SttProviderId } from "../../lib/settings";
 import type { WebSettingsSaveState } from "../../lib/webSettings";
@@ -16,6 +17,7 @@ export type SectionId =
   | "memory"
   | "hooks"
   | "cron"
+  | "image-studio"
   | "planning"
   | "devices"
   | "cua"
@@ -26,6 +28,8 @@ import type { SettingsHostAdapter } from "@liveagent/ui/pages/settings/kbrainSet
 export type SettingsPageProps = {
   settings: AppSettings;
   settingsHost?: SettingsHostAdapter;
+  imageClient?: ImageStudioClient;
+  registerLeaveGuard?: (guard: () => boolean) => () => void;
   setSettings: SetSettingsFn;
   saveState: WebSettingsSaveState;
   onBack: () => void;

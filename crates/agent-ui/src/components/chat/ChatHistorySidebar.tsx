@@ -12,6 +12,7 @@ import {
   Folder,
   FolderClosed,
   FolderOpen,
+  ImageIcon,
   ListChecks,
   Loader2,
   MessageSquare,
@@ -1451,6 +1452,7 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
                     mcp: Cable,
                     cron: Clock3,
                     planning: CalendarDays,
+                    "image-studio": ImageIcon,
                     memory: Brain,
                   }[id];
                   const active = activeView === `${id}-hub`;

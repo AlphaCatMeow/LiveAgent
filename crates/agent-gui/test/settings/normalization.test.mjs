@@ -3712,11 +3712,11 @@ test("workspace resource overflow uses locale-independent Unicode code-point ord
 test("sidebar shortcut migration tolerates partial and malformed preferences", () => {
   for (const input of [null, [], "hidden", {}]) {
     assert.deepEqual(settings.normalizeCustomSettings({ sidebarShortcuts: input }, []).sidebarShortcuts,
-      { skills: true, mcp: true, cron: true, memory: true, planning: true });
+      { skills: true, mcp: true, cron: true, memory: true, planning: true, "image-studio": true });
   }
   assert.deepEqual(settings.normalizeCustomSettings({ sidebarShortcuts: {
     skills: false, mcp: "false", cron: null, memory: true,
-  } }, []).sidebarShortcuts, { skills: false, mcp: true, cron: true, memory: true, planning: true });
+  } }, []).sidebarShortcuts, { skills: false, mcp: true, cron: true, memory: true, planning: true, "image-studio": true });
 });
 
 test("desktop snapshots synchronize sidebar shortcuts to WebUI", () => {
@@ -3733,7 +3733,7 @@ test("desktop snapshots synchronize sidebar shortcuts to WebUI", () => {
   assert.equal(sync.buildGatewaySettingsSyncUpdatePayload(desktop, hydrated).customSettings, undefined);
 });
 
-for (const resource of ["skills", "mcp", "cron", "memory", "planning"]) {
+for (const resource of ["skills", "mcp", "cron", "memory", "planning", "image-studio"]) {
   test(`WebUI ${resource} shortcut edits synchronize in both directions without changing resources`, () => {
     let desktop = settings.normalizeSettings({});
     let web = sync.applyGatewaySettingsSyncPayload(

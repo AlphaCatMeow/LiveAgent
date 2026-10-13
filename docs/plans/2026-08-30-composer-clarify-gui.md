@@ -1,6 +1,6 @@
 # 输入框提示词澄清 · 计划 1：agent-ui 共享组件 + 桌面 GUI 接线 实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **执行说明：** 按任务顺序实施并完成每项验证；使用复选框（`- [ ]`）记录进度。
 
 **Goal:** 在聊天输入框旁提供「澄清」按钮：LLM 小对话持续追问用户澄清需求，产出优化后的提示词放回输入框（只替换文本段，附件与提及保留）。
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** TypeScript / React（无新依赖）、`@earendil-works/pi-ai` Context 类型、`node:test`（经 `crates/agent-gui/test/helpers/load-ts-module.mjs` 的 TS 加载器）。
 
-**Spec:** `docs/superpowers/specs/2026-08-30-composer-clarify-design.md`
+**Spec:** `docs/design/2026-08-30-composer-clarify-design.md`
 
 ## Global Constraints
 

@@ -29,6 +29,7 @@ import { projectToolSurfaceTitleKey } from "@liveagent/ui/lib/workbench/projectT
 import { useWorkspaceProjectSettingsActions } from "@liveagent/ui/lib/workspaceProjectRemoval";
 import type { ChatQueueTurnPreview } from "@liveagent/ui/pages/chat/ChatComposerBar";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { TrustedGatewayImageIdentity } from "@/agent-ui-adapters/imageStudio";
 import { createGatewayWorkspaceProjectRootClient } from "@/agent-ui-adapters/workspaceProjectRoots";
 import type { GatewayTranscriptNavHandle } from "@/components/GatewayTranscript";
 import { registerAskUserQuestionAnswerHandler } from "@/lib/chat/askUserQuestionBridge";
@@ -238,6 +239,7 @@ function useGatewayAppController() {
     overlay,
     openSettings,
     closeSettings,
+    registerSettingsLeaveGuard,
     handleSettingsTransitionEnd,
     resetSettingsOverlay,
     settingsSection,
@@ -2102,6 +2104,8 @@ function useGatewayAppController() {
   ) => handleImportReadableFiles(files, { conversationId: targetConversationId, workdir });
 
   const viewModel = {
+    imageStudioToken: token,
+    registerSettingsLeaveGuard,
     activeFloorKey,
     activeSelectedModel,
     activeView,
@@ -2385,17 +2389,19 @@ export type GatewayAppViewModel = Extract<
   { activeFloorKey: string | null }
 >;
 
-export default function GatewayApp() {
+type GatewayAppProps = { imageStudioIdentity?: TrustedGatewayImageIdentity };
+
+export default function GatewayApp(props: GatewayAppProps) {
   return (
     <SidebarProvider>
-      <GatewayAppContent />
+      <GatewayAppContent {...props} />
     </SidebarProvider>
   );
 }
-function GatewayAppContent() {
+function GatewayAppContent({ imageStudioIdentity }: GatewayAppProps) {
   const result = useGatewayAppController();
   if (!result || !("activeFloorKey" in result)) {
     return result;
   }
-  return <GatewayAppView viewModel={result} />;
+  return <GatewayAppView viewModel={result} imageStudioIdentity={imageStudioIdentity} />;
 }

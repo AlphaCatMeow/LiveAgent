@@ -10,6 +10,7 @@ import {
   Clock3,
   Cloud,
   Cpu,
+  ImageIcon,
   Key,
   Mic,
   Settings2,
@@ -18,11 +19,13 @@ import {
 } from "@liveagent/ui/components/IconSet";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SettingsSectionDefinition, UiExtensionRegistry } from "../../contracts/registry";
+import { useLocale } from "../../i18n";
 import { AgentsSection } from "./AgentsSection";
 import { AIApprovalSection } from "./AIApprovalSection";
 import { CalendarSection } from "./CalendarSection";
 import { CronSection } from "./CronSection";
 import { HooksSection } from "./HooksSection";
+import { ImageSettings } from "./ImageSettings";
 import { MemoryPanel } from "./memory/MemoryPanel";
 import { ProvidersSection } from "./ProvidersSection";
 import { RemoteSection } from "./RemoteSection";
@@ -40,11 +43,14 @@ const STT_SELECTED_PROVIDER_CACHE = new WeakMap<
 >();
 
 export function SettingsPage(props: SettingsPageProps) {
+  const { t } = useLocale();
   const {
     settings,
     setSettings,
     saveState,
     onBack,
+    imageClient,
+    registerLeaveGuard,
     initialSection = "system",
     initialProviderId,
     hiddenSections = [],
@@ -54,6 +60,23 @@ export function SettingsPage(props: SettingsPageProps) {
     onRetryRejectedLegacyProviders,
     onDismissRejectedLegacyProviders,
   } = props;
+  const imageLeaveGuard = useRef<(() => boolean) | undefined>(undefined);
+  const registerImageLeaveGuard = useCallback(
+    (guard: () => boolean) => {
+      imageLeaveGuard.current = guard;
+      const unregister = registerLeaveGuard?.(guard);
+      return () => {
+        if (imageLeaveGuard.current === guard) imageLeaveGuard.current = undefined;
+        unregister?.();
+      };
+    },
+    [registerLeaveGuard],
+  );
+  const canLeaveSection = useCallback(() => imageLeaveGuard.current?.() ?? true, []);
+  const handleBack = useCallback(() => {
+    // The root also guards keyboard/actions that close the overlay directly.
+    if (registerLeaveGuard || canLeaveSection()) onBack();
+  }, [registerLeaveGuard, canLeaveSection, onBack]);
   const [pendingProviderId, setPendingProviderId] = useState(initialProviderId);
   const [sttSelectedProvider, setSttSelectedProvider] = useState<SttProviderId>(
     () =>
@@ -147,6 +170,23 @@ export function SettingsPage(props: SettingsPageProps) {
         render: () => <CalendarSection settings={settings} setSettings={setSettings} />,
       },
       {
+        id: "image-studio",
+        groupKey: "settings.groupResources",
+        groupOrder: 20,
+        order: 36,
+        labelKey: "settings.navImageStudio",
+        icon: <ImageIcon className={extension.iconClassName} />,
+        showSaveIndicator: false,
+        render: () =>
+          imageClient ? (
+            <ImageSettings client={imageClient} registerLeaveGuard={registerImageLeaveGuard} />
+          ) : (
+            <p role="status" className="p-6 text-sm text-muted-foreground">
+              {t("settings.imageStudioUnsupported")}
+            </p>
+          ),
+      },
+      {
         id: "memory",
         groupKey: "settings.groupResources",
         groupOrder: 20,
@@ -237,6 +277,9 @@ export function SettingsPage(props: SettingsPageProps) {
     [
       extension,
       props.settingsHost,
+      imageClient,
+      registerImageLeaveGuard,
+      t,
       handleSttProviderChange,
       pendingProviderId,
       saveState,
@@ -258,7 +301,8 @@ export function SettingsPage(props: SettingsPageProps) {
       registry={registry}
       context={undefined}
       saveState={saveState}
-      onBack={onBack}
+      onBack={handleBack}
+      canLeaveSection={canLeaveSection}
       initialSection={initialSection}
       hiddenSections={hiddenSections}
       fontScale={settings.customSettings.fontScale.settings}

@@ -165,7 +165,7 @@ export async function connectKBrainBackend(
     options.timeoutMs ?? DEFAULT_DESKTOP_BOOTSTRAP_TIMEOUT_MS,
     options.signal,
   );
-  setKBrainRuntimeConnection(connection);
+  setKBrainRuntimeConnection({ ...connection, managedLocal: true });
   return getConfiguredKBrainConnection() as KBrainRuntimeConnection;
 }
 

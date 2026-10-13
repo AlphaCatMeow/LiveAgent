@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -614,7 +615,7 @@ func (r *Relay) execute(ctx context.Context, state *runState, cwd string, prompt
 		if err == nil || errors.Is(err, context.Canceled) {
 			return
 		}
-		if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, io.EOF) {
+		if !retryableEventStreamError(err) {
 			r.emitTerminal(gatewayRunID, conversationID, cb, "failed", "kbrain_relay_error", err.Error())
 			return
 		}
@@ -849,7 +850,7 @@ func (r *Relay) resumeRun(state *runState) {
 			}
 			return
 		}
-		if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, io.EOF) {
+		if !retryableEventStreamError(err) {
 			r.emitTerminal(state.gatewayRunID, state.conversationID, r.runCallbacks(state), "failed", "kbrain_relay_error", err.Error())
 			return
 		}
@@ -879,4 +880,12 @@ func (r *Relay) runCallbacks(state *runState) Callbacks {
 
 func isRunTerminal(event Event, runID string) bool {
 	return event.RunID == runID && (event.Type == "run.completed" || event.Type == "run.failed" || event.Type == "run.cancelled")
+}
+
+// Transport failures can leave the canonical run active. Keep its reader alive
+// until replay delivers the terminal event; protocol and callback errors remain fatal.
+func retryableEventStreamError(err error) bool {
+	var networkError net.Error
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) || errors.As(err, &networkError)
 }

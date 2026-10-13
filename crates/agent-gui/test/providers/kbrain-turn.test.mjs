@@ -392,3 +392,33 @@ test("AI review warnings stay outside assistant content", async () => {
  assert.match(warnings[0][1].description,/Sensitive data/);
  assert.deepEqual(text,[]);
 });
+
+test("Stop recovers and cancels a run accepted before its HTTP acknowledgement", async () => {
+  storage.clear();
+  const controller = new AbortController();
+  const calls = [];
+  let running = false;
+  await withHttpFixture((req, res) => {
+    calls.push(`${req.method} ${req.url}`);
+    res.setHeader("content-type", "application/json");
+    if (req.url === "/v1/sessions") {
+      res.end(JSON.stringify({ id: "backend-session-1", model, messages: [], last_seq: 0 }));
+    } else if (req.method === "POST" && req.url.endsWith("/runs")) {
+      running = true;
+      // Acceptance is durable, but the POST response has not reached the caller.
+      setTimeout(() => controller.abort(), 10);
+    } else if (req.url.endsWith("/cancel")) {
+      running = false;
+      res.end(JSON.stringify({ ok: true }));
+    } else if (req.method === "GET" && req.url.includes("client_request_id=stop-before-ack")) {
+      res.end(JSON.stringify({ version: "kbrain.agent.v1", conversation_id: "backend-session-1", run_id: "run-1", accepted_seq: 1 }));
+    } else {
+      res.writeHead(404).end();
+    }
+  }, async (baseUrl) => {
+    await assert.rejects(runKBrainTurn({ ...baseParams, baseUrl, fetch: globalThis.fetch, clientRequestId: "stop-before-ack", signal: controller.signal }), /aborted/i);
+    assert.equal(running, false);
+    assert.equal(calls.filter((call) => call === "POST /v1/sessions/backend-session-1/runs").length, 1);
+    assert.ok(calls.includes("POST /v1/sessions/backend-session-1/runs/run-1/cancel"));
+  });
+});

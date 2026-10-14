@@ -438,3 +438,29 @@ test("K-brain model catalog request only sends CORS-allowed headers", async () =
     assert.ok(allowed.has(name.toLowerCase()), `header ${name} is outside the K-brain CORS allow-list`);
   }
 });
+
+test("Stop during lost-ACK lookup does not abort recovery or resubmit the run", async () => {
+  const controller = new AbortController();
+  const calls = [];
+  const accepted = { version: "kbrain.agent.v1", conversation_id: "session-1", run_id: "run-1", accepted_seq: 1 };
+  const client = createKBrainClient({
+    baseUrl: "https://kbrain.test",
+    fetch: async (url, init = {}) => {
+      calls.push(init.method ?? "GET");
+      if (init.method === "POST") throw new TypeError("lost response");
+      controller.abort();
+      assert.equal(init.signal.aborted, false);
+      assert.notEqual(init.signal, controller.signal);
+      return jsonResponse(accepted);
+    },
+  });
+  assert.deepEqual(await client.startRun({ conversation_id: "session-1", client_request_id: "stable", prompt: "hello" }, controller.signal), accepted);
+  assert.deepEqual(calls, ["POST", "GET"]);
+});
+
+test("an already stopped run makes no HTTP requests", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const client = createKBrainClient({ baseUrl: "https://kbrain.test", fetch: async () => assert.fail("unexpected request") });
+  await assert.rejects(client.startRun({ conversation_id: "session-1", client_request_id: "stable", prompt: "hello" }, controller.signal), { name: "AbortError" });
+});

@@ -520,6 +520,7 @@ export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
     input: KBrainPromptRequest,
     signal?: AbortSignal,
   ): Promise<KBrainRunAccepted> {
+    signal?.throwIfAborted();
     const path = `/v1/sessions/${encodeURIComponent(input.conversation_id)}/runs`;
     let accepted: KBrainRunAccepted;
     try {
@@ -530,16 +531,17 @@ export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
       });
     } catch (error) {
       if (
-        !(error instanceof KBrainTransportError) ||
-        !input.client_request_id?.trim() ||
-        signal?.aborted
+        (!(error instanceof KBrainTransportError) && !signal?.aborted) ||
+        !input.client_request_id?.trim()
       )
         throw error;
-      // Recover a lost ACK by its original identity; never resubmit the mutation.
+      // The backend run outlives the POST. Recover even after Stop so the caller
+      // can cancel the accepted run. Never resubmit the mutation, and keep the
+      // lookup independent of the user signal (which can abort during recovery).
       try {
         accepted = await request<KBrainRunAccepted>(
           `${path}?client_request_id=${encodeURIComponent(input.client_request_id)}`,
-          { signal },
+          { signal: AbortSignal.timeout(5_000) },
         );
       } catch {
         if (signal?.aborted) throw signal.reason;

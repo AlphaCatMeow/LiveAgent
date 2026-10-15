@@ -2352,6 +2352,7 @@ mod tests {
                 base_url: format!("http://{address}"),
                 token: "fixture-token".to_string(),
                 protocol_version: "kbrain.agent.v1".to_string(),
+                storage_id: "test-storage".into(),
             },
             &proto::TerminalRequest {
                 action: "read".to_string(),
@@ -2378,6 +2379,7 @@ mod tests {
                 base_url: "http://127.0.0.1:1".to_string(),
                 token: "token".to_string(),
                 protocol_version: "kbrain.agent.v1".to_string(),
+                storage_id: "test-storage".into(),
             },
             &proto::TerminalRequest {
                 action: "read".to_string(),
@@ -2458,6 +2460,7 @@ mod tests {
                 base_url: format!("http://{address}"),
                 token: "fixture-token".to_string(),
                 protocol_version: "kbrain.agent.v1".to_string(),
+                storage_id: "test-storage".into(),
             },
             json!({
                 "providerId": "saved/provider",

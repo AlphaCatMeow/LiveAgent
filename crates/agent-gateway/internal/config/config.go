@@ -20,7 +20,9 @@ const (
 )
 
 type Config struct {
-	Token string
+	// Explicit private single-owner image access; requires a loopback K-Brain URL.
+	ImageSingleUser bool
+	Token           string
 	// AgentDB 是每 Agent 凭证 SQLite 数据库路径；默认自动创建于用户配置目录。
 	AgentDB string
 	// 三条 v2 链路的并发连接上限（升级前检查，超限 503）；0/负值回落默认。
@@ -54,6 +56,7 @@ type Config struct {
 func Load() *Config {
 	cfg := &Config{}
 
+	flag.BoolVar(&cfg.ImageSingleUser, "image-single-user", getenv("LIVEAGENT_GATEWAY_IMAGE_SINGLE_USER", "") == "true", "enable single-owner Image Studio on an authenticated loopback K-Brain backend")
 	flag.StringVar(&cfg.Token, "token", getenv("LIVEAGENT_GATEWAY_TOKEN", ""), "gateway authentication token")
 	flag.StringVar(&cfg.AgentDB, "agent-db", getenv("LIVEAGENT_GATEWAY_AGENT_DB", defaultAgentDBPath()), "per-agent token SQLite database path (auto-created by default)")
 	flag.IntVar(&cfg.MaxAgentConnections, "max-agent-connections", getenvInt("LIVEAGENT_GATEWAY_MAX_AGENT_CONNECTIONS", DefaultMaxAgentConnections), "maximum concurrent desktop agent connections")

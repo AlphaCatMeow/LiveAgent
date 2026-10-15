@@ -567,7 +567,7 @@ fn read_pi_record(candidate: &PiCandidate) -> Option<PiMigrationRecord> {
 
 #[tauri::command]
 pub fn pi_history_migration_page(cursor: Option<String>) -> Result<PiMigrationPage, String> {
-    let home = dirs::home_dir().ok_or_else(|| "cannot locate user home".to_string())?;
+    let home = crate::runtime::data_home::home_dir().ok_or_else(|| "cannot locate user home".to_string())?;
     let candidates = pi_candidates(&home);
     let after = cursor.unwrap_or_default();
     let start = if after.is_empty() {

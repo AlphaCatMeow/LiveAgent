@@ -25,6 +25,12 @@ import (
 
 // NewHTTPServer 构造 HTTP 路由；生产启动时 tokens 始终是已初始化的 Agent 目录与凭证存储。
 func NewHTTPServer(cfg *config.Config, sm *session.Manager, tokens *agenttoken.Store, sttManagers ...*stt.Manager) http.Handler {
+	return NewHTTPServerWithImages(cfg, sm, tokens, singleUserImages(cfg), sttManagers...)
+}
+
+// NewHTTPServerWithImages accepts an explicitly configured trusted identity
+// adapter. The shared management bearer alone never enables image delegation.
+func NewHTTPServerWithImages(cfg *config.Config, sm *session.Manager, tokens *agenttoken.Store, images *handler.ImageGateway, sttManagers ...*stt.Manager) http.Handler {
 	rootMux := http.NewServeMux()
 	rootMux.HandleFunc("GET /healthz", handler.Health())
 
@@ -46,6 +52,9 @@ func NewHTTPServer(cfg *config.Config, sm *session.Manager, tokens *agenttoken.S
 	rootMux.HandleFunc("GET /api/public/history-shares/{token}", publicHistoryShare(cfg, sm))
 
 	apiMux := http.NewServeMux()
+	apiMux.HandleFunc("GET /api/image/identity", singleUserImageIdentity(cfg, images))
+	apiMux.Handle("/api/image/", images)
+	apiMux.Handle("/api/image", images)
 	apiMux.HandleFunc("GET /api/status", handler.Status(sm))
 	apiMux.HandleFunc("POST /api/files/import", handler.ImportReadableFiles(sm, cfg.RequestTimeout))
 	apiMux.HandleFunc("POST /api/files/import-directory", handler.ImportDirectory(sm, cfg.RequestTimeout))

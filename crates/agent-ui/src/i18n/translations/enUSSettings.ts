@@ -62,6 +62,9 @@ export const EN_US_SETTINGS_TRANSLATIONS = {
   "settings.navCron": "Scheduled tasks",
   "settings.navRemote": "Remote",
   "settings.navSkills": "Skills",
+  "settings.navImageStudio": "Image Studio",
+  "settings.imageStudioUnsupported":
+    "Image Studio is not connected on this host yet. Chat remains available.",
   "settings.navPlanning": "Calendar",
   "settings.navMemory": "Memory",
   "settings.groupGeneral": "General",

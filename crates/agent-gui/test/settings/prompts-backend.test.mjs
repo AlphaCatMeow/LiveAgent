@@ -6,10 +6,12 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { getKBrainBinary } from "../helpers/kbrain-binary.mjs";
 import { createTsModuleLoader } from "../helpers/load-ts-module.mjs";
 
-const HOST_MODULE = new URL("../../src/lib/host.ts", import.meta.url).pathname;
+const HOST_MODULE = fileURLToPath(new URL("../../src/lib/host.ts", import.meta.url));
+const { workspaceProjectPathKey } = createTsModuleLoader().loadModule("@liveagent/ui/lib/settings/workspaceProjects");
 const BROWSER_KEY = "liveagent.kbrain-browser-settings.v1";
 
 test("original prompt settings save and reload through the real K-brain factory and upstream request", { timeout: 120_000 }, async () => {
@@ -173,11 +175,11 @@ test("original prompt settings save and reload through the real K-brain factory 
     assert.match(appendedPrompt, /PROJECT_APPEND_AFTER_RELOAD/);
     assert.doesNotMatch(appendedPrompt, /GLOBAL_ALPHA_MARKER|PROJECT_REPLACE_MARKER/);
     assert.doesNotMatch(cache.get(BROWSER_KEY), /GLOBAL_|PROJECT_/);
-    assert.equal((await storage.loadPersistedSettings()).system.workspaceResourceSettings[workdir].projectPromptStrategy, "append");
+    assert.equal((await storage.loadPersistedSettings()).system.workspaceResourceSettings[workspaceProjectPathKey(workdir)].projectPromptStrategy, "append");
     const desktop = modules(false);
     const desktopLoaded = await desktop.storage.loadPersistedSettings();
     assert.equal(desktop.settings.resolveEffectivePromptSettings(desktopLoaded, workdir).prompt, "GLOBAL_BETA_MARKER\n\nPROJECT_APPEND_AFTER_RELOAD");
-    assert.deepEqual(desktopLoaded.system.workspaceResourceSettings[workdir].skillNames, ["selected-skill"]);
+    assert.deepEqual(desktopLoaded.system.workspaceResourceSettings[workspaceProjectPathKey(workdir)].skillNames, ["selected-skill"]);
     const desktopNext = desktop.settings.updateWorkspacePromptSettings(desktopLoaded, workdir, { projectPrompt: "DESKTOP_PROJECT_MARKER", projectPromptStrategy: "replace" });
     await desktop.storage.persistSettings(desktopLoaded, desktopNext);
     assert.equal((await desktop.prompts.get(workdir)).effectivePrompt, "DESKTOP_PROJECT_MARKER");
@@ -193,7 +195,7 @@ test("original prompt settings save and reload through the real K-brain factory 
     assert.doesNotMatch(clearedPrompt, /DESKTOP_PROJECT_MARKER/);
     assert.ok(nativeCalls.every(call => call.command !== "settings_save_agents"));
     for (const call of nativeCalls.filter(call => call.command === "settings_save_system")) {
-      const entry = call.args.payload.workspaceResourceSettings[workdir];
+      const entry = call.args.payload.workspaceResourceSettings[workspaceProjectPathKey(workdir)];
       assert.equal(entry.projectPrompt, undefined);
       assert.equal(entry.projectPromptStrategy, undefined);
       assert.deepEqual(entry.skillNames, ["selected-skill"]);

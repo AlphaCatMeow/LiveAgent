@@ -1,3 +1,4 @@
+pub(crate) mod data_home;
 pub mod managed_process;
 pub mod managed_process_journal;
 pub mod platform;

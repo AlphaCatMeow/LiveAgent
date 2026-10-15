@@ -1,7 +1,7 @@
 import { prepare } from "../../../../scripts/release/prepare-kbrain.mjs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { after } from "node:test";
 
 let prepared;
@@ -18,6 +18,12 @@ async function prepareBinary() {
 
 // Use the same pinned, checksum-verified release binaries as desktop packaging.
 export async function getKBrainBinary() {
+  const sourceBinary = process.env.LIVEAGENT_KBRAIN_BINARY;
+  if (sourceBinary) {
+    if (!isAbsolute(sourceBinary)) throw new Error("LIVEAGENT_KBRAIN_BINARY must be absolute");
+    await access(sourceBinary);
+    return sourceBinary;
+  }
   prepared ??= prepareBinary();
   return (await prepared).binary;
 }

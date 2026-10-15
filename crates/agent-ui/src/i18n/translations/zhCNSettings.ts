@@ -61,6 +61,8 @@ export const ZH_CN_SETTINGS_TRANSLATIONS = {
   "settings.navCron": "定时任务",
   "settings.navRemote": "Remote",
   "settings.navSkills": "Skills",
+  "settings.navImageStudio": "图像工作台",
+  "settings.imageStudioUnsupported": "当前主机尚未接入图像工作台。聊天功能可以继续使用。",
   "settings.navPlanning": "日程",
   "settings.navMemory": "记忆",
   "settings.groupGeneral": "通用",

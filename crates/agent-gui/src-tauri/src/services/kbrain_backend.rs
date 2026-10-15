@@ -1,7 +1,8 @@
 #[cfg(test)]
 use std::fs;
 use std::io::{self, BufRead, BufReader, Read};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use sha2::{Digest, Sha256};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -39,6 +40,7 @@ pub struct KBrainBackendConnection {
     pub base_url: String,
     pub token: String,
     pub protocol_version: String,
+    pub storage_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -94,6 +96,14 @@ impl Default for KBrainBackendState {
     }
 }
 
+// Storage identity follows the canonical data root, never the ephemeral listener or token.
+fn backend_storage_id(root: &Path) -> Result<String, String> {
+    let canonical = root.canonicalize().map_err(|_| "Unable to identify K-brain data root".to_string())?;
+    let digest = Sha256::digest(canonical.as_os_str().as_encoded_bytes());
+    let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+    Ok(format!("local-{hex}"))
+}
+
 impl KBrainBackendManager {
     #[cfg(test)]
     fn start_with_binary_and_timeout(
@@ -114,6 +124,8 @@ impl KBrainBackendManager {
         if cancelled() {
             return Err("K-brain backend startup cancelled".into());
         }
+        std::fs::create_dir_all(&backend_dir).map_err(|_| "Unable to create K-brain data root".to_string())?;
+        let storage_id = backend_storage_id(&backend_dir)?;
         let token = uuid::Uuid::new_v4().to_string();
 
         let mut command = Command::new(&binary);
@@ -236,6 +248,7 @@ impl KBrainBackendManager {
             base_url,
             token,
             protocol_version: PROTOCOL_VERSION.to_string(),
+            storage_id,
         };
         wait_for_health(
             &connection,
@@ -288,7 +301,7 @@ impl KBrainBackendState {
             .map_err(|error| format!("failed to resolve LiveAgent app data directory: {error}"))?;
         let binary = resolve_binary()?;
         let home =
-            dirs::home_dir().ok_or_else(|| "failed to resolve LiveAgent home".to_string())?;
+            crate::runtime::data_home::home_dir().ok_or_else(|| "failed to resolve LiveAgent home".to_string())?;
         let preferred = std::env::var_os("LIVEAGENT_HOME")
             .filter(|v| !v.is_empty())
             .map(PathBuf::from);
@@ -687,12 +700,29 @@ mod tests {
     }
 
     #[test]
+    fn storage_identity_is_stable_and_data_root_scoped() {
+        let root = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let id = backend_storage_id(root.path()).unwrap();
+        assert_eq!(id, backend_storage_id(&root.path().join(".")).unwrap());
+        assert_ne!(id, backend_storage_id(other.path()).unwrap());
+        assert!(!id.contains(root.path().to_string_lossy().as_ref()));
+        #[cfg(unix)] {
+            let link_parent = tempfile::tempdir().unwrap();
+            let link = link_parent.path().join("alias");
+            std::os::unix::fs::symlink(root.path(), &link).unwrap();
+            assert_eq!(id, backend_storage_id(&link).unwrap());
+        }
+    }
+
+    #[test]
     fn put_proxy_setting_sends_authorized_json_and_hides_value_on_failure() {
         let proxy = "socks5h://user:secret@proxy.local:1080";
         let connection = |base_url: String| KBrainBackendConnection {
             base_url,
             token: "test-token".into(),
             protocol_version: PROTOCOL_VERSION.into(),
+            storage_id: "test-storage".into(),
         };
 
         let (base_url, handle) = proxy_endpoint_stub("200 OK");

@@ -315,6 +315,7 @@ macro_rules! app_invoke_handler {
             commands::system::system_pick_file,
             commands::system::system_sandbox_capability,
             commands::system::system_save_preview_file,
+            commands::image_export::image_export_asset,
             commands::system::system_create_project_folder,
             commands::system::system_import_pasted_texts,
             commands::system::system_import_readable_file_paths,
@@ -860,7 +861,9 @@ pub fn run() {
     let browser_manager = Arc::new(services::browser::BrowserManager::default());
     // 扩展桥接：接受 LiveAgent 浏览器扩展的反向连接，Browser 工具优先驱动
     // 用户日常浏览器（复用登录态）；未连接时回退独立 profile 启动。
-    browser_manager.start_extension_bridge();
+    if !runtime::data_home::isolation_requested() {
+        browser_manager.start_extension_bridge();
+    }
 
     let builder = tauri::Builder::default();
     // dev 构建与已安装正式版共享 identifier；若 dev 也注册单实例，

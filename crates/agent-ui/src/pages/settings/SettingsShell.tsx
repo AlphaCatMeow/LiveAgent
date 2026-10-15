@@ -23,6 +23,7 @@ type SettingsShellProps<Context> = {
   context: Context;
   saveState: SettingsSaveState;
   onBack: () => void;
+  canLeaveSection?: () => boolean;
   initialSection?: string;
   hiddenSections?: readonly string[];
   fontScale?: number;
@@ -58,6 +59,7 @@ export function SettingsShell<Context>(props: SettingsShellProps<Context>) {
     context,
     saveState,
     onBack,
+    canLeaveSection,
     initialSection = "system",
     hiddenSections = [],
     fontScale = 1,
@@ -230,7 +232,10 @@ export function SettingsShell<Context>(props: SettingsShellProps<Context>) {
                         <button
                           key={definition.id}
                           type="button"
-                          onClick={() => setSection(definition.id)}
+                          onClick={() => {
+                            if (definition.id !== section && (canLeaveSection?.() ?? true))
+                              setSection(definition.id);
+                          }}
                           aria-current={active ? "page" : undefined}
                           data-testid={`settings-nav-${definition.id}`}
                           data-settings-nav-id={definition.id}

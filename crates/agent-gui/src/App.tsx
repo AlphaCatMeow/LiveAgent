@@ -30,6 +30,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useDesktopImageStudioHost } from "./agent-ui-adapters/imageStudio";
 import { settingsHostAdapter } from "./agent-ui-adapters/kbrainSettings";
 import { kbrainSkillsAdapter } from "./agent-ui-adapters/kbrainSkills";
 import { AppBootShell } from "./components/app/AppBootShell";
@@ -258,6 +259,8 @@ export default function App() {
   const [settingsReady, setSettingsReady] = useState(false);
   const [backgroundHostsReady, setBackgroundHostsReady] = useState(false);
   const [settings, setSettingsState] = useState<AppSettings>(() => getBootAlignedDefaultSettings());
+  const [imageStudioWorkspace, setImageStudioWorkspace] = useState(settings.system.workdir);
+  const imageStudioHost = useDesktopImageStudioHost(imageStudioWorkspace);
   const [sttProviderOverride, setSttProviderOverride] = useState<SttProviderId | null>(null);
   const [settingsSaveState, setSettingsSaveState] = useState<SettingsSaveState>({
     status: "idle",
@@ -605,8 +608,16 @@ export default function App() {
     [setSettings],
   );
 
+  const settingsLeaveGuard = useRef<(() => boolean) | undefined>(undefined);
+  const registerSettingsLeaveGuard = useCallback((guard: () => boolean) => {
+    settingsLeaveGuard.current = guard;
+    return () => {
+      if (settingsLeaveGuard.current === guard) settingsLeaveGuard.current = undefined;
+    };
+  }, []);
   const openSettings = useCallback(
     (section: SectionId = "system", providerId?: string) => {
+      if (settingsLeaveGuard.current && !settingsLeaveGuard.current()) return;
       setSettingsSection(section);
       setSettingsProviderId(section === "providers" ? providerId : undefined);
       openSettingsOverlay();
@@ -638,7 +649,10 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [settingsReady, backgroundHostsReady]);
 
-  const closeSettings = closeSettingsOverlay;
+  const closeSettings = useCallback(() => {
+    if (settingsLeaveGuard.current?.() === false) return;
+    closeSettingsOverlay();
+  }, [closeSettingsOverlay]);
 
   // 动作总线（Rust `app:action`）中 App 拥有的动作：主题/打开设置/网关开关/
   // 检查更新，以及「新建对话」时先收起设置覆盖层（会话侧由 ChatPage 处理）。
@@ -851,6 +865,8 @@ export default function App() {
               settings={settings}
               setSettings={setSettings}
               resourceHost={guiResourceHostCapabilities}
+              imageStudioHost={imageStudioHost}
+              onImageStudioWorkspaceChange={setImageStudioWorkspace}
               sttProviderOverride={sttProviderOverride}
               getMcpSettings={getMcpSettings}
               getToolPolicies={getToolPolicies}
@@ -886,6 +902,8 @@ export default function App() {
                   <SettingsPage
                     settings={settings}
                     settingsHost={settingsHostAdapter}
+                    imageClient={imageStudioHost?.client}
+                    registerLeaveGuard={registerSettingsLeaveGuard}
                     setSettings={setSettings}
                     saveState={settingsSaveState}
                     onBack={closeSettings}

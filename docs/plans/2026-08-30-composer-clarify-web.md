@@ -1,6 +1,6 @@
 # 输入框提示词澄清 · 计划 2：Web（agent-gateway）接线 实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **执行说明：** 按任务顺序实施并完成每项验证；使用复选框（`- [ ]`）记录进度。
 
 **Goal:** 让 Web 端（`crates/agent-gateway/web`）的 `ChatComposerBar` 澄清按钮可用——点击后经 gateway RPC `clarify.prompt_turn` 转发到桌面 agent 执行一次纯文本补全，产出优化提示词回填输入框。
 
@@ -8,7 +8,7 @@
 
 **Tech Stack:** protobuf（`proto/v2/gateway.proto`）、Go（`internal/protocol/pbws/guard.go`）、Rust（`services/gateway/`）、TypeScript（`crates/agent-gui/src/pages/chat/gateway/` + `crates/agent-gateway/web/src/lib/gatewaySocketV2/`）。
 
-**Spec:** `docs/superpowers/specs/2026-08-30-composer-clarify-design.md`
+**Spec:** `docs/design/2026-08-30-composer-clarify-design.md`
 
 ## Global Constraints
 

@@ -6,6 +6,8 @@ export type KBrainRuntimeConnection = {
   protocolVersion: "kbrain.agent.v1";
   /** Set only by the native manager bootstrap, never inferred from the URL. */
   managedLocal?: boolean;
+  /** Native-manager identity of the persistent data root, independent of port/token. */
+  storageId?: string;
 };
 
 let runtimeConnection: KBrainRuntimeConnection | null = null;
@@ -36,6 +38,9 @@ export function setKBrainRuntimeConnection(connection: KBrainRuntimeConnection):
     token: connection.token.trim(),
     protocolVersion: connection.protocolVersion,
     ...(connection.managedLocal ? { managedLocal: true } : {}),
+    ...(connection.managedLocal && connection.storageId?.trim()
+      ? { storageId: connection.storageId.trim() }
+      : {}),
   };
   for (const listener of connectionListeners) listener();
 }

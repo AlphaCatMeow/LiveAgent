@@ -88,3 +88,11 @@ K-Brain 新增无图像模块情况下的真实聊天 HTTP/SSE 回归，并从�
 已创建 K-Brain Draft #35 与 LA Draft #988，两个正文均以 UTF-8 从 GitHub 逐字读回核对。K-Brain 原生 Shell 的五个残余失败用例通过 Go -overlay 恢复上游 94 个 Go 文件后全部复现；该证据只覆盖这五项，并不替代 TUI 人工验收或宣称全仓测试通过。
 
 LA 首轮 CI 暴露 WebUI 浏览器下载辅助函数引用桌面源码、Gateway errcheck 以及供应商页旧精确文案断言。已将浏览器通用下载逻辑移动到 agent-ui，桌面保留兼容导出，WebUI 不再依赖桌面源码；显式忽略响应关闭错误；供应商页回归验证原界面与新增页签共同存在，保留原 props 和无额外后端请求断言。下载/宿主 9 项、供应商设置回归、Gateway 相关包、共享边界及两端构建重新通过。CI 最终结果以 PR 检查为准。
+
+## 2026-10-15 合并前修订
+
+原生 manager 以 canonical data root 的 SHA-256 生成不含原始目录或凭据的 storageId。桌面图像草稿、未确认提交和验证收据使用该稳定身份；传输仍绑定当次 URL/token，端口和 token 变化不会改变持久化 namespace，不同数据根/工作区继续隔离。缺失托管身份时拒绝创建图像 host，不回退到随机端口存储。未自动合并开发版旧端口 namespace，因为无法可靠证明属于同一数据根。
+
+macOS 验证：Rust data-root 身份测试（含目录别名和不同根），原生 manager 回归、GUI TypeScript、前端全量测试；Chrome 1440/390 视口直接使用生产 desktop host 和共享工作台模拟重启换端口，恢复草稿并以原 frozen request/key 核对未知提交。模拟 transport，不含真实供应商调用或原生保存对话框验收。
+
+合并不等于发布：当前后端锁保持已发布 beta.11；需在配套 KB #35 发布后更新版本锁，才能在发行安装包启用图像模块。

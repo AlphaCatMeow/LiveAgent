@@ -17,7 +17,10 @@ export function createDesktopImageStudioHost(
   storage?: DraftStorage,
 ): { host: ImageStudioHost; dispose: () => void } {
   const controller = new AbortController();
-  const backendId = connection.baseUrl.trim().replace(/\/+$/, "");
+  const backendId = connection.managedLocal
+    ? connection.storageId?.trim()
+    : connection.baseUrl.trim().replace(/\/+$/, "");
+  if (!backendId) throw new Error("Managed backend storage identity is unavailable");
   const workspaceKey = JSON.stringify([workspace.trim()]);
   const scopedStorage: DraftStorage = {
     getItem: (key) => storage?.getItem(`${workspaceKey}:${key}`) ?? null,

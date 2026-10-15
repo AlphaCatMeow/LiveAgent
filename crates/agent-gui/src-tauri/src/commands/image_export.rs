@@ -504,6 +504,7 @@ mod tests {
             base_url: "http://127.0.0.1:1234".into(),
             token: "test".into(),
             protocol_version: "test".into(),
+                storage_id: "test-storage".into(),
         };
         let mut request = ImageExportRequest {
             asset_id: "asset_123".into(),
@@ -658,6 +659,7 @@ mod tests {
             base_url: base_url.clone(),
             token: "mock-export-token".into(),
             protocol_version: "test".into(),
+                storage_id: "test-storage".into(),
         };
         let url = format!("{base_url}/v1/image/assets/asset_1/content?variant=original");
         let client = http_client().unwrap();

@@ -40,10 +40,10 @@ test("desktop bootstrap uses the native connection command and keeps the token i
   const calls = [];
   const result = await bootstrap.connectKBrainBackend(async (command) => {
     calls.push(command);
-    return { baseUrl: "http://127.0.0.1:49123/", token: "secret", protocolVersion: "kbrain.agent.v1" };
+    return { baseUrl: "http://127.0.0.1:49123/", token: "secret", protocolVersion: "kbrain.agent.v1", storageId: "local-stable-root" };
   });
   assert.deepEqual(calls, ["kbrain_backend_connection"]);
-  assert.deepEqual(result, { baseUrl: "http://127.0.0.1:49123", token: "secret", protocolVersion: "kbrain.agent.v1", managedLocal: true });
+  assert.deepEqual(result, { baseUrl: "http://127.0.0.1:49123", token: "secret", protocolVersion: "kbrain.agent.v1", managedLocal: true, storageId: "local-stable-root" });
   assert.equal(globalThis.localStorage, undefined);
   assert.equal(connection.getConfiguredKBrainConnection().token, "secret");
 });

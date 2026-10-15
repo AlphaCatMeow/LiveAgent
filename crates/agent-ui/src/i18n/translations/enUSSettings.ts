@@ -1,4 +1,44 @@
 export const EN_US_SETTINGS_TRANSLATIONS = {
+  "settings.aiApproval.title": "AI approval",
+  "settings.aiApproval.description":
+    "An isolated K-brain reviewer checks sandbox operations, sensitive data, model behavior and tool-content injection.",
+  "settings.aiApproval.mode": "Approval mode",
+  "settings.aiApproval.off": "Off",
+  "settings.aiApproval.risk_only": "Risk warnings only",
+  "settings.aiApproval.auto": "Automatic approval",
+  "settings.aiApproval.off.description":
+    "Use existing tool permissions without calling an AI reviewer.",
+  "settings.aiApproval.risk_only.description":
+    "Show risk warnings without changing existing permissions or approval decisions.",
+  "settings.aiApproval.auto.description":
+    "Approve clearly low-risk actions once; ask for manual confirmation when uncertain.",
+  "settings.aiApproval.model": "Reviewer model",
+  "settings.aiApproval.modelHint":
+    "Choose a fast, low-cost small model. Turning approval off keeps your model selection.",
+  "settings.aiApproval.selectModel": "Select a reviewer model",
+  "settings.aiApproval.unavailable": "unavailable",
+  "settings.aiApproval.modelUnavailable":
+    "The selected reviewer model is unavailable. Choose another model or turn AI approval off.",
+  "settings.aiApproval.modelRequired": "Select a reviewer model before saving an enabled mode.",
+  "settings.aiApproval.noModels":
+    "No models are available. Configure and enable a model in provider settings first.",
+  "settings.aiApproval.permissions":
+    "Sandbox restrictions and explicit denials remain authoritative. Changes apply on the next turn.",
+  "settings.aiApproval.privacy":
+    "Review adds model requests and cost. Actions, user requests and tool text are sent to the selected provider after common sensitive values are redacted; not all secrets can be detected. Automatic mode withholds tool output that cannot be verified.",
+  "settings.aiApproval.webNotice":
+    "This WebUI transport has no manual approval controls. Actions requiring confirmation are rejected; continue in LiveAgent desktop or K-brain TUI.",
+  "settings.aiApproval.save": "Save approval settings",
+  "settings.aiApproval.reload": "Reload",
+  "settings.aiApproval.discard": "Discard unsaved approval settings and reload?",
+  "settings.aiApproval.loading": "Loading…",
+  "settings.aiApproval.saving": "Saving…",
+  "settings.aiApproval.saved": "Saved",
+  "settings.aiApproval.unsaved": "Unsaved changes",
+  "settings.aiApproval.upgrade": "Upgrade K-brain to use AI approval.",
+  "settings.aiApproval.connectionChanged":
+    "The backend connection changed. Reload approval settings.",
+
   "settings.cuaBackend.description":
     "LiveAgent displays requests and results. K-brain owns tools, permissions, Cua execution and session cleanup. Changes apply to the next run.",
   "settings.cuaBackend.upgrade":

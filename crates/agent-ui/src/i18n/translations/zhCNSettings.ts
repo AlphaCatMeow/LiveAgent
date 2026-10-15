@@ -1,4 +1,37 @@
 export const ZH_CN_SETTINGS_TRANSLATIONS = {
+  "settings.aiApproval.title": "AI 智能审批",
+  "settings.aiApproval.description":
+    "由 K-brain 独立小模型审查沙箱操作、敏感信息、模型行为和工具内容注入风险。",
+  "settings.aiApproval.mode": "审批模式",
+  "settings.aiApproval.off": "关闭",
+  "settings.aiApproval.risk_only": "仅风险提示",
+  "settings.aiApproval.auto": "自动审批",
+  "settings.aiApproval.off.description": "沿用现有工具权限，不调用 AI 审批模型。",
+  "settings.aiApproval.risk_only.description": "仅显示风险提示，不改变原有权限或审批结果。",
+  "settings.aiApproval.auto.description": "仅自动放行明确低风险的单次操作；不确定时请求人工确认。",
+  "settings.aiApproval.model": "审批模型",
+  "settings.aiApproval.modelHint": "建议选择响应快、成本低的小模型。关闭审批时保留所选模型。",
+  "settings.aiApproval.selectModel": "选择审批模型",
+  "settings.aiApproval.unavailable": "不可用",
+  "settings.aiApproval.modelUnavailable":
+    "当前审批模型已不可用，请重新选择；也可以关闭 AI 智能审批。",
+  "settings.aiApproval.modelRequired": "请先选择审批模型，再保存启用设置。",
+  "settings.aiApproval.noModels": "暂无可用模型，请先在模型供应商设置中配置并启用模型。",
+  "settings.aiApproval.permissions": "沙箱限制和明确拒绝规则始终有效。设置在下一轮请求生效。",
+  "settings.aiApproval.privacy":
+    "审查会增加模型请求与费用。操作、用户请求和工具文本会在常见敏感信息脱敏后发送给所选供应商；脱敏无法识别所有秘密。自动模式会暂扣无法确认安全的工具输出。",
+  "settings.aiApproval.webNotice":
+    "当前 WebUI 传输不支持人工审批按钮；需要确认的操作会被拒绝，请在 LiveAgent 桌面端或 K-brain TUI 中继续。",
+  "settings.aiApproval.save": "保存审批设置",
+  "settings.aiApproval.reload": "重新加载",
+  "settings.aiApproval.discard": "放弃未保存的审批设置并重新加载？",
+  "settings.aiApproval.loading": "正在加载…",
+  "settings.aiApproval.saving": "正在保存…",
+  "settings.aiApproval.saved": "已保存",
+  "settings.aiApproval.unsaved": "有未保存的修改",
+  "settings.aiApproval.upgrade": "当前 K-brain 尚不支持 AI 智能审批，请升级后重试。",
+  "settings.aiApproval.connectionChanged": "后端连接已改变，请重新加载审批设置。",
+
   "settings.cuaBackend.description":
     "LiveAgent 只展示请求与结果。工具、权限判定、Cua 执行和会话清理由 K-brain 负责，修改从下一次运行生效。",
   "settings.cuaBackend.upgrade":

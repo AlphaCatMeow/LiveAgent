@@ -1,156 +1,249 @@
+import {
+  SettingsCard,
+  SettingsRow,
+  SettingsSection,
+} from "@liveagent/ui/components/settings/SettingsLayout";
+import {
+  SettingsToggleGroup,
+  SettingsToggleGroupItem,
+} from "@liveagent/ui/components/settings/SettingsToggleGroup";
 import { Button } from "@liveagent/ui/components/ui/button";
 import { useLocale } from "@liveagent/ui/i18n";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   AIApprovalConfig,
   KBrainSettingsAdapter,
   KBrainSettingsDocument,
 } from "./kbrainSettingsAdapter";
+import { ModelPicker, type ModelPickerOption } from "./modelPicker";
+
+const MODES = ["off", "risk_only", "auto"] as const;
+
+function sameConfig(left: AIApprovalConfig, right: AIApprovalConfig): boolean {
+  return (
+    left.mode === right.mode &&
+    (left.provider || "") === (right.provider || "") &&
+    (left.model || "") === (right.model || "")
+  );
+}
+
+function connectionScope(kbrain: KBrainSettingsAdapter): string {
+  const connection = kbrain.getConnection();
+  return JSON.stringify(connection ? [connection.baseUrl, connection.token] : null);
+}
 
 export function AIApprovalSection({ kbrain }: { kbrain: KBrainSettingsAdapter }) {
-  const { locale } = useLocale();
-  const zh = locale.startsWith("zh");
+  const { t } = useLocale();
   const [document, setDocument] = useState<KBrainSettingsDocument | null>(null);
   const [draft, setDraft] = useState<AIApprovalConfig>({ mode: "off" });
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"load" | "save" | null>("load");
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
-  const upgrade = zh
-    ? "当前 K-brain 尚不支持 AI 智能审批，请升级后重试。"
-    : "Upgrade K-brain to use AI approval.";
+  const epoch = useRef(0);
+  const pending = useRef(false);
+  const loadedScope = useRef<string | undefined>(undefined);
+  const dirty = !!document?.aiApproval && !sameConfig(draft, document.aiApproval);
   const refresh = useCallback(async () => {
-    setBusy(true);
+    const ticket = ++epoch.current;
+    const scope = connectionScope(kbrain);
+    pending.current = true;
+    setBusy("load");
     setDocument(null);
     setError("");
     setSaved(false);
     try {
       const next = await kbrain.getSettings();
-      if (!next.aiApproval) throw new Error(upgrade);
+      if (ticket !== epoch.current) return;
+      if (scope !== connectionScope(kbrain))
+        throw new Error(t("settings.aiApproval.connectionChanged"));
+      if (!next.aiApproval || !MODES.includes(next.aiApproval.mode))
+        throw new Error(t("settings.aiApproval.upgrade"));
+      loadedScope.current = scope;
       setDocument(next);
       setDraft(next.aiApproval);
-    } catch (e) {
-      setError(String(e));
+    } catch (reason) {
+      if (ticket === epoch.current)
+        setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
-      setBusy(false);
+      if (ticket === epoch.current) {
+        pending.current = false;
+        setBusy(null);
+      }
     }
-  }, [kbrain, upgrade]);
+  }, [kbrain, t]);
   useEffect(() => {
     void refresh();
+    return () => {
+      ++epoch.current;
+      pending.current = false;
+    };
   }, [refresh]);
+
+  const available = !!document?.models.some(
+    (model) => model.provider === draft.provider && model.id === draft.model,
+  );
+  const valid = draft.mode === "off" || available;
+  const selectedValue =
+    draft.provider && draft.model ? JSON.stringify([draft.provider, draft.model]) : "";
+  const options: ModelPickerOption[] = (document?.models ?? []).map((model) => ({
+    value: JSON.stringify([model.provider, model.id]),
+    label: model.name || model.id,
+    description: model.name && model.name !== model.id ? model.id : undefined,
+    providerId: model.provider,
+    providerName:
+      document?.providers.find((provider) => provider.id === model.provider)?.name ||
+      model.provider,
+  }));
+  const unavailable = !!selectedValue && !available;
+
   async function save() {
-    setBusy(true);
+    if (pending.current || !document || !valid || !dirty) return;
+    if (loadedScope.current !== connectionScope(kbrain)) {
+      setDocument(null);
+      setSaved(false);
+      setError(t("settings.aiApproval.connectionChanged"));
+      return;
+    }
+    const ticket = ++epoch.current;
+    const scope = loadedScope.current;
+    pending.current = true;
+    setBusy("save");
     setError("");
     setSaved(false);
     try {
       const next = await kbrain.updateSettings({ aiApproval: draft });
-      if (!next.aiApproval) throw new Error(upgrade);
+      if (ticket !== epoch.current) return;
+      if (scope !== connectionScope(kbrain)) {
+        setDocument(null);
+        throw new Error(t("settings.aiApproval.connectionChanged"));
+      }
+      if (!next.aiApproval || !MODES.includes(next.aiApproval.mode))
+        throw new Error(t("settings.aiApproval.upgrade"));
       setDocument(next);
       setDraft(next.aiApproval);
       setSaved(true);
       window.dispatchEvent(new Event("kbrain:settings-changed"));
-    } catch (e) {
-      setError(String(e));
+    } catch (reason) {
+      if (ticket === epoch.current)
+        setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
-      setBusy(false);
+      if (ticket === epoch.current) {
+        pending.current = false;
+        setBusy(null);
+      }
     }
   }
-  const valid =
-    draft.mode === "off" ||
-    document?.models.some((m) => m.provider === draft.provider && m.id === draft.model);
+
+  function change(patch: Partial<AIApprovalConfig>) {
+    setDraft((current) => ({ ...current, ...patch }));
+    setSaved(false);
+    setError("");
+  }
+
   return (
-    <section className="space-y-4 rounded-lg border p-4" data-testid="ai-approval-settings">
-      <h2 className="font-semibold">{zh ? "AI 智能审批" : "AI approval"}</h2>
-      <p className="text-sm text-muted-foreground">
-        {zh
-          ? "由 K-brain 独立小模型审查沙箱操作、敏感信息、模型行为和工具内容注入风险。仅风险提示不会改变原有权限；自动审批仅放行明确低风险的单次操作，不确定时请求人工确认。沙箱和明确拒绝规则始终有效。"
-          : "An isolated K-brain reviewer checks sandbox operations, sensitive data, model behavior and tool-content injection. Risk-only mode preserves existing permissions. Automatic mode approves low-risk actions once and asks you when uncertain. Sandbox restrictions and explicit denials remain authoritative."}
-      </p>
-      {!kbrain.getConnection() && (
-        <p className="text-xs text-muted-foreground">
-          {zh
-            ? "当前 WebUI 传输不支持人工审批按钮；需要确认的操作会被拒绝，请在 LiveAgent 桌面端或 K-brain TUI 中继续。"
-            : "This WebUI transport has no manual approval controls. Actions requiring confirmation are rejected; continue in LiveAgent desktop or K-brain TUI."}
-        </p>
-      )}
-      <fieldset disabled={busy || !document} className="space-y-4">
-        <legend className="sr-only">{zh ? "审批模式" : "Approval mode"}</legend>
-        <div className="flex flex-wrap gap-4">
-          {(["off", "risk_only", "auto"] as const).map((mode, i) => (
-            <label key={mode} className="flex items-center gap-2 text-sm">
-              <input
-                type="radio"
-                name="ai-approval-mode"
-                value={mode}
-                checked={draft.mode === mode}
-                onChange={() => {
-                  setDraft({ ...draft, mode });
-                  setSaved(false);
+    <SettingsSection
+      title={t("settings.aiApproval.title")}
+      description={t("settings.aiApproval.description")}
+      data-testid="ai-approval-settings"
+      aria-busy={!!busy}
+    >
+      <SettingsCard>
+        <SettingsRow
+          title={t("settings.aiApproval.mode")}
+          description={t(`settings.aiApproval.${draft.mode}.description`)}
+          control={
+            <SettingsToggleGroup
+              value={[draft.mode]}
+              disabled={!!busy || !document}
+              aria-label={t("settings.aiApproval.mode")}
+              className="max-w-full flex-wrap"
+              onValueChange={(values) => {
+                const mode = values[0] as AIApprovalConfig["mode"] | undefined;
+                if (mode && MODES.includes(mode)) change({ mode });
+              }}
+            >
+              {MODES.map((mode) => (
+                <SettingsToggleGroupItem key={mode} value={mode}>
+                  {t(`settings.aiApproval.${mode}`)}
+                </SettingsToggleGroupItem>
+              ))}
+            </SettingsToggleGroup>
+          }
+        />
+        <SettingsRow
+          title={t("settings.aiApproval.model")}
+          description={t("settings.aiApproval.modelHint")}
+          control={
+            <div className="w-64 max-w-full">
+              <ModelPicker
+                options={options}
+                value={selectedValue}
+                disabled={!!busy || !document || draft.mode === "off"}
+                placeholder={
+                  unavailable
+                    ? `${draft.provider} / ${draft.model} (${t("settings.aiApproval.unavailable")})`
+                    : t("settings.aiApproval.selectModel")
+                }
+                ariaLabel={t("settings.aiApproval.model")}
+                variant="plain"
+                onChange={(value) => {
+                  const [provider, model] = JSON.parse(value) as [string, string];
+                  change({ provider, model });
                 }}
               />
-              {
-                (zh
-                  ? ["关闭", "仅风险提示", "自动审批"]
-                  : ["Off", "Risk warnings only", "Automatic approval"])[i]
-              }
-            </label>
-          ))}
-        </div>
-        <label className="flex flex-col gap-2 text-sm">
-          {zh ? "审批模型（建议选择小模型）" : "Reviewer model (a small model is recommended)"}
-          <select
-            aria-label={zh ? "审批模型" : "Reviewer model"}
-            className="w-full min-w-0 rounded-md border bg-background p-2"
-            value={
-              draft.provider && draft.model ? JSON.stringify([draft.provider, draft.model]) : ""
-            }
-            onChange={(e) => {
-              const [provider, model] = e.target.value
-                ? (JSON.parse(e.target.value) as [string, string])
-                : ["", ""];
-              setDraft({ ...draft, provider, model });
-              setSaved(false);
-            }}
-          >
-            <option value="">{zh ? "请选择" : "Select a model"}</option>
-            {draft.provider &&
-              draft.model &&
-              !document?.models.some(
-                (m) => m.provider === draft.provider && m.id === draft.model,
-              ) && (
-                <option value={JSON.stringify([draft.provider, draft.model])}>
-                  {draft.provider} / {draft.model} ({zh ? "不可用" : "unavailable"})
-                </option>
-              )}
-            {document?.models.map((m) => (
-              <option
-                key={JSON.stringify([m.provider, m.id])}
-                value={JSON.stringify([m.provider, m.id])}
-              >
-                {m.provider} / {m.name || m.id}
-              </option>
-            ))}
-          </select>
-        </label>
-        <p className="text-xs text-muted-foreground">
-          {zh
-            ? "审查会增加模型请求与费用。经过常见敏感信息脱敏的操作、用户请求和工具文本会发送给所选供应商；脱敏不能识别所有秘密。自动模式会暂扣无法确认安全的工具输出。设置在下一轮请求生效。"
-            : "Review adds model requests and cost. Actions, user requests and tool text are sent to the selected provider after common sensitive values are redacted; not all secrets can be detected. Automatic mode withholds tool output that cannot be verified. Changes apply on the next turn."}
+            </div>
+          }
+        />
+      </SettingsCard>
+      {document && draft.mode !== "off" && !available && (
+        <p role="alert" className="px-1 text-xs leading-5 text-destructive">
+          {t(
+            unavailable
+              ? "settings.aiApproval.modelUnavailable"
+              : document.models.length
+                ? "settings.aiApproval.modelRequired"
+                : "settings.aiApproval.noModels",
+          )}
         </p>
-        <Button onClick={() => void save()} disabled={!valid}>
-          {zh ? "保存审批设置" : "Save approval settings"}
+      )}
+      <div className="space-y-2 px-1 text-xs leading-5 text-muted-foreground">
+        <p>{t("settings.aiApproval.permissions")}</p>
+        <p>{t("settings.aiApproval.privacy")}</p>
+        {!kbrain.getConnection() && <p>{t("settings.aiApproval.webNotice")}</p>}
+      </div>
+      <div className="flex flex-wrap items-center gap-2 px-1">
+        <Button
+          size="sm"
+          disabled={!!busy || !document || !valid || !dirty}
+          onClick={() => void save()}
+        >
+          {t("settings.aiApproval.save")}
         </Button>
-      </fieldset>
-      <Button variant="outline" disabled={busy} onClick={() => void refresh()}>
-        {zh ? "重新加载" : "Reload"}
-      </Button>
-      <div role="status" aria-live="polite" className="break-words text-sm">
-        {busy ? (zh ? "处理中…" : "Working…") : saved ? (zh ? "已保存" : "Saved") : ""}
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!!busy}
+          onClick={() => {
+            if (!dirty || window.confirm(t("settings.aiApproval.discard"))) void refresh();
+          }}
+        >
+          {t("settings.aiApproval.reload")}
+        </Button>
+        <span role="status" aria-live="polite" className="text-xs text-muted-foreground">
+          {busy
+            ? t(`settings.aiApproval.${busy === "load" ? "loading" : "saving"}`)
+            : saved
+              ? t("settings.aiApproval.saved")
+              : dirty
+                ? t("settings.aiApproval.unsaved")
+                : ""}
+        </span>
       </div>
       {error && (
-        <p role="alert" className="break-words text-sm text-destructive">
+        <p role="alert" className="break-words px-1 text-sm text-destructive">
           {error}
         </p>
       )}
-    </section>
+    </SettingsSection>
   );
 }

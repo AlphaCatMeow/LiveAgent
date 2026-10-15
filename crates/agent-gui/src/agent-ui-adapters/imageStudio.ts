@@ -26,7 +26,20 @@ export function createDesktopImageStudioHost(
   };
   const download = createBrowserImageDownload((...args) => client.readAsset(...args));
   const exports = createNativeImageExports(connection) ?? (download ? { download } : undefined);
-  const client = createKBrainImageClient(connection, controller.signal, exports);
+  const verificationScope = JSON.stringify(["local", backendId, workspace.trim()]);
+  const verificationStorage = storage
+    ? {
+        getItem: (key: string) => storage.getItem(`${verificationScope}:${key}`),
+        setItem: (key: string, value: string) =>
+          storage.setItem(`${verificationScope}:${key}`, value),
+      }
+    : undefined;
+  const client = createKBrainImageClient(
+    connection,
+    controller.signal,
+    exports,
+    verificationStorage,
+  );
   return {
     host: {
       client,

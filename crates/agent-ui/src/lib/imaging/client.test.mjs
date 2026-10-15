@@ -577,3 +577,174 @@ test("transport refreshes auth headers per call without exposing credentials in 
     errorCode("IMAGE_INVALID_INPUT"),
   );
 });
+
+test("target verification requires paid consent and forwards stable key with typed receipt", async () => {
+  const requests = [];
+  const receipt = {
+    id: "iv_test",
+    targetId: "it_test",
+    jobId: "ij_test",
+    state: "pending",
+    jobStatus: "running",
+    settingsRevision: 1,
+  };
+  const client = setup(async (url, init) => {
+    requests.push({ url, init });
+    return json({ version, verification: receipt });
+  });
+  const input = {
+    expectedRevision: 1,
+    projectId: "ip_test",
+    connectionId: "ic_test",
+    remoteId: "gpt-image-2",
+    targetRevision: 1,
+    operation: "generate",
+    count: 1,
+    prompt: "测试海报",
+    confirmPaid: false,
+  };
+  await assert.rejects(() => client.startTargetVerification("it_test", input, "verify-key"));
+  assert.equal(requests.length, 0);
+  assert.deepEqual(
+    await client.startTargetVerification("it_test", { ...input, confirmPaid: true }, "verify-key"),
+    receipt,
+  );
+  assert.equal(requests[0].init.method, "POST");
+  assert.equal(new Headers(requests[0].init.headers).get("X-Idempotency-Key"), "verify-key");
+  assert.match(requests[0].url, /targets\/it_test\/verify$/);
+  assert.deepEqual(await client.getTargetVerification("it_test", "iv_test"), receipt);
+  assert.match(requests[1].url, /targets\/it_test\/verifications\/iv_test$/);
+  assert.notEqual(requests[1].init.method, "POST");
+});
+
+test("verification recovery uses authenticated GET and the original key without a submit", async () => {
+  const calls = [];
+  const receipt = {
+    id: "iv_recovered",
+    targetId: "it_test",
+    state: "pending",
+    settingsRevision: 1,
+  };
+  const client = setup(async (url, init) => {
+    calls.push({ url, init });
+    return json({ version, verification: receipt });
+  });
+  assert.deepEqual(await client.getTargetVerificationByKey("it_test", "original-key"), receipt);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /targets\/it_test\/verifications\/by-key$/);
+  assert.notEqual(calls[0].init.method, "POST");
+  assert.equal(new Headers(calls[0].init.headers).get("X-Idempotency-Key"), "original-key");
+});
+
+test("verification journal survives client recreation without another paid submit", async () => {
+  const values = new Map();
+  const storage = { getItem: (k) => values.get(k) ?? null, setItem: (k, v) => values.set(k, v) };
+  let posts = 0;
+  const receipt = { id: "iv_journal", targetId: "it_test", state: "pending", settingsRevision: 1 };
+  const fetch = async (_url, init) => {
+    if (init.method === "POST") posts++;
+    return json({ version, verification: receipt });
+  };
+  const first = setup(fetch, { verificationStorage: storage });
+  const input = {
+    expectedRevision: 1,
+    projectId: "ip_test",
+    connectionId: "ic_test",
+    remoteId: "gpt-image-2",
+    targetRevision: 1,
+    operation: "generate",
+    count: 1,
+    prompt: "fixture",
+    confirmPaid: true,
+  };
+  await first.startTargetVerification("it_test", input, "journal-key");
+  const second = setup(fetch, { verificationStorage: storage });
+  const restored = second.loadVerificationAttempt("it_test");
+  assert.equal(restored.key, "journal-key");
+  assert.equal(restored.receipt.id, "iv_journal");
+  await second.getTargetVerificationByKey("it_test", restored.key);
+  assert.equal(posts, 1);
+});
+
+test("unwritable verification journal prevents paid submission", async () => {
+  let calls = 0;
+  const client = setup(
+    async () => {
+      calls++;
+      return json({ version });
+    },
+    {
+      verificationStorage: {
+        getItem: () => null,
+        setItem: () => {
+          throw new Error("quota");
+        },
+      },
+    },
+  );
+  const input = {
+    expectedRevision: 1,
+    projectId: "ip_test",
+    connectionId: "ic_test",
+    remoteId: "gpt-image-2",
+    targetRevision: 1,
+    operation: "generate",
+    count: 1,
+    prompt: "fixture",
+    confirmPaid: true,
+  };
+  await assert.rejects(() => client.startTargetVerification("it_test", input, "journal-key"));
+  assert.equal(calls, 0);
+});
+
+test("verification journal rejects corruption, competing keys and resetting unresolved work", async () => {
+  const values = new Map();
+  const storage = { getItem: (k) => values.get(k) ?? null, setItem: (k, v) => values.set(k, v) };
+  let calls = 0,
+    state = "pending";
+  const receipt = () => ({ id: "iv_journal", targetId: "it_test", state, settingsRevision: 1 });
+  const client = setup(
+    async () => {
+      calls++;
+      return json({ version, verification: receipt() });
+    },
+    { verificationStorage: storage },
+  );
+  const input = {
+    expectedRevision: 1,
+    projectId: "ip_test",
+    connectionId: "ic_test",
+    remoteId: "gpt-image-2",
+    targetRevision: 1,
+    operation: "generate",
+    count: 1,
+    prompt: "fixture",
+    confirmPaid: true,
+  };
+  await client.startTargetVerification("it_test", input, "original-key");
+  assert.throws(
+    () => client.clearVerificationAttempt("it_test"),
+    errorCode("IMAGE_RESULT_UNKNOWN"),
+  );
+  await assert.rejects(
+    () => client.startTargetVerification("it_test", input, "different-key"),
+    errorCode("IMAGE_IDEMPOTENCY_CONFLICT"),
+  );
+  assert.equal(calls, 1);
+  state = "verified";
+  await client.getTargetVerificationByKey("it_test", "original-key");
+  assert.equal(client.loadVerificationAttempt("it_test").receipt.state, "verified");
+  client.clearVerificationAttempt("it_test");
+  assert.equal(client.loadVerificationAttempt("it_test"), null);
+  const path = [...values.keys()][0];
+  values.set(path, "not-json");
+  assert.throws(
+    () => client.loadVerificationAttempt("it_test"),
+    errorCode("IMAGE_VERIFICATION_STORAGE_UNAVAILABLE"),
+  );
+  await assert.rejects(
+    () => client.startTargetVerification("it_test", input, "new-key"),
+    errorCode("IMAGE_VERIFICATION_STORAGE_UNAVAILABLE"),
+  );
+  assert.equal(calls, 2);
+});

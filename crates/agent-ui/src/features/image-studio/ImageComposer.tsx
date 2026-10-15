@@ -4,6 +4,7 @@ import { Input } from "../../components/ui/input";
 import { Textarea } from "../../components/ui/textarea";
 import type { InputAsset, Operation } from "../../lib/imaging/types";
 import { AssetImage } from "./AssetImage";
+import { ImageTargetSettings } from "./ImageTargetSettings";
 import type { ImageStudioController, StudioView } from "./studioController";
 import { selectClass, TargetParameterForm } from "./TargetParameterForm";
 
@@ -58,6 +59,10 @@ export function ImageComposer({
         if (dropped && uploadRole) void controller.upload(dropped, dropped.name, uploadRole);
       }}
     >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-medium">创作输入</span>
+        <ImageTargetSettings client={controller.client} />
+      </div>
       <fieldset disabled={locked} className="space-y-3">
         <legend className="sr-only">创作输入</legend>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_6rem]">

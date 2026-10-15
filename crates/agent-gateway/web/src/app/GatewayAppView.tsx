@@ -90,6 +90,7 @@ import {
 import { createGatewayTrajectoryHost } from "@/agent-ui-adapters/trajectory";
 import { GatewayTranscript } from "@/components/GatewayTranscript";
 import { executeClarifyPromptTurn } from "@/lib/chat/clarifyPromptTurn";
+import { useSingleUserImageIdentity } from "@/lib/imageIdentity";
 import type { SttProviderId } from "@/lib/settings";
 import {
   getNextTheme,
@@ -146,9 +147,13 @@ export function GatewayAppView({
   viewModel: GatewayAppViewModel;
   imageStudioIdentity?: TrustedGatewayImageIdentity;
 }) {
-  const imageStudio = useWebImageStudioHost(
+  const verifiedImageIdentity = useSingleUserImageIdentity(
     viewModel.imageStudioToken,
     imageStudioIdentity,
+  );
+  const imageStudio = useWebImageStudioHost(
+    viewModel.imageStudioToken,
+    verifiedImageIdentity,
     viewModel.activeWorkspaceProjectPath,
   );
   const chatFrameRef = useRef<HTMLDivElement | null>(null);

@@ -1,5 +1,13 @@
 import { abortError, ImageClientError, protocolError, responseError, safeInteger } from "./errors";
-import type { ExportDestination, ExportResult, ImageEvent, ImageStudioClient } from "./types";
+import type {
+  ExportDestination,
+  ExportResult,
+  ImageEvent,
+  ImageStudioClient,
+  TargetVerificationAttempt,
+  TargetVerificationReceipt,
+  TargetVerificationRequest,
+} from "./types";
 import { IMAGE_WIRE_VERSION } from "./types";
 import {
   array,
@@ -72,6 +80,11 @@ export function fetchTransport(options: FetchTransportOptions): ImageTransport {
 }
 export type ImageExportHandler = (id: string, signal?: AbortSignal) => Promise<ExportResult>;
 export interface ImageStudioClientOptions {
+  /** Host-scoped by verified owner, backend and workspace. No credentials. */
+  verificationStorage?: {
+    getItem(key: string): string | null;
+    setItem(key: string, value: string): void;
+  };
   transport: ImageTransport;
   /** Abort on backend/scope change and discard the client. The host owns Blob URL cleanup. */
   signal?: AbortSignal;
@@ -81,6 +94,56 @@ export interface ImageStudioClientOptions {
   exports?: Partial<Record<ExportDestination, ImageExportHandler>>;
   /** Total retry budget for a subscription, including repeated successful but short streams. */
   reconnectDelaysMs?: readonly number[];
+}
+
+function parseVerificationInput(value: unknown): TargetVerificationRequest {
+  const v = record(value);
+  if (v.operation !== "generate" || v.count !== 1 || v.confirmPaid !== true) throw protocolError();
+  return {
+    expectedRevision: safeInteger(v.expectedRevision),
+    projectId: text(v.projectId),
+    connectionId: text(v.connectionId),
+    remoteId: text(v.remoteId),
+    targetRevision: safeInteger(v.targetRevision),
+    operation: "generate",
+    count: 1,
+    prompt: text(v.prompt),
+    confirmPaid: true,
+  };
+}
+
+function parseVerification(value: unknown): TargetVerificationReceipt {
+  const v = record(value);
+  const result: TargetVerificationReceipt = {
+    id: text(v.id),
+    targetId: text(v.targetId),
+    state: text(v.state),
+    settingsRevision: safeInteger(v.settingsRevision),
+  };
+  if (!["pending", "verified", "failed", "unknown", "stale", "blocked"].includes(result.state))
+    throw protocolError();
+  if (v.jobId !== undefined) result.jobId = text(v.jobId);
+  if (v.reason !== undefined) result.reason = text(v.reason);
+  if (v.jobStatus !== undefined) {
+    const status = text(v.jobStatus);
+    if (
+      ![
+        "queued",
+        "running",
+        "saving",
+        "succeeded",
+        "partial_succeeded",
+        "failed",
+        "cancel_requested",
+        "cancelled",
+        "result_unknown",
+      ].includes(status)
+    )
+      throw protocolError();
+    result.jobStatus = status as NonNullable<TargetVerificationReceipt["jobStatus"]>;
+  }
+  // Job state remains optional: receipts may precede durable job acceptance.
+  return result;
 }
 
 function linkedSignal(signals: (AbortSignal | undefined)[]) {
@@ -136,6 +199,64 @@ function jsonBody(value: unknown): Pick<RequestInit, "body" | "headers"> {
 }
 
 export function createImageStudioClient(options: ImageStudioClientOptions): ImageStudioClient {
+  const verificationMemory = new Map<string, string>();
+  const journal = options.verificationStorage ?? {
+    getItem: (key: string) => verificationMemory.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      verificationMemory.set(key, value);
+    },
+  };
+  const journalKey = (id: string) => `image-verification:v1:${segment(id)}`;
+  function loadVerificationAttempt(id: string): TargetVerificationAttempt | null {
+    if (options.signal?.aborted) throw abortError();
+    try {
+      const raw = journal.getItem(journalKey(id));
+      if (!raw) return null;
+      if (raw.length > 65536) throw protocolError();
+      const v = record(JSON.parse(raw));
+      if (v.version !== 1 || v.targetId !== id) throw protocolError();
+      const key = text(v.key);
+      if (!key || key.length > 256 || /[^\x21-\x7e]/.test(key)) throw protocolError();
+      const result: TargetVerificationAttempt = { key, input: parseVerificationInput(v.input) };
+      if (v.receipt !== undefined) {
+        result.receipt = parseVerification(v.receipt);
+        if (result.receipt.targetId !== id) throw protocolError();
+      }
+      return result;
+    } catch {
+      throw new ImageClientError("IMAGE_VERIFICATION_STORAGE_UNAVAILABLE");
+    }
+  }
+  function saveVerificationAttempt(id: string, attempt: TargetVerificationAttempt) {
+    if (options.signal?.aborted) throw abortError();
+    try {
+      const raw = JSON.stringify({
+        version: 1,
+        targetId: id,
+        key: attempt.key,
+        input: attempt.input,
+        receipt: attempt.receipt,
+      });
+      if (raw.length > 65536) throw protocolError();
+      journal.setItem(journalKey(id), raw);
+      if (journal.getItem(journalKey(id)) !== raw) throw protocolError();
+    } catch {
+      throw new ImageClientError("IMAGE_VERIFICATION_STORAGE_UNAVAILABLE");
+    }
+  }
+  function rememberVerificationReceipt(
+    targetId: string,
+    receipt: TargetVerificationReceipt,
+    key?: string,
+  ) {
+    if (receipt.targetId !== targetId) throw protocolError();
+    const attempt = loadVerificationAttempt(targetId);
+    if (attempt && (key !== undefined ? key === attempt.key : attempt.receipt?.id === receipt.id)) {
+      attempt.receipt = receipt;
+      saveVerificationAttempt(targetId, attempt);
+    }
+    return receipt;
+  }
   const settingsSavedListeners = new Set<() => void>();
   options.signal?.addEventListener("abort", () => settingsSavedListeners.clear(), { once: true });
   const imagePath = (options.imagePath ?? "/v1/image").replace(/\/+$/, "");
@@ -237,6 +358,79 @@ export function createImageStudioClient(options: ImageStudioClientOptions): Imag
         if (supported && version !== IMAGE_WIRE_VERSION) throw protocolError();
         return { supported, ...(version === undefined ? {} : { version }) };
       }),
+    hasVerificationPersistence: () => options.verificationStorage !== undefined,
+    loadVerificationAttempt,
+    clearVerificationAttempt: (targetId) => {
+      const attempt = loadVerificationAttempt(targetId);
+      if (!attempt) return;
+      if (
+        !attempt.receipt ||
+        attempt.receipt.state === "unknown" ||
+        (attempt.receipt.state !== "verified" &&
+          !["failed", "succeeded", "partial_succeeded", "cancelled"].includes(
+            attempt.receipt.jobStatus ?? "",
+          ))
+      )
+        throw new ImageClientError("IMAGE_RESULT_UNKNOWN");
+      try {
+        journal.setItem(journalKey(targetId), "");
+        if (journal.getItem(journalKey(targetId))) throw protocolError();
+      } catch {
+        throw new ImageClientError("IMAGE_VERIFICATION_STORAGE_UNAVAILABLE");
+      }
+    },
+    startTargetVerification: async (targetId, input, key) => {
+      if (
+        !input.confirmPaid ||
+        input.operation !== "generate" ||
+        input.count !== 1 ||
+        !input.prompt.trim() ||
+        !key ||
+        key.length > 256 ||
+        /[^\x21-\x7e]/.test(key)
+      )
+        throw new ImageClientError("IMAGE_INVALID_INPUT");
+      const request = parseVerificationInput(input);
+      const old = loadVerificationAttempt(targetId);
+      if (old && (old.key !== key || JSON.stringify(old.input) !== JSON.stringify(request)))
+        throw new ImageClientError("IMAGE_IDEMPOTENCY_CONFLICT", 409);
+      const attempt: TargetVerificationAttempt = old ?? { key, input: request };
+      // Persist before sending any potentially billable request.
+      saveVerificationAttempt(targetId, attempt);
+      const receipt = parseVerification(
+        (
+          await json(`/targets/${segment(targetId)}/verify`, {
+            method: "POST",
+            ...jsonBody(request),
+            headers: { "Content-Type": "application/json", "X-Idempotency-Key": key },
+          })
+        ).verification,
+      );
+      if (receipt.targetId !== targetId) throw protocolError();
+      attempt.receipt = receipt;
+      saveVerificationAttempt(targetId, attempt);
+      return receipt;
+    },
+    getTargetVerificationByKey: async (targetId, key) => {
+      if (!key || key.length > 256 || /[^\x21-\x7e]/.test(key))
+        throw new ImageClientError("IMAGE_INVALID_INPUT");
+      const receipt = parseVerification(
+        (
+          await json(`/targets/${segment(targetId)}/verifications/by-key`, {
+            headers: { "X-Idempotency-Key": key },
+          })
+        ).verification,
+      );
+      return rememberVerificationReceipt(targetId, receipt, key);
+    },
+    getTargetVerification: async (targetId, receiptId) => {
+      const receipt = parseVerification(
+        (await json(`/targets/${segment(targetId)}/verifications/${segment(receiptId)}`))
+          .verification,
+      );
+      if (receipt.id !== receiptId) throw protocolError();
+      return rememberVerificationReceipt(targetId, receipt);
+    },
     listTargets: async () => array(parseTarget)((await json("/targets")).items),
     getSettings: async () => {
       const value = await json("/settings");

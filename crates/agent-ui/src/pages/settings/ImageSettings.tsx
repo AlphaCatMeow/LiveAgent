@@ -17,6 +17,7 @@ import type {
   Operation,
   ImageSettings as Settings,
 } from "../../lib/imaging/types";
+import { ImageTargetVerification } from "./ImageTargetVerification";
 import {
   connectionDependents,
   type ImageSecretPurpose,
@@ -41,6 +42,7 @@ import {
 } from "./imageSettingsAdapter";
 
 export interface ImageSettingsProps {
+  panel?: "all" | "connections" | "targets";
   /** Replace client identity whenever owner/backend changes. */
   client: ImageStudioClient;
   onDirtyChange?: (dirty: boolean) => void;
@@ -95,7 +97,12 @@ function Toggle({
 }
 type AdvancedDraft = { parameters?: string; workflow?: string };
 
-function ImageSettingsScope({ client, onDirtyChange, registerLeaveGuard }: ImageSettingsProps) {
+function ImageSettingsScope({
+  client,
+  onDirtyChange,
+  registerLeaveGuard,
+  panel = "all",
+}: ImageSettingsProps) {
   const [saved, setSaved] = useState<Settings | null>(null);
   const [draft, setDraft] = useState<Settings | null>(null);
   const [remote, setRemote] = useState<Settings | null>(null);
@@ -411,9 +418,15 @@ function ImageSettingsScope({ client, onDirtyChange, registerLeaveGuard }: Image
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-1">
       <div>
-        <h2 className="text-base font-semibold">图像设置</h2>
+        <h2 className="text-base font-semibold">
+          {panel === "connections" ? "图像服务" : panel === "targets" ? "目标设置" : "图像设置"}
+        </h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          配置图像连接和模型或工作流目标。公开配置保存后，再写入连接凭据。
+          {panel === "connections"
+            ? "配置图像供应商的地址、认证和凭据。模型与工作流请在创作输入区的目标设置中管理。"
+            : panel === "targets"
+              ? "选择已有图像服务，配置生成模型或工作流。新增服务和凭据请使用原有设置中的供应商设置。"
+              : "配置图像连接和模型或工作流目标。公开配置保存后，再写入连接凭据。"}
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
@@ -514,570 +527,592 @@ function ImageSettingsScope({ client, onDirtyChange, registerLeaveGuard }: Image
       )}
       {draft && (
         <fieldset disabled={!!busy} className="min-w-0 space-y-5">
-          <section className="space-y-3 rounded-xl bg-settings-tile p-4">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold">连接</h3>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  if (secretDirty && !window.confirm("新增连接将清空尚未写入的凭据。确定继续？"))
-                    return;
-                  clearSecret();
-                  const next = newImageConnection(`ic_${crypto.randomUUID().replaceAll("-", "")}`);
-                  setDraft({ ...draft, connections: [...draft.connections, next] });
-                  setConnectionId(next.id);
-                }}
-              >
-                新增连接
-              </Button>
-            </div>
-            <Field label="选择连接">
-              <select
-                className={selectClass}
-                value={connection?.id ?? ""}
-                onChange={(e) => selectConnection(e.target.value)}
-              >
-                <option value="" disabled>
-                  请选择连接
-                </option>
-                {draft.connections.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
+          {panel !== "targets" && (
+            <section className="space-y-3 rounded-xl bg-settings-tile p-4">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold">连接</h3>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    if (secretDirty && !window.confirm("新增连接将清空尚未写入的凭据。确定继续？"))
+                      return;
+                    clearSecret();
+                    const next = newImageConnection(
+                      `ic_${crypto.randomUUID().replaceAll("-", "")}`,
+                    );
+                    setDraft({ ...draft, connections: [...draft.connections, next] });
+                    setConnectionId(next.id);
+                  }}
+                >
+                  新增连接
+                </Button>
+              </div>
+              <Field label="选择连接">
+                <select
+                  className={selectClass}
+                  value={connection?.id ?? ""}
+                  onChange={(e) => selectConnection(e.target.value)}
+                >
+                  <option value="" disabled>
+                    请选择连接
                   </option>
-                ))}
-              </select>
-            </Field>
-            {!draft.connections.length && (
-              <p className="text-sm text-muted-foreground">先添加一个连接，再配置图像目标。</p>
-            )}
-            {connection && (
-              <>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="连接名称">
-                    <Input
-                      value={connection.name}
-                      onChange={(e) => updateConnection({ name: e.target.value })}
-                    />
-                  </Field>
-                  <Field label="供应商">
-                    <Input
-                      value={connection.vendor}
-                      placeholder="例如 openai、google、runninghub"
-                      onChange={(e) => updateConnection({ vendor: e.target.value })}
-                    />
-                  </Field>
-                  <Field label="凭据来源">
-                    <select
-                      className={selectClass}
-                      value={connection.binding.kind}
-                      onChange={(e) => {
-                        clearSecret();
-                        updateConnection({
-                          binding:
-                            e.target.value === "provider_ref"
-                              ? { kind: "provider_ref", providerId: "" }
-                              : {
-                                  kind: "independent",
-                                  baseUrl: "",
-                                  authKind: "bearer",
-                                  secretRefs: {},
-                                },
-                        });
-                      }}
-                    >
-                      <option value="independent">独立图像连接</option>
-                      <option value="provider_ref">复用已有供应商</option>
-                    </select>
-                  </Field>
-                  <Field label="最大并发任务">
-                    <Input
-                      type="number"
-                      min={1}
-                      max={16}
-                      value={connection.maxConcurrent}
-                      onChange={(e) => updateConnection({ maxConcurrent: Number(e.target.value) })}
-                    />
-                  </Field>
-                </div>
-                {connection.binding.kind === "provider_ref" ? (
-                  <>
-                    <Field label="已有供应商 ID">
+                  {draft.connections.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              {!draft.connections.length && (
+                <p className="text-sm text-muted-foreground">先添加一个连接，再配置图像目标。</p>
+              )}
+              {connection && (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="连接名称">
                       <Input
-                        value={connection.binding.providerId}
-                        placeholder="填写聊天供应商设置中的 ID"
-                        onChange={(e) =>
+                        value={connection.name}
+                        onChange={(e) => updateConnection({ name: e.target.value })}
+                      />
+                    </Field>
+                    <Field label="供应商">
+                      <Input
+                        value={connection.vendor}
+                        placeholder="例如 openai、google、runninghub"
+                        onChange={(e) => updateConnection({ vendor: e.target.value })}
+                      />
+                    </Field>
+                    <Field label="凭据来源">
+                      <select
+                        className={selectClass}
+                        value={connection.binding.kind}
+                        onChange={(e) => {
+                          clearSecret();
                           updateConnection({
-                            binding: { kind: "provider_ref", providerId: e.target.value },
+                            binding:
+                              e.target.value === "provider_ref"
+                                ? { kind: "provider_ref", providerId: "" }
+                                : {
+                                    kind: "independent",
+                                    baseUrl: "",
+                                    authKind: "bearer",
+                                    secretRefs: {},
+                                  },
+                          });
+                        }}
+                      >
+                        <option value="independent">独立图像连接</option>
+                        <option value="provider_ref">复用已有供应商</option>
+                      </select>
+                    </Field>
+                    <Field label="最大并发任务">
+                      <Input
+                        type="number"
+                        min={1}
+                        max={16}
+                        value={connection.maxConcurrent}
+                        onChange={(e) =>
+                          updateConnection({ maxConcurrent: Number(e.target.value) })
+                        }
+                      />
+                    </Field>
+                  </div>
+                  {connection.binding.kind === "provider_ref" ? (
+                    <>
+                      <Field label="已有供应商 ID">
+                        <Input
+                          value={connection.binding.providerId}
+                          placeholder="填写聊天供应商设置中的 ID"
+                          onChange={(e) =>
+                            updateConnection({
+                              binding: { kind: "provider_ref", providerId: e.target.value },
+                            })
+                          }
+                        />
+                      </Field>
+                      <p className="text-xs text-muted-foreground">
+                        只复用网络和凭据。图像协议与模型在下方单独配置；保存时由后端检查供应商是否存在。
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <Field label="服务地址">
+                        <Input
+                          type="url"
+                          value={connection.binding.baseUrl}
+                          placeholder="https://api.example.com/v1"
+                          onChange={(e) => {
+                            if (connection.binding.kind === "independent")
+                              updateConnection({
+                                binding: { ...connection.binding, baseUrl: e.target.value },
+                              });
+                          }}
+                        />
+                      </Field>
+                      <Field label="认证方式">
+                        <select
+                          className={selectClass}
+                          value={connection.binding.authKind}
+                          onChange={(e) => {
+                            if (connection.binding.kind === "independent")
+                              updateConnection({
+                                binding: {
+                                  ...connection.binding,
+                                  authKind: e.target.value as
+                                    | "bearer"
+                                    | "api_key_header"
+                                    | "signed_request",
+                                },
+                              });
+                          }}
+                        >
+                          <option value="bearer">Bearer token</option>
+                          <option value="api_key_header">API key 请求头</option>
+                          <option value="signed_request">签名认证（AK / SK）</option>
+                        </select>
+                      </Field>
+                      <Toggle
+                        label="使用系统代理"
+                        checked={!!connection.binding.useSystemProxy}
+                        onChange={(checked) => {
+                          if (connection.binding.kind === "independent")
+                            updateConnection({
+                              binding: { ...connection.binding, useSystemProxy: checked },
+                            });
+                        }}
+                      />
+                      <div className="space-y-3 rounded-lg border border-border p-3">
+                        <p className="text-sm">
+                          凭据：{connection.credentialConfigured ? "已配置" : "尚未配置"}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {canWriteSecret
+                            ? "选择凭据用途并写入。相同用途会替换原凭据；签名认证需分别写入 Access Key 和 Secret Key，临时凭据还需 Security Token。"
+                            : "先保存公开设置，处理版本冲突后再写入凭据。"}
+                        </p>
+                        <Field label="凭据用途（purpose）">
+                          <select
+                            className={selectClass}
+                            disabled={!canWriteSecret}
+                            value={selectedPurpose}
+                            onChange={(e) => {
+                              clearSecret();
+                              setPurpose(e.target.value as ImageSecretPurpose);
+                            }}
+                          >
+                            {secretPurposes.map((item) => (
+                              <option key={item} value={item}>
+                                {imageSecretPurposeLabels[item]}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                        <Field label="新凭据">
+                          <Input
+                            key={connection.id}
+                            ref={bindSecretInput}
+                            type="password"
+                            autoComplete="new-password"
+                            spellCheck={false}
+                            disabled={!canWriteSecret}
+                            onChange={(e) => setSecretDirty(e.target.value.length > 0)}
+                          />
+                        </Field>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            variant="outline"
+                            disabled={!canWriteSecret || !secretDirty}
+                            onClick={() => void saveSecret()}
+                          >
+                            写入并绑定凭据
+                          </Button>
+                          <Button variant="ghost" disabled={!secretDirty} onClick={clearSecret}>
+                            清空输入
+                          </Button>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                  <Toggle
+                    label="启用连接"
+                    checked={connection.enabled}
+                    onChange={(enabled) => updateConnection({ enabled })}
+                  />
+                  {dependencies.length > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      使用此连接的目标：{dependencies.map((t) => t.name).join("、")}
+                      。删除连接前请先移除目标或更换其连接。
+                    </p>
+                  )}
+                  <Button
+                    variant="destructive"
+                    disabled={dependencies.length > 0}
+                    onClick={() => {
+                      if (window.confirm(`确定删除连接“${connection.name}”？保存设置后生效。`)) {
+                        setDraft(removeImageConnection(draft, connection.id));
+                        clearSecret();
+                        setConnectionId("");
+                      }
+                    }}
+                  >
+                    删除连接
+                  </Button>
+                </>
+              )}
+            </section>
+          )}
+          {panel === "targets" && draft.connections.length === 0 && (
+            <p role="status">请先在设置 → 供应商设置 → 图像服务中添加连接。</p>
+          )}
+          {panel !== "connections" && (
+            <section className="space-y-3 rounded-xl bg-settings-tile p-4">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold">图像目标</h3>
+                <Button
+                  variant="outline"
+                  disabled={!draft.connections.length}
+                  onClick={() => {
+                    const next = newImageTarget(
+                      `it_${crypto.randomUUID().replaceAll("-", "")}`,
+                      connection?.id ?? draft.connections[0].id,
+                    );
+                    setDraft({ ...draft, targets: [...draft.targets, next] });
+                    setTargetId(next.id);
+                  }}
+                >
+                  新增目标
+                </Button>
+              </div>
+              <Field label="选择目标">
+                <select
+                  className={selectClass}
+                  value={target?.id ?? ""}
+                  onChange={(e) => setTargetId(e.target.value)}
+                >
+                  <option value="" disabled>
+                    请选择目标
+                  </option>
+                  {draft.targets.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                      {t.enabled ? "" : "（禁用）"}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              {target && (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="目标名称">
+                      <Input
+                        value={target.name}
+                        onChange={(e) => updateTarget({ name: e.target.value })}
+                      />
+                    </Field>
+                    <Field label="使用连接">
+                      <select
+                        className={selectClass}
+                        value={target.connectionId}
+                        onChange={(e) => updateTarget({ connectionId: e.target.value })}
+                      >
+                        {draft.connections.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="图像协议">
+                      <select
+                        className={selectClass}
+                        value={target.adapter}
+                        onChange={(e) => {
+                          const workflow = e.target.value === "runninghub-workflow";
+                          updateTarget({
+                            adapter: e.target.value,
+                            kind: workflow ? "workflow" : "model",
+                            workflowMapping: workflow
+                              ? (target.workflowMapping ?? { revision: 1, inputs: [], outputs: [] })
+                              : undefined,
+                          });
+                          setAdvanced((previous) => {
+                            const next = { ...previous };
+                            if (next[target.id])
+                              next[target.id] = { parameters: next[target.id].parameters };
+                            return next;
+                          });
+                        }}
+                      >
+                        {!imageProtocols.some((p) => p.id === target.adapter) && (
+                          <option value={target.adapter}>当前协议（需后端支持）</option>
+                        )}
+                        {imageProtocols.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.label}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="协议适配器版本">
+                      <Input
+                        value={target.adapterVersion}
+                        onChange={(e) => updateTarget({ adapterVersion: e.target.value })}
+                      />
+                    </Field>
+                    <Field label="目标类型">
+                      <select
+                        className={selectClass}
+                        disabled={target.adapter === "runninghub-workflow"}
+                        value={target.kind}
+                        onChange={(e) =>
+                          updateTarget({
+                            kind: e.target.value as "model" | "workflow",
+                            workflowMapping:
+                              e.target.value === "workflow"
+                                ? { revision: 1, inputs: [], outputs: [] }
+                                : undefined,
+                          })
+                        }
+                      >
+                        <option value="model">模型</option>
+                        <option value="workflow">工作流</option>
+                      </select>
+                    </Field>
+                    <Field
+                      label={
+                        target.kind === "workflow"
+                          ? "远端工作流 ID（remoteId）"
+                          : "远端模型 ID（remoteId）"
+                      }
+                    >
+                      <Input
+                        value={target.remoteId}
+                        placeholder={target.kind === "workflow" ? "工作流 ID" : "模型 ID"}
+                        onChange={(e) => updateTarget({ remoteId: e.target.value })}
+                      />
+                    </Field>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">
+                      声明目标能力（以供应商和后端实际验证为准）
+                    </p>
+                    <div className="flex flex-wrap gap-4">
+                      {(Object.entries(imageOperationLabels) as [Operation, string][]).map(
+                        ([op, label]) => (
+                          <Toggle
+                            key={op}
+                            label={label}
+                            checked={target.capabilities.operations.includes(op)}
+                            onChange={(checked) =>
+                              updateTarget({
+                                capabilities: {
+                                  ...target.capabilities,
+                                  operations: checked
+                                    ? [...target.capabilities.operations, op]
+                                    : target.capabilities.operations.filter((v) => v !== op),
+                                },
+                              })
+                            }
+                          />
+                        ),
+                      )}
+                    </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="最多输入图片">
+                      <Input
+                        type="number"
+                        min={0}
+                        max={16}
+                        value={target.capabilities.maxInputs}
+                        onChange={(e) =>
+                          updateTarget({
+                            capabilities: {
+                              ...target.capabilities,
+                              maxInputs: Number(e.target.value),
+                            },
                           })
                         }
                       />
                     </Field>
-                    <p className="text-xs text-muted-foreground">
-                      只复用网络和凭据。图像协议与模型在下方单独配置；保存时由后端检查供应商是否存在。
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <Field label="服务地址">
+                    <Field label="每次最多输出图片">
                       <Input
-                        type="url"
-                        value={connection.binding.baseUrl}
-                        placeholder="https://api.example.com/v1"
-                        onChange={(e) => {
-                          if (connection.binding.kind === "independent")
-                            updateConnection({
-                              binding: { ...connection.binding, baseUrl: e.target.value },
-                            });
-                        }}
+                        type="number"
+                        min={1}
+                        max={16}
+                        value={target.capabilities.maxCount}
+                        onChange={(e) =>
+                          updateTarget({
+                            capabilities: {
+                              ...target.capabilities,
+                              maxCount: Number(e.target.value),
+                            },
+                          })
+                        }
                       />
                     </Field>
-                    <Field label="认证方式">
-                      <select
-                        className={selectClass}
-                        value={connection.binding.authKind}
-                        onChange={(e) => {
-                          if (connection.binding.kind === "independent")
-                            updateConnection({
-                              binding: {
-                                ...connection.binding,
-                                authKind: e.target.value as
-                                  | "bearer"
-                                  | "api_key_header"
-                                  | "signed_request",
-                              },
-                            });
-                        }}
-                      >
-                        <option value="bearer">Bearer token</option>
-                        <option value="api_key_header">API key 请求头</option>
-                        <option value="signed_request">签名认证（AK / SK）</option>
-                      </select>
+                  </div>
+                  <div className="flex flex-wrap gap-4">
+                    {(
+                      [
+                        ["supportsCancel", "可取消"],
+                        ["supportsReconcile", "可核对结果"],
+                        ["supportsContinuation", "可继续编辑"],
+                        ["supportsPreview", "可预览"],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <Toggle
+                        key={key}
+                        label={label}
+                        checked={target.capabilities[key]}
+                        onChange={(checked) =>
+                          updateTarget({ capabilities: { ...target.capabilities, [key]: checked } })
+                        }
+                      />
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap gap-4">
+                    {["png", "jpeg", "webp"].map((format) => (
+                      <Toggle
+                        key={format}
+                        label={format.toUpperCase()}
+                        checked={target.capabilities.outputFormats.includes(format)}
+                        onChange={(checked) =>
+                          updateTarget({
+                            capabilities: {
+                              ...target.capabilities,
+                              outputFormats: checked
+                                ? [...target.capabilities.outputFormats, format]
+                                : target.capabilities.outputFormats.filter((f) => f !== format),
+                            },
+                          })
+                        }
+                      />
+                    ))}
+                  </div>
+                  <details className="space-y-3 rounded-lg border border-border p-3">
+                    <summary className="cursor-pointer text-sm">
+                      高级：参数 schema 与工作流映射
+                    </summary>
+                    <p className="text-xs text-muted-foreground">
+                      参数数组使用 key、label、type、required，可声明
+                      enum、minimum、maximum、default、unit。仅填写公开参数，凭据请使用上方专用输入。
+                    </p>
+                    <Field label="参数 schema（JSON）">
+                      <textarea
+                        className="min-h-40 w-full rounded-md border border-input bg-background p-3 font-mono text-xs"
+                        value={
+                          advanced[target.id]?.parameters ??
+                          JSON.stringify(target.parameters, null, 2)
+                        }
+                        spellCheck={false}
+                        onChange={(e) =>
+                          setAdvanced((previous) => ({
+                            ...previous,
+                            [target.id]: { ...previous[target.id], parameters: e.target.value },
+                          }))
+                        }
+                      />
                     </Field>
-                    <Toggle
-                      label="使用系统代理"
-                      checked={!!connection.binding.useSystemProxy}
-                      onChange={(checked) => {
-                        if (connection.binding.kind === "independent")
-                          updateConnection({
-                            binding: { ...connection.binding, useSystemProxy: checked },
-                          });
-                      }}
-                    />
-                    <div className="space-y-3 rounded-lg border border-border p-3">
-                      <p className="text-sm">
-                        凭据：{connection.credentialConfigured ? "已配置" : "尚未配置"}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {canWriteSecret
-                          ? "选择凭据用途并写入。相同用途会替换原凭据；签名认证需分别写入 Access Key 和 Secret Key，临时凭据还需 Security Token。"
-                          : "先保存公开设置，处理版本冲突后再写入凭据。"}
-                      </p>
-                      <Field label="凭据用途（purpose）">
-                        <select
-                          className={selectClass}
-                          disabled={!canWriteSecret}
-                          value={selectedPurpose}
-                          onChange={(e) => {
-                            clearSecret();
-                            setPurpose(e.target.value as ImageSecretPurpose);
-                          }}
-                        >
-                          {secretPurposes.map((item) => (
-                            <option key={item} value={item}>
-                              {imageSecretPurposeLabels[item]}
-                            </option>
-                          ))}
-                        </select>
-                      </Field>
-                      <Field label="新凭据">
-                        <Input
-                          key={connection.id}
-                          ref={bindSecretInput}
-                          type="password"
-                          autoComplete="new-password"
-                          spellCheck={false}
-                          disabled={!canWriteSecret}
-                          onChange={(e) => setSecretDirty(e.target.value.length > 0)}
-                        />
-                      </Field>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant="outline"
-                          disabled={!canWriteSecret || !secretDirty}
-                          onClick={() => void saveSecret()}
-                        >
-                          写入并绑定凭据
-                        </Button>
-                        <Button variant="ghost" disabled={!secretDirty} onClick={clearSecret}>
-                          清空输入
-                        </Button>
-                      </div>
-                    </div>
-                  </>
-                )}
-                <Toggle
-                  label="启用连接"
-                  checked={connection.enabled}
-                  onChange={(enabled) => updateConnection({ enabled })}
-                />
-                {dependencies.length > 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    使用此连接的目标：{dependencies.map((t) => t.name).join("、")}
-                    。删除连接前请先移除目标或更换其连接。
-                  </p>
-                )}
-                <Button
-                  variant="destructive"
-                  disabled={dependencies.length > 0}
-                  onClick={() => {
-                    if (window.confirm(`确定删除连接“${connection.name}”？保存设置后生效。`)) {
-                      setDraft(removeImageConnection(draft, connection.id));
-                      clearSecret();
-                      setConnectionId("");
-                    }
-                  }}
-                >
-                  删除连接
-                </Button>
-              </>
-            )}
-          </section>
-          <section className="space-y-3 rounded-xl bg-settings-tile p-4">
-            <div className="flex items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold">图像目标</h3>
-              <Button
-                variant="outline"
-                disabled={!draft.connections.length}
-                onClick={() => {
-                  const next = newImageTarget(
-                    `it_${crypto.randomUUID().replaceAll("-", "")}`,
-                    connection?.id ?? draft.connections[0].id,
-                  );
-                  setDraft({ ...draft, targets: [...draft.targets, next] });
-                  setTargetId(next.id);
-                }}
-              >
-                新增目标
-              </Button>
-            </div>
-            <Field label="选择目标">
-              <select
-                className={selectClass}
-                value={target?.id ?? ""}
-                onChange={(e) => setTargetId(e.target.value)}
-              >
-                <option value="" disabled>
-                  请选择目标
-                </option>
-                {draft.targets.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                    {t.enabled ? "" : "（禁用）"}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            {target && (
-              <>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="目标名称">
-                    <Input
-                      value={target.name}
-                      onChange={(e) => updateTarget({ name: e.target.value })}
-                    />
-                  </Field>
-                  <Field label="使用连接">
-                    <select
-                      className={selectClass}
-                      value={target.connectionId}
-                      onChange={(e) => updateTarget({ connectionId: e.target.value })}
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        setAdvanced((previous) => ({
+                          ...previous,
+                          [target.id]: {
+                            ...previous[target.id],
+                            parameters: JSON.stringify(
+                              [
+                                {
+                                  key: "quality",
+                                  label: "质量",
+                                  type: "string",
+                                  required: false,
+                                  enum: ["standard", "high"],
+                                  default: "standard",
+                                },
+                              ],
+                              null,
+                              2,
+                            ),
+                          },
+                        }))
+                      }
                     >
-                      {draft.connections.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="图像协议">
-                    <select
-                      className={selectClass}
-                      value={target.adapter}
-                      onChange={(e) => {
-                        const workflow = e.target.value === "runninghub-workflow";
-                        updateTarget({
-                          adapter: e.target.value,
-                          kind: workflow ? "workflow" : "model",
-                          workflowMapping: workflow
-                            ? (target.workflowMapping ?? { revision: 1, inputs: [], outputs: [] })
-                            : undefined,
+                      填入参数示例
+                    </Button>
+                    {target.kind === "workflow" && (
+                      <>
+                        <p className="text-xs text-muted-foreground">
+                          RunningHub 映射使用 revision、inputs 和 outputs。每个参数须映射
+                          parameterKey → nodeId / inputName，输出声明 nodeId / outputName。
+                        </p>
+                        <Field label="工作流字段映射（JSON）">
+                          <textarea
+                            className="min-h-40 w-full rounded-md border border-input bg-background p-3 font-mono text-xs"
+                            value={
+                              advanced[target.id]?.workflow ??
+                              JSON.stringify(
+                                target.workflowMapping ?? { revision: 1, inputs: [], outputs: [] },
+                                null,
+                                2,
+                              )
+                            }
+                            spellCheck={false}
+                            onChange={(e) =>
+                              setAdvanced((previous) => ({
+                                ...previous,
+                                [target.id]: { ...previous[target.id], workflow: e.target.value },
+                              }))
+                            }
+                          />
+                        </Field>
+                      </>
+                    )}
+                  </details>
+                  <p className="text-xs text-muted-foreground">
+                    {target.enabled ? "后端返回：已启用。" : "当前已禁用，尚不能用于生成。"}{" "}
+                    新增或修改执行配置后须完成实际验证；本页不会自动启用目标或执行收费测试。
+                  </p>
+                  <ImageTargetVerification
+                    key={target.id}
+                    client={client}
+                    target={target}
+                    revision={saved?.revision ?? 0}
+                    disabled={dirty || busy !== null}
+                    onEnable={() => updateTarget({ enabled: true })}
+                    onVerified={() => {
+                      void refresh();
+                    }}
+                  />
+                  {target.enabled && (
+                    <Button variant="outline" onClick={() => updateTarget({ enabled: false })}>
+                      禁用目标
+                    </Button>
+                  )}
+                  <Button
+                    variant="destructive"
+                    onClick={() => {
+                      if (window.confirm(`确定删除目标“${target.name}”？保存设置后生效。`)) {
+                        setDraft({
+                          ...draft,
+                          targets: draft.targets.filter((t) => t.id !== target.id),
                         });
                         setAdvanced((previous) => {
                           const next = { ...previous };
-                          if (next[target.id])
-                            next[target.id] = { parameters: next[target.id].parameters };
+                          delete next[target.id];
                           return next;
                         });
-                      }}
-                    >
-                      {!imageProtocols.some((p) => p.id === target.adapter) && (
-                        <option value={target.adapter}>当前协议（需后端支持）</option>
-                      )}
-                      {imageProtocols.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.label}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="协议适配器版本">
-                    <Input
-                      value={target.adapterVersion}
-                      onChange={(e) => updateTarget({ adapterVersion: e.target.value })}
-                    />
-                  </Field>
-                  <Field label="目标类型">
-                    <select
-                      className={selectClass}
-                      disabled={target.adapter === "runninghub-workflow"}
-                      value={target.kind}
-                      onChange={(e) =>
-                        updateTarget({
-                          kind: e.target.value as "model" | "workflow",
-                          workflowMapping:
-                            e.target.value === "workflow"
-                              ? { revision: 1, inputs: [], outputs: [] }
-                              : undefined,
-                        })
+                        setTargetId("");
                       }
-                    >
-                      <option value="model">模型</option>
-                      <option value="workflow">工作流</option>
-                    </select>
-                  </Field>
-                  <Field
-                    label={
-                      target.kind === "workflow"
-                        ? "远端工作流 ID（remoteId）"
-                        : "远端模型 ID（remoteId）"
-                    }
+                    }}
                   >
-                    <Input
-                      value={target.remoteId}
-                      placeholder={target.kind === "workflow" ? "工作流 ID" : "模型 ID"}
-                      onChange={(e) => updateTarget({ remoteId: e.target.value })}
-                    />
-                  </Field>
-                </div>
-                <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">
-                    声明目标能力（以供应商和后端实际验证为准）
-                  </p>
-                  <div className="flex flex-wrap gap-4">
-                    {(Object.entries(imageOperationLabels) as [Operation, string][]).map(
-                      ([op, label]) => (
-                        <Toggle
-                          key={op}
-                          label={label}
-                          checked={target.capabilities.operations.includes(op)}
-                          onChange={(checked) =>
-                            updateTarget({
-                              capabilities: {
-                                ...target.capabilities,
-                                operations: checked
-                                  ? [...target.capabilities.operations, op]
-                                  : target.capabilities.operations.filter((v) => v !== op),
-                              },
-                            })
-                          }
-                        />
-                      ),
-                    )}
-                  </div>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="最多输入图片">
-                    <Input
-                      type="number"
-                      min={0}
-                      max={16}
-                      value={target.capabilities.maxInputs}
-                      onChange={(e) =>
-                        updateTarget({
-                          capabilities: {
-                            ...target.capabilities,
-                            maxInputs: Number(e.target.value),
-                          },
-                        })
-                      }
-                    />
-                  </Field>
-                  <Field label="每次最多输出图片">
-                    <Input
-                      type="number"
-                      min={1}
-                      max={16}
-                      value={target.capabilities.maxCount}
-                      onChange={(e) =>
-                        updateTarget({
-                          capabilities: {
-                            ...target.capabilities,
-                            maxCount: Number(e.target.value),
-                          },
-                        })
-                      }
-                    />
-                  </Field>
-                </div>
-                <div className="flex flex-wrap gap-4">
-                  {(
-                    [
-                      ["supportsCancel", "可取消"],
-                      ["supportsReconcile", "可核对结果"],
-                      ["supportsContinuation", "可继续编辑"],
-                      ["supportsPreview", "可预览"],
-                    ] as const
-                  ).map(([key, label]) => (
-                    <Toggle
-                      key={key}
-                      label={label}
-                      checked={target.capabilities[key]}
-                      onChange={(checked) =>
-                        updateTarget({ capabilities: { ...target.capabilities, [key]: checked } })
-                      }
-                    />
-                  ))}
-                </div>
-                <div className="flex flex-wrap gap-4">
-                  {["png", "jpeg", "webp"].map((format) => (
-                    <Toggle
-                      key={format}
-                      label={format.toUpperCase()}
-                      checked={target.capabilities.outputFormats.includes(format)}
-                      onChange={(checked) =>
-                        updateTarget({
-                          capabilities: {
-                            ...target.capabilities,
-                            outputFormats: checked
-                              ? [...target.capabilities.outputFormats, format]
-                              : target.capabilities.outputFormats.filter((f) => f !== format),
-                          },
-                        })
-                      }
-                    />
-                  ))}
-                </div>
-                <details className="space-y-3 rounded-lg border border-border p-3">
-                  <summary className="cursor-pointer text-sm">
-                    高级：参数 schema 与工作流映射
-                  </summary>
-                  <p className="text-xs text-muted-foreground">
-                    参数数组使用 key、label、type、required，可声明
-                    enum、minimum、maximum、default、unit。仅填写公开参数，凭据请使用上方专用输入。
-                  </p>
-                  <Field label="参数 schema（JSON）">
-                    <textarea
-                      className="min-h-40 w-full rounded-md border border-input bg-background p-3 font-mono text-xs"
-                      value={
-                        advanced[target.id]?.parameters ??
-                        JSON.stringify(target.parameters, null, 2)
-                      }
-                      spellCheck={false}
-                      onChange={(e) =>
-                        setAdvanced((previous) => ({
-                          ...previous,
-                          [target.id]: { ...previous[target.id], parameters: e.target.value },
-                        }))
-                      }
-                    />
-                  </Field>
-                  <Button
-                    variant="outline"
-                    onClick={() =>
-                      setAdvanced((previous) => ({
-                        ...previous,
-                        [target.id]: {
-                          ...previous[target.id],
-                          parameters: JSON.stringify(
-                            [
-                              {
-                                key: "quality",
-                                label: "质量",
-                                type: "string",
-                                required: false,
-                                enum: ["standard", "high"],
-                                default: "standard",
-                              },
-                            ],
-                            null,
-                            2,
-                          ),
-                        },
-                      }))
-                    }
-                  >
-                    填入参数示例
+                    删除目标
                   </Button>
-                  {target.kind === "workflow" && (
-                    <>
-                      <p className="text-xs text-muted-foreground">
-                        RunningHub 映射使用 revision、inputs 和 outputs。每个参数须映射 parameterKey
-                        → nodeId / inputName，输出声明 nodeId / outputName。
-                      </p>
-                      <Field label="工作流字段映射（JSON）">
-                        <textarea
-                          className="min-h-40 w-full rounded-md border border-input bg-background p-3 font-mono text-xs"
-                          value={
-                            advanced[target.id]?.workflow ??
-                            JSON.stringify(
-                              target.workflowMapping ?? { revision: 1, inputs: [], outputs: [] },
-                              null,
-                              2,
-                            )
-                          }
-                          spellCheck={false}
-                          onChange={(e) =>
-                            setAdvanced((previous) => ({
-                              ...previous,
-                              [target.id]: { ...previous[target.id], workflow: e.target.value },
-                            }))
-                          }
-                        />
-                      </Field>
-                    </>
-                  )}
-                </details>
-                <p className="text-xs text-muted-foreground">
-                  {target.enabled ? "后端返回：已启用。" : "当前已禁用，尚不能用于生成。"}{" "}
-                  当前接口未提供分级验证状态及验证操作。新增或修改执行配置后须由后端完成契约和实际调用验证；本页不会自动启用目标或执行收费测试。
-                </p>
-                {target.enabled && (
-                  <Button variant="outline" onClick={() => updateTarget({ enabled: false })}>
-                    禁用目标
-                  </Button>
-                )}
-                <Button
-                  variant="destructive"
-                  onClick={() => {
-                    if (window.confirm(`确定删除目标“${target.name}”？保存设置后生效。`)) {
-                      setDraft({
-                        ...draft,
-                        targets: draft.targets.filter((t) => t.id !== target.id),
-                      });
-                      setAdvanced((previous) => {
-                        const next = { ...previous };
-                        delete next[target.id];
-                        return next;
-                      });
-                      setTargetId("");
-                    }
-                  }}
-                >
-                  删除目标
-                </Button>
-              </>
-            )}
-          </section>
+                </>
+              )}
+            </section>
+          )}
         </fieldset>
       )}
     </div>

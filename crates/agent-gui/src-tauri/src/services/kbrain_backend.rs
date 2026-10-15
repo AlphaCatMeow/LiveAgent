@@ -288,7 +288,7 @@ impl KBrainBackendState {
             .map_err(|error| format!("failed to resolve LiveAgent app data directory: {error}"))?;
         let binary = resolve_binary()?;
         let home =
-            dirs::home_dir().ok_or_else(|| "failed to resolve LiveAgent home".to_string())?;
+            crate::runtime::data_home::home_dir().ok_or_else(|| "failed to resolve LiveAgent home".to_string())?;
         let preferred = std::env::var_os("LIVEAGENT_HOME")
             .filter(|v| !v.is_empty())
             .map(PathBuf::from);

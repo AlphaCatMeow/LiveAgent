@@ -18,6 +18,8 @@ import (
 type ImageBackend struct {
 	Client *kbrain.Client
 	Signer kbrain.ImageDelegationSigner
+	// Explicit single-owner deployment, only an authenticated loopback backend.
+	SingleUserLocal bool
 }
 
 type ImageGateway struct {
@@ -70,11 +72,16 @@ func (g *ImageGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resource := strings.Split(suffix, "/")[0]
-	if (resource == "settings" || resource == "secrets") && !grant.Configure {
+	if (resource == "settings" || resource == "secrets" || resource == "targets" && strings.Contains(suffix, "/")) && !grant.Configure {
 		imageGatewayError(w, 403, "IMAGE_FORBIDDEN", "Image configuration access is denied")
 		return
 	}
-	delegation, err := backend.Signer.Sign(principal.OwnerID, backendID, grant.Configure)
+	delegation := ""
+	if !backend.SingleUserLocal {
+		delegation, err = backend.Signer.Sign(principal.OwnerID, backendID, grant.Configure)
+	} else if principal.OwnerID != "local" || !grant.Configure {
+		err = errors.New("single-user scope mismatch")
+	}
 	if err != nil || backend.Client == nil {
 		imageGatewayError(w, 503, "IMAGE_DELEGATION_UNAVAILABLE", "Image backend delegation is not configured")
 		return
@@ -109,7 +116,12 @@ func (g *ImageGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		upstreamPath = "/v1/health"
 	}
-	resp, err := backend.Client.ImageRequest(ctx, r, upstreamPath, delegation)
+	var resp *http.Response
+	if backend.SingleUserLocal {
+		resp, err = backend.Client.LocalImageRequest(ctx, r, upstreamPath)
+	} else {
+		resp, err = backend.Client.ImageRequest(ctx, r, upstreamPath, delegation)
+	}
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		switch {
@@ -142,8 +154,10 @@ func validImagePath(path string) bool {
 		}
 	}
 	switch parts[0] {
-	case "health", "targets", "settings", "secrets":
+	case "health", "settings", "secrets":
 		return len(parts) == 1
+	case "targets":
+		return len(parts) == 1 || len(parts) == 3 && parts[2] == "verify" || len(parts) == 4 && parts[2] == "verifications"
 	case "projects":
 		return len(parts) <= 2
 	case "assets":

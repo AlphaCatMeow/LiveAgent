@@ -54,6 +54,7 @@ export function createGatewayImageClient(
   connection: GatewayImageConnection,
   signal?: AbortSignal,
   exports?: ImageStudioClientOptions["exports"],
+  verificationStorage?: ImageStudioClientOptions["verificationStorage"],
 ) {
   return createImageStudioClient({
     transport: createGatewayImageTransport(connection),
@@ -61,5 +62,6 @@ export function createGatewayImageClient(
     healthPath: "/api/image/health",
     signal,
     exports,
+    verificationStorage,
   });
 }

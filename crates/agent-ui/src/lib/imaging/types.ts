@@ -204,7 +204,42 @@ export type ExportDestination = "download" | "local_workspace" | "remote_workspa
 export interface ExportResult {
   saved: boolean;
 }
+export interface TargetVerificationRequest {
+  expectedRevision: number;
+  projectId: string;
+  connectionId: string;
+  remoteId: string;
+  targetRevision: number;
+  operation: "generate";
+  count: 1;
+  prompt: string;
+  confirmPaid: boolean;
+}
+export interface TargetVerificationReceipt {
+  id: string;
+  targetId: string;
+  jobId?: string;
+  state: string;
+  jobStatus?: JobStatus;
+  settingsRevision: number;
+  reason?: string;
+}
+export interface TargetVerificationAttempt {
+  key: string;
+  input: TargetVerificationRequest;
+  receipt?: TargetVerificationReceipt;
+}
 export interface ImageStudioClient {
+  hasVerificationPersistence?(): boolean;
+  loadVerificationAttempt?(targetId: string): TargetVerificationAttempt | null;
+  clearVerificationAttempt?(targetId: string): void;
+  startTargetVerification?(
+    targetId: string,
+    input: TargetVerificationRequest,
+    key: string,
+  ): Promise<TargetVerificationReceipt>;
+  getTargetVerificationByKey?(targetId: string, key: string): Promise<TargetVerificationReceipt>;
+  getTargetVerification?(targetId: string, receiptId: string): Promise<TargetVerificationReceipt>;
   capabilities(): Promise<ImageCapabilities>;
   listTargets(): Promise<ImageTarget[]>;
   getSettings(): Promise<ImageSettings>;

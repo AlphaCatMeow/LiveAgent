@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -56,12 +57,29 @@ func (s ImageDelegationSigner) Sign(owner, backend string, configure bool) (stri
 // Authorization, cookies, owner/scope, forwarding and delegation headers never
 // cross this boundary. The caller owns and streams the returned body.
 func (c *Client) ImageRequest(ctx context.Context, incoming *http.Request, imagePath, delegation string) (*http.Response, error) {
-	if c == nil || delegation == "" {
+	if delegation == "" {
+		return nil, errors.New("image delegation is required")
+	}
+	return c.imageRequest(ctx, incoming, imagePath, delegation)
+}
+
+func (c *Client) LocalImageRequest(ctx context.Context, incoming *http.Request, imagePath string) (*http.Response, error) {
+	return c.imageRequest(ctx, incoming, imagePath, "")
+}
+
+func (c *Client) imageRequest(ctx context.Context, incoming *http.Request, imagePath, delegation string) (*http.Response, error) {
+	if c == nil {
 		return nil, errors.New("image delegation is required")
 	}
 	base, err := url.Parse(c.BaseURL)
 	if err != nil || base.Host == "" || (base.Scheme != "http" && base.Scheme != "https") || base.User != nil || base.RawQuery != "" || base.Fragment != "" {
 		return nil, errors.New("invalid image backend URL")
+	}
+	if delegation == "" {
+		ip := net.ParseIP(base.Hostname())
+		if ip == nil || !ip.IsLoopback() || c.Token == "" {
+			return nil, errors.New("single-user image backend must be authenticated loopback")
+		}
 	}
 	if (imagePath != "/v1/health" && !strings.HasPrefix(imagePath, "/v1/image/")) || strings.ContainsAny(imagePath, "\\?#") || (imagePath == "/v1/health" && incoming.Method != http.MethodGet) {
 		return nil, errors.New("invalid image path")
@@ -82,13 +100,15 @@ func (c *Client) ImageRequest(ctx context.Context, incoming *http.Request, image
 	req.ContentLength = incoming.ContentLength
 	// Prevent net/http from replaying a write after a transport failure.
 	req.GetBody = nil
-	for _, key := range []string{"Content-Type", "Accept", "Last-Event-ID", "Idempotency-Key", "Range", "If-None-Match", "If-Modified-Since"} {
+	for _, key := range []string{"Content-Type", "Accept", "Last-Event-ID", "Idempotency-Key", "X-Idempotency-Key", "Range", "If-None-Match", "If-Modified-Since"} {
 		for _, value := range incoming.Header.Values(key) {
 			req.Header.Add(key, value)
 		}
 	}
 	req.Header.Set("Authorization", "Bearer "+c.Token)
-	req.Header.Set(ImageDelegationHeader, delegation)
+	if delegation != "" {
+		req.Header.Set(ImageDelegationHeader, delegation)
+	}
 	client := http.Client{}
 	if c.HTTP != nil {
 		client = *c.HTTP

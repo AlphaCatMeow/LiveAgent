@@ -50,6 +50,7 @@ export function createWebImageStudioHost(
     connection,
     controller.signal,
     download ? { download } : undefined,
+    storage ? scopedStorage : undefined,
   );
   return {
     host: {

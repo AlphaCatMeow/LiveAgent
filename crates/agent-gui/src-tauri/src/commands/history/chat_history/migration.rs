@@ -413,7 +413,7 @@ pub async fn legacy_history_migration_page(
 ) -> Result<LegacyMigrationPage, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let home =
-            dirs::home_dir().ok_or_else(|| "cannot locate legacy history home".to_string())?;
+            crate::runtime::data_home::home_dir().ok_or_else(|| "cannot locate legacy history home".to_string())?;
         let path = home
             .join(format!(".{}", env!("CARGO_PKG_NAME")))
             .join("chat-history.sqlite3");

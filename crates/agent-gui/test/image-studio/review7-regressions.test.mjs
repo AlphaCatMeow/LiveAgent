@@ -25,6 +25,7 @@ function composer(c) {
     [path('components/ui/input.tsx')]: { Input: 'input' },
     [path('components/ui/textarea.tsx')]: { Textarea: 'textarea' },
     [path('features/image-studio/AssetImage.tsx')]: { AssetImage: 'img' },
+    [path('features/image-studio/ImageTargetSettings.tsx')]: { ImageTargetSettings: 'target-settings' },
     [path('features/image-studio/TargetParameterForm.tsx')]: { selectClass: '', TargetParameterForm: 'parameters' },
   } });
   const { ImageComposer } = ui.loadModule('@liveagent/ui/features/image-studio/ImageComposer');
@@ -240,4 +241,10 @@ test('review7: malformed saved draft blocks persistence instead of replacing it 
   const store = storage(); store.setItem(draftKey('o', 'b', 'p'), '{broken');
   const c = await setup({}, store); assert.equal(c.view.draftReady, false); c.dispose();
   assert.equal(store.getItem(draftKey('o', 'b', 'p')), '{broken');
+});
+
+test('empty target selection does not claim a deletion after settings refresh', async()=>{
+ const c=await setup({listTargets:async()=>[]});
+ try {assert.equal(c.view.draft.targetId,'');await c.refreshTargets();assert.doesNotMatch(c.view.notice,/已删除/);assert.equal(c.view.draft.targetId,'');}
+ finally{c.dispose();}
 });

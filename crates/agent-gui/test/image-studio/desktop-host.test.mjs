@@ -94,3 +94,18 @@ test("browser download confirms write completion, cancellation and write failure
   await assert.rejects(createBrowserImageDownload(read, broken)("ia_a"), /disk full/);
   assert.equal(operations.at(-1), "abort");
 });
+
+test("desktop verification journal is isolated by backend and workspace and survives host recreation",()=>{
+  const values=new Map();const storage={getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,v),removeItem:k=>values.delete(k)};
+  const prefix=JSON.stringify(["local",connection.baseUrl.replace(/\/+$/,""),"/repo/a"]);
+  const attempt={version:1,targetId:"it_test",key:"stable-key",input:{expectedRevision:1,projectId:"ip_test",connectionId:"ic_test",remoteId:"gpt-image-2",targetRevision:1,operation:"generate",count:1,prompt:"fixture",confirmPaid:true}};
+  values.set(prefix+":image-verification:v1:it_test",JSON.stringify(attempt));
+  const a=createDesktopImageStudioHost(connection,"/repo/a",storage);
+  const b=createDesktopImageStudioHost({...connection,baseUrl:"http://127.0.0.1:47322"},"/repo/a",storage);
+  const c=createDesktopImageStudioHost(connection,"/repo/b",storage);
+  try {
+    assert.equal(a.host.client.loadVerificationAttempt("it_test").key,"stable-key");
+    assert.equal(b.host.client.loadVerificationAttempt("it_test"),null);
+    assert.equal(c.host.client.loadVerificationAttempt("it_test"),null);
+  }finally {a.dispose();b.dispose();c.dispose();}
+});

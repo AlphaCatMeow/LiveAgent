@@ -10,8 +10,8 @@ const fixture = () => ({ revision: 4, connections: [model.newImageConnection('ic
 const secretRef = `is_${'a'.repeat(32)}`;
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 
-test('all five protocols and provider reuse preserve independent image identity', () => {
-  assert.equal(model.imageProtocols.length, 5);
+test('provider protocols include the distinct RollDek profile and preserve independent image identity', () => {
+  assert.deepEqual(plain(model.imageProtocols).map(p => p.id), ['openai-images', 'rolldek-images', 'google-generate-content-image', 'volcengine-ark-image', 'jimeng-image', 'runninghub-workflow', 'runninghub-model']);
   const settings = fixture();
   settings.connections[0].binding = { kind: 'provider_ref', providerId: 'existing-chat-provider' };
   assert.equal(model.validateImageSettingsDraft(settings).length, 0);

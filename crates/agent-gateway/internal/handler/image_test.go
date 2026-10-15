@@ -180,3 +180,45 @@ func TestImageGatewayRedirectDenied(t *testing.T) {
 		t.Fatalf("redirect escaped: %d", w.Code)
 	}
 }
+
+func TestImageGatewayVerificationRoutesAndPermission(t *testing.T) {
+	for _, tc := range []struct {
+		name, method, suffix string
+		configure            bool
+		want                 int
+	}{
+		{"start permitted", "POST", "targets/it_test/verify", true, 202},
+		{"receipt permitted", "GET", "targets/it_test/verifications/iv_test", true, 202},
+		{"receipt recovery", "GET", "targets/it_test/verifications/by-key", true, 202},
+		{"start denied", "POST", "targets/it_test/verify", false, 403},
+		{"receipt denied", "GET", "targets/it_test/verifications/iv_test", false, 403},
+		{"invalid target suffix", "GET", "targets/it_test/arbitrary", true, 404},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			g, _ := imageTestGateway(t, func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if r.URL.Path != "/v1/image/"+tc.suffix {
+					t.Errorf("wrong path: %s", r.URL.Path)
+				}
+				if (tc.method == "POST" || strings.HasSuffix(tc.suffix, "/by-key")) && r.Header.Get("X-Idempotency-Key") != "verification-key" {
+					t.Error("verification idempotency key was dropped")
+				}
+				w.WriteHeader(http.StatusAccepted)
+			}, tc.configure)
+			r := httptest.NewRequest(tc.method, "/api/image/"+tc.suffix+"?backendId=selected", nil)
+			r.Header.Set("X-Idempotency-Key", "verification-key")
+			w := httptest.NewRecorder()
+			g.ServeHTTP(w, r)
+			if w.Code != tc.want {
+				t.Fatalf("status=%d want=%d", w.Code, tc.want)
+			}
+			if tc.want != 202 && calls != 0 {
+				t.Fatal("denied request reached upstream")
+			}
+			if tc.want == 202 && calls != 1 {
+				t.Fatalf("forward count=%d", calls)
+			}
+		})
+	}
+}

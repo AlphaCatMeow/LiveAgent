@@ -10,6 +10,7 @@ export function createKBrainImageClient(
   connection: KBrainRuntimeConnection,
   signal: AbortSignal,
   exports?: ImageStudioClientOptions["exports"],
+  verificationStorage?: ImageStudioClientOptions["verificationStorage"],
 ) {
   const { baseUrl, token } = connection;
   return createImageStudioClient({
@@ -26,6 +27,7 @@ export function createKBrainImageClient(
         { baseUrl, token },
       ),
     exports,
+    verificationStorage,
     // Workspace destinations require a separate host implementation.
   });
 }

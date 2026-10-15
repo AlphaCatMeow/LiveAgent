@@ -154,7 +154,10 @@ export class ImageStudioController {
     if (current?.key !== key) {
       const history = this.submissionHistories.get(scopeKey) ?? [];
       if (result?.status === "accepted" && history.some((item) => item.key === key)) {
-        this.submissionHistories.set(scopeKey, history.map((item) => item.key === key ? result : item));
+        this.submissionHistories.set(
+          scopeKey,
+          history.map((item) => (item.key === key ? result : item)),
+        );
         this.saveSubmission(scope, current);
       }
       return current;
@@ -242,7 +245,11 @@ export class ImageStudioController {
         this.patch({ dropped: [...new Set([...pendingDrops, ...this.view.dropped])] });
         if (!next.enabled)
           this.patch({ notice: next.disabledReason || "当前目标已停用，请选择已启用的目标。" });
-      } else this.patch({ notice: "当前目标已删除，请重新选择目标；草稿与原提交记录已保留。" });
+      } else if (this.view.draft.targetId) {
+        this.patch({ notice: "当前目标已删除，请重新选择目标；草稿与原提交记录已保留。" });
+      } else {
+        this.patch({ notice: "" });
+      }
     } catch {
       if (this.valid(epoch) && refresh === this.targetRefresh)
         this.patch({ notice: "图像目标刷新失败，请检查连接后重试。" });
@@ -480,7 +487,7 @@ export class ImageStudioController {
           state: { ...initialStudioState(this.ownerId, this.backendId), projects },
           draft: emptyDraft(),
           submission: null,
-      submissionHistory: [],
+          submissionHistory: [],
         });
       }
     } catch {

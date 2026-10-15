@@ -157,7 +157,10 @@ export function serializeSubmission(
   return JSON.stringify({ version: 1, scope, submission, history });
 }
 // Keep replaced uncertain requests in the same atomic record as the active intent.
-export function restoreSubmissionHistory(raw: string | null, scope: DraftScope): FrozenSubmission[] {
+export function restoreSubmissionHistory(
+  raw: string | null,
+  scope: DraftScope,
+): FrozenSubmission[] {
   if (!raw) return [];
   const value: unknown = JSON.parse(raw);
   if (!record(value) || value.history === undefined) return [];

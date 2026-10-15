@@ -1,6 +1,7 @@
 import { IMAGE_WIRE_VERSION, type ImageError, type ImageErrorDetails } from "./types";
 
 const messages: Record<string, string> = {
+  IMAGE_VERIFICATION_STORAGE_UNAVAILABLE: "Verification record could not be saved or restored",
   IMAGE_INVALID_INPUT: "Invalid image input",
   IMAGE_UNSUPPORTED_OPERATION: "Image operation is unsupported",
   IMAGE_REVISION_CONFLICT: "Image configuration revision changed",

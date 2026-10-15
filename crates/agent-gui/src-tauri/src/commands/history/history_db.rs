@@ -7,7 +7,7 @@ const HISTORY_DB_SCHEMA_VERSION: i64 = 4;
 static HISTORY_DB_MIGRATION_LOCK: Mutex<()> = Mutex::new(());
 
 fn history_db_dir() -> Result<PathBuf, String> {
-    let home = dirs::home_dir().ok_or_else(|| "无法定位用户目录".to_string())?;
+    let home = crate::runtime::data_home::home_dir().ok_or_else(|| "无法定位用户目录".to_string())?;
     let dir = home.join(format!(".{}", env!("CARGO_PKG_NAME")));
     fs::create_dir_all(&dir).map_err(|e| format!("创建历史目录失败：{e}"))?;
     Ok(dir)

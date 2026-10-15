@@ -11,10 +11,12 @@ import type {
 
 export const imageProtocols = [
   { id: "openai-images", label: "OpenAI Images" },
+  { id: "rolldek-images", label: "RollDek Images" },
   { id: "google-generate-content-image", label: "Google generateContent" },
   { id: "volcengine-ark-image", label: "火山方舟 Images" },
   { id: "jimeng-image", label: "即梦 Visual OpenAPI" },
   { id: "runninghub-workflow", label: "RunningHub 工作流" },
+  { id: "runninghub-model", label: "RunningHub 模型 API" },
 ] as const;
 export const imageSecretPurposeLabels = {
   apiKey: "API Key",

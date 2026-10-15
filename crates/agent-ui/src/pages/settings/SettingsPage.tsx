@@ -10,7 +10,6 @@ import {
   Clock3,
   Cloud,
   Cpu,
-  ImageIcon,
   Key,
   Mic,
   Settings2,
@@ -25,8 +24,8 @@ import { AIApprovalSection } from "./AIApprovalSection";
 import { CalendarSection } from "./CalendarSection";
 import { CronSection } from "./CronSection";
 import { HooksSection } from "./HooksSection";
-import { ImageSettings } from "./ImageSettings";
 import { MemoryPanel } from "./memory/MemoryPanel";
+import { ProviderImageServices } from "./ProviderImageServices";
 import { ProvidersSection } from "./ProvidersSection";
 import { RemoteSection } from "./RemoteSection";
 import { ResourceHubSection } from "./ResourceHubSection";
@@ -123,15 +122,21 @@ export function SettingsPage(props: SettingsPageProps) {
         icon: <Cpu className={extension.iconClassName} />,
         contentMode: "fill",
         render: () => (
-          <ProvidersSection
-            settings={settings}
-            setSettings={setSettings}
-            initialProviderId={pendingProviderId}
-            onInitialProviderHandled={() => setPendingProviderId(undefined)}
-            rejectedLegacyProviders={rejectedLegacyProviders}
-            onRetryRejectedLegacyProviders={onRetryRejectedLegacyProviders}
-            onDismissRejectedLegacyProviders={onDismissRejectedLegacyProviders}
-          />
+          <ProviderImageServices
+            navigationLabel={t("settings.navProviders")}
+            client={imageClient}
+            registerLeaveGuard={registerImageLeaveGuard}
+          >
+            <ProvidersSection
+              settings={settings}
+              setSettings={setSettings}
+              initialProviderId={pendingProviderId}
+              onInitialProviderHandled={() => setPendingProviderId(undefined)}
+              rejectedLegacyProviders={rejectedLegacyProviders}
+              onRetryRejectedLegacyProviders={onRetryRejectedLegacyProviders}
+              onDismissRejectedLegacyProviders={onDismissRejectedLegacyProviders}
+            />
+          </ProviderImageServices>
         ),
       },
       {
@@ -168,23 +173,6 @@ export function SettingsPage(props: SettingsPageProps) {
         labelKey: "settings.navPlanning",
         icon: <CalendarDays className={extension.iconClassName} />,
         render: () => <CalendarSection settings={settings} setSettings={setSettings} />,
-      },
-      {
-        id: "image-studio",
-        groupKey: "settings.groupResources",
-        groupOrder: 20,
-        order: 36,
-        labelKey: "settings.navImageStudio",
-        icon: <ImageIcon className={extension.iconClassName} />,
-        showSaveIndicator: false,
-        render: () =>
-          imageClient ? (
-            <ImageSettings client={imageClient} registerLeaveGuard={registerImageLeaveGuard} />
-          ) : (
-            <p role="status" className="p-6 text-sm text-muted-foreground">
-              {t("settings.imageStudioUnsupported")}
-            </p>
-          ),
       },
       {
         id: "memory",
@@ -278,8 +266,11 @@ export function SettingsPage(props: SettingsPageProps) {
       extension,
       props.settingsHost,
       imageClient,
-      registerImageLeaveGuard,
       t,
+      registerImageLeaveGuard,
+      rejectedLegacyProviders,
+      onRetryRejectedLegacyProviders,
+      onDismissRejectedLegacyProviders,
       handleSttProviderChange,
       pendingProviderId,
       saveState,
@@ -303,7 +294,7 @@ export function SettingsPage(props: SettingsPageProps) {
       saveState={saveState}
       onBack={handleBack}
       canLeaveSection={canLeaveSection}
-      initialSection={initialSection}
+      initialSection={initialSection === "image-studio" ? "providers" : initialSection}
       hiddenSections={hiddenSections}
       fontScale={settings.customSettings.fontScale.settings}
     />

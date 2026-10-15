@@ -110,3 +110,16 @@ test("identity/token/workspace switches synchronously hide stale host and abort 
     hook.dispose();
   });
 });
+
+test("WebUI verification journal cannot cross trusted users or selected backends",()=>{
+  const loader=createWebModuleLoader();const {createWebImageStudioHost}=loader.loadModule("src/agent-ui-adapters/imageStudio.ts");
+  const values=new Map();const storage={getItem:k=>values.get(k)??null,setItem:(k,v)=>values.set(k,v),removeItem:k=>values.delete(k)};
+  const connection={baseUrl:identity.gatewayOrigin,backendId:identity.backendId,token:identity.accessToken};
+  const prefix=JSON.stringify([connection.baseUrl,identity.ownerId,connection.backendId,"/workspace"]);
+  values.set(prefix+":image-verification:v1:it_test",JSON.stringify({version:1,targetId:"it_test",key:"stable-key",input:{expectedRevision:1,projectId:"ip_test",connectionId:"ic_test",remoteId:"gpt-image-2",targetRevision:1,operation:"generate",count:1,prompt:"fixture",confirmPaid:true}}));
+  const a=createWebImageStudioHost(connection,identity,"/workspace",storage);
+  const b=createWebImageStudioHost(connection,{...identity,ownerId:"another-user"},"/workspace",storage);
+  const c=createWebImageStudioHost({...connection,backendId:"other"},{...identity,backendId:"other"},"/workspace",storage);
+  try {assert.equal(a.host.client.loadVerificationAttempt("it_test").key,"stable-key");assert.equal(b.host.client.loadVerificationAttempt("it_test"),null);assert.equal(c.host.client.loadVerificationAttempt("it_test"),null);}
+  finally {a.dispose();b.dispose();c.dispose();}
+});

@@ -33,7 +33,6 @@ function ImageStudioWorkbench({
   backendId,
   exportDestinations = [],
   storage,
-  onOpenSettings,
 }: ImageStudioPageProps) {
   const { controller, view } = useImageStudio(client, ownerId, backendId, storage);
   useEffect(
@@ -100,11 +99,6 @@ function ImageStudioWorkbench({
             </Button>
           ))}
         </nav>
-        {onOpenSettings && (
-          <Button size="sm" variant="outline" onClick={onOpenSettings}>
-            图像设置
-          </Button>
-        )}
       </header>
       {view.notice && (
         <p role="status" className="shrink-0 border-b border-border bg-muted/40 px-4 py-2 text-sm">

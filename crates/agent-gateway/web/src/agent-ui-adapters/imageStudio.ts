@@ -1,9 +1,9 @@
 import type { ImageStudioHost } from "@liveagent/ui/application/imageStudioHost";
 import type { DraftStorage } from "@liveagent/ui/features/image-studio/drafts";
+// Pure browser helper shared with desktop; it has no Tauri/native dependencies.
+import { createBrowserImageDownload } from "@liveagent/ui/lib/imaging/browserDownload";
 import { ImageClientError } from "@liveagent/ui/lib/imaging/errors";
 import { useEffect, useState } from "react";
-// Pure browser helper shared with desktop; it has no Tauri/native dependencies.
-import { createBrowserImageDownload } from "../../../../agent-gui/src/agent-ui-adapters/imageDownload";
 import { createGatewayImageClient, type GatewayImageConnection } from "../lib/imageStudio";
 
 /** Supplied only by an authenticated server identity response, never browser preferences. */

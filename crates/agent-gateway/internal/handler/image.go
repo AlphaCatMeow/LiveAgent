@@ -134,7 +134,7 @@ func (g *ImageGateway) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 		imageGatewayError(w, 502, "IMAGE_BACKEND_UNAVAILABLE", "Image backend redirect is not permitted")
 		return

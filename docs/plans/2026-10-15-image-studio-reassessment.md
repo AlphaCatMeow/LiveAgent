@@ -82,3 +82,9 @@ K-Brain 新增无图像模块情况下的真实聊天 HTTP/SSE 回归，并从�
 全仓 Go 测试实际结束但失败；独立 Agent、backend、config、storage 和图像模块包通过，cmd/kn、planning、tools、tools/bashrun、tui 的失败仍需区分环境和基线。没有将文件未改动作为所有失败无关的证明。独立 TUI 人工验收仍待完成。
 
 本轮修正生图前端差异文件格式，ui/gui/webui 差异 lint、118 项生图专项和双端标准 build 全部通过，更新此前“格式错误未修复”的阶段状态。未修改用户 .gitignore 和本地启动脚本。两个 PR 均要求保持 Draft。
+
+### Draft PR 与 CI 修订
+
+已创建 K-Brain Draft #35 与 LA Draft #988，两个正文均以 UTF-8 从 GitHub 逐字读回核对。K-Brain 原生 Shell 的五个残余失败用例通过 Go -overlay 恢复上游 94 个 Go 文件后全部复现；该证据只覆盖这五项，并不替代 TUI 人工验收或宣称全仓测试通过。
+
+LA 首轮 CI 暴露 WebUI 浏览器下载辅助函数引用桌面源码、Gateway errcheck 以及供应商页旧精确文案断言。已将浏览器通用下载逻辑移动到 agent-ui，桌面保留兼容导出，WebUI 不再依赖桌面源码；显式忽略响应关闭错误；供应商页回归验证原界面与新增页签共同存在，保留原 props 和无额外后端请求断言。下载/宿主 9 项、供应商设置回归、Gateway 相关包、共享边界及两端构建重新通过。CI 最终结果以 PR 检查为准。

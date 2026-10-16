@@ -132,6 +132,7 @@ pub struct GatewayController {
     managed_process_registry: Arc<ManagedProcessRegistry>,
     pub(crate) git_clone_task_registry: Arc<GitCloneTaskRegistry>,
     config_tx: watch::Sender<RemoteSettingsPayload>,
+    local_gateway: Arc<crate::services::local_gateway::LocalGatewayManager>,
     runner_task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
     status: Mutex<GatewayStatusSnapshot>,
     outbound_tx: Mutex<Option<GatewayOutboundSender>>,

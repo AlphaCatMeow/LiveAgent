@@ -862,7 +862,9 @@ pub fn run() {
     let browser_manager = Arc::new(services::browser::BrowserManager::default());
     // 扩展桥接：接受 LiveAgent 浏览器扩展的反向连接，Browser 工具优先驱动
     // 用户日常浏览器（复用登录态）；未连接时回退独立 profile 启动。
-    if !runtime::data_home::isolation_requested() {
+    if !runtime::data_home::isolation_requested()
+        && std::env::var_os("LIVEAGENT_CONFIG_DIR").is_none()
+    {
         browser_manager.start_extension_bridge();
     }
 
@@ -880,7 +882,16 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_mcp_bridge::init())
+        .plugin(
+            tauri_plugin_mcp_bridge::Builder::new()
+                .base_port(
+                    std::env::var("LIVEAGENT_DEV_MCP_BRIDGE_PORT")
+                        .ok()
+                        .and_then(|value| value.parse().ok())
+                        .unwrap_or(9223),
+                )
+                .build(),
+        )
         .plugin(
             tauri_plugin_window_state::Builder::new()
                 .with_state_flags(WINDOW_STATE_FLAGS)
@@ -1074,6 +1085,9 @@ pub fn run() {
                 {
                     backend.shutdown_for_exit();
                 }
+                if let Some(gateway) = _app.try_state::<Arc<services::gateway::GatewayController>>() {
+                    gateway.shutdown_local_gateway();
+                }
                 terminal_registry.shutdown_cleanup();
                 shell_session_manager.shutdown_cleanup();
                 managed_process_registry.shutdown_cleanup();
@@ -1088,6 +1102,9 @@ pub fn run() {
                 _app.try_state::<Arc<services::kbrain_backend::KBrainBackendState>>()
             {
                 backend.shutdown_for_exit();
+            }
+            if let Some(gateway) = _app.try_state::<Arc<services::gateway::GatewayController>>() {
+                gateway.shutdown_local_gateway();
             }
         }
         _ => {}

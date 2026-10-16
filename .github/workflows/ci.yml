@@ -208,6 +208,21 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: crates/agent-gateway/go.mod
+          cache-dependency-path: crates/agent-gateway/go.sum
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Prepare Gateway sidecar required by tauri-build
+        run: |
+          npm install -g pnpm@10.32.1
+          pnpm install --frozen-lockfile --filter liveagent-workspace --filter @liveagent/gateway-webui...
+          node scripts/prepare-gateway.mjs --target x86_64-unknown-linux-gnu
+
       - name: Install Tauri Linux dependencies
         run: |
           sudo apt-get update
@@ -250,6 +265,94 @@ jobs:
           cargo test --manifest-path crates/agent-gui/src-tauri/Cargo.toml --lib --
           chat_history ssh_local_forward shell_runner integration_commands::mcp
           services::system_proxy services::kbrain_backend
+
+  managed-gateway:
+    name: Desktop Gateway (${{ matrix.name }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            extension: .exe
+          - name: macOS
+            runner: macos-15
+            target: aarch64-apple-darwin
+            extension: ""
+          - name: Linux
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            extension: ""
+    env:
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: crates/agent-gateway/go.mod
+          cache-dependency-path: crates/agent-gateway/go.sum
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libclang-dev
+          # Ubuntu 22.04 protoc requires the optional-field flag; use the same
+          # modern compiler as desktop releases instead.
+          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" https://github.com/protocolbuffers/protobuf/releases/download/v34.0/protoc-34.0-linux-x86_64.zip
+          sudo unzip -oq "$RUNNER_TEMP/protoc.zip" -d /usr/local 'bin/protoc' 'include/*'
+          echo "PROTOC=/usr/local/bin/protoc" >> "$GITHUB_ENV"
+
+      - name: Install macOS protobuf compiler
+        if: runner.os == 'macOS'
+        run: brew install protobuf
+
+      - name: Install Linux mold linker
+        if: runner.os == 'Linux'
+        uses: rui314/setup-mold@v1
+
+      - name: Install Windows protobuf compiler
+        if: runner.os == 'Windows'
+        run: |
+          choco install protoc -y --no-progress
+          "$env:ChocolateyInstall\lib\protoc\tools\bin" | Out-File -Append $env:GITHUB_PATH
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      - name: Install frontend dependencies
+        run: |
+          npm install -g pnpm@10.32.1
+          pnpm install --frozen-lockfile --filter liveagent-workspace --filter liveagent... --filter @liveagent/gateway-webui...
+
+      - name: Test sidecar preparation
+        run: node --test scripts/prepare-gateway.test.mjs
+
+      - name: Build sidecar with embedded WebUI
+        run: node scripts/prepare-gateway.mjs --target ${{ matrix.target }}
+
+      - name: Smoke native packaged Gateway
+        run: node scripts/smoke-gateway-sidecar.mjs crates/agent-gui/src-tauri/binaries/liveagent-gateway-${{ matrix.target }}${{ matrix.extension }}
+
+      - name: Test desktop Gateway lifecycle and configuration migration
+        run: cargo test --manifest-path crates/agent-gui/src-tauri/Cargo.toml --lib -- local_gateway remote_ managed_local effective_gateway
+
+      - name: Verify Tauri copied the runnable sidecar beside the application
+        run: node scripts/smoke-gateway-sidecar.mjs target/debug/liveagent-gateway${{ matrix.extension }}
 
   ui-boundaries:
     name: Shared UI Boundaries

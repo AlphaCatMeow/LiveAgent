@@ -694,6 +694,11 @@ export function normalizeRemoteSettings(input: unknown): RemoteSettings {
   const obj = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
   return {
     enabled: obj.enabled === true,
+    managedLocal: obj.managedLocal === true,
+    localGatewayPort: normalizeIntegerInRange(obj.localGatewayPort, 1, 65_535, 50052),
+    localGatewayToken: normalizeApiKey(
+      typeof obj.localGatewayToken === "string" ? obj.localGatewayToken : "",
+    ),
     gatewayUrl: normalizeBaseUrl(typeof obj.gatewayUrl === "string" ? obj.gatewayUrl : ""),
     gatewayPort: normalizeIntegerInRange(obj.gatewayPort, 1, 65_535, 443),
     token: normalizeApiKey(typeof obj.token === "string" ? obj.token : ""),
@@ -1837,6 +1842,9 @@ export function getDefaultSettings(): AppSettings {
     },
     remote: {
       enabled: false,
+      managedLocal: false,
+      localGatewayPort: 50052,
+      localGatewayToken: "",
       gatewayUrl: "",
       gatewayPort: 443,
       token: "",

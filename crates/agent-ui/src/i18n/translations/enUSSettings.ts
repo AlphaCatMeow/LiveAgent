@@ -1210,7 +1210,15 @@ export const EN_US_SETTINGS_TRANSLATIONS = {
   "settings.cronViewLogConclusion": "Conclusion",
   "settings.cronViewLogExit": "Exit code",
   "settings.remoteTitle": "Remote Access",
-  "settings.remoteDesc": "Control your local LiveAgent remotely via cloud Gateway",
+  "settings.remoteDesc": "Connect LiveAgent to a local or external Gateway for WebUI access",
+  "settings.remoteManagedLocal": "Host Gateway on this computer",
+  "settings.remoteManagedLocalHint":
+    "Start and stop Gateway with LiveAgent. Turn this off to use your saved external Gateway connection.",
+  "settings.remoteLocalHint":
+    "Open this address in a browser on this computer to use WebUI. Changing the port restarts the local Gateway.",
+  "settings.remoteLocalTokenHint":
+    "This installation's access token is generated automatically. Copy it to sign in to the local WebUI.",
+  "settings.remoteRetry": "Retry Gateway connection",
   "settings.remoteConnected": "Connected",
   "settings.remoteConnectedProtocol": "Connected ({protocol})",
   "settings.remoteDisconnected": "Disconnected",

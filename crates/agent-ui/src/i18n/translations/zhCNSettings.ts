@@ -1143,7 +1143,14 @@ export const ZH_CN_SETTINGS_TRANSLATIONS = {
   "settings.cronViewLogConclusion": "结论",
   "settings.cronViewLogExit": "退出码",
   "settings.remoteTitle": "远程访问",
-  "settings.remoteDesc": "通过云端 Gateway 远程控制本地 LiveAgent",
+  "settings.remoteDesc": "连接本机或外部 Gateway，通过 WebUI 访问 LiveAgent",
+  "settings.remoteManagedLocal": "在此电脑托管 Gateway",
+  "settings.remoteManagedLocalHint":
+    "随 LiveAgent 自动启动和退出。关闭此选项后，使用已保存的外部 Gateway 连接配置。",
+  "settings.remoteLocalHint":
+    "在此电脑的浏览器中打开以下地址即可访问 WebUI。修改端口会重启本机 Gateway。",
+  "settings.remoteLocalTokenHint": "此安装的访问令牌由系统自动生成，复制后用于登录本机 WebUI。",
+  "settings.remoteRetry": "重试 Gateway 连接",
   "settings.remoteConnected": "已连接",
   "settings.remoteConnectedProtocol": "已连接 ({protocol})",
   "settings.remoteDisconnected": "未连接",

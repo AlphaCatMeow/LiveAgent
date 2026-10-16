@@ -835,6 +835,9 @@ test("loadWebSettings forces current gateway URL/token over stale persisted remo
   assert.equal(loaded.system.workdir, "/workspace");
   assert.equal(loaded.remote.gatewayUrl, "https://new.example");
   assert.equal(loaded.remote.token, "new-token");
+  const cached = JSON.parse(store.get("liveagent.gateway.webui.settings.v1"));
+  assert.equal(cached.remote.token, "");
+  assert.equal(cached.remote.localGatewayToken, "");
   assert.equal(loaded.remote.enabled, true);
   assert.equal(loaded.customSettings.rightDock.width, 612);
   assert.deepEqual(Object.keys(loaded.customSettings.rightDock.projects), ["/stale/project"]);

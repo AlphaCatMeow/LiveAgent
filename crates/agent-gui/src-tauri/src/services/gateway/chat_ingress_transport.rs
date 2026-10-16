@@ -277,21 +277,27 @@ impl GatewayController {
     }
 
     fn chat_ingress_identity(&self) -> Result<String, String> {
-        let config = self.config_tx.borrow().clone();
-        let agent_id = effective_agent_id(&config)?;
-        if config.gateway_url.trim().is_empty() || config.token.trim().is_empty() {
-            return Err("gateway chat ingress requires a configured gateway identity".to_string());
-        }
-        let token_hash = sha256_hex(config.token.trim().as_bytes());
-        let material = format!(
-            "{}|{}|{}|{}",
-            config.gateway_url.trim().trim_end_matches('/'),
-            config.gateway_port,
-            agent_id,
-            token_hash
-        );
-        Ok(sha256_hex(material.as_bytes()))
+        chat_ingress_identity_for_config(&self.config_tx.borrow())
     }
+}
+
+fn chat_ingress_identity_for_config(
+    config: &crate::commands::settings::RemoteSettingsPayload,
+) -> Result<String, String> {
+    let config = config.effective_gateway_settings();
+    let agent_id = effective_agent_id(&config)?;
+    if config.gateway_url.trim().is_empty() || config.token.trim().is_empty() {
+        return Err("gateway chat ingress requires a configured gateway identity".to_string());
+    }
+    let token_hash = sha256_hex(config.token.trim().as_bytes());
+    let material = format!(
+        "{}|{}|{}|{}",
+        config.gateway_url.trim().trim_end_matches('/'),
+        config.gateway_port,
+        agent_id,
+        token_hash
+    );
+    Ok(sha256_hex(material.as_bytes()))
 }
 
 fn chat_ingress_wire_bytes(envelope: &proto::AgentEnvelope) -> usize {
@@ -523,6 +529,31 @@ mod wire_limit_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_gateway_chat_ingress_uses_selected_endpoint_and_credential() {
+        let mut config = crate::commands::settings::RemoteSettingsPayload {
+            enabled: true,
+            managed_local: true,
+            local_gateway_port: 50582,
+            local_gateway_token: "local-token".into(),
+            agent_id: "agent-installation".into(),
+            ..Default::default()
+        };
+        let local = chat_ingress_identity_for_config(&config).expect("local identity");
+        config.gateway_url = "https://external.example".into();
+        config.token = "external-token".into();
+        assert_eq!(chat_ingress_identity_for_config(&config).unwrap(), local);
+        config.managed_local = false;
+        let external = chat_ingress_identity_for_config(&config).unwrap();
+        assert_ne!(external, local);
+        config.managed_local = true;
+        config.local_gateway_port += 1;
+        assert_ne!(chat_ingress_identity_for_config(&config).unwrap(), local);
+        config.local_gateway_port -= 1;
+        config.local_gateway_token = "new-installation-token".into();
+        assert_ne!(chat_ingress_identity_for_config(&config).unwrap(), local);
+    }
 
     #[test]
     fn terminal_record_carries_the_durable_projection() {

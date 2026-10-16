@@ -85,7 +85,12 @@ jobs:
           workspaces: crates/agent-gui/src-tauri
 
       - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile --filter liveagent...
+        run: pnpm install --frozen-lockfile --filter liveagent... --filter @liveagent/gateway-webui...
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: crates/agent-gateway/go.mod
+          cache-dependency-path: crates/agent-gateway/go.sum
 
       - name: Prepare locked K-brain external binaries
         env:
@@ -224,7 +229,12 @@ jobs:
           workspaces: crates/agent-gui/src-tauri
 
       - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile --filter liveagent...
+        run: pnpm install --frozen-lockfile --filter liveagent... --filter @liveagent/gateway-webui...
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: crates/agent-gateway/go.mod
+          cache-dependency-path: crates/agent-gateway/go.sum
 
       - name: Prepare locked K-brain external binaries
         env:
@@ -252,9 +262,11 @@ jobs:
           msi_path="$(find target crates/agent-gui/src-tauri/target -type f -name '*.msi' -path '*bundle*' -print -quit 2>/dev/null || true)"
           exe_path="$(find target crates/agent-gui/src-tauri/target -type f -name '*.exe' -path '*bundle*' -print -quit 2>/dev/null || true)"
           portable_exe_path="target/x86_64-pc-windows-msvc/release/liveagent.exe"
+          gateway_exe_path="crates/agent-gui/src-tauri/binaries/liveagent-gateway-x86_64-pc-windows-msvc.exe"
           test -n "$msi_path"
           test -n "$exe_path"
           test -n "$portable_exe_path"
+          test -s "$gateway_exe_path"
           test -f "$msi_path.sig"
           test -f "$exe_path.sig"
           cp "$msi_path" "dist/LiveAgent-${LIVEAGENT_RELEASE_TAG}-Windows-x64.msi"
@@ -270,6 +282,7 @@ jobs:
           test -f "$computer_path"
           cp "$backend_path" dist/portable/LiveAgent/k-brain.exe
           cp "$computer_path" dist/portable/LiveAgent/k-brain-computer.exe
+          cp "$gateway_exe_path" dist/portable/LiveAgent/liveagent-gateway.exe
           portable_zip="dist/LiveAgent-${LIVEAGENT_RELEASE_TAG}-Windows-x64-portable.zip"
           powershell -NoProfile -Command "Compress-Archive -Path 'dist/portable/LiveAgent/*' -DestinationPath '$portable_zip' -Force"
           rm -rf "$RUNNER_TEMP/liveagent-portable"
@@ -351,7 +364,12 @@ jobs:
           workspaces: crates/agent-gui/src-tauri
 
       - name: Install frontend dependencies
-        run: pnpm install --frozen-lockfile --filter liveagent...
+        run: pnpm install --frozen-lockfile --filter liveagent... --filter @liveagent/gateway-webui...
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: crates/agent-gateway/go.mod
+          cache-dependency-path: crates/agent-gateway/go.sum
 
       - name: Prepare locked K-brain external binaries
         env:

@@ -129,8 +129,9 @@ github-release-main: check-github-release-tag
 		echo "Release tag already exists on origin: $(RELEASE_TAG)"; \
 		exit 1; \
 	fi
-	pnpm install --frozen-lockfile --filter liveagent...
+	pnpm install --frozen-lockfile --filter liveagent... --filter @liveagent/gateway-webui...
 	pnpm --dir $(AGENT_GUI_DIR) test:release
+	node scripts/prepare-gateway.mjs
 	cargo check --manifest-path $(AGENT_GUI_DIR)/src-tauri/Cargo.toml --tests
 	node scripts/release/prepare-app-version-from-tag.mjs "$(RELEASE_TAG)" --json
 	git tag -a "$(RELEASE_TAG)" -m "LiveAgent $(RELEASE_TAG)"

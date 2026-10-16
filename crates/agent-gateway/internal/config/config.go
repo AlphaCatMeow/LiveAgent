@@ -23,6 +23,8 @@ type Config struct {
 	// Explicit private single-owner image access; requires a loopback K-Brain URL.
 	ImageSingleUser bool
 	Token           string
+	// InstanceNonce identifies a desktop-owned child, and is only returned to its authenticated owner.
+	InstanceNonce string
 	// AgentDB 是每 Agent 凭证 SQLite 数据库路径；默认自动创建于用户配置目录。
 	AgentDB string
 	// 三条 v2 链路的并发连接上限（升级前检查，超限 503）；0/负值回落默认。
@@ -55,6 +57,7 @@ type Config struct {
 
 func Load() *Config {
 	cfg := &Config{}
+	cfg.InstanceNonce = os.Getenv("LIVEAGENT_GATEWAY_INSTANCE_NONCE")
 
 	flag.BoolVar(&cfg.ImageSingleUser, "image-single-user", getenv("LIVEAGENT_GATEWAY_IMAGE_SINGLE_USER", "") == "true", "enable single-owner Image Studio on an authenticated loopback K-Brain backend")
 	flag.StringVar(&cfg.Token, "token", getenv("LIVEAGENT_GATEWAY_TOKEN", ""), "gateway authentication token")

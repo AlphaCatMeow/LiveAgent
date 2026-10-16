@@ -16,7 +16,7 @@
     "check:fast": "node scripts/check.mjs fast",
     "check:all": "node scripts/check.mjs all",
     "check:strict": "node scripts/check.mjs strict",
-    "check:script-tests": "node --test scripts/ui-boundary-declarations.test.mjs scripts/run-node-tests.test.mjs scripts/check-biome-changed.test.mjs scripts/check-diff-hygiene.test.mjs scripts/release/release-version.test.mjs scripts/release/create-ai-release-notes.test.mjs scripts/release/build-kbrain-source.test.mjs scripts/release/prepare-kbrain.test.mjs scripts/release/verify-kbrain-packaging.test.mjs",
+    "check:script-tests": "node --test scripts/ui-boundary-declarations.test.mjs scripts/run-node-tests.test.mjs scripts/check-biome-changed.test.mjs scripts/check-diff-hygiene.test.mjs scripts/prepare-gateway.test.mjs scripts/release/release-version.test.mjs scripts/release/create-ai-release-notes.test.mjs scripts/release/build-kbrain-source.test.mjs scripts/release/prepare-kbrain.test.mjs scripts/release/verify-kbrain-packaging.test.mjs",
     "prepare:kbrain": "node scripts/release/prepare-kbrain.mjs",
     "build:kbrain:source": "node scripts/release/build-kbrain-source.mjs",
     "prepare:kbrain:release": "node scripts/release/prepare-kbrain.mjs --release",

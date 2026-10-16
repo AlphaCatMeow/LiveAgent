@@ -48,6 +48,7 @@ impl GatewayController {
             managed_process_registry,
             git_clone_task_registry,
             config_tx,
+            local_gateway: Arc::new(crate::services::local_gateway::LocalGatewayManager::new()),
             runner_task: Mutex::new(None),
             status: Mutex::new(GatewayStatusSnapshot {
                 online: false,
@@ -240,21 +241,6 @@ impl GatewayController {
         Ok(())
     }
 
-    pub(crate) fn restart_runner(self: &Arc<Self>) -> Result<(), String> {
-        self.set_outbound_sender(None);
-        self.set_outbound_control_sender(None);
-        self.set_terminal_stream_sender(None);
-        let mut runner_task = self
-            .runner_task
-            .lock()
-            .map_err(|_| "gateway runner task lock poisoned".to_string())?;
-        if let Some(task) = runner_task.take() {
-            task.abort();
-        }
-        self.spawn_runner(&mut runner_task);
-        Ok(())
-    }
-
     pub fn wake_chat_runtime(&self, reason: &str) -> Result<(), String> {
         self.app_handle
             .emit(
@@ -270,7 +256,7 @@ impl GatewayController {
         force_reconnect: bool,
     ) -> Result<bool, String> {
         let config = self.config_tx.borrow().clone();
-        if !config.enabled || !is_remote_configured(&config) {
+        if !config.enabled || !is_remote_configured(&config.effective_gateway_settings()) {
             return Ok(false);
         }
 
@@ -280,7 +266,11 @@ impl GatewayController {
 
         let status = self.status();
         if !force_reconnect
-            && !gateway_connection_needs_restart(&status, &config, now_unix_seconds())
+            && !gateway_connection_needs_restart(
+                &status,
+                &config.effective_gateway_settings(),
+                now_unix_seconds(),
+            )
         {
             return Ok(false);
         }
@@ -302,7 +292,11 @@ impl GatewayController {
             *last_nudge = Some(now);
         }
 
-        self.restart_runner()?;
+        // Wake the existing supervisor, including a pending child startup. Never
+        // abort a spawn_blocking task: its owned process still needs collecting.
+        self.local_gateway.cancel_start();
+        self.config_tx.send_modify(|_| {});
+        self.ensure_runner()?;
         Ok(true)
     }
 
@@ -320,23 +314,28 @@ impl GatewayController {
         let normalized = normalize_remote_settings_payload(config);
         let previous = self.config_tx.borrow().clone();
         let config_changed = previous != normalized;
-        let should_run_remote = normalized.enabled && is_remote_configured(&normalized);
+        let effective = normalized.effective_gateway_settings();
+        if config_changed {
+            self.local_gateway.cancel_start();
+        }
         self.config_tx.send_replace(normalized.clone());
         self.publish_status(|status| {
             status.enabled = normalized.enabled;
-            status.configured = is_remote_configured(&normalized);
-            status.gateway_url = normalized.gateway_url.clone();
+            status.configured = is_remote_configured(&effective);
+            status.gateway_url = effective.gateway_url.clone();
             status.agent_id = normalized.agent_id.clone();
             if !normalized.enabled || config_changed {
-                set_disconnected_status(status, &normalized, None);
+                set_disconnected_status(status, &effective, None);
             }
         });
-        if should_run_remote {
-            self.restart_runner()?;
-        } else {
-            self.ensure_runner()?;
-        }
+        self.ensure_runner()?;
         Ok(())
+    }
+
+    pub fn shutdown_local_gateway(&self) {
+        if let Err(error) = self.local_gateway.shutdown() {
+            eprintln!("failed to stop local gateway: {error}");
+        }
     }
 
     pub fn disconnect_runtime(self: &Arc<Self>) -> Result<(), String> {

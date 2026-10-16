@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -85,8 +86,17 @@ func main() {
 
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM)
+	var parentClosed <-chan struct{}
+	if os.Getenv("LIVEAGENT_GATEWAY_DESKTOP_PARENT") == "1" {
+		// The desktop retains the pipe's write handle without sending data. EOF
+		// also covers force termination and development rebuilds, where no
+		// desktop exit callback or Rust destructor can run.
+		parentClosed = desktopParentClosed(os.Stdin)
+	}
 
 	select {
+	case <-parentClosed:
+		slog.Info("desktop parent exited, shutting down")
 	case sig := <-signalCh:
 		slog.Info("received signal, shutting down", "signal", sig.String())
 	case err := <-errCh:
@@ -99,4 +109,13 @@ func main() {
 	if err := httpServer.Shutdown(ctx); err != nil {
 		slog.Warn("http shutdown error", "err", err)
 	}
+}
+
+func desktopParentClosed(reader io.Reader) <-chan struct{} {
+	closed := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(io.Discard, reader)
+		close(closed)
+	}()
+	return closed
 }

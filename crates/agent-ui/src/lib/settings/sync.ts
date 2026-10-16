@@ -187,6 +187,10 @@ export function redactSettingsForWebStorage(settings: AppSettings): AppSettings 
     },
     customProviders: redactCustomProvidersForWebStorage(settings.customProviders),
     ssh: redactSshSettingsForWebStorage(settings.ssh),
+    remote: {
+      ...settings.remote,
+      localGatewayToken: "",
+    },
     stt: redactSttSettingsForWebStorage(settings.stt),
   });
 }

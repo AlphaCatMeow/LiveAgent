@@ -1,6 +1,8 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +16,33 @@ import (
 	"github.com/liveagent/agent-gateway/internal/protocol/shared"
 	"github.com/liveagent/agent-gateway/internal/session"
 )
+
+func TestDesktopHealthIdentifiesOnlyOwnedInstanceWithoutSendingGatewayCredentials(t *testing.T) {
+	for _, nonce := range []string{"", "launch-instance"} {
+		h := NewHTTPServer(&config.Config{Token: "owner-secret", InstanceNonce: nonce}, session.NewManager(), nil)
+		digest := sha256.Sum256([]byte(nonce))
+		validProbe := hex.EncodeToString(digest[:])
+		for _, probe := range []string{"", "incorrect", validProbe} {
+			req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+			req.Header.Set("X-LiveAgent-Instance-Probe", probe)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok":true`) {
+				t.Fatalf("public health unavailable: %d %s", rec.Code, rec.Body.String())
+			}
+			want := ""
+			if probe == validProbe {
+				want = nonce
+			}
+			if got := rec.Header().Get("X-LiveAgent-Instance"); got != want {
+				t.Fatalf("instance header = %q, want %q", got, want)
+			}
+			if strings.Contains(rec.Body.String(), "owner-secret") || strings.Contains(rec.Body.String(), "launch-instance") {
+				t.Fatal("health body disclosed launch credentials")
+			}
+		}
+	}
+}
 
 func TestNewHTTPServerServesRootWithoutRedirect(t *testing.T) {
 	handler := NewHTTPServer(&config.Config{Token: "dev-token"}, session.NewManager(), nil)

@@ -222,14 +222,6 @@ mod tests {
         assert!(is_generated_agent_id(&first), "generated id = {first}");
         assert_eq!(second, first);
         assert_eq!(stored.agent_id, first);
-        assert!(stored.enabled);
-        assert!(stored.managed_local);
-        assert_eq!(stored.local_gateway_port, 50052);
-        assert_eq!(stored.local_gateway_token.len(), 64);
-        assert_eq!(
-            stored.local_gateway_token,
-            load_remote_settings(&conn).unwrap().local_gateway_token
-        );
     }
 
     #[test]
@@ -303,87 +295,6 @@ mod tests {
         let second_id = ensure_remote_agent_id(&mut second).expect("generate second Agent ID");
 
         assert_ne!(first_id, second_id);
-        assert_ne!(
-            load_remote_settings(&first).unwrap().local_gateway_token,
-            load_remote_settings(&second).unwrap().local_gateway_token
-        );
-    }
-
-    #[test]
-    fn local_gateway_migration_preserves_existing_external_choice_and_explicit_off() {
-        for enabled in [false, true] {
-            let mut conn = open_memory_db();
-            let agent_id = generate_agent_id();
-            let legacy = json!({
-                "enabled": enabled,
-                "gatewayUrl": "https://existing.example.com",
-                "gatewayPort": 8443,
-                "token": "external-secret",
-                "agentId": agent_id,
-            });
-            conn.execute(
-                &format!("INSERT INTO {REMOTE_SETTINGS_TABLE} (config_id, payload_json, updated_at) VALUES ('default', ?1, ?2)"),
-                params![legacy.to_string(), now_ms()],
-            ).unwrap();
-
-            ensure_remote_agent_id(&mut conn).unwrap();
-            let migrated = load_remote_settings(&conn).unwrap();
-            assert_eq!(migrated.enabled, enabled);
-            assert!(!migrated.managed_local);
-            assert_eq!(migrated.agent_id, agent_id);
-            assert_eq!(migrated.gateway_url, "https://existing.example.com");
-            assert_eq!(migrated.gateway_port, 8443);
-            assert_eq!(migrated.token, "external-secret");
-            assert_eq!(migrated.local_gateway_token.len(), 64);
-            ensure_remote_agent_id(&mut conn).unwrap();
-            assert_eq!(load_remote_settings(&conn).unwrap(), migrated);
-        }
-    }
-
-    #[test]
-    fn managed_gateway_choice_roundtrips_without_overwriting_external_connection() {
-        let mut conn = open_memory_db();
-        ensure_remote_agent_id(&mut conn).unwrap();
-        let local_token = load_remote_settings(&conn).unwrap().local_gateway_token;
-        let mut settings = json!({
-            "enabled": false,
-            "managedLocal": true,
-            "localGatewayPort": 59123,
-            "localGatewayToken": "caller-cannot-replace-token",
-            "gatewayUrl": "https://external.example.com",
-            "gatewayPort": 8443,
-            "token": "external-token",
-        });
-        let saved = save_remote(&mut conn, settings.clone()).unwrap();
-        let effective = saved.effective_gateway_settings();
-        assert!(saved.managed_local);
-        assert!(!effective.enabled);
-        assert_eq!(saved.local_gateway_token, local_token);
-        assert_eq!(effective.gateway_url, "http://127.0.0.1");
-        assert_eq!(effective.gateway_port, 59123);
-        assert_eq!(effective.token, local_token);
-        assert_eq!(load_remote_settings(&conn).unwrap(), saved);
-
-        settings["managedLocal"] = json!(false);
-        settings
-            .as_object_mut()
-            .unwrap()
-            .remove("localGatewayToken");
-        let external = save_remote(&mut conn, settings).unwrap();
-        assert!(!external.managed_local);
-        assert!(!external.enabled);
-        assert_eq!(external.local_gateway_token, local_token);
-        assert_eq!(external.gateway_url, saved.gateway_url);
-        assert_eq!(external.gateway_port, saved.gateway_port);
-        assert_eq!(external.token, saved.token);
-        assert_eq!(external.effective_gateway_settings(), external);
-
-        let snapshot = load_gateway_settings_sync_snapshot(&conn).unwrap();
-        let remote = &snapshot["remote"];
-        assert!(remote.get("localGatewayToken").is_none());
-        assert!(remote.get("managedLocal").is_none());
-        assert!(!remote.to_string().contains(&local_token));
-        assert!(!remote.to_string().contains("external-token"));
     }
 
     #[test]

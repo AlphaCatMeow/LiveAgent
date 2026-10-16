@@ -66,22 +66,20 @@ Get-CimInstance Win32_Process -Filter "Name = 'liveagent-gateway.exe'" |
     Select-Object ProcessId, ParentProcessId, ExecutablePath
 ```
 
-## 自动化专用场景
+## 现有自动化测试
 
-下列失败条件通过测试夹具触发，不伪装成可以在设置页面直接选择的选项。不要通过修改用户真实安装程序或终止其他任务进程来制造故障。
+按用户最终要求，本 PR 不新增测试用例或测试脚本，仅运行仓库现有测试。现有 Rust 用例只补齐新增配置字段的默认值；现有前端测试只修正 Windows 文件 URL 路径转换。三平台 CI 构建当前源码的 sidecar 并运行已有 Gateway 与设置测试。
 
-| 场景 | 命令或测试 | 核心断言 | 实际结果 |
-| --- | --- | --- | --- |
-| 配置迁移、明确关闭、模式切换与令牌持久化 | `cargo test --manifest-path crates/agent-gui/src-tauri/Cargo.toml -- settings::tests` | 仅新安装启用托管；旧记录保留；令牌不能被保存载荷替换；同步脱敏 | 96 项通过，1 个既有外部服务 fixture ignored |
-| 并发启动、关闭、Drop 与退出回收 | Rust `services::local_gateway::tests` | 并发启动共享进程；关闭与 Drop 回收拥有的子进程；真正退出后不能重启；父进程直接退出时管道关闭并释放监听 | 最终 Rust 组合筛选 144 项通过，4 ignored；其中 3 个子进程 fixture 由父测试调用，另 1 个为既有外部服务 fixture |
-| 提前退出、缺失程序、超时与恢复 | 同上，`failures_are_retryable_and_do_not_leak_tokens`、`missing_executable_and_invalid_token_are_actionable`、`a_dead_child_can_be_restarted` | 失败有界、可重试、凭据不出现在错误信息 | 包含在上述 144 项通过结果中 |
-| 取消、排队启动与配置竞争 | 同上，`cancellation_interrupts_start_and_allows_retry`、`configuration_change_cancels_start_queued_on_blocking_executor` | 取消阻止过期配置的启动；随后可重试 | 包含在上述 144 项通过结果中 |
-| 外部监听器与环境变量隔离 | 同上，`existing_listener_is_not_contacted_or_stopped`、`inherited_external_gateway_environment_is_not_used` | 不接触外部监听器，不继承外部数据库和 TLS 配置 | 包含在上述 144 项通过结果中 |
-| 空格、中文路径和隐藏控制台 | 同上及 `node scripts/smoke-gateway-sidecar.mjs` | 可执行路径直接传给进程 API；Windows 隐藏控制台；独立目录运行真实 sidecar | 原生 Windows sidecar 冒烟通过：中文/空格路径、清空 PATH、嵌入 WebUI 可用；实际桌面窗口行为仍待人工验收 |
-| UI 模式切换、重试与浏览器凭据 | `node --test crates/agent-gui/test/settings/managed-gateway.test.mjs crates/agent-gateway/test/webui/web-settings.test.mjs` | 切模式保留外部配置和关闭状态；WebUI 内存保留当前登录 token，持久缓存清空连接凭据 | 46/46 通过 |
-| 连接状态回退与模式变更 | `node --test crates/agent-gui/test/chat/gateway-runtime-status.test.mjs` | 本机模式使用独立端口与凭据；缺少配置时不将 enabled 视为配置完整；模式/端口/凭据改变会刷新 IPC 状态与订阅 | 2/2 通过 |
-| 既有设置规范化回归 | `node --test crates/agent-gui/test/settings/normalization.test.mjs` | 共享设置、Gateway 同步、外部配置行为保持 | 95/95 通过 |
-| 本机托管侧车准备 | `node --test scripts/prepare-gateway.test.mjs` 与脚本测试入口 | 平台名、目标 triple、构建参数和 WebUI 嵌入 | 脚本测试 35 项与发布相关测试 9 项通过 |
+| 现有测试 | 命令 | 实际结果 |
+| --- | --- | --- |
+| Gateway、设置与连接监督 | `cargo test --manifest-path crates/agent-gui/src-tauri/Cargo.toml --lib -- settings::tests services::gateway::tests services::gateway::connection::transport_supervisor_tests` | 126 项通过，1 个既有外部服务用例 ignored |
+| GUI 前端 | `pnpm --dir crates/agent-gui test:frontend` | 3416 项通过，7 个批次 |
+| WebUI | `pnpm --dir crates/agent-gateway/web test` | 734 项通过 |
+| 既有脚本 | `pnpm check:script-tests` | 31 项通过 |
+| 既有发布脚本 | `pnpm --dir crates/agent-gui test:release` | 9 项通过 |
+| Go | `go -C crates/agent-gateway test ./...` | Windows 下仅既有 POSIX 文件权限断言失败，其余包通过；Linux CI 运行完整套件 |
+
+本机进程、打包和安装行为的已完成实际冒烟记录见下节；这些观察不等同于新增自动化回归用例。超时、并发、程序缺失等未被既有用例覆盖的路径，不宣称已有自动化回归覆盖。
 
 ## 构建与提交前检查
 
@@ -90,10 +88,10 @@ Get-CimInstance Win32_Process -Filter "Name = 'liveagent-gateway.exe'" |
 | `pnpm --dir crates/agent-gui build` | 通过；现有大 bundle 警告，无构建错误 |
 | `pnpm --dir crates/agent-gui lint` | 通过，342 文件 |
 | `pnpm --dir crates/agent-ui lint` | 通过，607 文件 |
-| `pnpm --dir crates/agent-gui test:frontend` | 全部 3421 项通过，7 个批次；同时修复 6 处既有测试使用 URL.pathname 导致 Windows 盘符重复的问题，统一使用 fileURLToPath |
+| `pnpm --dir crates/agent-gui test:frontend` | 全部 3416 项通过，7 个批次；同时修复 6 处既有测试使用 URL.pathname 导致 Windows 盘符重复的问题，统一使用 fileURLToPath |
 | `pnpm --dir crates/agent-gateway/web build`、lint、test | build 通过、lint 145 文件通过；WebUI 原生测试共 734 项通过 |
-| Rust check/build/test | 最终 `cargo check --manifest-path crates/agent-gui/src-tauri/Cargo.toml --tests` 通过；`cargo test --manifest-path crates/agent-gui/src-tauri/Cargo.toml --lib -- local_gateway settings::tests services::gateway::tests services::gateway::connection::transport_supervisor_tests` 为 144 通过、4 ignored；Tauri debug 和 release 构建通过 |
-| `go -C crates/agent-gateway test ./...` | Windows 原生完整测试存在基线失败：`store_test.go:410: db file perm = 666, want 0600`，对应代码在基线 85029b56 未改动；本任务涉及的 cmd/gateway、config、server 定向测试通过。完整 Go 套件由 Linux CI 验证 |
+| Rust check/build/test | `cargo check --manifest-path crates/agent-gui/src-tauri/Cargo.toml --tests` 通过；最终仅运行现有 Gateway/设置/连接监督测试，为 126 通过、1 ignored；Tauri debug 和 release 构建通过 |
+| `go -C crates/agent-gateway test ./...` | Windows 原生完整测试存在基线失败：`store_test.go:410: db file perm = 666, want 0600`，对应代码在基线 85029b56 未改动；现有 config、server 用例通过，cmd/gateway 没有现有测试文件。完整 Go 套件由 Linux CI 验证 |
 | sidecar 与 Windows 安装包 | sidecar 原生冒烟通过，含空 PATH、真实 WebUI、认证 API、stdin EOF 后正常退出和 SQLite 句柄释放；NSIS 安装返回 0，安装目录含空格和中文，安装 sidecar 与源码产物 SHA-256 一致；实际安装版的首次自动连接、关闭持久化、崩溃恢复、托盘与退出清理通过 |
 | `node scripts/check-ui-boundaries.mjs` | 通过；当前上游已采用 agent-ui 共享源码，旧 check-mirror.mjs 不存在 |
 | `git diff --check` | 通过，提交前再次运行 |

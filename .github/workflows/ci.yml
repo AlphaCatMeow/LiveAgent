@@ -277,15 +277,12 @@ jobs:
           - name: Windows
             runner: windows-latest
             target: x86_64-pc-windows-msvc
-            extension: .exe
           - name: macOS
             runner: macos-15
             target: aarch64-apple-darwin
-            extension: ""
           - name: Linux
             runner: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            extension: ""
     env:
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
       CARGO_BUILD_JOBS: 2
@@ -339,20 +336,11 @@ jobs:
           npm install -g pnpm@10.32.1
           pnpm install --frozen-lockfile --filter liveagent-workspace --filter liveagent... --filter @liveagent/gateway-webui...
 
-      - name: Test sidecar preparation
-        run: node --test scripts/prepare-gateway.test.mjs
-
       - name: Build sidecar with embedded WebUI
         run: node scripts/prepare-gateway.mjs --target ${{ matrix.target }}
 
-      - name: Smoke native packaged Gateway
-        run: node scripts/smoke-gateway-sidecar.mjs crates/agent-gui/src-tauri/binaries/liveagent-gateway-${{ matrix.target }}${{ matrix.extension }}
-
-      - name: Test desktop Gateway lifecycle and configuration migration
-        run: cargo test --manifest-path crates/agent-gui/src-tauri/Cargo.toml --lib -- local_gateway remote_ managed_local effective_gateway
-
-      - name: Verify Tauri copied the runnable sidecar beside the application
-        run: node scripts/smoke-gateway-sidecar.mjs target/debug/liveagent-gateway${{ matrix.extension }}
+      - name: Run existing Gateway and settings tests
+        run: cargo test --manifest-path crates/agent-gui/src-tauri/Cargo.toml --lib -- settings::tests services::gateway::tests services::gateway::connection::transport_supervisor_tests
 
   ui-boundaries:
     name: Shared UI Boundaries

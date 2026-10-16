@@ -876,7 +876,7 @@ export function GatewayAppView({
           if (selection) composerCommandLatestRef.current.handleSelectModel(selection);
         },
       }),
-    [api, displayedConversationWorkdir, sendChat, settings.locale],
+    [api, displayedConversationWorkdir, getDisplayedConversationId, sendChat, settings.locale],
   );
 
   const primaryConversationSurface: GatewayConversationPrimarySurface = {

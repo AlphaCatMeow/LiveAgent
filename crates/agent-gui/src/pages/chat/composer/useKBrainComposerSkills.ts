@@ -18,6 +18,7 @@ export function useKBrainComposerSkills(
     if (!enabled) return;
     return subscribeSkillsDiscoveryUpdated(() => setRevision((value) => value + 1));
   }, [enabled]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: revision 用于在技能发现变更后重新读取后端列表。
   useEffect(() => {
     if (!enabled) {
       setSkills([]);

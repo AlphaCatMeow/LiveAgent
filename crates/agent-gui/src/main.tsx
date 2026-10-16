@@ -10,41 +10,40 @@ import {
 } from "./lib/kbrain/bootstrap";
 import { migrateAllHistoryOnce } from "./lib/kbrain/historyMigration";
 import { inferRuntimePlatform } from "./lib/runtimePlatform";
+import { createStartupRenderer } from "./lib/startup/render";
 import { installWebviewNavigationGuard } from "./lib/system/webviewNavigationGuard";
 
 const root = ReactDOM.createRoot(document.getElementById("root") as HTMLElement);
 
-function renderBootstrapError(error: unknown, retry: () => void) {
-  const message = error instanceof Error ? error.message : String(error);
-  root.render(
-    <main className="flex size-full flex-col items-center justify-center gap-4 bg-background p-8 text-center">
-      <h1 className="text-lg font-semibold">K-brain 后端启动失败</h1>
-      <p className="max-w-xl text-sm text-muted-foreground">{message}</p>
-      <button className="rounded-md border px-4 py-2 text-sm" type="button" onClick={retry}>
-        重试
-      </button>
-    </main>,
-  );
-}
+let currentBootstrap: Promise<void> | undefined;
 
 const bootstrap = createKBrainBootstrapRunner(async () => {
+  const screen = createStartupRenderer();
   try {
     await connectKBrainBackendWithRetry();
     // Startup skips conversations that already failed deterministically with unchanged
     // content; they are listed in Settings and in the app notice instead of re-uploaded.
-    const migration = await migrateAllHistoryOnce();
+    screen.phase("checking");
+    const migration = await migrateAllHistoryOnce({ onProgress: screen.progress });
     const newFailures = migration.failures.filter((failure) => !failure.skipped);
     if (newFailures.length > 0) {
       console.warn("Legacy history migration incomplete", newFailures);
     }
+    screen.phase("opening");
     const { default: App } = await import("./App");
+    screen.dispose();
     root.render(
       <React.StrictMode>
         <App />
       </React.StrictMode>,
     );
   } catch (error) {
-    renderBootstrapError(error, () => void bootstrap());
+    console.error("Application startup failed", error);
+    screen.fail(() => {
+      void (currentBootstrap ?? Promise.resolve()).then(() => {
+        currentBootstrap = bootstrap();
+      });
+    });
   } finally {
     await notifyFrontendReady().catch(() => undefined);
   }
@@ -65,4 +64,4 @@ if (import.meta.env.DEV) {
   });
 }
 
-void bootstrap();
+currentBootstrap = bootstrap();

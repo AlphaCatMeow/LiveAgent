@@ -98,7 +98,34 @@ export type MigrationFailure = {
   skipped?: boolean;
 };
 
+export type HistoryMigrationSource = "legacy" | "pi";
+export type HistoryMigrationOutcome =
+  | "imported"
+  | "alreadyImported"
+  | "skipped"
+  | "failed"
+  | "partial";
+export type HistoryMigrationProgress = {
+  source: HistoryMigrationSource;
+  operation: "reading" | "processing" | "importing" | "settled" | "done" | "error";
+  outcome?: HistoryMigrationOutcome;
+};
+
+function reportProgress(
+  options: HistoryMigrationOptions,
+  operation: HistoryMigrationProgress["operation"],
+  outcome?: HistoryMigrationOutcome,
+) {
+  try {
+    options.onProgress?.({ source: options.progressSource ?? "legacy", operation, outcome });
+  } catch {
+    // Progress observers must never change migration or its persistent result.
+  }
+}
+
 export type HistoryMigrationOptions = {
+  onProgress?: (progress: HistoryMigrationProgress) => void;
+  progressSource?: HistoryMigrationSource;
   fetch?: typeof globalThis.fetch;
   signal?: AbortSignal;
   /**
@@ -410,6 +437,8 @@ export async function migrateLegacyHistoryPage(
   const failedRecords: HistoryMigrationFailureRecord[] = [];
   const succeededIds: string[] = [];
   for (const item of page.conversations) {
+    reportProgress(options, "processing");
+    let outcome: HistoryMigrationOutcome = "failed";
     let sourceFingerprint = "";
     let bodyBytes: number | undefined;
     // Only the import POST speaks for the payload; earlier existence checks (GET) failing
@@ -423,6 +452,7 @@ export async function migrateLegacyHistoryPage(
         ? undefined
         : knownDeterministicFailure(knownFailures, item.id, sourceFingerprint);
       if (known) {
+        outcome = "skipped";
         // Same content failed the same way before; re-sending would only fail again.
         failures.push({
           sourceId: item.id,
@@ -448,6 +478,7 @@ export async function migrateLegacyHistoryPage(
           };
           setKBrainSessionId(item.id, cachedResult.backend_id);
           results.push(cachedResult);
+          outcome = cachedResult.checkpoint === "partial" ? "partial" : "alreadyImported";
           continue;
         }
       }
@@ -500,6 +531,7 @@ export async function migrateLegacyHistoryPage(
         },
       };
       bodyBytes = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+      reportProgress(options, "importing");
       importAttempted = true;
       const result = await client.importLegacyHistory(payload, options.signal);
       if (
@@ -516,10 +548,16 @@ export async function migrateLegacyHistoryPage(
       }
       succeededIds.push(item.id);
       results.push(result);
+      outcome = ["partial", "unresolved"].includes(result.checkpoint)
+        ? "partial"
+        : result.status === "already_imported"
+          ? "alreadyImported"
+          : "imported";
     } catch (error) {
       const status = historyErrorStatus(error);
       // The backend persists deletion intent across restarts and clients.
       if (status === 410) {
+        outcome = "skipped";
         succeededIds.push(item.id);
         continue;
       }
@@ -549,6 +587,8 @@ export async function migrateLegacyHistoryPage(
           failedAt: Date.now(),
         });
       }
+    } finally {
+      reportProgress(options, "settled", outcome);
     }
   }
   if (cacheChanged) writeMigrationCache(scope, cache);
@@ -616,7 +656,12 @@ async function migrateHistorySourceOnce(
   command: "legacy_history_migration_page" | "pi_history_migration_page",
   options: HistoryMigrationOptions = {},
 ) {
+  options = {
+    ...options,
+    progressSource: command === "legacy_history_migration_page" ? "legacy" : "pi",
+  };
   if (!isTauriHost() || !getConfiguredKBrainConnection()) {
+    reportProgress(options, "done");
     return { results: [], failures: [], complete: true };
   }
   let cursor: string | undefined;
@@ -624,6 +669,7 @@ async function migrateHistorySourceOnce(
   const failures: MigrationFailure[] = [];
   try {
     do {
+      reportProgress(options, "reading");
       const page = await invoke<LegacyPage>(command, { cursor });
       const migrated = await migrateLegacyHistoryPage(page, options);
       all.push(...migrated.results);
@@ -634,7 +680,9 @@ async function migrateHistorySourceOnce(
       }
       cursor = migrated.nextCursor;
     } while (cursor !== undefined);
+    reportProgress(options, "done");
   } catch (error) {
+    reportProgress(options, "error");
     failures.push({
       sourceId: command,
       error: error instanceof Error ? error.message : String(error),

@@ -9,7 +9,6 @@ import {
   COMPOSER_ACTION_COMMAND_NAMES,
   type ComposerTurnCommand,
 } from "@liveagent/ui/lib/chat/composerCommands";
-import { showGoalProgress } from "../../../lib/kbrain/goalNotice";
 import { normalizeLogicalLineEndings } from "@liveagent/ui/lib/chat/composerText";
 import { normalizeConversationMentionReferences } from "@liveagent/ui/lib/chat/mentionReferences";
 import {
@@ -60,6 +59,7 @@ import {
 import { skillMentionInjection } from "../../../lib/chat/skills/mentionInjection";
 import { createStreamDebugLogger } from "../../../lib/debug/agentDebug";
 import { liveAgentRuntimeCapabilities } from "../../../lib/host";
+import { showGoalProgress } from "../../../lib/kbrain/goalNotice";
 import { createModelFromConfig, createProviderRuntimeConfig } from "../../../lib/providers/llm";
 import {
   type AppSettings,

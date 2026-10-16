@@ -575,15 +575,18 @@ export const EN_US_COMMON_TRANSLATIONS = {
   "chat.commands.failed": "Command failed",
   "chat.commands.modelNotFound": "No model named",
   "chat.commands.rewindNone": "No checkpoint to rewind in this conversation",
-  "chat.commands.rewindBusy": "Rewind is unavailable while the agent is running or checkpoints are loading",
+  "chat.commands.rewindBusy":
+    "Rewind is unavailable while the agent is running or checkpoints are loading",
   "chat.commands.goalUsage": "Usage: /goal <goal> | /goal resume | /goal clear",
   "chat.commands.goalCleared": "Goal cleared.",
-  "chat.commands.loopUsage": "Usage: /loop <interval> <prompt> (interval like 10m, 2h, 1d) | /loop list | /loop cancel <id>",
+  "chat.commands.loopUsage":
+    "Usage: /loop <interval> <prompt> (interval like 10m, 2h, 1d) | /loop list | /loop cancel <id>",
   "chat.commands.loopCreated": "Loop created",
   "chat.commands.loopCancelled": "Loop cancelled",
   "chat.commands.loopsTitle": "Loops in this conversation",
   "chat.commands.loopsEmpty": "No loops in this conversation.",
-  "chat.commands.needsConversation": "Send a message first; this command needs an existing conversation.",
+  "chat.commands.needsConversation":
+    "Send a message first; this command needs an existing conversation.",
   "chat.commands.loopInterval": "Interval",
   "chat.commands.loopPrompt": "Prompt",
   "chat.commands.loopHint": "Results are written to this conversation. To stop it:",
@@ -600,7 +603,8 @@ export const EN_US_COMMON_TRANSLATIONS = {
   "chat.goalBar.cancelEdit": "Cancel editing",
   "chat.goalBar.clear": "Cancel goal",
   "chat.goalBar.clearTitle": "Cancel this goal?",
-  "chat.goalBar.clearDescription": "The running round stops and the goal is removed from this conversation. This cannot be undone; you can set a new goal with /goal.",
+  "chat.goalBar.clearDescription":
+    "The running round stops and the goal is removed from this conversation. This cannot be undone; you can set a new goal with /goal.",
   "chat.goalBar.clearConfirm": "Cancel goal",
   "chat.goalBar.clearCancel": "Keep goal",
   "chat.mention.command": "Command",

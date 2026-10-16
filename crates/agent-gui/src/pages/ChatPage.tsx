@@ -42,7 +42,6 @@ import type {
   ComposerCommandHost,
   ComposerTurnCommand,
 } from "@liveagent/ui/lib/chat/composerCommands";
-import type { ChatRuntimeControls } from "@liveagent/ui/lib/settings/types";
 import { searchMentionConversations } from "@liveagent/ui/lib/chat/conversationSearch";
 import { useChangedFilesActions } from "@liveagent/ui/lib/chat/useChangedFilesActions";
 import { useChatFileLinkNavigation } from "@liveagent/ui/lib/chat/useChatFileLinkNavigation";
@@ -56,6 +55,7 @@ import { useThinkingLiveVersion } from "@liveagent/ui/lib/models/useThinkingLive
 import { setPreferredMonacoNlsLocale } from "@liveagent/ui/lib/monacoNls";
 import { releaseProjectToolFromDock } from "@liveagent/ui/lib/projectTools/releaseProjectToolFromDock";
 import { useRightDockSettings } from "@liveagent/ui/lib/projectTools/useRightDockSettings";
+import type { ChatRuntimeControls } from "@liveagent/ui/lib/settings/types";
 import { buildGatewayPublicBaseUrl } from "@liveagent/ui/lib/shared/gatewayPublicUrl";
 import { cn } from "@liveagent/ui/lib/shared/utils";
 import type {
@@ -150,9 +150,9 @@ import { skillMentionInjection } from "../lib/chat/skills/mentionInjection";
 import { tauriGitClient } from "../lib/git/tauriGitClient";
 import { isKBrainBackendEnabled, isKBrainBrowserHost } from "../lib/host";
 import { useKBrainCatalogSettings } from "../lib/kbrain/catalog";
-import { subscribeHistoryImported } from "../lib/kbrain/manualHistoryImport";
 import { createKBrainClient } from "../lib/kbrain/client";
 import { publishGoalState } from "../lib/kbrain/goalStore";
+import { subscribeHistoryImported } from "../lib/kbrain/manualHistoryImport";
 import { getKBrainSessionId } from "../lib/kbrain/mapping";
 import { createProviderRuntimeConfig, toModelValue } from "../lib/providers/llm";
 import {
@@ -200,8 +200,8 @@ import { tauriWorkspaceActivityClient } from "../lib/workspace-activity/tauriWor
 import type { ChatPageProps } from "./chat/chatPageTypes";
 import { asErrorMessage } from "./chat/chatPageUtils";
 import { createGuiComposerCommandHost } from "./chat/composer/guiComposerCommandHost";
-import { useKBrainComposerSkills } from "./chat/composer/useKBrainComposerSkills";
 import { useComposerHistoryPrompts } from "./chat/composer/useComposerHistoryPrompts";
+import { useKBrainComposerSkills } from "./chat/composer/useKBrainComposerSkills";
 import type {
   ConversationControllerActions,
   ConversationSurfaceController,

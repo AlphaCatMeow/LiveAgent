@@ -1,4 +1,3 @@
-import { parseModelValue } from "@liveagent/ui/lib/models/modelValue";
 import { ApplicationView } from "@liveagent/ui/application/ApplicationView";
 import { AppWorkbenchChrome } from "@liveagent/ui/application/AppWorkbenchChrome";
 import { AppErrorBoundary } from "@liveagent/ui/components/AppErrorBoundary";
@@ -46,6 +45,7 @@ import {
 } from "@liveagent/ui/lib/chat/checkpointRewind";
 import type { PendingUploadedFile } from "@liveagent/ui/lib/chat/uploadedFiles";
 import { mergePendingUploadedFiles } from "@liveagent/ui/lib/chat/uploadedFiles";
+import { parseModelValue } from "@liveagent/ui/lib/models/modelValue";
 import { nativeResourceHostCapabilities } from "@liveagent/ui/lib/resourceHost";
 import { cn } from "@liveagent/ui/lib/shared/utils";
 import { useSidebarSelector } from "@liveagent/ui/lib/sidebar/useSidebarSelector";

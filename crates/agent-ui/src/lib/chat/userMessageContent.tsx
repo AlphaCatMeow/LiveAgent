@@ -7,10 +7,10 @@ import {
   SkillIcon,
   Terminal,
 } from "@liveagent/ui/components/IconSet";
-import { COMPOSER_ACTION_COMMAND_NAMES } from "@liveagent/ui/lib/chat/composerCommands";
 import { floatingSurfaceClassName } from "@liveagent/ui/components/ui/menu-surface";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { useAppMentionIcon } from "@liveagent/ui/lib/chat/appMentionIcons";
+import { COMPOSER_ACTION_COMMAND_NAMES } from "@liveagent/ui/lib/chat/composerCommands";
 import { normalizeLogicalLineEndings } from "@liveagent/ui/lib/chat/composerText";
 import {
   type CodeMentionReference,

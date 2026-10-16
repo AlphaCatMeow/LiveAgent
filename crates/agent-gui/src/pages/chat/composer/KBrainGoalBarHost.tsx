@@ -2,9 +2,9 @@ import {
   ComposerGoalBar,
   type ComposerGoalBarState,
 } from "@liveagent/ui/components/chat/ComposerGoalBar";
+import { toast } from "@liveagent/ui/components/ui/toast-manager";
 import type { ComposerCommandHost } from "@liveagent/ui/lib/chat/composerCommands";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
-import { toast } from "@liveagent/ui/components/ui/toast-manager";
 import { createKBrainClient } from "../../../lib/kbrain/client";
 import { publishGoalState, readGoalState, subscribeGoalState } from "../../../lib/kbrain/goalStore";
 import { getKBrainSessionId } from "../../../lib/kbrain/mapping";

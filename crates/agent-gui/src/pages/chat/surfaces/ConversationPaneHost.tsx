@@ -18,12 +18,12 @@ import {
 } from "react";
 import { PaneLoadingSkeleton } from "../../../components/app/PaneLoadingSkeleton";
 import { isKBrainBackendEnabled } from "../../../lib/host";
-import { KBrainGoalBarHost } from "../composer/KBrainGoalBarHost";
 import { ConversationStatsBarHost } from "../components/ConversationStatsBarHost";
 import { CurrentTaskProgress } from "../components/CurrentTaskProgress";
 import { DesktopCheckpointRewindProvider } from "../components/DesktopCheckpointRewindProvider";
 import { KBrainCheckpointRewindProvider } from "../components/KBrainCheckpointRewindProvider";
 import { PendingToolApprovalBar } from "../components/PendingToolApprovalBar";
+import { KBrainGoalBarHost } from "../composer/KBrainGoalBarHost";
 import type { ConversationPaneHostHandle } from "../conversations/useConversationPaneHostBridge";
 import { useConversationSurfaceSnapshot } from "../conversations/useConversationSurfaceSnapshot";
 import { buildQueuedChatTurnPreview } from "../queue/chatTurnQueue";

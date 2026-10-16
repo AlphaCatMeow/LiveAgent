@@ -534,7 +534,8 @@ export const ZH_CN_COMMON_TRANSLATIONS = {
   "chat.commands.rewindBusy": "Agent 运行中或检查点加载中，暂时无法回退",
   "chat.commands.goalUsage": "用法：/goal <目标> | /goal resume | /goal clear",
   "chat.commands.goalCleared": "目标已清除。",
-  "chat.commands.loopUsage": "用法：/loop <间隔> <提示词>（间隔如 10m、2h、1d）| /loop list | /loop cancel <id>",
+  "chat.commands.loopUsage":
+    "用法：/loop <间隔> <提示词>（间隔如 10m、2h、1d）| /loop list | /loop cancel <id>",
   "chat.commands.loopCreated": "已创建定时任务",
   "chat.commands.loopCancelled": "已取消定时任务",
   "chat.commands.loopsTitle": "当前对话的定时任务",
@@ -556,7 +557,8 @@ export const ZH_CN_COMMON_TRANSLATIONS = {
   "chat.goalBar.cancelEdit": "取消修改",
   "chat.goalBar.clear": "取消目标",
   "chat.goalBar.clearTitle": "取消这个目标？",
-  "chat.goalBar.clearDescription": "正在运行的这一轮会停止，目标会从当前对话移除，无法撤销；之后可以用 /goal 重新设定。",
+  "chat.goalBar.clearDescription":
+    "正在运行的这一轮会停止，目标会从当前对话移除，无法撤销；之后可以用 /goal 重新设定。",
   "chat.goalBar.clearConfirm": "取消目标",
   "chat.goalBar.clearCancel": "保留目标",
   "chat.mention.command": "指令",

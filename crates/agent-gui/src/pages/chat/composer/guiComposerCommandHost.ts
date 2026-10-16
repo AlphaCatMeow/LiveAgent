@@ -4,9 +4,9 @@ import {
   findModelOptionByName,
   loopIntervalToCron,
 } from "@liveagent/ui/lib/chat/composerCommands";
-import type { ChatRuntimeControls } from "@liveagent/ui/lib/settings/types";
 import type { SharedModelOption } from "@liveagent/ui/lib/models/modelOptions";
 import { parseModelValue } from "@liveagent/ui/lib/models/modelValue";
+import type { ChatRuntimeControls } from "@liveagent/ui/lib/settings/types";
 import type { KBrainClient } from "../../../lib/kbrain/client";
 import type { KBrainGoalState } from "../../../lib/kbrain/types";
 import type { SelectedModel } from "../../../lib/settings";

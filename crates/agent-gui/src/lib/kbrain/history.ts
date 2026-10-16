@@ -6,6 +6,7 @@ import type {
   TextContent,
 } from "@liveagent/app/lib/agentTypes";
 import type { HostedSearchBlock } from "@liveagent/ui/lib/chat/hostedSearch";
+import { taskResultDetails } from "@liveagent/ui/lib/chat/taskProgress";
 import { parseUserMessageContentWithUploads } from "@liveagent/ui/lib/chat/uploadedFiles";
 import {
   type ConversationViewState,
@@ -121,7 +122,13 @@ function toHostedSearch(value: KBrainMessage["hosted_search"]): HostedSearchBloc
   }));
 }
 
-function toMessage(message: KBrainMessage, index: number, cwd?: string): Message | null {
+function toMessage(
+  message: KBrainMessage,
+  index: number,
+  cwd?: string,
+  toolArguments?: unknown,
+  taskRunId?: string,
+): Message | null {
   const timestamp = epoch(message.created_at, index + 1);
   if (message.role === "user") {
     const content = userContent(message);
@@ -163,13 +170,27 @@ function toMessage(message: KBrainMessage, index: number, cwd?: string): Message
       toolCallId: message.tool_call_id || `kbrain-tool-${index}`,
       toolName: message.name || "tool",
       content,
-      details: questionResultDetails(
-        message.name,
-        content
-          .filter((part) => part.type === "text")
-          .map((part) => part.text)
-          .join(""),
-      ),
+      details:
+        questionResultDetails(
+          message.name,
+          content
+            .filter((part) => part.type === "text")
+            .map((part) => part.text)
+            .join(""),
+        ) ??
+        taskResultDetails(
+          message.name,
+          toolArguments,
+          {
+            output: content
+              .filter((part) => part.type === "text")
+              .map((part) => part.text)
+              .join(""),
+            isError: message.stop_reason === "error" || message.stop_reason === "cancelled",
+          },
+          taskRunId ?? "history",
+          index,
+        ),
       isError: message.stop_reason === "error" || message.stop_reason === "cancelled",
       timestamp,
     };
@@ -321,9 +342,24 @@ function revisionFor(session: KBrainSession): string {
   return session.revision;
 }
 
-function convertMessages(messages: KBrainMessage[], offset = 0, cwd?: string): Message[] {
+function convertMessages(
+  messages: KBrainMessage[],
+  offset = 0,
+  cwd?: string,
+  taskRunId?: string,
+): Message[] {
+  const toolArguments = new Map<string, unknown>();
+  for (const message of messages) {
+    for (const call of message.tool_calls ?? []) toolArguments.set(call.id, call.arguments);
+  }
   return messages.flatMap((message, index) => {
-    const converted = toMessage(message, offset + index, cwd);
+    const converted = toMessage(
+      message,
+      offset + index,
+      cwd,
+      message.role === "tool" ? toolArguments.get(message.tool_call_id ?? "") : undefined,
+      taskRunId,
+    );
     return converted ? [converted] : [];
   });
 }
@@ -354,9 +390,19 @@ function historyWindow(
   ) {
     throw new Error("K-brain history message_offsets are invalid");
   }
+  const toolArguments = new Map<string, unknown>();
+  for (const message of source) {
+    for (const call of message.tool_calls ?? []) toolArguments.set(call.id, call.arguments);
+  }
   const indexedMessages = source.flatMap((message, index) => {
     const offset = offsets[index];
-    const converted = toMessage(message, offset, session.cwd);
+    const converted = toMessage(
+      message,
+      offset,
+      session.cwd,
+      message.role === "tool" ? toolArguments.get(message.tool_call_id ?? "") : undefined,
+      session.id,
+    );
     return converted ? [{ message: converted, offset }] : [];
   });
   const taskOffset = (offsets.at(-1) ?? result.oldest_offset - 1) + 1;
@@ -373,7 +419,7 @@ function historyWindow(
     if (id) snapshot.indices.set(id, offset);
   }
   const activeMessages = includeActive
-    ? convertMessages(result.active_messages ?? [], 0, session.cwd)
+    ? convertMessages(result.active_messages ?? [], 0, session.cwd, session.id)
     : [];
   if (pendingEditId) {
     for (const message of [...windowMessages, ...activeMessages]) {

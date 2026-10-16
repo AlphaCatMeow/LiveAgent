@@ -88,6 +88,11 @@ import {
   type ManagedProcessStatePayload,
   type MentionListResponse,
   normalizeChatQueueResponse,
+  type GoalManageResponse,
+  type LoopManageResponse,
+  type PromptTemplateExpandResponse,
+  type PromptTemplateListResponse,
+  type SlashCommandListResponse,
   normalizeHistoryListPage,
   normalizeHistoryListPageSize,
   normalizeManagedProcessState,
@@ -1166,6 +1171,73 @@ export class GatewayWebSocketRpcClient extends GatewayWebSocketTransport {
       max_results: maxResults,
       query,
       show_hidden: showHidden,
+    });
+  }
+
+  /** 桌面端“/”指令目录。列表不是状态变更，可安全重试。 */
+  async listCommands(workdir?: string): Promise<SlashCommandListResponse> {
+    return this.requestWithRecovery<SlashCommandListResponse>("commands.list", {
+      workdir: workdir ?? "",
+    });
+  }
+
+  /** /goal clear：清除会话目标（set/resume 会开始一轮运行，走聊天请求）。 */
+  async clearGoal(conversationId: string): Promise<GoalManageResponse> {
+    return this.requestWithRecovery<GoalManageResponse>("goal.manage", {
+      conversationId,
+      action: "clear",
+    });
+  }
+
+  async listLoops(conversationId: string): Promise<LoopManageResponse> {
+    return this.requestWithRecovery<LoopManageResponse>("loops.manage", {
+      conversationId,
+      action: "list",
+    });
+  }
+
+  async createLoop(input: {
+    conversationId: string;
+    cron: string;
+    interval: string;
+    prompt: string;
+    reasoning?: string;
+  }): Promise<LoopManageResponse> {
+    return this.requestWithRecovery<LoopManageResponse>("loops.manage", {
+      conversationId: input.conversationId,
+      action: "create",
+      cron: input.cron,
+      interval: input.interval,
+      prompt: input.prompt,
+      reasoning: input.reasoning ?? "",
+    });
+  }
+
+  async cancelLoop(conversationId: string, loopId: string): Promise<LoopManageResponse> {
+    return this.requestWithRecovery<LoopManageResponse>("loops.manage", {
+      conversationId,
+      action: "cancel",
+      loopId,
+    });
+  }
+
+  /** 输入框“/”提示词指令列表；项目级模板是否生效由 K-brain 按项目信任决定。 */
+  async listPromptTemplates(workdir?: string): Promise<PromptTemplateListResponse> {
+    return this.requestWithRecovery<PromptTemplateListResponse>("prompts.list", {
+      workdir: workdir ?? "",
+    });
+  }
+
+  /** 展开提示词模板；text 为指令名之后的参数文本。展开不改状态，可安全重试。 */
+  async expandPromptTemplate(
+    name: string,
+    text: string,
+    workdir?: string,
+  ): Promise<PromptTemplateExpandResponse> {
+    return this.requestWithRecovery<PromptTemplateExpandResponse>("prompts.expand", {
+      name,
+      text,
+      workdir: workdir ?? "",
     });
   }
 

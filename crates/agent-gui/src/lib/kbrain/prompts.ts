@@ -51,9 +51,13 @@ export type KBrainPromptClient = {
     prompt: string,
     strategy: "append" | "replace",
   ): Promise<PromptMutationResponse>;
+  /**
+   * 展开 Markdown 提示词模板。args 为已切分的参数；传 `{ text }` 时由 K-brain
+   * 按 commandline.Split 切分原始参数文本（输入框“/”指令走这条）。
+   */
   expandMarkdown(
     name: string,
-    args: string[],
+    args: string[] | { text: string },
     workdir?: string,
   ): Promise<{ name: string; text: string }>;
 };
@@ -120,7 +124,10 @@ export function createKBrainPromptClient(
       const query = workdir?.trim() ? `?workdir=${encodeURIComponent(workdir.trim())}` : "";
       return request<{ name: string; text: string }>(
         `/v1/prompts/templates/${encodeURIComponent(name)}/expand${query}`,
-        { method: "POST", body: JSON.stringify({ args }) },
+        {
+          method: "POST",
+          body: JSON.stringify(Array.isArray(args) ? { args } : { text: args.text }),
+        },
       );
     },
   };

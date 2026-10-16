@@ -174,6 +174,9 @@ impl GatewayController {
             uploaded_files,
             referenced_conversations,
             queue_policy,
+            goal_action,
+            goal_text,
+            prompt_command,
         } = request;
         let selected_model = selected_model.map(|selected_model| GatewaySelectedModelEvent {
             custom_provider_id: selected_model.custom_provider_id,
@@ -249,6 +252,9 @@ impl GatewayController {
                 .collect(),
             referenced_conversations,
             queue_policy,
+            goal_action: goal_action.trim().to_string(),
+            goal_text: goal_text.trim().to_string(),
+            prompt_command,
         }
     }
 

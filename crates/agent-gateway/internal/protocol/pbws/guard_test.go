@@ -1,6 +1,7 @@
 package pbws
 
 import (
+	"strings"
 	"testing"
 
 	gatewayv2 "github.com/liveagent/agent-gateway/internal/proto/v2"
@@ -44,6 +45,57 @@ func TestVetAgentRequestAllowsReadOnlyCuaDriverActions(t *testing.T) {
 
 		if err := vetAgentRequest(session.AgentView{}, env); err != nil {
 			t.Fatalf("vetAgentRequest(%q) error = %v", action, err)
+		}
+	}
+}
+
+func TestVetAgentRequestAllowsPromptTemplates(t *testing.T) {
+	for name, env := range map[string]*gatewayv2.GatewayEnvelope{
+		"list": {Payload: &gatewayv2.GatewayEnvelope_PromptTemplateList{
+			PromptTemplateList: &gatewayv2.PromptTemplateListRequest{Workdir: "/repo"},
+		}},
+		"list without workdir": {Payload: &gatewayv2.GatewayEnvelope_PromptTemplateList{
+			PromptTemplateList: &gatewayv2.PromptTemplateListRequest{},
+		}},
+		"expand": {Payload: &gatewayv2.GatewayEnvelope_PromptTemplateExpand{
+			PromptTemplateExpand: &gatewayv2.PromptTemplateExpandRequest{Name: "review-pr", Text: "123 \"two words\"", Workdir: "/repo"},
+		}},
+	} {
+		if err := vetAgentRequest(session.AgentView{}, env); err != nil {
+			t.Fatalf("vetAgentRequest(%s) error = %v", name, err)
+		}
+	}
+}
+
+func TestVetAgentRequestRejectsInvalidPromptTemplates(t *testing.T) {
+	longWorkdir := strings.Repeat("a", maxPromptTemplateWorkdir+1)
+	for name, env := range map[string]*gatewayv2.GatewayEnvelope{
+		"list nil": {Payload: &gatewayv2.GatewayEnvelope_PromptTemplateList{}},
+		"list workdir too long": {Payload: &gatewayv2.GatewayEnvelope_PromptTemplateList{
+			PromptTemplateList: &gatewayv2.PromptTemplateListRequest{Workdir: longWorkdir},
+		}},
+		"expand nil": {Payload: &gatewayv2.GatewayEnvelope_PromptTemplateExpand{}},
+		"expand empty name": {Payload: &gatewayv2.GatewayEnvelope_PromptTemplateExpand{
+			PromptTemplateExpand: &gatewayv2.PromptTemplateExpandRequest{Name: "  "},
+		}},
+		"expand name too long": {Payload: &gatewayv2.GatewayEnvelope_PromptTemplateExpand{
+			PromptTemplateExpand: &gatewayv2.PromptTemplateExpandRequest{Name: strings.Repeat("n", maxPromptTemplateNameLen+1)},
+		}},
+		"expand name with slash": {Payload: &gatewayv2.GatewayEnvelope_PromptTemplateExpand{
+			PromptTemplateExpand: &gatewayv2.PromptTemplateExpandRequest{Name: "../secret"},
+		}},
+		"expand name with backslash": {Payload: &gatewayv2.GatewayEnvelope_PromptTemplateExpand{
+			PromptTemplateExpand: &gatewayv2.PromptTemplateExpandRequest{Name: "a\\b"},
+		}},
+		"expand text too long": {Payload: &gatewayv2.GatewayEnvelope_PromptTemplateExpand{
+			PromptTemplateExpand: &gatewayv2.PromptTemplateExpandRequest{Name: "review", Text: strings.Repeat("x", maxPromptTemplateTextLen+1)},
+		}},
+		"expand workdir too long": {Payload: &gatewayv2.GatewayEnvelope_PromptTemplateExpand{
+			PromptTemplateExpand: &gatewayv2.PromptTemplateExpandRequest{Name: "review", Workdir: longWorkdir},
+		}},
+	} {
+		if err := vetAgentRequest(session.AgentView{}, env); err == nil {
+			t.Fatalf("vetAgentRequest(%s) error = nil, want rejection", name)
 		}
 	}
 }
@@ -270,6 +322,68 @@ func TestCanonicalTerminalRetainsNativeRemoteGate(t *testing.T) {
 	} {
 		if err := vetCanonicalTerminal(request); err == nil {
 			t.Fatalf("invalid request accepted: %+v", request)
+		}
+	}
+}
+
+func TestVetAgentRequestAllowsSlashCommandsGoalsAndLoops(t *testing.T) {
+	for name, env := range map[string]*gatewayv2.GatewayEnvelope{
+		"slash commands": {Payload: &gatewayv2.GatewayEnvelope_SlashCommandList{
+			SlashCommandList: &gatewayv2.SlashCommandListRequest{Workdir: "/repo"},
+		}},
+		"goal clear": {Payload: &gatewayv2.GatewayEnvelope_GoalManage{
+			GoalManage: &gatewayv2.GoalManageRequest{ConversationId: "sess-1", Action: "clear"},
+		}},
+		"loops list": {Payload: &gatewayv2.GatewayEnvelope_LoopManage{
+			LoopManage: &gatewayv2.LoopManageRequest{ConversationId: "sess-1", Action: "list"},
+		}},
+		"loop create": {Payload: &gatewayv2.GatewayEnvelope_LoopManage{
+			LoopManage: &gatewayv2.LoopManageRequest{
+				ConversationId: "sess-1", Action: "create", Cron: "0 */10 * * * *",
+				Interval: "10m", Prompt: "report the build",
+			},
+		}},
+		"loop cancel": {Payload: &gatewayv2.GatewayEnvelope_LoopManage{
+			LoopManage: &gatewayv2.LoopManageRequest{ConversationId: "sess-1", Action: "cancel", LoopId: "loop-1"},
+		}},
+	} {
+		if err := vetAgentRequest(session.AgentView{}, env); err != nil {
+			t.Fatalf("vetAgentRequest(%s) error = %v", name, err)
+		}
+	}
+}
+
+func TestVetAgentRequestRejectsInvalidGoalAndLoopRequests(t *testing.T) {
+	for name, env := range map[string]*gatewayv2.GatewayEnvelope{
+		"goal nil": {Payload: &gatewayv2.GatewayEnvelope_GoalManage{}},
+		"goal without conversation": {Payload: &gatewayv2.GatewayEnvelope_GoalManage{
+			GoalManage: &gatewayv2.GoalManageRequest{Action: "clear"},
+		}},
+		"goal unknown action": {Payload: &gatewayv2.GatewayEnvelope_GoalManage{
+			GoalManage: &gatewayv2.GoalManageRequest{ConversationId: "s", Action: "pause"},
+		}},
+		"goal set over the manage route": {Payload: &gatewayv2.GatewayEnvelope_GoalManage{
+			GoalManage: &gatewayv2.GoalManageRequest{ConversationId: "s", Action: "set"},
+		}},
+		"loop nil": {Payload: &gatewayv2.GatewayEnvelope_LoopManage{}},
+		"loop unknown action": {Payload: &gatewayv2.GatewayEnvelope_LoopManage{
+			LoopManage: &gatewayv2.LoopManageRequest{ConversationId: "s", Action: "pause"},
+		}},
+		"loop create without schedule": {Payload: &gatewayv2.GatewayEnvelope_LoopManage{
+			LoopManage: &gatewayv2.LoopManageRequest{ConversationId: "s", Action: "create", Prompt: "x"},
+		}},
+		"loop create without prompt": {Payload: &gatewayv2.GatewayEnvelope_LoopManage{
+			LoopManage: &gatewayv2.LoopManageRequest{ConversationId: "s", Action: "create", Cron: "0 */10 * * * *"},
+		}},
+		"loop prompt too long": {Payload: &gatewayv2.GatewayEnvelope_LoopManage{
+			LoopManage: &gatewayv2.LoopManageRequest{ConversationId: "s", Action: "create", Cron: "0 */10 * * * *", Prompt: strings.Repeat("p", maxLoopPromptLen+1)},
+		}},
+		"loop cancel without id": {Payload: &gatewayv2.GatewayEnvelope_LoopManage{
+			LoopManage: &gatewayv2.LoopManageRequest{ConversationId: "s", Action: "cancel"},
+		}},
+	} {
+		if err := vetAgentRequest(session.AgentView{}, env); err == nil {
+			t.Fatalf("vetAgentRequest(%s) error = nil, want rejection", name)
 		}
 	}
 }

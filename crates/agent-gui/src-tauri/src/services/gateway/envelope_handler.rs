@@ -602,6 +602,66 @@ impl GatewayController {
                     Err(error) => self.send_error_response(request_id, 502, error).await,
                 }
             }
+            Some(proto::gateway_envelope::Payload::PromptTemplateList(request)) => {
+                match gateway_bridge::handle_prompt_template_list(self.app_handle.clone(), request)
+                    .await
+                {
+                    Ok(response) => {
+                        self.send_agent_envelope(proto::AgentEnvelope {
+                            request_id,
+                            timestamp: now_unix_seconds(),
+                            payload: Some(proto::agent_envelope::Payload::PromptTemplateListResp(
+                                response,
+                            )),
+                        })
+                        .await
+                    }
+                    Err(error) => self.send_error_response(request_id, 502, error).await,
+                }
+            }
+            Some(proto::gateway_envelope::Payload::SlashCommandList(request)) => {
+                match gateway_bridge::handle_slash_command_list(self.app_handle.clone(), request)
+                    .await
+                {
+                    Ok(response) => {
+                        self.send_agent_envelope(proto::AgentEnvelope {
+                            request_id,
+                            timestamp: now_unix_seconds(),
+                            payload: Some(proto::agent_envelope::Payload::SlashCommandListResp(
+                                response,
+                            )),
+                        })
+                        .await
+                    }
+                    Err(error) => self.send_error_response(request_id, 502, error).await,
+                }
+            }
+            Some(proto::gateway_envelope::Payload::GoalManage(request)) => {
+                self.handle_goal_manage(request_id, request).await
+            }
+            Some(proto::gateway_envelope::Payload::LoopManage(request)) => {
+                self.handle_loop_manage(request_id, request).await
+            }
+            Some(proto::gateway_envelope::Payload::PromptTemplateExpand(request)) => {
+                match gateway_bridge::handle_prompt_template_expand(
+                    self.app_handle.clone(),
+                    request,
+                )
+                .await
+                {
+                    Ok(response) => {
+                        self.send_agent_envelope(proto::AgentEnvelope {
+                            request_id,
+                            timestamp: now_unix_seconds(),
+                            payload: Some(
+                                proto::agent_envelope::Payload::PromptTemplateExpandResp(response),
+                            ),
+                        })
+                        .await
+                    }
+                    Err(error) => self.send_error_response(request_id, 502, error).await,
+                }
+            }
             Some(proto::gateway_envelope::Payload::SettingsGet(_request)) => {
                 match self.current_settings_snapshot().await {
                     Ok(snapshot) => {

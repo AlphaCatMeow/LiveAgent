@@ -22,6 +22,15 @@ import {
   sortAppsByMentionRecency,
 } from "@liveagent/ui/lib/chat/appMentionRecency";
 import {
+  buildComposerCommands,
+  type ComposerCatalogCommand,
+  type ComposerCommandPanelState,
+  filterComposerCommands,
+  type ParsedComposerCommand,
+  parseComposerCommandDraft,
+  runComposerCommand,
+} from "@liveagent/ui/lib/chat/composerCommands";
+import {
   insertPlainTextWithUndo,
   normalizeLogicalLineEndings,
 } from "@liveagent/ui/lib/chat/composerText";
@@ -52,6 +61,7 @@ import {
   useState,
 } from "react";
 import { readSendShortcut, shouldSendOnEnter } from "../../lib/chat/sendShortcut";
+import { ComposerCommandPanel } from "./ComposerCommandPanel";
 import {
   COMMIT_MENTION_SHA_ATTR,
   CONVERSATION_MENTION_ID_ATTR,
@@ -131,6 +141,7 @@ import {
   readComposerClipboardSegments,
   rebuildClipboardSegmentsForPaste,
   removeStaleCaretAnchorsAroundSelection,
+  replaceMentionQueryText,
   resolveComposerSelection,
   resolveComposerSelectionText,
   sanitizeAppMentionSegments,
@@ -192,6 +203,7 @@ export const MentionComposer = memo(
       conversationMentionsEnabled = true,
       currentConversationId,
       mentionApps = [],
+      commandHost,
       className,
     }: MentionComposerProps,
     ref,
@@ -313,6 +325,42 @@ export const MentionComposer = memo(
     const [conversationSearchError, setConversationSearchError] = useState<string | null>(null);
     const conversationSearchRequestSeqRef = useRef(0);
 
+    // ---- Slash commands ----
+    const [commandCatalog, setCommandCatalog] = useState<readonly ComposerCatalogCommand[]>([]);
+    const [commandPanel, setCommandPanel] = useState<ComposerCommandPanelState | null>(null);
+    const commandCatalogSeqRef = useRef(0);
+    const commandsEnabled = Boolean(commandHost);
+    const commands = useMemo(
+      () =>
+        buildComposerCommands({
+          host: commandHost,
+          catalog: commandCatalog,
+          skills: enabledSkills,
+          t,
+        }),
+      [commandHost, commandCatalog, enabledSkills, t],
+    );
+    const refreshCommandCatalog = useCallback(() => {
+      const seq = ++commandCatalogSeqRef.current;
+      if (!commandHost?.listCommands) {
+        setCommandCatalog([]);
+        return;
+      }
+      void Promise.resolve()
+        .then(() => commandHost.listCommands?.() ?? [])
+        .then((catalog) => {
+          if (seq === commandCatalogSeqRef.current) setCommandCatalog(catalog);
+        })
+        .catch(() => {
+          // A failed listing only hides commands; skills stay.
+          if (seq === commandCatalogSeqRef.current) setCommandCatalog([]);
+        });
+    }, [commandHost]);
+    // Prefetch: send interception is synchronous and only knows loaded command names.
+    useEffect(() => {
+      refreshCommandCatalog();
+    }, [refreshCommandCatalog]);
+
     const setMentionMenuMode = useCallback((mode: MentionMenuMode) => {
       mentionMenuModeRef.current = mode;
       setMentionMenuModeState(mode);
@@ -366,6 +414,10 @@ export const MentionComposer = memo(
         setMentionSessionLoading(isFileFetch);
         setMentionSessionError(null);
 
+        if (ctx.trigger === "command") {
+          refreshCommandCatalog();
+          return;
+        }
         if (ctx.trigger === "skill") {
           return;
         }
@@ -398,7 +450,7 @@ export const MentionComposer = memo(
             setMentionSessionLoading(false);
           });
       },
-      [cancelMentionRefetch, normalizedWorkdir],
+      [cancelMentionRefetch, normalizedWorkdir, refreshCommandCatalog],
     );
 
     const scheduleMentionRefetch = useCallback(
@@ -505,6 +557,28 @@ export const MentionComposer = memo(
         return [];
       }
 
+      if (mentionCtx.trigger === "command") {
+        // 与 "@" 一致的两级菜单：空查询的根级只列"指令 / 技能"两类；输入文字后在
+        // 根级跨两类直接搜索，/goal 这类常用指令仍可一步选中；进入某一类后只在该类里筛。
+        const hasActions = commands.some((command) => command.kind !== "skill");
+        const hasSkills = commands.some((command) => command.kind === "skill");
+        if (mentionMenuMode === "root" && !normalizedMentionQuery && hasActions && hasSkills) {
+          return [
+            { type: "category", category: "commands" },
+            { type: "category", category: "skills" },
+          ];
+        }
+        const pool =
+          mentionMenuMode === "commands"
+            ? commands.filter((command) => command.kind !== "skill")
+            : mentionMenuMode === "skills"
+              ? commands.filter((command) => command.kind === "skill")
+              : commands;
+        return filterComposerCommands(pool, normalizedMentionQuery, MAX_SUGGESTIONS).map(
+          (command) => ({ type: "command", command }),
+        );
+      }
+
       if (mentionCtx.trigger === "skill") {
         const next: MentionSuggestion[] = [];
         for (const skill of enabledSkills) {
@@ -601,6 +675,7 @@ export const MentionComposer = memo(
       }
       return next;
     }, [
+      commands,
       conversations,
       conversationMentionLimitReached,
       conversationMentionsEnabled,
@@ -634,17 +709,19 @@ export const MentionComposer = memo(
             ? conversationSearchError
             : null;
     const popupEmptyLabel =
-      mentionCtx?.trigger === "skill"
-        ? t("chat.composer.noMatchingEnabledSkills")
-        : mentionMenuMode === "apps"
-          ? t("chat.composer.noMatchingApps")
-          : mentionMenuMode === "conversations"
-            ? conversationMentionLimitReached
-              ? t("chat.composer.conversationLimitReached")
-              : t("chat.composer.noMatchingConversations")
-            : mentionMenuMode === "root"
-              ? t("chat.composer.noMatchingReferenceTypes")
-              : t("chat.composer.noMatchingFiles");
+      mentionCtx?.trigger === "command"
+        ? t("chat.commands.noMatching")
+        : mentionCtx?.trigger === "skill"
+          ? t("chat.composer.noMatchingEnabledSkills")
+          : mentionMenuMode === "apps"
+            ? t("chat.composer.noMatchingApps")
+            : mentionMenuMode === "conversations"
+              ? conversationMentionLimitReached
+                ? t("chat.composer.conversationLimitReached")
+                : t("chat.composer.noMatchingConversations")
+              : mentionMenuMode === "root"
+                ? t("chat.composer.noMatchingReferenceTypes")
+                : t("chat.composer.noMatchingFiles");
     const showEmpty =
       mentionCtx !== null && !popupLoading && !popupError && suggestions.length === 0;
     const popupVisible =
@@ -860,19 +937,80 @@ export const MentionComposer = memo(
         }
       };
 
-      applyContext(detectMention(el, enabledSkills.length > 0));
+      applyContext(detectMention(el, enabledSkills.length > 0, commandsEnabled));
       window.requestAnimationFrame(() => {
         const nextEl = editorRef.current;
         if (!nextEl || document.activeElement !== nextEl) return;
-        applyContext(detectMention(nextEl, enabledSkills.length > 0));
+        applyContext(detectMention(nextEl, enabledSkills.length > 0, commandsEnabled));
       });
     }, [
       cancelMentionRefetch,
       closeMentionSession,
+      commandsEnabled,
       enabledSkills.length,
       scheduleMentionRefetch,
       startMentionSession,
     ]);
+
+    const setEditorText = useCallback(
+      (text: string) => {
+        const el = editorRef.current;
+        if (!el) return;
+        resetPromptHistoryRecall();
+        el.innerHTML = "";
+        largePastesRef.current.clear();
+        closeCommitTooltip();
+        closeComposerContextMenu();
+        const normalizedText = normalizeLogicalLineEndings(text);
+        if (isLargePasteText(normalizedText)) {
+          insertLargePaste(normalizedText);
+        } else {
+          el.textContent = normalizedText;
+          closeMentionSession();
+          refreshEmptyState();
+        }
+        placeCaretAtEditorEnd();
+        scheduleComposerSelectionScroll(el);
+      },
+      [
+        closeCommitTooltip,
+        closeComposerContextMenu,
+        closeMentionSession,
+        insertLargePaste,
+        placeCaretAtEditorEnd,
+        refreshEmptyState,
+        resetPromptHistoryRecall,
+      ],
+    );
+
+    const executeCommand = useCallback(
+      (parsed: ParsedComposerCommand, options: { consumeDraft: boolean }) => {
+        if (!commandHost) return;
+        setCommandPanel(null);
+        void runComposerCommand(parsed, {
+          host: commandHost,
+          t,
+          consumeDraft: () => {
+            if (options.consumeDraft) setEditorText("");
+          },
+          showPanel: setCommandPanel,
+        });
+      },
+      [commandHost, setEditorText, t],
+    );
+
+    const runCommandDraft = useCallback(() => {
+      const el = editorRef.current;
+      if (!el || !commandHost) return false;
+      const parsed = parseComposerCommandDraft(
+        normalizeSerializedText(serializeChildren(el, largePastesRef.current)),
+        commands,
+      );
+      if (!parsed) return false;
+      closeMentionSession();
+      executeCommand(parsed, { consumeDraft: true });
+      return true;
+    }, [closeMentionSession, commandHost, commands, executeCommand]);
 
     useImperativeHandle(
       ref,
@@ -887,25 +1025,8 @@ export const MentionComposer = memo(
           const el = editorRef.current;
           return el != null && !editorTextIsEmpty(el);
         },
-        setText: (text: string) => {
-          const el = editorRef.current;
-          if (!el) return;
-          resetPromptHistoryRecall();
-          el.innerHTML = "";
-          largePastesRef.current.clear();
-          closeCommitTooltip();
-          closeComposerContextMenu();
-          const normalizedText = normalizeLogicalLineEndings(text);
-          if (isLargePasteText(normalizedText)) {
-            insertLargePaste(normalizedText);
-          } else {
-            el.textContent = normalizedText;
-            closeMentionSession();
-            refreshEmptyState();
-          }
-          placeCaretAtEditorEnd();
-          scheduleComposerSelectionScroll(el);
-        },
+        setText: setEditorText,
+        runCommandDraft,
         setDraft: (draft: MentionComposerDraft) => {
           const el = editorRef.current;
           if (!el) return;
@@ -1115,10 +1236,11 @@ export const MentionComposer = memo(
         closeComposerContextMenu,
         closeMentionSession,
         focusEditorAtSavedSelection,
-        insertLargePaste,
         placeCaretAtEditorEnd,
         refreshEmptyState,
         resetPromptHistoryRecall,
+        runCommandDraft,
+        setEditorText,
         conversationMentionsEnabled,
         currentConversationId,
         disabled,
@@ -1138,7 +1260,8 @@ export const MentionComposer = memo(
     );
 
     const returnToMentionRoot = useCallback(() => {
-      if (!mentionCtx || mentionCtx.trigger === "skill") return;
+      if (!mentionCtx || (mentionCtx.trigger !== "file" && mentionCtx.trigger !== "command"))
+        return;
       setMentionMenuMode("root");
       setHighlightIdx(0);
       startMentionSession(mentionCtx, { mode: "root" });
@@ -1154,6 +1277,32 @@ export const MentionComposer = memo(
         }
         if (suggestion.type === "category") {
           openMentionMenuMode(suggestion.category);
+          return;
+        }
+        if (suggestion.type === "command") {
+          const { command } = suggestion;
+          if (command.kind === "skill") {
+            insertSkillMentionChip(mentionCtx, command.skill);
+          } else if (
+            command.kind === "action" &&
+            command.id === "model" &&
+            commandHost?.openModelPicker
+          ) {
+            // 模型选择是本地界面操作，选中候选即可打开列表，无需再发送一次。
+            replaceMentionQueryText(mentionCtx, "");
+            resetPromptHistoryRecall();
+            closeMentionSession();
+            refreshEmptyState();
+            commandHost.openModelPicker();
+            return;
+          } else {
+            // Selecting only drafts "/name "; the command runs when the draft is sent.
+            replaceMentionQueryText(mentionCtx, `/${command.name} `);
+          }
+          resetPromptHistoryRecall();
+          closeMentionSession();
+          refreshEmptyState();
+          editorRef.current?.focus();
           return;
         }
         if (suggestion.type === "skill") {
@@ -1194,6 +1343,7 @@ export const MentionComposer = memo(
       },
       [
         closeMentionSession,
+        commandHost,
         mentionCtx,
         openMentionMenuMode,
         refreshEmptyState,
@@ -1669,11 +1819,20 @@ export const MentionComposer = memo(
         }
         if (popupVisible && e.key === "Escape") {
           e.preventDefault();
-          if (mentionCtx?.trigger === "file" && mentionMenuMode !== "root") {
+          e.stopPropagation();
+          if (
+            (mentionCtx?.trigger === "file" || mentionCtx?.trigger === "command") &&
+            mentionMenuMode !== "root"
+          ) {
             returnToMentionRoot();
           } else {
             closeMentionSession();
           }
+          return;
+        }
+        if (commandPanel && e.key === "Escape") {
+          e.preventDefault();
+          setCommandPanel(null);
           return;
         }
 
@@ -1766,7 +1925,7 @@ export const MentionComposer = memo(
           compositionEnterKeyRef.current = false;
           lastCompositionEndAtRef.current = 0;
           e.preventDefault();
-          if (!e.repeat) onSend();
+          if (!e.repeat && !runCommandDraft()) onSend();
           return;
         }
 
@@ -1793,6 +1952,8 @@ export const MentionComposer = memo(
         mentionCtx?.trigger,
         mentionMenuMode,
         onSend,
+        runCommandDraft,
+        commandPanel,
         refreshEmptyState,
         refreshMention,
         loadHistoryPrompts,
@@ -1989,6 +2150,9 @@ export const MentionComposer = memo(
 
     return (
       <div ref={wrapperRef} className="relative w-full min-w-0 max-w-full flex-1">
+        {commandPanel ? (
+          <ComposerCommandPanel panel={commandPanel} onClose={() => setCommandPanel(null)} />
+        ) : null}
         <AnimatePresence initial={false}>
           {popupVisible ? (
             <Popup

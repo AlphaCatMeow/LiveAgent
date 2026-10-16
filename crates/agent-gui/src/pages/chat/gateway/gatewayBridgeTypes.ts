@@ -1,4 +1,5 @@
 import type { MentionComposerDraft } from "@liveagent/ui/components/chat/MentionComposer";
+import type { ComposerTurnCommand } from "@liveagent/ui/lib/chat/composerCommands";
 import type { ConversationMentionReference } from "@liveagent/ui/lib/chat/mentionReferences";
 import type { PendingUploadedFile } from "@liveagent/ui/lib/chat/uploadedFiles";
 import type { MutableRefObject } from "react";
@@ -99,6 +100,8 @@ export type SendChatAction = (overrides?: {
   workdirOverride?: string;
   commandSafetyModeOverride?: CommandSafetyMode;
   runtimeControlsOverride?: ChatRuntimeControls;
+  /** 输入框“/”指令带来的单轮语义（goal 或提示词指令）。 */
+  composerCommand?: ComposerTurnCommand;
   gatewayBridgeRequestOverride?: ActiveGatewayBridgeRequest | null;
   preserveComposerOnStart?: boolean;
   beforeRuntimeStart?: () => Promise<void>;

@@ -245,6 +245,9 @@ export function createGatewayChatCommandActions(options: GatewayChatCommandActio
           runtimeControls,
           baseMessageRef: sendOptions?.editMessageRef,
           queuePolicy: sendOptions?.queuePolicy ?? "auto",
+          goalAction: sendOptions?.goalAction,
+          goalText: sendOptions?.goalText,
+          promptCommand: sendOptions?.promptCommand,
         });
       },
     });

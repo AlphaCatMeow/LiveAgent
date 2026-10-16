@@ -367,6 +367,7 @@ macro_rules! app_invoke_handler {
             commands::gateway::gateway_chat_release_lease,
             commands::gateway::gateway_chat_queue_respond,
             commands::gateway::gateway_clarify_respond,
+            commands::gateway::gateway_composer_action_respond,
             commands::gateway::gateway_clarify_delta,
             commands::gateway::gateway_publish_chat_queue_event,
             commands::gateway::gateway_publish_settings_sync,

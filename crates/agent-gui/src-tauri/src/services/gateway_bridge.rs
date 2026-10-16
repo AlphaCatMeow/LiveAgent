@@ -185,7 +185,8 @@ pub async fn handle_cron_manage(
         }
         "occurrences" => {
             let query = parse_occurrence_query(&request.task_json)?;
-            let response = crate::services::automation::kbrain_occurrences::query(app, query).await?;
+            let response =
+                crate::services::automation::kbrain_occurrences::query(app, query).await?;
             serialize_cron_manage_result(&response)?
         }
         "validate" => {
@@ -916,6 +917,210 @@ async fn kbrain_provider_models(
         .get("models")
         .cloned()
         .unwrap_or_else(|| Value::Array(Vec::new())))
+}
+
+async fn ensure_kbrain_connection(app: &AppHandle) -> Result<KBrainBackendConnection, String> {
+    let backend = app
+        .try_state::<Arc<KBrainBackendState>>()
+        .ok_or_else(|| "K-brain backend state is unavailable".to_string())?;
+    tauri::async_runtime::spawn_blocking({
+        let backend = Arc::clone(backend.inner());
+        let app = app.clone();
+        move || backend.ensure_started(&app)
+    })
+    .await
+    .map_err(|error| format!("K-brain backend startup task failed: {error}"))?
+}
+
+fn prompt_workdir_query(workdir: &str) -> String {
+    let workdir = workdir.trim();
+    if workdir.is_empty() {
+        String::new()
+    } else {
+        format!("?workdir={}", urlencoding::encode(workdir))
+    }
+}
+
+/// 调 K-brain 的提示词接口并解析 JSON；非 2xx 时取 error/message 字段作为错误。
+async fn kbrain_prompt_request(
+    connection: &KBrainBackendConnection,
+    method: reqwest::Method,
+    path_and_query: &str,
+    body: Option<Value>,
+) -> Result<Value, String> {
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .map_err(|error| format!("create K-brain HTTP client failed: {error}"))?;
+    let mut request = client
+        .request(
+            method,
+            format!(
+                "{}{}",
+                connection.base_url.trim_end_matches('/'),
+                path_and_query
+            ),
+        )
+        .bearer_auth(&connection.token);
+    if let Some(body) = body {
+        request = request
+            .header("content-type", "application/json")
+            .json(&body);
+    }
+    let response = request
+        .send()
+        .await
+        .map_err(|error| format!("K-brain prompt request failed: {error}"))?;
+    let status = response.status();
+    let payload = response
+        .json::<Value>()
+        .await
+        .map_err(|error| format!("K-brain prompt response was invalid JSON: {error}"))?;
+    if !status.is_success() {
+        let message = payload
+            .get("error")
+            .and_then(Value::as_str)
+            .or_else(|| payload.get("message").and_then(Value::as_str))
+            .unwrap_or("K-brain prompt request failed");
+        return Err(format!("{message} (HTTP {status})"));
+    }
+    Ok(payload)
+}
+
+async fn kbrain_prompt_template_list(
+    connection: &KBrainBackendConnection,
+    workdir: &str,
+) -> Result<proto::PromptTemplateListResponse, String> {
+    let payload = kbrain_prompt_request(
+        connection,
+        reqwest::Method::GET,
+        &format!("/v1/prompts{}", prompt_workdir_query(workdir)),
+        None,
+    )
+    .await?;
+    let field = |file: &Value, key: &str| {
+        file.get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    let templates = payload
+        .get("files")
+        .and_then(Value::as_array)
+        .map(|files| {
+            files
+                .iter()
+                .filter(|file| !field(file, "name").trim().is_empty())
+                .map(|file| proto::PromptTemplateSummary {
+                    name: field(file, "name"),
+                    description: field(file, "description"),
+                    argument_hint: field(file, "argumentHint"),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(proto::PromptTemplateListResponse { templates })
+}
+
+async fn kbrain_prompt_template_expand(
+    connection: &KBrainBackendConnection,
+    request: &proto::PromptTemplateExpandRequest,
+) -> Result<proto::PromptTemplateExpandResponse, String> {
+    let name = request.name.trim();
+    if name.is_empty() {
+        return Err("prompt template name is required".to_string());
+    }
+    let payload = kbrain_prompt_request(
+        connection,
+        reqwest::Method::POST,
+        &format!(
+            "/v1/prompts/templates/{}/expand{}",
+            urlencoding::encode(name),
+            prompt_workdir_query(&request.workdir)
+        ),
+        Some(json!({ "text": request.text })),
+    )
+    .await?;
+    let text = |key: &str| {
+        payload
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    Ok(proto::PromptTemplateExpandResponse {
+        name: text("name"),
+        text: text("text"),
+    })
+}
+
+async fn kbrain_slash_commands(
+    connection: &KBrainBackendConnection,
+    workdir: &str,
+) -> Result<proto::SlashCommandListResponse, String> {
+    let payload = kbrain_prompt_request(
+        connection,
+        reqwest::Method::GET,
+        &format!("/v1/commands{}", prompt_workdir_query(workdir)),
+        None,
+    )
+    .await?;
+    let commands = payload
+        .get("commands")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let name = item.get("name").and_then(Value::as_str)?.trim().to_string();
+                    if name.is_empty() {
+                        return None;
+                    }
+                    let text = |key: &str| {
+                        item.get(key)
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_string()
+                    };
+                    Some(proto::SlashCommandSummary {
+                        name,
+                        description: text("description"),
+                        argument_hint: text("argument_hint"),
+                        kind: text("kind"),
+                        source: text("source"),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(proto::SlashCommandListResponse { commands })
+}
+
+/// WebUI 输入框“/”指令目录：桌面端内置动作 + K-brain 的提示词模板。
+pub async fn handle_slash_command_list(
+    app: AppHandle,
+    request: proto::SlashCommandListRequest,
+) -> Result<proto::SlashCommandListResponse, String> {
+    let connection = ensure_kbrain_connection(&app).await?;
+    kbrain_slash_commands(&connection, &request.workdir).await
+}
+
+/// WebUI 输入框“/”提示词指令：列出 K-brain 的 Markdown 提示词模板。
+pub async fn handle_prompt_template_list(
+    app: AppHandle,
+    request: proto::PromptTemplateListRequest,
+) -> Result<proto::PromptTemplateListResponse, String> {
+    let connection = ensure_kbrain_connection(&app).await?;
+    kbrain_prompt_template_list(&connection, &request.workdir).await
+}
+
+/// WebUI 输入框“/”提示词指令：由 K-brain 展开模板，结果回填输入框，不发送。
+pub async fn handle_prompt_template_expand(
+    app: AppHandle,
+    request: proto::PromptTemplateExpandRequest,
+) -> Result<proto::PromptTemplateExpandResponse, String> {
+    let connection = ensure_kbrain_connection(&app).await?;
+    kbrain_prompt_template_expand(&connection, &request).await
 }
 
 pub async fn handle_skill_files_list() -> Result<proto::SkillFilesListResponse, String> {
@@ -2144,9 +2349,10 @@ mod tests {
 
     use super::{
         decode_kbrain_terminal_response, flatten_history_messages_json,
-        flatten_history_messages_json_window, is_builtin_share_tool_name, kbrain_provider_models,
-        kbrain_terminal_request, parse_occurrence_query, parse_runs_limit, proto,
-        redact_builtin_tool_content_json, resolve_stored_provider_models_config,
+        flatten_history_messages_json_window, is_builtin_share_tool_name,
+        kbrain_prompt_template_expand, kbrain_prompt_template_list, kbrain_provider_models,
+        kbrain_terminal_request, parse_occurrence_query, parse_runs_limit, prompt_workdir_query,
+        proto, redact_builtin_tool_content_json, resolve_stored_provider_models_config,
         sanitize_provider_summaries, KBrainBackendConnection,
     };
     use crate::commands::chat_history::{
@@ -2174,6 +2380,170 @@ mod tests {
             created_at: 0,
             updated_at: 0,
         }
+    }
+
+    fn prompt_fixture_connection(address: std::net::SocketAddr) -> KBrainBackendConnection {
+        KBrainBackendConnection {
+            base_url: format!("http://{address}"),
+            token: "fixture-token".to_string(),
+            protocol_version: "kbrain.agent.v1".to_string(),
+            storage_id: "test-storage".into(),
+        }
+    }
+
+    /// 单次请求的本地 K-brain 替身：返回请求头与 JSON 正文，并回写给定响应。
+    async fn serve_one_prompt_request(
+        listener: tokio::net::TcpListener,
+        status: &'static str,
+        payload: &'static str,
+    ) -> (String, Option<Value>) {
+        let (mut socket, _) = listener.accept().await.expect("accept prompt request");
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 4096];
+        let header_end = loop {
+            let count = socket.read(&mut buffer).await.expect("read request");
+            assert!(count > 0, "fixture request ended before headers");
+            request.extend_from_slice(&buffer[..count]);
+            if let Some(index) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                break index + 4;
+            }
+        };
+        let headers = String::from_utf8_lossy(&request[..header_end]).into_owned();
+        let content_length = headers
+            .lines()
+            .find_map(|line| {
+                line.strip_prefix("Content-Length:")
+                    .or_else(|| line.strip_prefix("content-length:"))
+            })
+            .and_then(|value| value.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        while request.len() < header_end + content_length {
+            let count = socket.read(&mut buffer).await.expect("read request body");
+            assert!(count > 0, "fixture request ended before body");
+            request.extend_from_slice(&buffer[..count]);
+        }
+        let body = (content_length > 0).then(|| {
+            serde_json::from_slice(&request[header_end..header_end + content_length])
+                .expect("prompt request JSON")
+        });
+        let response = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            payload.len(),
+            payload
+        );
+        socket
+            .write_all(response.as_bytes())
+            .await
+            .expect("write fixture response");
+        (headers, body)
+    }
+
+    #[test]
+    fn prompt_workdir_query_is_omitted_when_blank_and_encoded_otherwise() {
+        assert_eq!(prompt_workdir_query("   "), "");
+        assert_eq!(
+            prompt_workdir_query(" C:\\work dir "),
+            "?workdir=C%3A%5Cwork%20dir"
+        );
+    }
+
+    #[tokio::test]
+    async fn prompt_template_list_maps_files_and_drops_unnamed_entries() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind local K-brain fixture");
+        let address = listener.local_addr().expect("fixture address");
+        let server = tokio::spawn(serve_one_prompt_request(
+            listener,
+            "200 OK",
+            r#"{"files":[{"name":"fix","description":"Fix an issue","argumentHint":"<issue>"},{"name":"  "},{"name":"bare"}]}"#,
+        ));
+        let response = kbrain_prompt_template_list(&prompt_fixture_connection(address), "/repo")
+            .await
+            .expect("prompt list");
+        let (headers, body) = server.await.expect("fixture task");
+        assert!(headers.starts_with("GET /v1/prompts?workdir=%2Frepo "));
+        assert!(
+            headers.contains("authorization: Bearer fixture-token")
+                || headers.contains("Authorization: Bearer fixture-token")
+        );
+        assert!(body.is_none());
+        let names: Vec<_> = response
+            .templates
+            .iter()
+            .map(|template| {
+                (
+                    template.name.as_str(),
+                    template.description.as_str(),
+                    template.argument_hint.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            names,
+            vec![("fix", "Fix an issue", "<issue>"), ("bare", "", "")]
+        );
+    }
+
+    #[tokio::test]
+    async fn prompt_template_expand_posts_raw_arguments_and_surfaces_errors() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind local K-brain fixture");
+        let address = listener.local_addr().expect("fixture address");
+        let server = tokio::spawn(serve_one_prompt_request(
+            listener,
+            "200 OK",
+            r#"{"name":"fix","text":"Fix issue 12"}"#,
+        ));
+        let response = kbrain_prompt_template_expand(
+            &prompt_fixture_connection(address),
+            &proto::PromptTemplateExpandRequest {
+                name: " fix ".to_string(),
+                text: "  12  ".to_string(),
+                workdir: String::new(),
+            },
+        )
+        .await
+        .expect("prompt expand");
+        let (headers, body) = server.await.expect("fixture task");
+        assert!(headers.starts_with("POST /v1/prompts/templates/fix/expand "));
+        // 参数原样转发，由 K-brain 按命令行规则切分。
+        assert_eq!(body, Some(json!({ "text": "  12  " })));
+        assert_eq!(response.name, "fix");
+        assert_eq!(response.text, "Fix issue 12");
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind local K-brain fixture");
+        let address = listener.local_addr().expect("fixture address");
+        let server = tokio::spawn(serve_one_prompt_request(
+            listener,
+            "404 Not Found",
+            r#"{"error":"prompt template not found"}"#,
+        ));
+        let error = kbrain_prompt_template_expand(
+            &prompt_fixture_connection(address),
+            &proto::PromptTemplateExpandRequest {
+                name: "missing".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect_err("missing template");
+        server.await.expect("fixture task");
+        assert!(error.starts_with("prompt template not found (HTTP 404"));
+
+        let blank = kbrain_prompt_template_expand(
+            &prompt_fixture_connection(address),
+            &proto::PromptTemplateExpandRequest {
+                name: "  ".to_string(),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect_err("blank name");
+        assert_eq!(blank, "prompt template name is required");
     }
 
     #[test]

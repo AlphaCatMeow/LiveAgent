@@ -17,6 +17,7 @@ import type {
   KBrainClientToolResult,
   KBrainContentBlock,
   KBrainEvent,
+  KBrainGoalState,
   KBrainHostedSearch,
   KBrainMessage,
   KBrainModelRef,
@@ -166,10 +167,35 @@ export type KBrainTurnParams = {
   options?: KBrainRunOptions;
   hook_policy?: "backend";
   hook_scope_id?: string;
+  /** prompt 是“/名称 参数”提示词指令，由 K-brain 展开。 */
+  promptCommand?: boolean;
+  /** 经 goal 接口开始本轮：set 设定新目标，resume 续上已暂停的目标。 */
+  goal?: { action: "set"; goal: string } | { action: "resume" };
+  /** 不发起新运行，挂接到后端按目标自动发起的这一轮（goal.updated 给出的请求标识）。 */
+  attachClientRequestId?: string;
+  onGoalUpdate?: (state: KBrainGoalState) => void;
 };
 
 const api = "kbrain.agent.v1" as AssistantMessage["api"];
 const maxReconnects = 3;
+// 后端在上一轮终止事件之后才发起目标续跑；按请求标识轮询，直到它被接受。
+const goalAttachPollMs = 150;
+const goalAttachTimeoutMs = 60_000;
+
+function waitMs(ms: number, signal: AbortSignal): Promise<void> {
+  throwIfAborted(signal);
+  return new Promise((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer);
+      reject(abortError());
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    }, ms);
+    signal.addEventListener("abort", abort, { once: true });
+  });
+}
 
 function usage(message?: KBrainMessage): AssistantMessage["usage"] {
   const value = message?.usage;
@@ -387,22 +413,44 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
   if (!kbrainSessionId) kbrainSessionId = await createSession();
   throwIfAborted(params.signal);
   const clientRequestId = params.clientRequestId ?? fallbackRequestId(params);
-  const startRun = () =>
-    client.startRun(
-      {
-        conversation_id: kbrainSessionId,
-        client_request_id: clientRequestId,
-        ...(params.turnId ? { turn_id: params.turnId } : {}),
-        prompt: params.prompt,
-        ...(promptContent.length ? { content: promptContent } : {}),
-        model,
-        ...(params.options ? { options: params.options } : {}),
-        ...(params.hook_policy ? { hook_policy: params.hook_policy } : {}),
-        ...(params.hook_scope_id ? { hook_scope_id: params.hook_scope_id } : {}),
-        ...(resumeMessageId ? { resume_message_id: resumeMessageId } : {}),
-      },
-      params.signal,
-    );
+  const attachRun = async () => {
+    const requestId = params.attachClientRequestId ?? "";
+    const deadline = Date.now() + goalAttachTimeoutMs;
+    for (;;) {
+      const found = await client.lookupRun(kbrainSessionId, requestId, params.signal);
+      if (found) return found;
+      if (Date.now() > deadline) throw new Error("K-brain did not start the next goal round");
+      await waitMs(goalAttachPollMs, params.signal);
+    }
+  };
+  const startRun = async () => {
+    if (params.attachClientRequestId) return attachRun();
+    const run = {
+      client_request_id: clientRequestId,
+      ...(params.turnId ? { turn_id: params.turnId } : {}),
+      prompt: params.prompt,
+      ...(promptContent.length ? { content: promptContent } : {}),
+      model,
+      ...(params.options ? { options: params.options } : {}),
+      ...(params.hook_policy ? { hook_policy: params.hook_policy } : {}),
+      ...(params.hook_scope_id ? { hook_scope_id: params.hook_scope_id } : {}),
+      ...(resumeMessageId ? { resume_message_id: resumeMessageId } : {}),
+      ...(params.promptCommand ? { prompt_command: true } : {}),
+    };
+    if (params.goal) {
+      const state = await client.postGoal(
+        kbrainSessionId,
+        params.goal.action === "set"
+          ? { action: "set", goal: params.goal.goal, run }
+          : { action: "resume", run },
+        params.signal,
+      );
+      params.onGoalUpdate?.(state);
+      if (!state.run) throw new Error("K-brain goal response has no run");
+      return state.run;
+    }
+    return client.startRun({ conversation_id: kbrainSessionId, ...run }, params.signal);
+  };
   let accepted: Awaited<ReturnType<typeof client.startRun>>;
   try {
     accepted = await startRun();
@@ -501,6 +549,11 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
       case "assistant.message.created":
         finalMessage = eventPayload<KBrainMessage>(event);
         break;
+      case "goal.updated": {
+        const state = eventPayload<KBrainGoalState>(event);
+        if (state?.conversation_id === kbrainSessionId) params.onGoalUpdate?.(state);
+        break;
+      }
       case "subagent.started":
       case "subagent.updated":
       case "subagent.completed":

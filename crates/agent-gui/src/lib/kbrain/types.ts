@@ -308,6 +308,49 @@ export type KBrainPromptRequest = {
   hook_policy?: "backend";
   hook_scope_id?: string;
   stop_requested?: boolean;
+  /** prompt 为“/名称 参数”形式的提示词指令；后端展开给模型，历史保留原文。 */
+  prompt_command?: boolean;
+};
+
+/** 会话目标；continuing 事件带上后端即将发起的下一轮请求标识。 */
+export type KBrainGoalState = {
+  version: typeof KBRAIN_PROTOCOL_VERSION;
+  conversation_id: string;
+  goal: string;
+  status: "none" | "active" | "continuing" | "met" | "paused" | "cleared";
+  round: number;
+  max_rounds: number;
+  reason?: string;
+  next_client_request_id?: string;
+  next_prompt?: string;
+  /** 目标设定或最近一次恢复的时间（RFC 3339）。 */
+  started_at?: string;
+  run?: KBrainRunAccepted;
+};
+
+export type KBrainGoalRequest =
+  | { action: "set"; goal: string; run: Omit<KBrainPromptRequest, "conversation_id"> }
+  | { action: "resume"; run: Omit<KBrainPromptRequest, "conversation_id"> }
+  | { action: "pause" }
+  | { action: "update"; goal: string }
+  | { action: "clear" };
+
+/** /loop：绑定到会话的定时提示词。interval 是输入框的写法（10m、2h、1d）。 */
+export type KBrainSessionLoop = {
+  id: string;
+  interval: string;
+  cron: string;
+  prompt: string;
+  enabled: boolean;
+};
+
+/** 桌面端“/”指令目录项：action 由客户端按名称处理，prompt 以 prompt_command 发送。 */
+export type KBrainSlashCommand = {
+  name: string;
+  description: string;
+  argument_hint?: string;
+  kind: "action" | "prompt";
+  source: "builtin" | "user" | "project" | string;
 };
 
 export type KBrainRunAccepted = {

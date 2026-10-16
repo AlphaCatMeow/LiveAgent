@@ -18,6 +18,7 @@ import {
 } from "react";
 import { PaneLoadingSkeleton } from "../../../components/app/PaneLoadingSkeleton";
 import { isKBrainBackendEnabled } from "../../../lib/host";
+import { KBrainGoalBarHost } from "../composer/KBrainGoalBarHost";
 import { ConversationStatsBarHost } from "../components/ConversationStatsBarHost";
 import { CurrentTaskProgress } from "../components/CurrentTaskProgress";
 import { DesktopCheckpointRewindProvider } from "../components/DesktopCheckpointRewindProvider";
@@ -286,6 +287,14 @@ const RegisteredConversationPaneHostContent = forwardRef<
               isSending={isSending}
               pendingUploadedFiles={snapshot.uploads}
               queuedTurns={queuedTurns}
+              goalBar={
+                <KBrainGoalBarHost
+                  key={`goal-${snapshot.conversationId}`}
+                  conversationId={snapshot.conversationId}
+                  commandHost={composer.commandHost}
+                  enabled={isKBrainBackendEnabled()}
+                />
+              }
               onStop={controller.stop}
               onManualCompactConfirm={controller.compact}
               manualCompactBlocked={isCompactionRunning}

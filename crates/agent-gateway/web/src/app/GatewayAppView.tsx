@@ -1,3 +1,4 @@
+import { parseModelValue } from "@liveagent/ui/lib/models/modelValue";
 import { ApplicationView } from "@liveagent/ui/application/ApplicationView";
 import { AppWorkbenchChrome } from "@liveagent/ui/application/AppWorkbenchChrome";
 import { AppErrorBoundary } from "@liveagent/ui/components/AppErrorBoundary";
@@ -132,6 +133,7 @@ import { HistorySwitchLoadingOverlay } from "./HistorySwitchLoadingOverlay";
 import { useWindowFileDropGuard } from "./hooks/useWindowFileDropGuard";
 import { GatewaySidebarContainer } from "./sidebar/GatewaySidebarContainer";
 import { UserMenu } from "./UserMenu";
+import { createWebComposerCommandHost } from "./webComposerCommandHost";
 import {
   GatewayConversationPaneHost,
   type GatewayConversationPaneHostContext,
@@ -833,6 +835,50 @@ export function GatewayAppView({
     [handleFileDrop],
   );
 
+  // 输入框“/”指令宿主：引用只随会话、工作目录和 /review 能力变化，
+  // 动作与状态读数经 ref 取最新值。/resume 递增请求键，由侧栏打开会话搜索。
+  const [conversationSearchRequestKey] = useState(0);
+  const composerCommandLatestRef = useRef({
+    handleManualCompact,
+    handleSelectModel,
+    modelOptions,
+    runtimeControls: chatRuntimeControlsForCurrentProvider,
+  });
+  composerCommandLatestRef.current = {
+    handleManualCompact,
+    handleSelectModel,
+    modelOptions,
+    runtimeControls: chatRuntimeControlsForCurrentProvider,
+  };
+  const composerCommandHost = useMemo(
+    () =>
+      createWebComposerCommandHost({
+        t: (key) => translate(key, settings.locale),
+        client: api ?? undefined,
+        getConversationId: () => {
+          const id = getDisplayedConversationId();
+          return isLocalDraftConversationId(id) ? undefined : id;
+        },
+        getWorkdir: () => displayedConversationWorkdir || undefined,
+        getRuntimeControls: () => composerCommandLatestRef.current.runtimeControls,
+        sendTurn: (text, command, runtimeControls) =>
+          sendChat(text, {
+            goalAction: command?.kind === "goal" ? command.action : undefined,
+            goalText:
+              command?.kind === "goal" && command.action === "set" ? command.goal : undefined,
+            promptCommand: command?.kind === "prompt" ? true : undefined,
+            runtimeControls,
+          }),
+        compact: () => composerCommandLatestRef.current.handleManualCompact(),
+        getModelOptions: () => composerCommandLatestRef.current.modelOptions,
+        selectModel: (value) => {
+          const selection = parseModelValue(value);
+          if (selection) composerCommandLatestRef.current.handleSelectModel(selection);
+        },
+      }),
+    [api, displayedConversationWorkdir, sendChat, settings.locale],
+  );
+
   const primaryConversationSurface: GatewayConversationPrimarySurface = {
     isSending: composerIsSending,
     // 上传态只归属目标会话:背景 Pane 的导入不在主 Pane 显示"上传中"。
@@ -871,6 +917,7 @@ export function GatewayAppView({
     onRemoveQueuedTurn: removeQueuedTurn,
     onManualCompactConfirm: handleManualCompact,
     manualCompactBlocked: manualCompactPending || composerCompactionBlocked,
+    commandHost: composerCommandHost,
     approvalBar,
     taskProgressBar: (
       <TaskProgressBar
@@ -1391,6 +1438,7 @@ export function GatewayAppView({
                 approvalConversationIds={approvalConversationIds}
                 transientRunningConversations={manualCompactTransientConversations}
                 currentConversationId={displayedConversationId}
+                conversationSearchRequestKey={conversationSearchRequestKey}
                 isOpen={sidebarOpen}
                 fontScale={settings.customSettings.fontScale.sidebar}
                 activeView={activeView}
@@ -1787,6 +1835,7 @@ export function GatewayAppView({
                                   mentionableConversations={mentionableConversations}
                                   searchMentionableConversations={searchMentionableConversations}
                                   mentionApps={mentionApps}
+                                  commandHost={composerCommandHost}
                                   executionMode={settings.system.executionMode}
                                   hasModels={modelOptions.length > 0}
                                   currentModelLabel={currentModelLabel}

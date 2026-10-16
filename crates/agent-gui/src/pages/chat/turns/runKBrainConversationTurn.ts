@@ -1,4 +1,5 @@
 import type { AssistantMessage, ToolCall, ToolResultMessage } from "@liveagent/app/lib/agentTypes";
+import type { ComposerTurnCommand } from "@liveagent/ui/lib/chat/composerCommands";
 import { appendMessagesToConversation } from "../../../lib/chat/conversation/conversationState";
 import { buildConversationStateFromWindow } from "../../../lib/chat/history/chatHistory";
 import {
@@ -15,6 +16,7 @@ import { getKBrainHistoryWindow } from "../../../lib/kbrain/history";
 import { canonicalKBrainToolPolicies } from "../../../lib/kbrain/toolPolicies";
 import { runKBrainTurn } from "../../../lib/kbrain/turn";
 import type {
+  KBrainGoalState,
   KBrainQuestionAnswer,
   KBrainQuestionRequest,
   KBrainRunOptions,
@@ -62,8 +64,25 @@ function canonicalRunOptions(params: Params, uploadsRoot?: string): KBrainRunOpt
   };
 }
 
+function turnCommandParams(
+  command: ComposerTurnCommand | undefined,
+  attachClientRequestId: string | undefined,
+) {
+  if (attachClientRequestId) return { attachClientRequestId };
+  if (command?.kind === "goal") {
+    return {
+      goal:
+        command.action === "set"
+          ? { action: "set" as const, goal: command.goal }
+          : { action: "resume" as const },
+    };
+  }
+  if (command?.kind === "prompt") return { promptCommand: true };
+  return {};
+}
+
 export async function runKBrainConversationTurn(params: Params): Promise<void> {
-  const round = 1;
+  let round = 1;
   const { transcriptStore, gatewayBridgeEvents, hookLifecycle, cancellation } = params;
   const context = params.buildPreparedContext(params.getNextConversationState(), undefined, {
     includeUploadedFilesMetadata: true,
@@ -149,162 +168,207 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
     } else projectToolResult(call, result);
   };
   hookLifecycle.startAgent();
-  hookLifecycle.startTurn(round);
+  const command = "composerCommand" in params ? params.composerCommand : undefined;
+  // 目标续跑：后端在每轮终止前用 goal.updated 给出下一轮的请求标识，这里挂接上去，
+  // 直到目标达成、暂停或用户停止。
+  // 回调里写入、轮次结束后读取；经函数读取，避免控制流把它收窄成初始值。
+  let latestGoalState: KBrainGoalState | undefined;
+  const readGoalState = () => latestGoalState;
+  let attachClientRequestId: string | undefined;
   try {
     const uploadsRoot = await resolveUploadStagingRoot();
-    const assistant = await runKBrainTurn({
-      conversationId: params.conversationId,
-      sessionId: params.sessionId,
-      clientRequestId:
-        params.clientRequestId?.trim() || params.trajectoryMessageId || crypto.randomUUID(),
-      turnId: user && "id" in user && typeof user.id === "string" ? user.id : undefined,
-      cwd: params.conversationCwd,
-      model: {
-        provider: params.selectedModel.customProviderId || String(params.providerId),
-        model: params.model,
-      },
-      prompt,
-      context,
-      options: canonicalRunOptions(params, uploadsRoot),
-      signal: cancellation.userStop.signal,
-      hook_policy: "backend",
-      hook_scope_id: params.conversationId,
-      onTextDelta: (delta) => {
-        update((target) => appendTextDeltaToRound(collapseThinking(target), delta));
-        gatewayBridgeEvents.queueToken(delta, { round });
-      },
-      onThinkingDelta: (delta) => {
-        update((target) => appendThinkingDeltaToRound(target, delta));
-        gatewayBridgeEvents.queueEvent({
-          type: "thinking",
-          text: delta,
-          round,
-          conversation_id: params.conversationId,
-        });
-      },
-      onHostedSearch: (search) => {
-        update((target) => upsertHostedSearchToRound(target, search));
-      },
-      onToolCall,
-      onToolResult,
-      onStatus: status,
-      onQuestionRequest: async (
-        request: KBrainQuestionRequest,
-        signal?: AbortSignal,
-      ): Promise<KBrainQuestionAnswer[]> => {
-        const answers = await requestBackendQuestion({
-          toolCallId: request.tool_call_id,
-          conversationId: params.conversationId,
-          questions: request.questions,
-          deadlineAt: request.deadline_at,
-          signal,
-        });
-        return answers.map((answer) => ({
-          question_id: answer.questionId,
-          selected_label: answer.selectedLabel,
-          ...(answer.custom ? { custom: true } : {}),
-        }));
-      },
-      onPermissionRequest: async (request) => {
-        const settlement = await requestToolApproval({
-          toolCallId: request.permission_id,
-          toolName: request.tool,
-          summary: [request.command, request.description].filter(Boolean).join("\n\n"),
-          conversationId: params.conversationId,
-          signal: approvalController.signal,
-        });
-        if (settlement.kind !== "decided" || settlement.decision === "deny") return "reject";
-        return settlement.decision === "approve_session" ? "allow_always" : "allow_once";
-      },
-      onSubagent: (subagent) => {
-        const id = `kbrain-subagent:${subagent.id}`;
-        const call: ToolCall = {
-          type: "toolCall",
-          id,
-          name: "subagent",
-          arguments: {
-            id: subagent.id,
-            description: subagent.description,
-            status: subagent.status,
-            model: subagent.model,
-          },
-        };
-        onToolCall(call);
-        if (["done", "completed", "error", "failed", "cancelled"].includes(subagent.status)) {
-          onToolResult(call, {
-            role: "toolResult",
-            toolCallId: id,
-            toolName: call.name,
-            content: [
-              {
-                type: "text",
-                text: subagent.error || subagent.report || subagent.status,
-              },
-            ],
-            isError: !["done", "completed"].includes(subagent.status),
-            timestamp: Date.now(),
+    for (;;) {
+      hookLifecycle.startTurn(round);
+      latestGoalState = undefined;
+      const assistant = await runKBrainTurn({
+        conversationId: params.conversationId,
+        sessionId: params.sessionId,
+        clientRequestId:
+          attachClientRequestId ||
+          params.clientRequestId?.trim() ||
+          params.trajectoryMessageId ||
+          crypto.randomUUID(),
+        turnId:
+          !attachClientRequestId && user && "id" in user && typeof user.id === "string"
+            ? user.id
+            : undefined,
+        ...turnCommandParams(command, attachClientRequestId),
+        onGoalUpdate: (state) => {
+          latestGoalState = state;
+          if ("onGoalUpdate" in params) params.onGoalUpdate?.(state);
+        },
+        cwd: params.conversationCwd,
+        model: {
+          provider: params.selectedModel.customProviderId || String(params.providerId),
+          model: params.model,
+        },
+        prompt,
+        context,
+        options: canonicalRunOptions(params, uploadsRoot),
+        signal: cancellation.userStop.signal,
+        hook_policy: "backend",
+        hook_scope_id: params.conversationId,
+        onTextDelta: (delta) => {
+          update((target) => appendTextDeltaToRound(collapseThinking(target), delta));
+          gatewayBridgeEvents.queueToken(delta, { round });
+        },
+        onThinkingDelta: (delta) => {
+          update((target) => appendThinkingDeltaToRound(target, delta));
+          gatewayBridgeEvents.queueEvent({
+            type: "thinking",
+            text: delta,
+            round,
+            conversation_id: params.conversationId,
           });
-        }
-      },
-    });
-    const assistantCallIds = new Set(
-      assistant.content.filter((block) => block.type === "toolCall").map((block) => block.id),
-    );
-    const projected: AssistantMessage = {
-      ...assistant,
-      content: [
-        ...assistant.content,
-        ...Array.from(calls.values()).filter((call) => !assistantCallIds.has(call.id)),
-      ],
-    };
-    update((target) => ({
-      ...collapseThinking(target),
-      runningToolCallIds: [],
-      meta: {
+        },
+        onHostedSearch: (search) => {
+          update((target) => upsertHostedSearchToRound(target, search));
+        },
+        onToolCall,
+        onToolResult,
+        onStatus: status,
+        onQuestionRequest: async (
+          request: KBrainQuestionRequest,
+          signal?: AbortSignal,
+        ): Promise<KBrainQuestionAnswer[]> => {
+          const answers = await requestBackendQuestion({
+            toolCallId: request.tool_call_id,
+            conversationId: params.conversationId,
+            questions: request.questions,
+            deadlineAt: request.deadline_at,
+            signal,
+          });
+          return answers.map((answer) => ({
+            question_id: answer.questionId,
+            selected_label: answer.selectedLabel,
+            ...(answer.custom ? { custom: true } : {}),
+          }));
+        },
+        onPermissionRequest: async (request) => {
+          const settlement = await requestToolApproval({
+            toolCallId: request.permission_id,
+            toolName: request.tool,
+            summary: [request.command, request.description].filter(Boolean).join("\n\n"),
+            conversationId: params.conversationId,
+            signal: approvalController.signal,
+          });
+          if (settlement.kind !== "decided" || settlement.decision === "deny") return "reject";
+          return settlement.decision === "approve_session" ? "allow_always" : "allow_once";
+        },
+        onSubagent: (subagent) => {
+          const id = `kbrain-subagent:${subagent.id}`;
+          const call: ToolCall = {
+            type: "toolCall",
+            id,
+            name: "subagent",
+            arguments: {
+              id: subagent.id,
+              description: subagent.description,
+              status: subagent.status,
+              model: subagent.model,
+            },
+          };
+          onToolCall(call);
+          if (["done", "completed", "error", "failed", "cancelled"].includes(subagent.status)) {
+            onToolResult(call, {
+              role: "toolResult",
+              toolCallId: id,
+              toolName: call.name,
+              content: [
+                {
+                  type: "text",
+                  text: subagent.error || subagent.report || subagent.status,
+                },
+              ],
+              isError: !["done", "completed"].includes(subagent.status),
+              timestamp: Date.now(),
+            });
+          }
+        },
+      });
+      const assistantCallIds = new Set(
+        assistant.content.filter((block) => block.type === "toolCall").map((block) => block.id),
+      );
+      const projected: AssistantMessage = {
+        ...assistant,
+        content: [
+          ...assistant.content,
+          ...Array.from(calls.values()).filter((call) => !assistantCallIds.has(call.id)),
+        ],
+      };
+      update((target) => ({
+        ...collapseThinking(target),
+        runningToolCallIds: [],
+        meta: {
+          provider: projected.provider,
+          model: projected.model,
+          api: projected.api,
+          stopReason: projected.stopReason,
+          usage: projected.usage,
+        },
+      }));
+      gatewayBridgeEvents.queueToken("", {
+        round,
         provider: projected.provider,
         model: projected.model,
         api: projected.api,
         stopReason: projected.stopReason,
         usage: projected.usage,
-      },
-    }));
-    gatewayBridgeEvents.queueToken("", {
-      round,
-      provider: projected.provider,
-      model: projected.model,
-      api: projected.api,
-      stopReason: projected.stopReason,
-      usage: projected.usage,
-    });
-    if (projected.errorMessage) gatewayBridgeEvents.emitError(projected.errorMessage);
-    let state = appendMessagesToConversation(params.getNextConversationState(), [
-      projected,
-      ...results.values(),
-    ]);
-    if (projected.stopReason !== "error" && projected.stopReason !== "aborted") {
-      try {
-        const history = await getKBrainHistoryWindow(params.conversationId);
-        state = buildConversationStateFromWindow(history);
-      } catch (error) {
-        gatewayBridgeEvents.emitError(
-          `Reply completed, but history refresh failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
+      });
+      if (projected.errorMessage) gatewayBridgeEvents.emitError(projected.errorMessage);
+      let state = appendMessagesToConversation(params.getNextConversationState(), [
+        projected,
+        ...results.values(),
+      ]);
+      if (projected.stopReason !== "error" && projected.stopReason !== "aborted") {
+        try {
+          const history = await getKBrainHistoryWindow(params.conversationId);
+          state = buildConversationStateFromWindow(history);
+        } catch (error) {
+          gatewayBridgeEvents.emitError(
+            `Reply completed, but history refresh failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
       }
+      params.applyConversationState(state);
+      const goalState = readGoalState();
+      const nextRound =
+        goalState?.status === "continuing" &&
+        projected.stopReason === "stop" &&
+        !cancellation.userStop.signal.aborted
+          ? goalState
+          : undefined;
+      if (nextRound?.next_client_request_id) {
+        // 把刚完成的一轮落进转录区，并先显示后端为下一轮写入的用户消息。
+        params.settleLiveTranscript(transcriptStore);
+        params.applyConversationState(
+          appendMessagesToConversation(state, [
+            { role: "user", content: nextRound.next_prompt ?? "", timestamp: Date.now() },
+          ]),
+        );
+        hookLifecycle.ensureMessageEnded();
+        hookLifecycle.endTurn(round);
+        round += 1;
+        results.clear();
+        calls.clear();
+        attachClientRequestId = nextRound.next_client_request_id;
+        continue;
+      }
+      params.freezeGatewayFinalProjection(state, true);
+      params.settleLiveTranscript(transcriptStore);
+      await params.persistConversationWithHistorySync({
+        conversationId: params.conversationId,
+        sessionId: params.sessionId,
+        providerId: projected.provider,
+        model: projected.model,
+        cwd: "historyCwd" in params ? params.historyCwd : params.conversationCwd,
+        state,
+        fallbackTitle: params.fallbackTitle,
+        createdAt: params.createdAt,
+        titlePromise: params.titlePromise,
+      });
+      break;
     }
-    params.applyConversationState(state);
-    params.freezeGatewayFinalProjection(state, true);
-    params.settleLiveTranscript(transcriptStore);
-    await params.persistConversationWithHistorySync({
-      conversationId: params.conversationId,
-      sessionId: params.sessionId,
-      providerId: projected.provider,
-      model: projected.model,
-      cwd: "historyCwd" in params ? params.historyCwd : params.conversationCwd,
-      state,
-      fallbackTitle: params.fallbackTitle,
-      createdAt: params.createdAt,
-      titlePromise: params.titlePromise,
-    });
   } finally {
     approvalController.abort();
     cancellation.userStop.signal.removeEventListener("abort", cancelApprovals);

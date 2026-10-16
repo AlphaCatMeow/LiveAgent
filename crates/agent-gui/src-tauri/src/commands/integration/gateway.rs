@@ -7,6 +7,7 @@ use crate::services::gateway::{
     GatewayChatCheckpointCommitResult, GatewayChatCheckpointInput, GatewayChatClaimedRequest,
     GatewayChatIngressAcceptResult, GatewayChatIngressBatchInput, GatewayChatQueueEventInput,
     GatewayChatQueueResponseInput, GatewayClarifyDeltaInput, GatewayClarifyRespondInput,
+    GatewayComposerActionRespondInput,
     GatewayController, GatewayStatusSnapshot,
 };
 use crate::services::provider_usage::{ProviderUsageResult, ProviderUsageService};
@@ -247,6 +248,15 @@ pub fn gateway_clarify_respond(
     gateway_controller: tauri::State<'_, Arc<GatewayController>>,
 ) -> Result<(), String> {
     gateway_controller.respond_clarify_turn(input)
+}
+
+/// WebUI“/”指令非运行动作（/goal clear、/loop）的结果回传。
+#[tauri::command(rename_all = "snake_case")]
+pub fn gateway_composer_action_respond(
+    input: GatewayComposerActionRespondInput,
+    gateway_controller: tauri::State<'_, Arc<GatewayController>>,
+) -> Result<(), String> {
+    gateway_controller.respond_composer_action(input)
 }
 
 #[tauri::command(rename_all = "snake_case")]

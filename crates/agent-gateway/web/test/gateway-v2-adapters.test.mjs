@@ -780,3 +780,68 @@ test("Planning v2 preserves CAS and taxonomy payloads and identifies the invalid
   const changed = decodeServerFrame(roundtrip(serverFrame({agent_id:"agent-1",planning_changed:{seq:"9"}})),{agentOnline:true});
   assert.equal(changed.type,"planning.changed");assert.equal(changed.agentId,"agent-1");assert.equal(changed.payload.seq,9);
 });
+
+test("prompt template requests carry workdir, name and raw arguments to the desktop", () => {
+  const list = decodeClientFrame(
+    encodeRequestFrame("prompts-1", "prompts.list", { workdir: " /repo " }, "agent-1"),
+  );
+  assert.equal(list.payload.value.payload.case, "promptTemplateList");
+  assert.equal(list.payload.value.payload.value.workdir, "/repo");
+
+  const expand = decodeClientFrame(
+    encodeRequestFrame(
+      "prompts-2",
+      "prompts.expand",
+      { name: " fix ", text: "  issue 12  ", workdir: "/repo" },
+      "agent-1",
+    ),
+  );
+  assert.equal(expand.payload.value.payload.case, "promptTemplateExpand");
+  assert.deepEqual(
+    {
+      name: expand.payload.value.payload.value.name,
+      text: expand.payload.value.payload.value.text,
+      workdir: expand.payload.value.payload.value.workdir,
+    },
+    // 参数原样转发，由 K-brain 按命令行规则切分。
+    { name: "fix", text: "  issue 12  ", workdir: "/repo" },
+  );
+});
+
+test("prompt template responses decode into list and expanded text", () => {
+  const listed = decodeServerFrame(
+    roundtrip(
+      serverFrame({
+        request_id: "prompts-1",
+        agent_id: "agent-1",
+        agent_response: {
+          request_id: "prompts-1",
+          prompt_template_list_resp: {
+            templates: [{ name: "fix", description: "Fix an issue", argument_hint: "<issue>" }],
+          },
+        },
+      }),
+    ),
+    { agentOnline: true },
+  );
+  assert.equal(listed.kind, "response");
+  assert.deepEqual(listed.payload, {
+    templates: [{ name: "fix", description: "Fix an issue", argumentHint: "<issue>" }],
+  });
+
+  const expanded = decodeServerFrame(
+    roundtrip(
+      serverFrame({
+        request_id: "prompts-2",
+        agent_id: "agent-1",
+        agent_response: {
+          request_id: "prompts-2",
+          prompt_template_expand_resp: { name: "fix", text: "Fix issue 12" },
+        },
+      }),
+    ),
+    { agentOnline: true },
+  );
+  assert.equal(expanded.kind, "response");
+  assert.deepEqual(expanded.payload, { name: "fix", text: "Fix issue 12" });
+});

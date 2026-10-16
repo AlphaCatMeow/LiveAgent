@@ -73,6 +73,11 @@ import {
   ManagedProcessRequestSchema,
   MemoryManageRequestSchema,
   PlanningRequestSchema,
+  GoalManageRequestSchema,
+  LoopManageRequestSchema,
+  PromptTemplateExpandRequestSchema,
+  PromptTemplateListRequestSchema,
+  SlashCommandListRequestSchema,
   ProviderCustomHeaderSchema,
   ProviderCustomHeadersSchema,
   ProviderListRequestSchema,
@@ -372,6 +377,9 @@ function buildChatCommand(body: J) {
       clientRequestId: str(inner.client_request_id),
       runtimeControls: buildRuntimeControls(inner.runtime_controls),
       queuePolicy: str(inner.queue_policy),
+      goalAction: str(inner.goal_action),
+      goalText: str(inner.goal_text),
+      promptCommand: bool(inner.prompt_command),
     }),
     baseMessageRef: inner.base_message_ref
       ? buildMessageRef(rec(inner.base_message_ref))
@@ -698,6 +706,47 @@ function agentRequestPayload(type: string, body: J): GatewayEnvelope["payload"] 
       };
     case "apps.installed.list":
       return { case: "installedAppsList", value: create(InstalledAppsListRequestSchema, {}) };
+    // 输入框“/”提示词指令：桌面端转调 K-brain 的提示词模板接口。
+    case "commands.list":
+      return {
+        case: "slashCommandList",
+        value: create(SlashCommandListRequestSchema, { workdir: trimStr(body.workdir) }),
+      };
+    case "goal.manage":
+      return {
+        case: "goalManage",
+        value: create(GoalManageRequestSchema, {
+          conversationId: trimStr(body.conversationId),
+          action: trimStr(body.action),
+        }),
+      };
+    case "loops.manage":
+      return {
+        case: "loopManage",
+        value: create(LoopManageRequestSchema, {
+          conversationId: trimStr(body.conversationId),
+          action: trimStr(body.action),
+          cron: trimStr(body.cron),
+          interval: trimStr(body.interval),
+          prompt: typeof body.prompt === "string" ? body.prompt : "",
+          reasoning: trimStr(body.reasoning),
+          loopId: trimStr(body.loopId),
+        }),
+      };
+    case "prompts.list":
+      return {
+        case: "promptTemplateList",
+        value: create(PromptTemplateListRequestSchema, { workdir: trimStr(body.workdir) }),
+      };
+    case "prompts.expand":
+      return {
+        case: "promptTemplateExpand",
+        value: create(PromptTemplateExpandRequestSchema, {
+          name: trimStr(body.name),
+          text: typeof body.text === "string" ? body.text : "",
+          workdir: trimStr(body.workdir),
+        }),
+      };
     // Computer Use 设置页的只读引导状态。action 与桌面端的两条 Tauri 命令同名，
     // 写动作（安装 / 授权）不在这条通道上——见 proto 的 CuaDriverRequest 注释。
     case "cua.driver.probe":
@@ -1312,6 +1361,45 @@ function decodeAgentResponse(envelope: AgentEnvelope, options: { agentOnline: bo
           iconDataUrl: app.iconDataUrl,
         })),
       };
+    case "slashCommandListResp":
+      return {
+        commands: payload.value.commands.map((command) => ({
+          name: command.name,
+          description: command.description,
+          argumentHint: command.argumentHint,
+          kind: command.kind,
+          source: command.source,
+        })),
+      };
+    case "goalManageResp":
+      return {
+        conversationId: payload.value.conversationId,
+        goal: payload.value.goal,
+        status: payload.value.status,
+        round: payload.value.round,
+        maxRounds: payload.value.maxRounds,
+        reason: payload.value.reason,
+      };
+    case "loopManageResp":
+      return {
+        loops: payload.value.loops.map((loop) => ({
+          id: loop.id,
+          interval: loop.interval,
+          cron: loop.cron,
+          prompt: loop.prompt,
+          enabled: loop.enabled,
+        })),
+      };
+    case "promptTemplateListResp":
+      return {
+        templates: payload.value.templates.map((template) => ({
+          name: template.name,
+          description: template.description,
+          argumentHint: template.argumentHint,
+        })),
+      };
+    case "promptTemplateExpandResp":
+      return { name: payload.value.name, text: payload.value.text };
     case "uploadedImagePreviewResp":
       return { mimeType: payload.value.mimeType, data: payload.value.data };
     case "memoryManageResp":

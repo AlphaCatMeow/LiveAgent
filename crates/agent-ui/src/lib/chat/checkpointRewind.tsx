@@ -142,6 +142,22 @@ type CheckpointRewindContextValue = {
 
 const CheckpointRewindContext = createContext<CheckpointRewindContextValue | null>(null);
 
+/**
+ * 输入框“/rewind”的结果：started 表示已进入与行内按钮相同的预览确认流程；
+ * none 表示本会话没有可回退的检查点；busy 表示发送中、列表加载中或已有回退在跑。
+ */
+export type CheckpointRewindLatestOutcome = "started" | "none" | "busy";
+
+// 输入框与转录区不在同一棵 Provider 子树里，按会话 id 登记“回退最近一轮”。
+const latestRewinders = new Map<string, () => CheckpointRewindLatestOutcome>();
+
+/** 回退指定会话最近一轮的文件改动；该会话没有挂载中的 Provider 时返回 none。 */
+export function requestCheckpointRewindLatest(
+  conversationId: string,
+): CheckpointRewindLatestOutcome {
+  return latestRewinders.get(conversationId)?.() ?? "none";
+}
+
 // 仅覆盖 Write/Edit/Delete 三个文件工具的改动;Bash 等 shell 写入不在检查点内。
 // 回退点 = 用户消息:turnId 就是用户消息 ID,行内按钮经 useCheckpointRewindAction
 // 按 messageId 命中本轮(对齐 Claude Code 的每消息回退)。
@@ -371,6 +387,30 @@ export function CheckpointRewindProvider(props: {
     },
     [client, confirm, conversationId, loadTurns, zh],
   );
+
+  const latestRef = useRef({ turns, loading });
+  latestRef.current = { turns, loading };
+  useEffect(() => {
+    if (!conversationId) return;
+    const rewindLatest = (): CheckpointRewindLatestOutcome => {
+      const latest = latestRef.current;
+      if (disabledRef.current || latest.loading || busyTurnRef.current !== null) return "busy";
+      const turn = latest.turns.reduce<CheckpointTurnSummary | undefined>(
+        (best, item) => (!best || item.turnSeq > best.turnSeq ? item : best),
+        undefined,
+      );
+      if (!turn) return "none";
+      void rewind(turn);
+      return "started";
+    };
+    latestRewinders.set(conversationId, rewindLatest);
+    return () => {
+      // 同一会话可能被另一 Pane 的 Provider 接管，只清理自己登记的那一项。
+      if (latestRewinders.get(conversationId) === rewindLatest) {
+        latestRewinders.delete(conversationId);
+      }
+    };
+  }, [conversationId, rewind]);
 
   const value = useMemo<CheckpointRewindContextValue>(
     () => ({

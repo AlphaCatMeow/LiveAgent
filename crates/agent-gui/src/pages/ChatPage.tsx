@@ -38,6 +38,11 @@ import { isWorkspacePreviewPath } from "@liveagent/ui/components/workspace-edito
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { getAutomationState, useAutomation } from "@liveagent/ui/lib/automation/index";
 import { formatCheckpointRewoundNotification } from "@liveagent/ui/lib/chat/checkpointRewind";
+import type {
+  ComposerCommandHost,
+  ComposerTurnCommand,
+} from "@liveagent/ui/lib/chat/composerCommands";
+import type { ChatRuntimeControls } from "@liveagent/ui/lib/settings/types";
 import { searchMentionConversations } from "@liveagent/ui/lib/chat/conversationSearch";
 import { useChangedFilesActions } from "@liveagent/ui/lib/chat/useChangedFilesActions";
 import { useChatFileLinkNavigation } from "@liveagent/ui/lib/chat/useChatFileLinkNavigation";
@@ -146,6 +151,9 @@ import { tauriGitClient } from "../lib/git/tauriGitClient";
 import { isKBrainBackendEnabled, isKBrainBrowserHost } from "../lib/host";
 import { useKBrainCatalogSettings } from "../lib/kbrain/catalog";
 import { subscribeHistoryImported } from "../lib/kbrain/manualHistoryImport";
+import { createKBrainClient } from "../lib/kbrain/client";
+import { publishGoalState } from "../lib/kbrain/goalStore";
+import { getKBrainSessionId } from "../lib/kbrain/mapping";
 import { createProviderRuntimeConfig, toModelValue } from "../lib/providers/llm";
 import {
   applyConversationThinking,
@@ -161,6 +169,7 @@ import {
   parseSelectedModelJson,
   resolveEffectiveTheme,
   resolveWorkspaceResources,
+  type SelectedModel,
   updateExecutionModeFromChatSelection,
   updateRightDockFileTreeState,
   updateSshProjectHostIds,
@@ -190,6 +199,8 @@ import { createTauriTunnelClient } from "../lib/tunnels/tauriTunnelClient";
 import { tauriWorkspaceActivityClient } from "../lib/workspace-activity/tauriWorkspaceActivityClient";
 import type { ChatPageProps } from "./chat/chatPageTypes";
 import { asErrorMessage } from "./chat/chatPageUtils";
+import { createGuiComposerCommandHost } from "./chat/composer/guiComposerCommandHost";
+import { useKBrainComposerSkills } from "./chat/composer/useKBrainComposerSkills";
 import { useComposerHistoryPrompts } from "./chat/composer/useComposerHistoryPrompts";
 import type {
   ConversationControllerActions,
@@ -755,11 +766,17 @@ function ChatPageContent(props: ChatPageProps) {
     () => (skillsEnabled ? activeWorkspaceResources.skillNames : []),
     [activeWorkspaceResources.skillNames, skillsEnabled],
   );
-  const { enabledComposerSkills, codeReviewSkill } = useComposerSkillSelection(
+  const { enabledComposerSkills: localComposerSkills, codeReviewSkill } = useComposerSkillSelection(
     availableSkills,
     selectedSkillNames,
     skillsEnabled,
   );
+  // K-brain 模式关掉了前端的本地技能发现；输入框改从 K-brain 读取已启用的技能。
+  const kBrainComposerSkills = useKBrainComposerSkills(
+    kBrainBackendEnabled && isAgentMode,
+    displayedConversationWorkdir,
+  );
+  const enabledComposerSkills = kBrainBackendEnabled ? kBrainComposerSkills : localComposerSkills;
   const mentionApps = useMentionApps(
     activeWorkspaceResources.mcpServers,
     isAgentMode && !kBrainBackendEnabled,
@@ -1813,6 +1830,52 @@ function ChatPageContent(props: ChatPageProps) {
   // （handleSelectConversation 定义之后）；这里先备好 ref 镜像。
   const handleNewConversationRef = useRef(handleNewConversation);
   handleNewConversationRef.current = handleNewConversation;
+
+  // ---- 输入框“/”指令宿主 ----
+  // 目录、目标和 /loop 都由 K-brain 提供；这里只把“发送一轮”接到 send。宿主引用
+  // 只随会话与工作目录变化（输入框按引用重新拉指令目录），读数经 ref 取最新值。
+  // reloadConversation 每次渲染都是新引用；宿主经 ref 调用，保持宿主引用稳定。
+  const reloadConversationLatestRef = useRef(reloadConversation);
+  reloadConversationLatestRef.current = reloadConversation;
+  const composerCommandLatestRef = useRef({
+    handleSelectModel,
+    modelOptions,
+    runtimeControls: settings.chatRuntimeControls,
+  });
+  composerCommandLatestRef.current = {
+    handleSelectModel,
+    modelOptions,
+    runtimeControls: settings.chatRuntimeControls,
+  };
+  const kBrainClient = useMemo(
+    () => (kBrainBackendEnabled ? createKBrainClient() : undefined),
+    [kBrainBackendEnabled],
+  );
+  const composerCommandHost = useMemo<ComposerCommandHost>(
+    () =>
+      createGuiComposerCommandHost({
+        t,
+        client: kBrainClient,
+        getKBrainSessionId: () => getKBrainSessionId(currentConversationId),
+        onGoalState: (state) => publishGoalState(currentConversationId, state),
+        reloadConversation: () => reloadConversationLatestRef.current(currentConversationId),
+        getWorkdir: () => displayedConversationWorkdir,
+        getRuntimeControls: () => composerCommandLatestRef.current.runtimeControls,
+        sendTurn: (text, command, options) =>
+          sendActionRef.current({
+            textOverride: text,
+            composerCommand: command,
+            ...(options?.runtimeControls
+              ? { runtimeControlsOverride: options.runtimeControls }
+              : {}),
+          }),
+        compact: () => manualCompactActionRef.current({ conversationId: currentConversationId }),
+        getModelOptions: () => composerCommandLatestRef.current.modelOptions,
+        selectModel: (selection) => composerCommandLatestRef.current.handleSelectModel(selection),
+      }),
+    [currentConversationId, displayedConversationWorkdir, kBrainClient, t],
+  );
+
   const activeViewRef = useRef(activeView);
   activeViewRef.current = activeView;
   const isDraftConversationRef = useRef(isDraftConversation);
@@ -2444,9 +2507,11 @@ function ChatPageContent(props: ChatPageProps) {
         onMoveQueuedTurnUp: moveQueuedTurnUp,
         onEditQueuedTurn: editQueuedTurn,
         onRemoveQueuedTurn: removeQueuedTurn,
+        commandHost: composerCommandHost,
       },
     }),
     [
+      composerCommandHost,
       currentConversationWorkspaceRoot,
       currentModelContextWindow,
       currentModelLabel,
@@ -3400,6 +3465,25 @@ function ChatPageContent(props: ChatPageProps) {
     },
     [conversationControllerActions, conversationRuntimeRegistry],
   );
+  type BackgroundComposerCommandEntry = {
+    host: ComposerCommandHost;
+    latest: {
+      modelLabel: string;
+      contextWindow: number | undefined;
+      contextUsageTokensSource: ReturnType<typeof createContextUsageTokensSource>;
+      workdir: string | undefined;
+      selectModel: (selection: SelectedModel) => void;
+      /** 背景 Pane 的“/”指令发送，按该 Pane 的会话路由。 */
+      sendTurn: (
+        text: string,
+        command?: ComposerTurnCommand,
+        options?: { runtimeControls?: ChatRuntimeControls },
+      ) => unknown;
+    };
+  };
+  const backgroundComposerCommandHostsRef = useRef(
+    new Map<string, BackgroundComposerCommandEntry>(),
+  );
   useEffect(() => {
     if (!sessionWorkbench.enabled) return;
     const keep = new Set(
@@ -3412,6 +3496,10 @@ function ChatPageContent(props: ChatPageProps) {
         controller.dispose();
         backgroundControllersRef.current.delete(conversationId);
       }
+    }
+    for (const conversationId of backgroundComposerCommandHostsRef.current.keys()) {
+      if (!keep.has(conversationId))
+        backgroundComposerCommandHostsRef.current.delete(conversationId);
     }
   }, [workbench.layout]);
   // 布局对账:终端 drop 事务在宿主挂载前同步占约,Pane 若在宿主接手
@@ -3434,6 +3522,38 @@ function ChatPageContent(props: ChatPageProps) {
   // Attach/send/stop/chip-remove route by this pane's conversationId. Other
   // interactions that still go through page-level current-conversation
   // machinery focus the pane first.
+  // 背景 Pane 的 binding 每次渲染重建；“/”指令宿主按会话缓存，保持引用稳定，
+  // 随渲染变化的读数放进 latest，由宿主的 getter 读取。
+  const resolveBackgroundComposerCommandHost = (
+    conversationId: string,
+    latest: BackgroundComposerCommandEntry["latest"],
+  ): ComposerCommandHost => {
+    const cache = backgroundComposerCommandHostsRef.current;
+    const cached = cache.get(conversationId);
+    if (cached) {
+      cached.latest = latest;
+      return cached.host;
+    }
+    const entry: BackgroundComposerCommandEntry = {
+      latest,
+      host: createGuiComposerCommandHost({
+        t,
+        client: kBrainClient,
+        getKBrainSessionId: () => getKBrainSessionId(conversationId),
+        onGoalState: (state) => publishGoalState(conversationId, state),
+        reloadConversation: () => reloadConversationLatestRef.current(conversationId),
+        getWorkdir: () => entry.latest.workdir,
+        getRuntimeControls: () => composerCommandLatestRef.current.runtimeControls,
+        sendTurn: (text, command, options) => entry.latest.sendTurn(text, command, options),
+        compact: () => manualCompactActionRef.current({ conversationId }),
+        getModelOptions: () => composerCommandLatestRef.current.modelOptions,
+        selectModel: (selection) => entry.latest.selectModel(selection),
+      }),
+    };
+    cache.set(conversationId, entry);
+    return entry.host;
+  };
+
   const buildBackgroundPaneBinding = (
     surface: ConversationWorkbenchSurface,
   ): ConversationPaneBinding => {
@@ -3659,6 +3779,22 @@ function ChatPageContent(props: ChatPageProps) {
         onMoveQueuedTurnUp: moveQueuedTurnUp,
         onEditQueuedTurn: focusGuard(editQueuedTurn),
         onRemoveQueuedTurn: removeQueuedTurn,
+        commandHost: resolveBackgroundComposerCommandHost(conversationId, {
+          modelLabel: paneModelLabel,
+          contextWindow: paneContextWindow,
+          contextUsageTokensSource: paneContextUsageTokensSource,
+          workdir: workspaceRoot,
+          selectModel: focusGuard(handleSelectModel),
+          sendTurn: (text, command, options) =>
+            sendActionRef.current({
+              conversationIdOverride: conversationId,
+              textOverride: text,
+              composerCommand: command,
+              ...(options?.runtimeControls
+                ? { runtimeControlsOverride: options.runtimeControls }
+                : {}),
+            }),
+        }),
       },
       sendDraft: paneSendDraft,
     };

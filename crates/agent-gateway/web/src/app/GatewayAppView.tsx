@@ -43,6 +43,7 @@ import {
   type CheckpointRewoundInfo,
   formatCheckpointRewoundNotification,
 } from "@liveagent/ui/lib/chat/checkpointRewind";
+import type { ComposerCommandHost } from "@liveagent/ui/lib/chat/composerCommands";
 import type { PendingUploadedFile } from "@liveagent/ui/lib/chat/uploadedFiles";
 import { mergePendingUploadedFiles } from "@liveagent/ui/lib/chat/uploadedFiles";
 import { parseModelValue } from "@liveagent/ui/lib/models/modelValue";
@@ -131,6 +132,7 @@ import type { GatewayAppViewModel } from "./GatewayApp";
 import { isLocalDraftConversationId } from "./gatewayLocalDraft";
 import { HistorySwitchLoadingOverlay } from "./HistorySwitchLoadingOverlay";
 import { useWindowFileDropGuard } from "./hooks/useWindowFileDropGuard";
+import { sendComposerCommandTurn } from "./sendComposerCommandTurn";
 import { GatewaySidebarContainer } from "./sidebar/GatewaySidebarContainer";
 import { UserMenu } from "./UserMenu";
 import { createWebComposerCommandHost } from "./webComposerCommandHost";
@@ -835,24 +837,25 @@ export function GatewayAppView({
     [handleFileDrop],
   );
 
-  // 输入框“/”指令宿主：引用只随会话、工作目录和 /review 能力变化，
-  // 动作与状态读数经 ref 取最新值。/resume 递增请求键，由侧栏打开会话搜索。
-  const [conversationSearchRequestKey] = useState(0);
+  // 输入框“/”指令宿主：引用只随 api、工作目录和语言变化（输入框按宿主引用重新拉
+  // 指令目录），动作与状态读数经 ref 取最新值——sendChat 等每次渲染都是新函数。
   const composerCommandLatestRef = useRef({
     handleManualCompact,
     handleSelectModel,
     modelOptions,
     runtimeControls: chatRuntimeControlsForCurrentProvider,
+    sendChat,
   });
   composerCommandLatestRef.current = {
     handleManualCompact,
     handleSelectModel,
     modelOptions,
     runtimeControls: chatRuntimeControlsForCurrentProvider,
+    sendChat,
   };
-  const composerCommandHost = useMemo(
-    () =>
-      createWebComposerCommandHost({
+  const composerCommandHost = useMemo<ComposerCommandHost>(
+    () => ({
+      ...createWebComposerCommandHost({
         t: (key) => translate(key, settings.locale),
         client: api ?? undefined,
         getConversationId: () => {
@@ -862,13 +865,13 @@ export function GatewayAppView({
         getWorkdir: () => displayedConversationWorkdir || undefined,
         getRuntimeControls: () => composerCommandLatestRef.current.runtimeControls,
         sendTurn: (text, command, runtimeControls) =>
-          sendChat(text, {
-            goalAction: command?.kind === "goal" ? command.action : undefined,
-            goalText:
-              command?.kind === "goal" && command.action === "set" ? command.goal : undefined,
-            promptCommand: command?.kind === "prompt" ? true : undefined,
-            runtimeControls,
-          }),
+          sendComposerCommandTurn(
+            composerCommandLatestRef.current.sendChat,
+            (key) => translate(key, settings.locale),
+            text,
+            command,
+            { runtimeControls },
+          ),
         compact: () => composerCommandLatestRef.current.handleManualCompact(),
         getModelOptions: () => composerCommandLatestRef.current.modelOptions,
         selectModel: (value) => {
@@ -876,7 +879,17 @@ export function GatewayAppView({
           if (selection) composerCommandLatestRef.current.handleSelectModel(selection);
         },
       }),
-    [api, displayedConversationWorkdir, getDisplayedConversationId, sendChat, settings.locale],
+      // 正在编辑排队消息时，发送是保存编辑，不按指令执行。
+      isDraftReserved: () =>
+        queuedChatEditSessionRef.current?.conversationId === getDisplayedConversationId(),
+    }),
+    [
+      api,
+      displayedConversationWorkdir,
+      getDisplayedConversationId,
+      queuedChatEditSessionRef,
+      settings.locale,
+    ],
   );
 
   const primaryConversationSurface: GatewayConversationPrimarySurface = {
@@ -1438,7 +1451,6 @@ export function GatewayAppView({
                 approvalConversationIds={approvalConversationIds}
                 transientRunningConversations={manualCompactTransientConversations}
                 currentConversationId={displayedConversationId}
-                conversationSearchRequestKey={conversationSearchRequestKey}
                 isOpen={sidebarOpen}
                 fontScale={settings.customSettings.fontScale.sidebar}
                 activeView={activeView}

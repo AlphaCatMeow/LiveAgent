@@ -281,15 +281,20 @@ test("LiveAgent composer commands run against the K-brain backend it depends on"
     const deps = { client, getKBrainSessionId: () => session.id };
     const base = { conversationId: "liveagent-conversation", kind: "loop", loopId: "", cron: "", interval: "", prompt: "", reasoning: "" };
     const created = await runGatewayComposerAction(
-      { ...base, action: "create", cron: "0 */10 * * * *", interval: "10m", prompt: "check the build" },
+      { ...base, action: "create", interval: "90m", prompt: "check the build" },
       deps,
     );
     assert.equal(created.loops.length, 1);
     assert.match(created.loops[0].id, /^loop-/);
+    assert.equal(created.loops[0].interval, "90m");
+    await waitFor(async () => {
+      const history = await client.getHistory(session.id, { maxMessages: 20 });
+      return (history.session.messages ?? []).some((message) => textOf(message).includes(`[Loop ${created.loops[0].id}`));
+    }, "immediate detached loop result in parent history");
     const listed = await runGatewayComposerAction({ ...base, action: "list" }, deps);
     assert.deepEqual(listed.loops.map((loop) => loop.id), [created.loops[0].id]);
     await assert.rejects(
-      client.createLoop(session.id, { cron: "* * * * * *", interval: "1s", prompt: "too often" }),
+      client.createLoop(session.id, { interval: "0s", prompt: "invalid" }),
       (error) => error.status === 422,
     );
     const cancelled = await runGatewayComposerAction({ ...base, action: "cancel", loopId: created.loops[0].id }, deps);

@@ -540,7 +540,7 @@ export const ZH_CN_COMMON_TRANSLATIONS = {
   "chat.commands.contextUnsupported":
     "此指令在这里无法附带会话引用、大段粘贴或附件；请移除后重试。",
   "chat.commands.loopUsage":
-    "用法：/loop <间隔> <提示词>（间隔如 10m、2h、1d）| /loop list | /loop cancel <id>",
+    "用法：/loop <间隔> <提示词>（90s、90m、2h、1d；最长 7d）| /loop list | /loop cancel <id>",
   "chat.commands.loopCreated": "已创建定时任务",
   "chat.commands.loopCancelled": "已取消定时任务",
   "chat.commands.loopsTitle": "当前对话的定时任务",
@@ -548,7 +548,8 @@ export const ZH_CN_COMMON_TRANSLATIONS = {
   "chat.commands.needsConversation": "请先发送一条消息；这个指令需要已有的对话。",
   "chat.commands.loopInterval": "间隔",
   "chat.commands.loopPrompt": "提示词",
-  "chat.commands.loopHint": "每次执行的结果会写进当前对话。停止：",
+  "chat.commands.loopHint":
+    "在独立上下文中立即首跑，随后按间隔执行（最短 1 分钟）。7 天后过期，最多 50 个活跃任务。提示词需包含完整上下文，结果在当前对话空闲时返回。K-brain 需保持运行。停止：",
   "chat.commands.loopEveryMinutes": "每 {count} 分钟",
   "chat.commands.loopEveryHours": "每 {count} 小时",
   "chat.commands.loopEveryDays": "每 {count} 天",

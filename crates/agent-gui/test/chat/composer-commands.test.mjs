@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createDomTestEnv } from "../helpers/dom-test-env.mjs";
 const env = await createDomTestEnv();
-const { buildComposerCommands, parseComposerCommandDraft, runComposerCommand, filterComposerCommands, loopIntervalToCron } = env.loadModule("@liveagent/ui/lib/chat/composerCommands.ts");
+const { buildComposerCommands, parseComposerCommandDraft, runComposerCommand, filterComposerCommands, normalizeLoopInterval } = env.loadModule("@liveagent/ui/lib/chat/composerCommands.ts");
 const catalog = [
   ...["goal", "loop", "plan", "model", "compact", "rewind"].map(name => ({name,kind:"action",source:"builtin",description:name})),
   {name:"init",kind:"prompt",source:"builtin",description:"init"},
@@ -36,8 +36,9 @@ test("model without argument opens picker; name selects directly",async()=>{
 test("prompt commands are sent verbatim for backend expansion",async()=>{const f=fixture();await f.run('/deploy staging');assert.deepEqual(f.calls.at(-1),["send","/deploy staging",{kind:"prompt"}]);});
 test("loop results go into conversation and invalid intervals do not mutate",async()=>{
  const f=fixture();await f.run("/loop 1m report time");assert.equal(f.calls.at(-1)[0],"record");assert.equal(f.calls.at(-1)[1],"/loop 1m report time");
- f.calls.length=0;await f.run("/loop 30s test");assert.equal(f.calls[0][0],"panel");assert.equal(f.calls[0][1].type,"error");
- assert.equal(loopIntervalToCron("10m"),"0 */10 * * * *");
+ f.calls.length=0;await f.run("/loop 0s test");assert.equal(f.calls[0][0],"panel");assert.equal(f.calls[0][1].type,"error");
+ for (const interval of ["30s", "90s", "90m", "25h", "7d"]) assert.equal(normalizeLoopInterval(interval), interval);
+ for (const interval of ["0m", "8d", "1.5h", "1w"]) assert.equal(normalizeLoopInterval(interval), null);
 });
 test("builtins localize while author descriptions remain unchanged",()=>{
  const f=fixture();const list=buildComposerCommands({host:f.host,catalog,skills:[],t:key=>key==='chat.commands.builtin.goal.description'?'持续执行目标':key});assert.equal(list[0].description,'持续执行目标');assert.equal(list.at(-1).description,'Deploy');

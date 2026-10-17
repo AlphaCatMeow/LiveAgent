@@ -1197,7 +1197,7 @@ export class GatewayWebSocketRpcClient extends GatewayWebSocketTransport {
   /** 创建 /loop。断线后不自动重发：桌面端可能已经建好，重发会多出一条重复的定时任务。 */
   async createLoop(input: {
     conversationId: string;
-    cron: string;
+    cron?: string;
     interval: string;
     prompt: string;
     reasoning?: string;
@@ -1205,7 +1205,7 @@ export class GatewayWebSocketRpcClient extends GatewayWebSocketTransport {
     return this.request<LoopManageResponse>("loops.manage", {
       conversationId: input.conversationId,
       action: "create",
-      cron: input.cron,
+      cron: input.cron ?? "",
       interval: input.interval,
       prompt: input.prompt,
       reasoning: input.reasoning ?? "",

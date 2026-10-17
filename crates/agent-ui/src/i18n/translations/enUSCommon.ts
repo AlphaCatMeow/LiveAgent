@@ -586,7 +586,7 @@ export const EN_US_COMMON_TRANSLATIONS = {
   "chat.commands.contextUnsupported":
     "This command cannot carry referenced conversations, large pastes or attachments here; remove them and try again.",
   "chat.commands.loopUsage":
-    "Usage: /loop <interval> <prompt> (interval like 10m, 2h, 1d) | /loop list | /loop cancel <id>",
+    "Usage: /loop <interval> <prompt> (90s, 90m, 2h, 1d; up to 7d) | /loop list | /loop cancel <id>",
   "chat.commands.loopCreated": "Loop created",
   "chat.commands.loopCancelled": "Loop cancelled",
   "chat.commands.loopsTitle": "Loops in this conversation",
@@ -595,7 +595,8 @@ export const EN_US_COMMON_TRANSLATIONS = {
     "Send a message first; this command needs an existing conversation.",
   "chat.commands.loopInterval": "Interval",
   "chat.commands.loopPrompt": "Prompt",
-  "chat.commands.loopHint": "Results are written to this conversation. To stop it:",
+  "chat.commands.loopHint":
+    "Runs immediately in an independent context, then repeats (minimum 1 min). Expires after 7 days; up to 50 active loops. Include all necessary context in the prompt. Results return when this conversation is idle. K-brain must remain running. Stop:",
   "chat.commands.loopEveryMinutes": "Every {count} min",
   "chat.commands.loopEveryHours": "Every {count} h",
   "chat.commands.loopEveryDays": "Every {count} days",

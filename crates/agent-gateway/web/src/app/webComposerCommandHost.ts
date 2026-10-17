@@ -2,7 +2,6 @@ import {
   type ComposerCommandHost,
   type ComposerTurnCommand,
   findModelOptionByName,
-  loopIntervalToCron,
 } from "@liveagent/ui/lib/chat/composerCommands";
 import type { SharedModelOption } from "@liveagent/ui/lib/models/modelOptions";
 import type { ChatRuntimeControls } from "@liveagent/ui/lib/settings/types";
@@ -19,7 +18,7 @@ export type WebComposerCommandClient = {
   listLoops: (conversationId: string) => Promise<LoopManageResponse>;
   createLoop: (input: {
     conversationId: string;
-    cron: string;
+    cron?: string;
     interval: string;
     prompt: string;
   }) => Promise<LoopManageResponse>;
@@ -81,11 +80,8 @@ export function createWebComposerCommandHost(params: {
   host.clearGoal = () => client.clearGoal(conversationId());
   host.loops = {
     create: async (interval, prompt) => {
-      const cron = loopIntervalToCron(interval);
-      if (!cron) throw new Error(t("chat.commands.loopUsage"));
       const created = await client.createLoop({
         conversationId: conversationId(),
-        cron,
         interval,
         prompt,
       });

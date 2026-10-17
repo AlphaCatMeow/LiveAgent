@@ -122,20 +122,14 @@ export function describeLoopInterval(interval: string, t: (key: string) => strin
   return t(key).replace("{count}", match[1]);
 }
 
-/**
- * /loop 的间隔转成 K-brain 的六段 cron 表达式（秒 分 时 日 月 周）：支持
- * m（1-59）、h（1-23）、d（1-31）。不支持秒级间隔，也不接受其他写法，避免悄悄
- * 换成别的频率。
- */
-export function loopIntervalToCron(interval: string): string | null {
-  const match = /^(\d+)([mhd])$/i.exec(interval.trim());
+/** Validate syntax only; K-brain owns elapsed scheduling and the minimum interval. */
+export function normalizeLoopInterval(interval: string): string | null {
+  const match = /^(\d+)([smhd])$/i.exec(interval.trim());
   if (!match) return null;
   const value = Number(match[1]);
   const unit = match[2].toLowerCase();
-  if (unit === "m" && value >= 1 && value <= 59) return `0 */${value} * * * *`;
-  if (unit === "h" && value >= 1 && value <= 23) return `0 0 */${value} * * *`;
-  if (unit === "d" && value >= 1 && value <= 31) return `0 0 0 */${value} * *`;
-  return null;
+  const seconds = value * ({ s: 1, m: 60, h: 3600, d: 86400 }[unit] ?? 0);
+  return Number.isSafeInteger(value) && value > 0 && seconds <= 604800 ? `${value}${unit}` : null;
 }
 /* ------------------------------------------------------------------ */
 /*  Registry                                                           */
@@ -421,9 +415,10 @@ async function runLoop(text: string, args: string, effects: ComposerCommandEffec
     return;
   }
   const prompt = args.slice(head.length).trim();
-  if (!head || !prompt || !loopIntervalToCron(head)) throw new Error(t("chat.commands.loopUsage"));
+  const interval = normalizeLoopInterval(head);
+  if (!interval || !prompt) throw new Error(t("chat.commands.loopUsage"));
   effects.consumeDraft();
-  const loop = await loops.create(head, prompt);
+  const loop = await loops.create(interval, prompt);
   await report(text, describeCreatedLoop(loop, t), { type: "loopCreated", loop }, effects);
 }
 

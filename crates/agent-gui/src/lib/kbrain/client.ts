@@ -629,7 +629,7 @@ export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
 
   async function createLoop(
     conversationId: string,
-    input: { cron: string; interval: string; prompt: string; reasoning?: string },
+    input: { cron?: string; interval: string; prompt: string; reasoning?: string },
   ): Promise<KBrainSessionLoop> {
     return request<KBrainSessionLoop>(`/v1/sessions/${encodeURIComponent(conversationId)}/loops`, {
       method: "POST",

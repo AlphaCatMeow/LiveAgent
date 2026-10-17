@@ -154,6 +154,7 @@ import { createKBrainClient } from "../lib/kbrain/client";
 import { publishGoalState } from "../lib/kbrain/goalStore";
 import { subscribeHistoryImported } from "../lib/kbrain/manualHistoryImport";
 import { getKBrainSessionId } from "../lib/kbrain/mapping";
+import { watchKBrainHistory } from "../lib/kbrain/watchHistory";
 import { createProviderRuntimeConfig, toModelValue } from "../lib/providers/llm";
 import {
   applyConversationThinking,
@@ -1864,6 +1865,17 @@ function ChatPageContent(props: ChatPageProps) {
     () => (kBrainBackendEnabled ? createKBrainClient() : undefined),
     [kBrainBackendEnabled],
   );
+  const watchedKBrainSessionId = kBrainBackendEnabled
+    ? getKBrainSessionId(currentConversationId)
+    : undefined;
+  useEffect(() => {
+    if (!kBrainClient || !watchedKBrainSessionId) return;
+    return watchKBrainHistory(
+      kBrainClient,
+      watchedKBrainSessionId,
+      () => void sidebarStore.refresh(),
+    );
+  }, [watchedKBrainSessionId, kBrainClient, sidebarStore]);
   const composerCommandHost = useMemo<ComposerCommandHost>(
     () =>
       createGuiComposerCommandHost({

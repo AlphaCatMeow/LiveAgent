@@ -3,7 +3,6 @@ import {
   type ComposerCommandHost,
   type ComposerTurnCommand,
   findModelOptionByName,
-  loopIntervalToCron,
 } from "@liveagent/ui/lib/chat/composerCommands";
 import type { SharedModelOption } from "@liveagent/ui/lib/models/modelOptions";
 import { parseModelValue } from "@liveagent/ui/lib/models/modelValue";
@@ -113,9 +112,7 @@ export function createGuiComposerCommandHost(params: {
   };
   host.loops = {
     create: async (interval, prompt) => {
-      const cron = loopIntervalToCron(interval);
-      if (!cron) throw new Error(t("chat.commands.loopUsage"));
-      return client.createLoop(sessionId(), { cron, interval, prompt });
+      return client.createLoop(sessionId(), { interval, prompt });
     },
     list: () => client.listLoops(sessionId()),
     cancel: (id) => client.cancelLoop(sessionId(), id),

@@ -9,7 +9,7 @@ export type GatewayComposerActionDeps = {
     listLoops: (sessionId: string) => Promise<KBrainSessionLoop[]>;
     createLoop: (
       sessionId: string,
-      input: { cron: string; interval: string; prompt: string; reasoning?: string },
+      input: { cron?: string; interval: string; prompt: string; reasoning?: string },
     ) => Promise<KBrainSessionLoop>;
     cancelLoop: (sessionId: string, loopId: string) => Promise<void>;
   };
@@ -48,12 +48,14 @@ export async function runGatewayComposerAction(
         return { loops: await client.listLoops(sessionId) };
       case "create": {
         const cron = event.cron.trim();
+        const interval = event.interval.trim();
         const prompt = event.prompt.trim();
-        if (!cron || !prompt) throw new Error("loop schedule and prompt are required");
+        if ((!cron && !interval) || !prompt)
+          throw new Error("loop schedule and prompt are required");
         const reasoning = event.reasoning.trim();
         const created = await client.createLoop(sessionId, {
-          cron,
-          interval: event.interval.trim(),
+          ...(cron ? { cron } : {}),
+          interval,
           prompt,
           ...(reasoning ? { reasoning } : {}),
         });

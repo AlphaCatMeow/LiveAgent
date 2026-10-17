@@ -2,8 +2,8 @@
 
 ## Runtime dependency
 
-The desktop lock uses K-brain `v0.107.6-beta.13` at
-`adbb288a0d21ffdfa4febb36fbfc30969e25bddc`, including merged K-brain #37.
+The desktop lock uses K-brain `v0.107.6-beta.14` at
+`473db05596c6554dcb4dec7645ae26f9aa62875c`, including merged K-brain #37.
 All four desktop platform entries use the published release's SHA-256 checksums.
 Desktop release builds download these assets; they do not compile K-brain.
 
@@ -53,3 +53,6 @@ An explicit interval is required: natural-language frequency parsing is not
 implemented. Each occurrence starts fresh instead of continuing the same
 worker's context. The backend must remain running. Parent result messages are
 truncated at 4,000 runes, with fuller output in bounded scheduled-task logs.
+
+A final backend regression also verifies that prior worker compaction summaries
+are cleared before the next occurrence; this fix is included in beta.14.

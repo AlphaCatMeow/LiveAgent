@@ -17,10 +17,20 @@ const (
 	defaultHistoryListPage     = 1
 	defaultHistoryListPageSize = 80
 	maxWorkspaceRootGrants     = 64
-	maxPromptTemplateNameLen   = 256
-	maxPromptTemplateTextLen   = 64 * 1024
-	maxPromptTemplateWorkdir   = 32768
+	maxSlashCommandWorkdirLen  = 32768
 )
+
+const (
+	errComposerCommandsUnsupported = "desktop app does not support composer commands; update LiveAgent on the desktop"
+	errComposerGoalUnsupported     = "/goal is not available on a direct K-brain target"
+)
+
+func requireComposerCommands(sm session.AgentView) error {
+	if !sm.SupportsCapability(gatewayv2.ComposerCommandsV1Capability) {
+		return errors.New(errComposerCommandsUnsupported)
+	}
+	return nil
+}
 
 // vetAgentRequest 校验并（必要时）原地修正一条直通请求；返回错误则拒绝转发，错误信息面向客户端。
 // 门控按目标 Agent 的视图判定（sm 为绑定 agent_id 的只读视图）。
@@ -89,15 +99,22 @@ func vetAgentRequest(sm session.AgentView, env *gatewayv2.GatewayEnvelope) error
 		return vetCheckpoint(payload.Checkpoint)
 	case *gatewayv2.GatewayEnvelope_CuaDriver:
 		return vetCuaDriver(payload.CuaDriver)
-	case *gatewayv2.GatewayEnvelope_PromptTemplateList:
-		return vetPromptTemplateList(payload.PromptTemplateList)
-	case *gatewayv2.GatewayEnvelope_PromptTemplateExpand:
-		return vetPromptTemplateExpand(payload.PromptTemplateExpand)
+	// 输入框“/”指令：只发给声明了 COMPOSER_COMMANDS_V1 的桌面端；旧版桌面端不认识这些
+	// 载荷臂，会静默丢弃，浏览器只能等到请求超时。
 	case *gatewayv2.GatewayEnvelope_SlashCommandList:
+		if err := requireComposerCommands(sm); err != nil {
+			return err
+		}
 		return vetSlashCommandList(payload.SlashCommandList)
 	case *gatewayv2.GatewayEnvelope_GoalManage:
+		if err := requireComposerCommands(sm); err != nil {
+			return err
+		}
 		return vetGoalManage(payload.GoalManage)
 	case *gatewayv2.GatewayEnvelope_LoopManage:
+		if err := requireComposerCommands(sm); err != nil {
+			return err
+		}
 		return vetLoopManage(payload.LoopManage)
 
 	// ---- 带功能门控 / 限额的直通臂 ----
@@ -138,6 +155,11 @@ func vetAgentRequest(sm session.AgentView, env *gatewayv2.GatewayEnvelope) error
 		return nil
 
 	// ---- 明确拒绝的臂 ----
+	case *gatewayv2.GatewayEnvelope_PromptTemplateList,
+		*gatewayv2.GatewayEnvelope_PromptTemplateExpand:
+		// 提示词模板已并入 slash_command_list（目录）与 ChatRequest.prompt_command（由 K-brain
+		// 在运行时展开）；这两条独立通道没有调用方，不再对浏览器开放。proto 字段保留以兼容。
+		return errors.New("prompt template requests are retired; use slash_command_list and prompt_command")
 	default:
 		// 含 chat_command（须走网关编排）、ping（探活由网关发起）、upload_readable_files
 		// （走 HTTP 上传）、history_share_resolve（公共分享端点专用）及网关内部推送臂。
@@ -254,89 +276,82 @@ func vetWorkspaceRootGrants(req *gatewayv2.WorkspaceRootGrantsRequest) error {
 	return nil
 }
 
-// vetPromptTemplateList 只限制 workdir 长度；项目级模板是否生效由 K-brain 按项目信任状态决定。
-func vetPromptTemplateList(req *gatewayv2.PromptTemplateListRequest) error {
-	if req == nil {
-		return errors.New("prompt template list request is required")
-	}
-	if len(req.GetWorkdir()) > maxPromptTemplateWorkdir {
-		return errors.New("prompt template workdir is too long")
-	}
-	return nil
-}
-
-// vetPromptTemplateExpand 校验模板名与参数长度；模板名不能含路径分隔符，避免拼进 K-brain 路由时越出模板目录。
-func vetPromptTemplateExpand(req *gatewayv2.PromptTemplateExpandRequest) error {
-	if req == nil {
-		return errors.New("prompt template expand request is required")
-	}
-	name := strings.TrimSpace(req.GetName())
-	if name == "" || len(name) > maxPromptTemplateNameLen || strings.ContainsAny(name, "/\\") {
-		return errors.New("prompt template name is invalid")
-	}
-	if len(req.GetText()) > maxPromptTemplateTextLen {
-		return errors.New("prompt template arguments are too long")
-	}
-	if len(req.GetWorkdir()) > maxPromptTemplateWorkdir {
-		return errors.New("prompt template workdir is too long")
-	}
-	return nil
-}
-
 const (
-	maxGoalTextLen     = 16 * 1024
 	maxLoopPromptLen   = 16 * 1024
 	maxLoopIntervalLen = 16
+	maxLoopCronLen     = 256
+	maxComposerIDLen   = 256
 )
 
-// vetSlashCommandList 只带工作目录，长度按模板列表同一上限校验。
+// vetSlashCommandList 只带工作目录，按长度把关；项目级指令是否生效由 K-brain 按项目信任决定。
 func vetSlashCommandList(req *gatewayv2.SlashCommandListRequest) error {
 	if req == nil {
 		return errors.New("slash command list request is required")
 	}
-	if len(req.GetWorkdir()) > maxPromptTemplateWorkdir {
+	req.Workdir = strings.TrimSpace(req.GetWorkdir())
+	if len(req.GetWorkdir()) > maxSlashCommandWorkdirLen {
 		return errors.New("slash command workdir is too long")
 	}
 	return nil
 }
 
 // vetGoalManage 只放行 clear：set/resume 会开始一轮运行，走 ChatRequest 的 goal_action。
+// 校验后原地规范化，桌面端按规范值精确匹配。
 func vetGoalManage(req *gatewayv2.GoalManageRequest) error {
-	if req == nil || strings.TrimSpace(req.GetConversationId()) == "" || len(req.GetConversationId()) > 256 {
+	if req == nil {
 		return errors.New("conversation is unavailable")
 	}
-	if strings.TrimSpace(req.GetAction()) != "clear" {
+	req.ConversationId = strings.TrimSpace(req.GetConversationId())
+	req.Action = strings.TrimSpace(req.GetAction())
+	if req.ConversationId == "" || len(req.ConversationId) > maxComposerIDLen {
+		return errors.New("conversation is unavailable")
+	}
+	if req.Action != "clear" {
 		return errors.New("goal action must be clear")
 	}
 	return nil
 }
 
-// vetLoopManage 校验会话内定时任务：间隔由桌面端解析成 cron，这里只按长度把关，
-// 真正的表达式与提示词校验在 K-brain 侧完成。
+// vetLoopManage 校验会话内定时任务并原地规范化：间隔由浏览器解析成 cron，这里只按长度把关，
+// 真正的表达式与提示词校验在 K-brain 侧完成。与当前动作无关的字段清空后再转发。
 func vetLoopManage(req *gatewayv2.LoopManageRequest) error {
-	if req == nil || strings.TrimSpace(req.GetConversationId()) == "" || len(req.GetConversationId()) > 256 {
+	if req == nil {
 		return errors.New("conversation is unavailable")
 	}
-	switch strings.TrimSpace(req.GetAction()) {
+	req.ConversationId = strings.TrimSpace(req.GetConversationId())
+	req.Action = strings.TrimSpace(req.GetAction())
+	if req.ConversationId == "" || len(req.ConversationId) > maxComposerIDLen {
+		return errors.New("conversation is unavailable")
+	}
+	switch req.Action {
 	case "list":
-		return nil
+		req.Cron, req.Interval, req.Prompt, req.Reasoning, req.LoopId = "", "", "", "", ""
 	case "create":
-		if strings.TrimSpace(req.GetCron()) == "" || len(req.GetCron()) > 256 {
+		req.Cron = strings.TrimSpace(req.GetCron())
+		req.Interval = strings.TrimSpace(req.GetInterval())
+		req.Prompt = strings.TrimSpace(req.GetPrompt())
+		req.Reasoning = strings.TrimSpace(req.GetReasoning())
+		req.LoopId = ""
+		if req.Cron == "" || len(req.Cron) > maxLoopCronLen {
 			return errors.New("loop schedule is required")
 		}
-		prompt := strings.TrimSpace(req.GetPrompt())
-		if prompt == "" || len(prompt) > maxLoopPromptLen {
+		if req.Prompt == "" || len(req.Prompt) > maxLoopPromptLen {
 			return errors.New("loop prompt is required and must be within the size limit")
 		}
+		if len(req.Interval) > maxLoopIntervalLen {
+			return errors.New("loop interval is too long")
+		}
+		if len(req.Reasoning) > maxLoopIntervalLen {
+			return errors.New("loop reasoning is invalid")
+		}
 	case "cancel":
-		if strings.TrimSpace(req.GetLoopId()) == "" || len(req.GetLoopId()) > 256 {
+		req.LoopId = strings.TrimSpace(req.GetLoopId())
+		req.Cron, req.Interval, req.Prompt, req.Reasoning = "", "", "", ""
+		if req.LoopId == "" || len(req.LoopId) > maxComposerIDLen {
 			return errors.New("loop id is required")
 		}
 	default:
 		return errors.New("loop action must be create, list or cancel")
-	}
-	if len(req.GetInterval()) > maxLoopIntervalLen {
-		return errors.New("loop interval is too long")
 	}
 	return nil
 }

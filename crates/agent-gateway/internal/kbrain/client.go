@@ -161,11 +161,13 @@ type ToolSelection struct {
 }
 
 type PromptRequest struct {
-	ConversationID  string      `json:"conversation_id"`
-	ClientRequestID string      `json:"client_request_id"`
-	Prompt          string      `json:"prompt,omitempty"`
-	Model           *ModelRef   `json:"model,omitempty"`
-	Options         *RunOptions `json:"options,omitempty"`
+	ConversationID  string `json:"conversation_id"`
+	ClientRequestID string `json:"client_request_id"`
+	Prompt          string `json:"prompt,omitempty"`
+	// PromptCommand 表示 Prompt 是 "/name args" 提示词指令，由 K-brain 展开，历史保留原文。
+	PromptCommand bool        `json:"prompt_command,omitempty"`
+	Model         *ModelRef   `json:"model,omitempty"`
+	Options       *RunOptions `json:"options,omitempty"`
 }
 
 type RunAccepted struct {

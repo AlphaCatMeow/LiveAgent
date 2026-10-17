@@ -163,6 +163,10 @@ func (r *Relay) Queue(ctx context.Context, req *gatewayv2.ChatQueueRequest, call
 			return queueError("invalid_payload", err.Error())
 		}
 		edited.Item.Prompt.Prompt = prompt
+		// 编辑后不再以“/”开头就不是提示词指令了，避免 K-brain 按指令解析普通文本。
+		if !strings.HasPrefix(strings.TrimSpace(prompt), "/") {
+			edited.Item.Prompt.PromptCommand = false
+		}
 		edited.Item.Prompt.ClientRequestID = edited.Item.ClientRequestID
 		edited.Item.DraftJSON, edited.Item.UploadedFilesJSON = draft, uploads
 		delete(r.queueEdits, key)

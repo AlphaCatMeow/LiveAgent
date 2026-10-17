@@ -422,3 +422,29 @@ test("Stop recovers and cancels a run accepted before its HTTP acknowledgement",
     assert.ok(calls.includes("POST /v1/sessions/backend-session-1/runs/run-1/cancel"));
   });
 });
+
+test("attaching to a goal round stops early once the backend paused the goal", async () => {
+  storage.clear();
+  const calls = [];
+  const updates = [];
+  const fetch = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    calls.push(parsed.pathname);
+    if (parsed.pathname === "/v1/sessions" && init.method === "POST") {
+      return json({ id: "backend-session-1", model, messages: [], last_seq: 0 });
+    }
+    if (parsed.pathname.endsWith("/runs")) return json({ error: "run acceptance not found" }, 404);
+    if (parsed.pathname.endsWith("/goal")) {
+      return json({ version: "kbrain.agent.v1", conversation_id: "backend-session-1", goal: "ship", status: "paused", round: 2, max_rounds: 5, reason: "start failed" });
+    }
+    throw new Error(`unexpected K-brain URL ${parsed.pathname}`);
+  };
+  const started = Date.now();
+  await assert.rejects(
+    runKBrainTurn({ ...baseParams, fetch, attachClientRequestId: "goal-next", onGoalUpdate: (state) => updates.push(state.status) }),
+    /goal paused: start failed/,
+  );
+  assert.ok(Date.now() - started < 5_000);
+  assert.deepEqual(updates, ["paused"]);
+  assert.ok(calls.filter((path) => path.endsWith("/runs")).length >= 2);
+});

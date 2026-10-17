@@ -212,8 +212,12 @@ function isSkillMentionNameChar(value: string) {
   return /^[A-Za-z0-9_:-]$/.test(value);
 }
 
-export function extractSkillMentionNamesFromText(text: string): string[] {
+export function extractSkillMentionNamesFromText(
+  text: string,
+  excludedNames: readonly string[] = [],
+): string[] {
   const names: string[] = [];
+  const excluded = new Set(excludedNames.map((name) => name.toLowerCase()));
   const seen = new Set<string>();
 
   for (let index = 0; index < text.length; index += 1) {
@@ -233,8 +237,16 @@ export function extractSkillMentionNamesFromText(text: string): string[] {
     // A slash right after the name means a filesystem path (/usr/bin), not a skill.
     if (text[nameEnd] === "/") continue;
 
-    const name = text.slice(nameStart, nameEnd);
+    // “/skill:名称”是显式引用形态：冒号后才是技能名，前缀本身不是指令。冒号也是
+    // 名称字符，所以上面的扫描已把整个“skill:名称”读进来，这里去掉前缀。
+    let name = text.slice(nameStart, nameEnd);
+    if (name.toLowerCase().startsWith("skill:")) {
+      name = name.slice("skill:".length);
+      if (!name) continue;
+    }
     if (isCommonSkillMentionEnvVar(name)) continue;
+    // 输入框只把草稿开头的“/名称”当指令，句中的同名引用仍按 Skill 解析。
+    if (!text.slice(0, index).trim() && excluded.has(name.toLowerCase())) continue;
     if (seen.has(name)) continue;
     seen.add(name);
     names.push(name);
@@ -248,6 +260,8 @@ export function resolveExplicitSkillMentions(params: {
   text?: string | null;
   structured?: ExplicitSkillMentionReference[] | null;
   enabledSkills: SkillSummary[];
+  /** Registered action-command names skipped by the text scan (structured chips still count). */
+  excludedCommandNames?: readonly string[];
 }): SkillSummary[] {
   const enabledSkills = params.enabledSkills;
   if (enabledSkills.length === 0) return [];
@@ -273,7 +287,10 @@ export function resolveExplicitSkillMentions(params: {
   for (const item of params.structured ?? []) {
     pushName(item);
   }
-  for (const name of extractSkillMentionNamesFromText(params.text ?? "")) {
+  for (const name of extractSkillMentionNamesFromText(
+    params.text ?? "",
+    params.excludedCommandNames,
+  )) {
     pushName(name);
   }
 

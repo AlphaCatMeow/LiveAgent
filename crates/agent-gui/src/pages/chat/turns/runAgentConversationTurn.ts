@@ -1,4 +1,5 @@
 import type { AssistantMessage, Context } from "@liveagent/app/lib/agentTypes";
+import type { ComposerTurnCommand } from "@liveagent/ui/lib/chat/composerCommands";
 import type { ConversationMentionReference } from "@liveagent/ui/lib/chat/mentionReferences";
 import type { ProviderRuntimeConfig } from "../../../lib/chat/compaction/types";
 import type { SuppressedToolTraceSnapshot } from "../../../lib/chat/conversation/chatAbort";
@@ -14,6 +15,7 @@ import type {
 import type { TurnCancellation } from "../../../lib/chat/conversation/turnCancellation";
 import type { LiveRound } from "../../../lib/chat/messages/uiMessages";
 import type { StreamDebugLogger } from "../../../lib/debug/agentDebug";
+import type { KBrainGoalState } from "../../../lib/kbrain/types";
 import type { AppSettings, McpSettingsOp, ProviderId, SshHostConfig } from "../../../lib/settings";
 import type { SubagentConversationStore } from "../../../lib/subagents";
 import type { AdditionalProjectRoot } from "../../../lib/tools/additionalProjectRoots";
@@ -74,6 +76,10 @@ export type RunAgentConversationTurnParams = {
   onSshSessionsChanged?: (change: SshManagerSessionChange) => void;
   sessionId: string;
   clientRequestId?: string;
+  /** 输入框“/”指令带来的单轮语义：经 goal 接口开始，或作为提示词指令由后端展开。 */
+  composerCommand?: ComposerTurnCommand;
+  /** 目标状态变化（达成、暂停、续跑）；由调用方提示用户。 */
+  onGoalUpdate?: (state: KBrainGoalState) => void;
   taskStateStore: TaskStateStore;
   conversationId: string;
   referencedConversations?: readonly ConversationMentionReference[];

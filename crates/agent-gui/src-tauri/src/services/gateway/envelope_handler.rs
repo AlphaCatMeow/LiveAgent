@@ -602,6 +602,67 @@ impl GatewayController {
                     Err(error) => self.send_error_response(request_id, 502, error).await,
                 }
             }
+            Some(proto::gateway_envelope::Payload::PromptTemplateList(_))
+            | Some(proto::gateway_envelope::Payload::PromptTemplateExpand(_)) => {
+                // 提示词模板已并入指令目录（slash_command_list）与 ChatRequest.prompt_command，
+                // Gateway 也不再放行这两条通道；保留 proto 字段只为兼容。
+                self.send_error_response(
+                    request_id,
+                    410,
+                    "prompt template requests are retired; use slash_command_list and prompt_command"
+                        .to_string(),
+                )
+                .await
+            }
+            // 以下三类都要等 K-brain 或 WebView 回应，一律 spawn，避免卡住单线程的分发循环。
+            Some(proto::gateway_envelope::Payload::SlashCommandList(request)) => {
+                let controller = Arc::clone(self);
+                tauri::async_runtime::spawn(async move {
+                    let result = match gateway_bridge::handle_slash_command_list(
+                        controller.app_handle.clone(),
+                        request,
+                    )
+                    .await
+                    {
+                        Ok(response) => {
+                            controller
+                                .send_agent_envelope(proto::AgentEnvelope {
+                                    request_id: request_id.clone(),
+                                    timestamp: now_unix_seconds(),
+                                    payload: Some(
+                                        proto::agent_envelope::Payload::SlashCommandListResp(
+                                            response,
+                                        ),
+                                    ),
+                                })
+                                .await
+                        }
+                        Err(error) => controller.send_error_response(request_id, 502, error).await,
+                    };
+                    if let Err(error) = result {
+                        eprintln!("handle slash command list failed: {error}");
+                    }
+                });
+                Ok(())
+            }
+            Some(proto::gateway_envelope::Payload::GoalManage(request)) => {
+                let controller = Arc::clone(self);
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = controller.handle_goal_manage(request_id, request).await {
+                        eprintln!("handle goal manage failed: {error}");
+                    }
+                });
+                Ok(())
+            }
+            Some(proto::gateway_envelope::Payload::LoopManage(request)) => {
+                let controller = Arc::clone(self);
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = controller.handle_loop_manage(request_id, request).await {
+                        eprintln!("handle loop manage failed: {error}");
+                    }
+                });
+                Ok(())
+            }
             Some(proto::gateway_envelope::Payload::SettingsGet(_request)) => {
                 match self.current_settings_snapshot().await {
                     Ok(snapshot) => {

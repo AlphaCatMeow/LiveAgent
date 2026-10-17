@@ -118,6 +118,9 @@ export type ComposerModelControlsProps = {
   onSelectExecutionMode: (mode: "text" | "tools") => void;
   onOpenSettings: (section?: "providers", providerId?: string) => void;
   onChatRuntimeControlsChange: (patch: Partial<ChatRuntimeControls>) => void;
+  /** 受控开关（/model 指令从外部打开）；缺省时弹层自管开关。 */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 };
 
 // Touch / coarse-pointer must not land on the search field: that opens the IME.
@@ -144,12 +147,19 @@ export const ComposerModelControls = memo(function ComposerModelControls(
     onSelectExecutionMode,
     onOpenSettings,
     onChatRuntimeControlsChange,
+    open,
+    onOpenChange,
   } = props;
   const nativeWebSearchSupported =
     modelOptions.find((option) => option.value === selectedValue)?.nativeWebSearchSupported ===
     true;
   const { t } = useLocale();
-  const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
+  const [uncontrolledModelPickerOpen, setUncontrolledModelPickerOpen] = useState(false);
+  const isModelPickerOpen = open ?? uncontrolledModelPickerOpen;
+  const setIsModelPickerOpen = (next: boolean) => {
+    if (open === undefined) setUncontrolledModelPickerOpen(next);
+    onOpenChange?.(next);
+  };
   const [modelSearch, setModelSearch] = useState("");
   const [providerFilter, setProviderFilter] = useState("");
   const [collapsedProviders, setCollapsedProviders] = useState<Set<string>>(() => new Set());

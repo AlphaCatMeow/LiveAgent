@@ -74,6 +74,7 @@ impl GatewayController {
             workspace_watch,
             pending_chat_queue_requests: Mutex::new(HashMap::new()),
             pending_clarify_turns: Mutex::new(HashMap::new()),
+            pending_composer_actions: Mutex::new(HashMap::new()),
             chat_ingress,
             chat_ingress_flush_lock: tokio::sync::Mutex::new(()),
             terminal_forwarder_once: Once::new(),

@@ -23,6 +23,7 @@ import { CurrentTaskProgress } from "../components/CurrentTaskProgress";
 import { DesktopCheckpointRewindProvider } from "../components/DesktopCheckpointRewindProvider";
 import { KBrainCheckpointRewindProvider } from "../components/KBrainCheckpointRewindProvider";
 import { PendingToolApprovalBar } from "../components/PendingToolApprovalBar";
+import { KBrainGoalBarHost } from "../composer/KBrainGoalBarHost";
 import type { ConversationPaneHostHandle } from "../conversations/useConversationPaneHostBridge";
 import { useConversationSurfaceSnapshot } from "../conversations/useConversationSurfaceSnapshot";
 import { buildQueuedChatTurnPreview } from "../queue/chatTurnQueue";
@@ -286,6 +287,14 @@ const RegisteredConversationPaneHostContent = forwardRef<
               isSending={isSending}
               pendingUploadedFiles={snapshot.uploads}
               queuedTurns={queuedTurns}
+              goalBar={
+                <KBrainGoalBarHost
+                  key={`goal-${snapshot.conversationId}`}
+                  conversationId={snapshot.conversationId}
+                  commandHost={composer.commandHost}
+                  enabled={isKBrainBackendEnabled()}
+                />
+              }
               onStop={controller.stop}
               onManualCompactConfirm={controller.compact}
               manualCompactBlocked={isCompactionRunning}

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
+import { renderToStaticMarkup } from "react-dom/server";
+import * as jsxRuntime from "react/jsx-runtime";
 import { createTsModuleLoader } from "../helpers/load-ts-module.mjs";
 
 const loader = createTsModuleLoader();
@@ -56,12 +57,13 @@ test("allowed K-brain tool names exclude frontend-only tools", () => {
 });
 
 test("trailing newline anchor uses a real CSS zero-width escape, not a literal backslash", () => {
-  // `className` strings are not JS-unescaped, so `\\200b` reached Tailwind as two backslashes and
-  // rendered a visible "\200b" after pasted messages ending in a newline.
-  const source = readFileSync(
-    new URL("../../../agent-ui/src/lib/chat/userMessageContent.tsx", import.meta.url),
-    "utf8",
+  // Check the rendered class: JSX attributes and JavaScript strings escape backslashes differently.
+  const renderLoader = createTsModuleLoader({ mocks: { "react/jsx-runtime": jsxRuntime } });
+  const { UserMessageContent } = renderLoader.loadModule(
+    "@liveagent/ui/lib/chat/userMessageContent.tsx",
   );
-  assert.match(source, /className="before:content-\['\\200b'\]"/);
-  assert.doesNotMatch(source, /content-\['\\\\200b'\]/);
+  const html = renderToStaticMarkup(jsxRuntime.jsx(UserMessageContent, { text: "alpha\n" }));
+  const anchorClass = /class="(before:content-[^"]+)"/.exec(html);
+  assert.ok(anchorClass, "a trailing newline must render its visual anchor");
+  assert.equal(anchorClass[1].replaceAll("&#x27;", "'"), "before:content-['\\200b']");
 });

@@ -6,6 +6,9 @@ import { createUuid } from "@liveagent/ui/lib/shared/id";
 import { useEffect, useRef } from "react";
 import type { HistoryMessageRef } from "../../../lib/chat/conversation/conversationState";
 import { isKBrainBackendEnabled, isTauriHost } from "../../../lib/host";
+import { createKBrainClient } from "../../../lib/kbrain/client";
+import { publishGoalState } from "../../../lib/kbrain/goalStore";
+import { getKBrainSessionId } from "../../../lib/kbrain/mapping";
 import { type ChatRuntimeControls, normalizeChatRuntimeControls } from "../../../lib/settings";
 import { createTextComposerDraft } from "../composer/composerDraftText";
 import { createClarifyDeltaForwarder } from "./clarifyDeltaForwarder";
@@ -16,11 +19,14 @@ import {
   type GatewayChatClaimedRequest,
   type GatewayChatRequestReadyEvent,
   type GatewayClarifyTurnRequestEvent,
+  type GatewayComposerActionEvent,
+  gatewayComposerTurnCommand,
   normalizeGatewayCommandSafetyMode,
   normalizeGatewayExecutionMode,
   normalizeGatewayWorkdir,
   type PrepareEditResend,
 } from "./gatewayBridgeTypes";
+import { runGatewayComposerAction } from "./gatewayComposerActions";
 
 type UseGatewayBridgeListenersParams = GatewayBridgeRuntimeRefs & {
   prepareEditResend?: PrepareEditResend;
@@ -170,6 +176,7 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
     let unlistenChatCancel: (() => void) | null = null;
     let unlistenGatewayStatus: (() => void) | null = null;
     let unlistenClarifyTurnRequested: (() => void) | null = null;
+    let unlistenComposerActionRequested: (() => void) | null = null;
     let drainInFlight = false;
     const workerId = workerIdRef.current;
     const heartbeatTimers = new Map<string, number>();
@@ -389,6 +396,17 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
         stopHeartbeat(requestId);
         return;
       }
+      const composerCommand = gatewayComposerTurnCommand(payload);
+      if (composerCommand === null) {
+        failClaimedRequest(
+          requestId,
+          targetConversationId,
+          "invalid_chat_command",
+          "Remote composer command is invalid.",
+        );
+        stopHeartbeat(requestId);
+        return;
+      }
       const claimResult = claimGatewayBridgeRequest(
         requestId,
         clientRequestId,
@@ -536,6 +554,7 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
           workdirOverride: gatewayBridgeRequest.workdirOverride,
           commandSafetyModeOverride: gatewayBridgeRequest.commandSafetyModeOverride,
           runtimeControlsOverride: gatewayBridgeRequest.runtimeControlsOverride,
+          ...(composerCommand ? { composerCommand } : {}),
           gatewayBridgeRequestOverride: gatewayBridgeRequest,
           editResendBaseMessageRef,
           beforeRuntimeStart: markRuntimeStarted,
@@ -790,6 +809,40 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
       unlistenClarifyTurnRequested = dispose;
     });
 
+    // WebUI 的 /goal clear 与 /loop：对话到 K-brain 会话的映射只在这里，执行后经
+    // gateway_composer_action_respond 把结果交回 Rust（Rust 侧有超时兜底）。
+    const composerActionClient = isKBrainBackendEnabled() ? createKBrainClient() : undefined;
+    const handleComposerActionRequested = async (event: Event<GatewayComposerActionEvent>) => {
+      const { requestId } = event.payload;
+      let result: unknown;
+      let errorMessage: string | undefined;
+      try {
+        result = await runGatewayComposerAction(event.payload, {
+          client: composerActionClient,
+          getKBrainSessionId: (conversationId) => getKBrainSessionId(conversationId),
+          onGoalState: publishGoalState,
+        });
+      } catch (error) {
+        errorMessage = asErrorMessage(error, "Composer command failed.");
+      }
+      await invoke<unknown>("gateway_composer_action_respond", {
+        input: { requestId, result, errorMessage },
+      }).catch((error: unknown) => {
+        console.warn("gateway_composer_action_respond failed", error);
+      });
+    };
+
+    void listen<GatewayComposerActionEvent>(
+      "gateway:composer-action-requested",
+      handleComposerActionRequested,
+    ).then((dispose) => {
+      if (disposed) {
+        dispose();
+        return;
+      }
+      unlistenComposerActionRequested = dispose;
+    });
+
     return () => {
       disposed = true;
       window.clearInterval(idlePollId);
@@ -808,6 +861,7 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
       unlistenChatCancel?.();
       unlistenGatewayStatus?.();
       unlistenClarifyTurnRequested?.();
+      unlistenComposerActionRequested?.();
     };
   }, []);
 }

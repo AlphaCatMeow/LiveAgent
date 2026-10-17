@@ -1,3 +1,5 @@
+import { sendComposerCommandTurn } from "../sendComposerCommandTurn";
+import { createWebComposerCommandHost } from "../webComposerCommandHost";
 // 会话 Pane 的统一宿主——复刻桌面端 RestorableConversationPaneHost:
 // 每个 Pane 始终挂同一组件,焦点切换只换 primary/background 绑定,不拆宿主。
 // 发送/停止/排队/上传/审批按本 Pane 的 conversationId 路由;选模型、编辑队列
@@ -27,6 +29,7 @@ import {
   CheckpointRewindProvider,
   type CheckpointRewoundInfo,
 } from "@liveagent/ui/lib/chat/checkpointRewind";
+import type { ComposerCommandHost } from "@liveagent/ui/lib/chat/composerCommands";
 import { deriveContextUsageTokens } from "@liveagent/ui/lib/chat/contextUsage";
 import type { ConversationMentionReference } from "@liveagent/ui/lib/chat/mentionReferences";
 import { selectLatestTaskProgress } from "@liveagent/ui/lib/chat/taskProgress";
@@ -201,6 +204,8 @@ export type GatewayConversationPrimarySurface = {
   onRemoveQueuedTurn: ChatComposerBarProps["onRemoveQueuedTurn"];
   onManualCompactConfirm: ChatComposerBarProps["onManualCompactConfirm"];
   manualCompactBlocked: boolean;
+  /** 主 Pane 的“/”指令宿主；背景 Pane 只提供 /stop 等按本会话路由的指令。 */
+  commandHost?: ComposerCommandHost;
   approvalBar: ReactNode;
   taskProgressBar: ReactNode;
   statsBar: ReactNode;
@@ -611,6 +616,29 @@ export function GatewayConversationPaneHost(props: GatewayConversationPaneHostPr
     }
     void context.cancelChat(conversationId);
   }, [context, conversationId, handleRunQueuedTurnNow]);
+  // 背景 Pane 的“/”指令：目录、发送、目标清除与定时任务都按本会话路由；
+  // /plan、/model 与 /rewind 依赖主 Pane 的开关、模型与回退上下文，这里不提供。
+  // context 每次渲染都是新对象：读数经 ref 取最新值，宿主引用只随 api 与会话变化，
+  // 否则输入框会在每次渲染时重新拉指令目录。
+  const commandLatestRef = useRef({ context, paneRuntimeControls });
+  commandLatestRef.current = { context, paneRuntimeControls };
+  const commandApi = context.api;
+  const backgroundCommandHost = useMemo<ComposerCommandHost>(
+    () =>
+      createWebComposerCommandHost({
+        t,
+        client: commandApi,
+        getConversationId: () => conversationId,
+        getWorkdir: () => workdirRef.current || undefined,
+        getRuntimeControls: () => commandLatestRef.current.paneRuntimeControls,
+        sendTurn: (text, command, runtimeControls) =>
+          sendComposerCommandTurn(commandLatestRef.current.context.sendChat, t, text, command, {
+            conversationId,
+            runtimeControls,
+          }),
+      }),
+    [commandApi, conversationId, t],
+  );
 
   // ---- 草稿:挂载恢复缓存,卸载(聚焦切换/关 Pane)写回缓存(桌面端口径) --
   // hydrated 必须参与触发:背景 Pane 冷启动时先渲染加载占位,composer 尚未
@@ -933,6 +961,7 @@ export function GatewayConversationPaneHost(props: GatewayConversationPaneHostPr
             mentionableConversations={context.mentionableConversations}
             searchMentionableConversations={context.searchMentionableConversations}
             mentionApps={context.mentionApps}
+            commandHost={usePrimary && primary ? primary.commandHost : backgroundCommandHost}
             executionMode={context.settings.system.executionMode}
             hasModels={context.hasModels}
             currentModelLabel={modelLabel}

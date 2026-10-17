@@ -50,6 +50,11 @@ type ChatRequestBody struct {
 	UploadedFiles           []ChatUploadedFileBody          `json:"uploaded_files,omitempty"`
 	ReferencedConversations []ChatConversationReferenceBody `json:"referenced_conversations,omitempty"`
 	QueuePolicy             string                          `json:"queue_policy,omitempty"`
+	// 输入框“/”指令的单轮语义：GoalAction 仅 set/resume（经 K-brain goal 接口开始本轮），
+	// GoalText 为 set 的目标正文；PromptCommand 表示 Message 是提示词指令，由 K-brain 展开。
+	GoalAction    string `json:"goal_action,omitempty"`
+	GoalText      string `json:"goal_text,omitempty"`
+	PromptCommand bool   `json:"prompt_command,omitempty"`
 }
 
 type CancelChatRequestBody struct {

@@ -89,6 +89,10 @@ export type GatewayChatCommandInput = {
   runtimeControls?: GatewayChatRuntimeControls;
   baseMessageRef?: HistoryMessageRef;
   queuePolicy?: "auto" | "append" | "interrupt";
+  /** 输入框“/”指令的单轮语义：经 K-brain 的 goal 接口开始本轮，或本条是提示词指令。 */
+  goalAction?: "set" | "resume";
+  goalText?: string;
+  promptCommand?: boolean;
 };
 
 export type SkillListResponse = {
@@ -110,6 +114,40 @@ export type MentionListResponse = {
  *  camelCase 序列化，空串表示缺失（无 bundle id / 取不到图标）。 */
 export type InstalledAppsListResponse = {
   apps: Array<{ name: string; bundleId: string; path: string; iconDataUrl: string }>;
+};
+
+/** 桌面端“/”指令目录：action 由客户端处理，prompt 由 K-brain 展开。 */
+export type SlashCommandSummary = {
+  name: string;
+  description: string;
+  argumentHint: string;
+  kind: string;
+  source: string;
+};
+
+export type SlashCommandListResponse = {
+  commands: SlashCommandSummary[];
+};
+
+export type GoalManageResponse = {
+  conversationId: string;
+  goal: string;
+  status: string;
+  round: number;
+  maxRounds: number;
+  reason: string;
+};
+
+export type LoopSummary = {
+  id: string;
+  interval: string;
+  cron: string;
+  prompt: string;
+  enabled: boolean;
+};
+
+export type LoopManageResponse = {
+  loops: LoopSummary[];
 };
 
 export type FsRoot = {
@@ -508,6 +546,9 @@ export function buildChatCommandPayload(input: GatewayChatCommandInput) {
             provider_type: input.selectedModel.providerType,
           }
         : undefined,
+      goal_action: input.goalAction ?? "",
+      goal_text: input.goalText ?? "",
+      prompt_command: input.promptCommand === true,
       runtime_controls: input.runtimeControls
         ? {
             thinking_enabled: input.runtimeControls.thinkingEnabled,

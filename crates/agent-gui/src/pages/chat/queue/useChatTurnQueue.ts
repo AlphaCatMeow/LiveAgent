@@ -36,6 +36,7 @@ import {
 import type { ActiveGatewayBridgeRequest, SendChatAction } from "../gateway/gatewayBridgeTypes";
 import {
   type GatewayChatClaimedRequest,
+  gatewayComposerTurnCommand,
   normalizeGatewayCommandSafetyMode,
   normalizeGatewayExecutionMode,
   normalizeGatewayWorkdir,
@@ -51,6 +52,7 @@ import {
   type ChatQueueItemDetail,
   type ChatQueueSnapshot,
   createQueuedChatTurn,
+  gatewayRequestAfterQueuedEdit,
   getQueuedConversationIds,
   insertQueuedChatTurnAtSlot,
   moveQueuedChatTurn,
@@ -186,6 +188,8 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
         commandSafetyMode: CommandSafetyMode;
         runtimeControls: ChatRuntimeControls;
         gatewayRequest?: QueuedChatTurn["gatewayRequest"];
+        /** 进入编辑时的正文；保存时据此判断 WebUI 指令语义是否还成立。 */
+        originalText: string;
       })
     | null
   >(null);
@@ -456,7 +460,13 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
       commandSafetyMode,
       runtimeControls: editSlot?.runtimeControls ?? settings.chatRuntimeControls,
       createdAt: editSlot?.createdAt,
-      gatewayRequest: editSlot?.gatewayRequest,
+      gatewayRequest: editSlot
+        ? gatewayRequestAfterQueuedEdit(
+            editSlot.gatewayRequest,
+            editSlot.originalText,
+            draft?.text ?? "",
+          )
+        : undefined,
     });
 
     setQueuedChatTurnsState((current) => {
@@ -610,6 +620,9 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
           workdirOverride: queuedTurn.workdir,
           commandSafetyModeOverride: queuedTurn.commandSafetyMode,
           runtimeControlsOverride: queuedTurn.runtimeControls,
+          ...(gatewayRequest?.composerCommand
+            ? { composerCommand: gatewayRequest.composerCommand }
+            : {}),
           gatewayBridgeRequestOverride: gatewayBridgeRequest,
           preserveComposerOnStart: true,
           beforeRuntimeStart: markGatewayStarted,
@@ -772,6 +785,7 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
       commandSafetyMode: queuedTurn.commandSafetyMode,
       runtimeControls: { ...queuedTurn.runtimeControls },
       gatewayRequest: queuedTurn.gatewayRequest ? { ...queuedTurn.gatewayRequest } : undefined,
+      originalText: queuedTurn.draft.text,
     };
     setQueuedChatTurnsState((current) => removeQueuedChatTurn(current, key));
     composerRef.current?.setDraft(queuedTurn.draft);
@@ -826,6 +840,9 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
     const runtimeControls = payload.runtimeControls
       ? normalizeChatRuntimeControls(payload.runtimeControls)
       : settings.chatRuntimeControls;
+    // 排队的 WebUI 轮次同样要带上“/”指令语义（goal set/resume、提示词指令）。
+    const composerCommand = gatewayComposerTurnCommand(payload);
+    if (composerCommand === null) return false;
     const queuedTurn = createQueuedChatTurn({
       id: `gateway-${requestId}`,
       conversationId: targetConversationId,
@@ -852,6 +869,7 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
             : "auto",
         selectedModel: payload.selectedModel,
         runtimeControls: payload.runtimeControls,
+        ...(composerCommand ? { composerCommand } : {}),
       },
     });
 
@@ -1252,6 +1270,11 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
           uploadedFiles: Array.isArray(uploadedFiles) ? uploadedFiles : [],
           id: session.item.id,
           createdAt: session.item.createdAt,
+          gatewayRequest: gatewayRequestAfterQueuedEdit(
+            session.item.gatewayRequest,
+            session.item.draft.text,
+            typeof draft?.text === "string" ? draft.text : "",
+          ),
         });
         remoteQueuedChatTurnEditSlotsRef.current.delete(itemId);
         setQueuedChatTurnsState((current) =>

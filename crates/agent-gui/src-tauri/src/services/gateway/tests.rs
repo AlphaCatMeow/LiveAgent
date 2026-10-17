@@ -85,6 +85,9 @@ fn gateway_chat_request(
         uploaded_files: Vec::new(),
         referenced_conversations: Vec::new(),
         queue_policy: String::new(),
+        goal_action: String::new(),
+        goal_text: String::new(),
+        prompt_command: false,
     }
 }
 
@@ -116,6 +119,9 @@ fn gateway_chat_command_mapping_preserves_rebase_signal() {
         execution_mode: "tools".to_string(),
         workdir: "/workspace".to_string(),
         command_safety_mode: "sandbox".to_string(),
+        goal_action: String::new(),
+        goal_text: String::new(),
+        prompt_command: false,
         referenced_conversations: vec![proto::ChatConversationReference {
             id: "conversation-source".to_string(),
             title: "Earlier investigation".to_string(),

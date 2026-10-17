@@ -79,11 +79,13 @@ import {
   type GatewayWorkspaceRootGrant,
   type GatewayWorkspaceRootGrantDraft,
   type GatewayWorkspaceRootGrantsResponse,
+  type GoalManageResponse,
   type HistoryGetOptions,
   type InstalledAppsListResponse,
   isConnectionSetupTimeoutError,
   isRecoverableGatewayTransportError,
   isRequestTimeoutError,
+  type LoopManageResponse,
   type ManagedProcessLogPayload,
   type ManagedProcessStatePayload,
   type MentionListResponse,
@@ -101,6 +103,7 @@ import {
   type SkillManagePayload,
   type SkillMetadataResponse,
   type SkillTextResponse,
+  type SlashCommandListResponse,
   type SshKnownHostResetResult,
   sftpPathPayload,
   shouldRecoverMemoryManageRequest,
@@ -1166,6 +1169,54 @@ export class GatewayWebSocketRpcClient extends GatewayWebSocketTransport {
       max_results: maxResults,
       query,
       show_hidden: showHidden,
+    });
+  }
+
+  /** 桌面端“/”指令目录。列表不是状态变更，可安全重试。 */
+  async listCommands(workdir?: string): Promise<SlashCommandListResponse> {
+    return this.requestWithRecovery<SlashCommandListResponse>("commands.list", {
+      workdir: workdir ?? "",
+    });
+  }
+
+  /** /goal clear：清除会话目标（set/resume 会开始一轮运行，走聊天请求）。改状态的请求不自动重发。 */
+  async clearGoal(conversationId: string): Promise<GoalManageResponse> {
+    return this.request<GoalManageResponse>("goal.manage", {
+      conversationId,
+      action: "clear",
+    });
+  }
+
+  async listLoops(conversationId: string): Promise<LoopManageResponse> {
+    return this.requestWithRecovery<LoopManageResponse>("loops.manage", {
+      conversationId,
+      action: "list",
+    });
+  }
+
+  /** 创建 /loop。断线后不自动重发：桌面端可能已经建好，重发会多出一条重复的定时任务。 */
+  async createLoop(input: {
+    conversationId: string;
+    cron?: string;
+    interval: string;
+    prompt: string;
+    reasoning?: string;
+  }): Promise<LoopManageResponse> {
+    return this.request<LoopManageResponse>("loops.manage", {
+      conversationId: input.conversationId,
+      action: "create",
+      cron: input.cron ?? "",
+      interval: input.interval,
+      prompt: input.prompt,
+      reasoning: input.reasoning ?? "",
+    });
+  }
+
+  async cancelLoop(conversationId: string, loopId: string): Promise<LoopManageResponse> {
+    return this.request<LoopManageResponse>("loops.manage", {
+      conversationId,
+      action: "cancel",
+      loopId,
     });
   }
 

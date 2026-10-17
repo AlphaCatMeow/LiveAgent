@@ -43,8 +43,10 @@ import {
   type CheckpointRewoundInfo,
   formatCheckpointRewoundNotification,
 } from "@liveagent/ui/lib/chat/checkpointRewind";
+import type { ComposerCommandHost } from "@liveagent/ui/lib/chat/composerCommands";
 import type { PendingUploadedFile } from "@liveagent/ui/lib/chat/uploadedFiles";
 import { mergePendingUploadedFiles } from "@liveagent/ui/lib/chat/uploadedFiles";
+import { parseModelValue } from "@liveagent/ui/lib/models/modelValue";
 import { nativeResourceHostCapabilities } from "@liveagent/ui/lib/resourceHost";
 import { cn } from "@liveagent/ui/lib/shared/utils";
 import { useSidebarSelector } from "@liveagent/ui/lib/sidebar/useSidebarSelector";
@@ -130,8 +132,10 @@ import type { GatewayAppViewModel } from "./GatewayApp";
 import { isLocalDraftConversationId } from "./gatewayLocalDraft";
 import { HistorySwitchLoadingOverlay } from "./HistorySwitchLoadingOverlay";
 import { useWindowFileDropGuard } from "./hooks/useWindowFileDropGuard";
+import { sendComposerCommandTurn } from "./sendComposerCommandTurn";
 import { GatewaySidebarContainer } from "./sidebar/GatewaySidebarContainer";
 import { UserMenu } from "./UserMenu";
+import { createWebComposerCommandHost } from "./webComposerCommandHost";
 import {
   GatewayConversationPaneHost,
   type GatewayConversationPaneHostContext,
@@ -833,6 +837,61 @@ export function GatewayAppView({
     [handleFileDrop],
   );
 
+  // 输入框“/”指令宿主：引用只随 api、工作目录和语言变化（输入框按宿主引用重新拉
+  // 指令目录），动作与状态读数经 ref 取最新值——sendChat 等每次渲染都是新函数。
+  const composerCommandLatestRef = useRef({
+    handleManualCompact,
+    handleSelectModel,
+    modelOptions,
+    runtimeControls: chatRuntimeControlsForCurrentProvider,
+    sendChat,
+  });
+  composerCommandLatestRef.current = {
+    handleManualCompact,
+    handleSelectModel,
+    modelOptions,
+    runtimeControls: chatRuntimeControlsForCurrentProvider,
+    sendChat,
+  };
+  const composerCommandHost = useMemo<ComposerCommandHost>(
+    () => ({
+      ...createWebComposerCommandHost({
+        t: (key) => translate(key, settings.locale),
+        client: api ?? undefined,
+        getConversationId: () => {
+          const id = getDisplayedConversationId();
+          return isLocalDraftConversationId(id) ? undefined : id;
+        },
+        getWorkdir: () => displayedConversationWorkdir || undefined,
+        getRuntimeControls: () => composerCommandLatestRef.current.runtimeControls,
+        sendTurn: (text, command, runtimeControls) =>
+          sendComposerCommandTurn(
+            composerCommandLatestRef.current.sendChat,
+            (key) => translate(key, settings.locale),
+            text,
+            command,
+            { runtimeControls },
+          ),
+        compact: () => composerCommandLatestRef.current.handleManualCompact(),
+        getModelOptions: () => composerCommandLatestRef.current.modelOptions,
+        selectModel: (value) => {
+          const selection = parseModelValue(value);
+          if (selection) composerCommandLatestRef.current.handleSelectModel(selection);
+        },
+      }),
+      // 正在编辑排队消息时，发送是保存编辑，不按指令执行。
+      isDraftReserved: () =>
+        queuedChatEditSessionRef.current?.conversationId === getDisplayedConversationId(),
+    }),
+    [
+      api,
+      displayedConversationWorkdir,
+      getDisplayedConversationId,
+      queuedChatEditSessionRef,
+      settings.locale,
+    ],
+  );
+
   const primaryConversationSurface: GatewayConversationPrimarySurface = {
     isSending: composerIsSending,
     // 上传态只归属目标会话:背景 Pane 的导入不在主 Pane 显示"上传中"。
@@ -871,6 +930,7 @@ export function GatewayAppView({
     onRemoveQueuedTurn: removeQueuedTurn,
     onManualCompactConfirm: handleManualCompact,
     manualCompactBlocked: manualCompactPending || composerCompactionBlocked,
+    commandHost: composerCommandHost,
     approvalBar,
     taskProgressBar: (
       <TaskProgressBar
@@ -1787,6 +1847,7 @@ export function GatewayAppView({
                                   mentionableConversations={mentionableConversations}
                                   searchMentionableConversations={searchMentionableConversations}
                                   mentionApps={mentionApps}
+                                  commandHost={composerCommandHost}
                                   executionMode={settings.system.executionMode}
                                   hasModels={modelOptions.length > 0}
                                   currentModelLabel={currentModelLabel}

@@ -7,6 +7,8 @@ import {
   type KBrainCreateSessionRequest,
   type KBrainEditRequest,
   type KBrainEvent,
+  type KBrainGoalRequest,
+  type KBrainGoalState,
   type KBrainHistoryResponse,
   type KBrainModelRef,
   type KBrainPromptRequest,
@@ -14,11 +16,13 @@ import {
   type KBrainQuestionAnswer,
   type KBrainRunAccepted,
   type KBrainSession,
+  type KBrainSessionLoop,
   type KBrainSessionPage,
   type KBrainSettingsDocument,
   type KBrainSettingsUpdate,
   type KBrainSharedProjection,
   type KBrainShareStatus,
+  type KBrainSlashCommand,
   type KBrainTextGenerateRequest,
   type KBrainTextGenerateResponse,
   type KBrainUpdateSessionRequest,
@@ -562,6 +566,90 @@ export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
     return accepted;
   }
 
+  /** 按 client_request_id 查已接受的运行；未接受时返回 null（404）。 */
+  async function lookupRun(
+    conversationId: string,
+    clientRequestId: string,
+    signal?: AbortSignal,
+  ): Promise<KBrainRunAccepted | null> {
+    try {
+      return await request<KBrainRunAccepted>(
+        `/v1/sessions/${encodeURIComponent(conversationId)}/runs?client_request_id=${encodeURIComponent(clientRequestId)}`,
+        { signal },
+      );
+    } catch (error) {
+      if ((error as { status?: number }).status === 404) return null;
+      throw error;
+    }
+  }
+
+  async function getGoal(conversationId: string, signal?: AbortSignal): Promise<KBrainGoalState> {
+    return request<KBrainGoalState>(`/v1/sessions/${encodeURIComponent(conversationId)}/goal`, {
+      signal,
+    });
+  }
+
+  async function postGoal(
+    conversationId: string,
+    input: KBrainGoalRequest,
+    signal?: AbortSignal,
+  ): Promise<KBrainGoalState> {
+    const body =
+      input.action === "set" || input.action === "resume"
+        ? { ...input, run: { ...input.run, conversation_id: conversationId } }
+        : input;
+    const state = await request<KBrainGoalState>(
+      `/v1/sessions/${encodeURIComponent(conversationId)}/goal`,
+      { method: "POST", body: JSON.stringify(body), signal },
+    );
+    if (state.version !== KBRAIN_PROTOCOL_VERSION || state.conversation_id !== conversationId) {
+      throw new Error("Malformed K-brain goal response");
+    }
+    return state;
+  }
+
+  /** 把不经过模型的“/”指令和结果作为一问一答写进会话历史。 */
+  async function recordCommandNote(
+    conversationId: string,
+    command: string,
+    result: string,
+  ): Promise<void> {
+    await request<unknown>(`/v1/sessions/${encodeURIComponent(conversationId)}/command-notes`, {
+      method: "POST",
+      body: JSON.stringify({ command, result }),
+    });
+  }
+
+  async function listLoops(conversationId: string): Promise<KBrainSessionLoop[]> {
+    const result = await request<{ loops?: KBrainSessionLoop[] }>(
+      `/v1/sessions/${encodeURIComponent(conversationId)}/loops`,
+    );
+    return result.loops ?? [];
+  }
+
+  async function createLoop(
+    conversationId: string,
+    input: { cron?: string; interval: string; prompt: string; reasoning?: string },
+  ): Promise<KBrainSessionLoop> {
+    return request<KBrainSessionLoop>(`/v1/sessions/${encodeURIComponent(conversationId)}/loops`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async function cancelLoop(conversationId: string, loopId: string): Promise<void> {
+    await request<unknown>(
+      `/v1/sessions/${encodeURIComponent(conversationId)}/loops/${encodeURIComponent(loopId)}/cancel`,
+      { method: "POST", body: "{}" },
+    );
+  }
+
+  async function listCommands(workdir?: string): Promise<KBrainSlashCommand[]> {
+    const query = workdir?.trim() ? `?workdir=${encodeURIComponent(workdir.trim())}` : "";
+    const result = await request<{ commands?: KBrainSlashCommand[] }>(`/v1/commands${query}`);
+    return result.commands ?? [];
+  }
+
   async function cancelRun(conversationId: string, runId: string): Promise<void> {
     await request<unknown>(
       `/v1/sessions/${encodeURIComponent(conversationId)}/runs/${encodeURIComponent(runId)}/cancel`,
@@ -730,6 +818,14 @@ export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
     getSession,
     updateSession,
     startRun,
+    lookupRun,
+    getGoal,
+    postGoal,
+    listCommands,
+    recordCommandNote,
+    listLoops,
+    createLoop,
+    cancelLoop,
     cancelRun,
     closeSession,
     resolvePermission,

@@ -5,6 +5,10 @@ import type {
   MentionComposerHandle,
 } from "@liveagent/ui/components/chat/MentionComposer";
 import { getAutomationState } from "@liveagent/ui/lib/automation/index";
+import {
+  COMPOSER_ACTION_COMMAND_NAMES,
+  type ComposerTurnCommand,
+} from "@liveagent/ui/lib/chat/composerCommands";
 import { normalizeLogicalLineEndings } from "@liveagent/ui/lib/chat/composerText";
 import { normalizeConversationMentionReferences } from "@liveagent/ui/lib/chat/mentionReferences";
 import {
@@ -55,6 +59,7 @@ import {
 import { skillMentionInjection } from "../../../lib/chat/skills/mentionInjection";
 import { createStreamDebugLogger } from "../../../lib/debug/agentDebug";
 import { liveAgentRuntimeCapabilities } from "../../../lib/host";
+import { showGoalProgress } from "../../../lib/kbrain/goalNotice";
 import { createModelFromConfig, createProviderRuntimeConfig } from "../../../lib/providers/llm";
 import {
   type AppSettings,
@@ -314,6 +319,8 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     workdirOverride?: string;
     commandSafetyModeOverride?: CommandSafetyMode;
     runtimeControlsOverride?: ChatRuntimeControls;
+    /** 输入框“/”指令带来的单轮语义；planMode 已并入 runtimeControlsOverride。 */
+    composerCommand?: ComposerTurnCommand;
     gatewayBridgeRequestOverride?: ActiveGatewayBridgeRequest | null;
     preserveComposerOnStart?: boolean;
     beforeRuntimeStart?: () => Promise<void>;
@@ -1306,6 +1313,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
         text,
         structured: composerDraft?.skillMentions ?? [],
         enabledSkills: selectedSkills,
+        excludedCommandNames: COMPOSER_ACTION_COMMAND_NAMES,
       });
       // 显式提及只对当轮有效:留在 system prompt 里会让它这轮多一段、下轮撤回去,
       // 一次 `/skill-name` 连废两次缓存前缀。这里只算出块,挂载推迟到停止检查之后。
@@ -1523,6 +1531,8 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
             },
             sessionId,
             clientRequestId: gatewayBridgeRequest?.clientRequestId,
+            composerCommand: overrides?.composerCommand,
+            onGoalUpdate: (state) => showGoalProgress(conversationId, state, t),
             taskStateStore,
             conversationId,
             referencedConversations,

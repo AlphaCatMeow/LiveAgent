@@ -187,11 +187,21 @@ func (c *browserConn) handleChatCommand(requestID, agentID string, cmd *gatewayv
 	}
 
 	if c.srv.kbrainRelay != nil && agentID == c.srv.kbrainTargetID {
+		// 直连 K-brain 只支持提示词指令；/goal 需要桌面端的目标栏与续跑挂接。
+		if body.GoalAction != "" {
+			_ = c.sendLocalError(requestID, errComposerGoalUnsupported)
+			return
+		}
 		c.handleKBrainChatCommand(requestID, agentID, body)
 		return
 	}
 	if !c.sm.IsOnline(agentID) {
 		_ = c.sendLocalError(requestID, "agent offline")
+		return
+	}
+	if chatcmd.HasComposerCommand(body) &&
+		!c.sm.SupportsCapability(agentID, gatewayv2.ComposerCommandsV1Capability) {
+		_ = c.sendLocalError(requestID, errComposerCommandsUnsupported)
 		return
 	}
 	if len(body.ReferencedConversations) > 0 &&
@@ -270,7 +280,7 @@ func (c *browserConn) handleKBrainChatCommand(requestID, agentID string, body ha
 		<-ready
 		onControl(runID, control)
 	}
-	queued, err := c.srv.kbrainRelay.StartWithCWD(context.Background(), start.RunID, start.ConversationID, body.ClientRequestID, body.Workdir, kbrain.PromptRequest{Prompt: body.Message, Model: model, Options: options}, body.QueuePolicy, callbacks)
+	queued, err := c.srv.kbrainRelay.StartWithCWD(context.Background(), start.RunID, start.ConversationID, body.ClientRequestID, body.Workdir, kbrain.PromptRequest{Prompt: body.Message, PromptCommand: body.PromptCommand, Model: model, Options: options}, body.QueuePolicy, callbacks)
 	if err == nil && queued {
 		// Settle the browser startup watchdog before a queued run can start.
 		onControl(start.RunID, &gatewayv2.ChatControlEvent{RequestId: start.RunID, ConversationId: start.ConversationID, Type: "queued_in_gui"})

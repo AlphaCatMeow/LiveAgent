@@ -250,6 +250,9 @@ test("a direct queue stop pauses processing until composer Stop resumes it", asy
         },
       },
       "../gateway/gatewayBridgeTypes": {
+        gatewayComposerTurnCommand() {
+          return undefined;
+        },
         normalizeGatewayCommandSafetyMode(value) {
           return value === "sandboxOffline" ? value : undefined;
         },
@@ -474,6 +477,9 @@ test("K-brain native queue subscribes to Gateway queue answers", async () => {
         },
       },
       "../gateway/gatewayBridgeTypes": {
+        gatewayComposerTurnCommand() {
+          return undefined;
+        },
         normalizeGatewayExecutionMode(value) {
           return value;
         },

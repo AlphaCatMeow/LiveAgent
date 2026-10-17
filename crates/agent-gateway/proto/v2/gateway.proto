@@ -70,6 +70,11 @@ message GatewayEnvelope {
     ClarifyTurnRequest clarify_turn = 101;
     CuaDriverRequest cua_driver = 102;
     PlanningRequest planning = 103;
+    PromptTemplateListRequest prompt_template_list = 104;
+    PromptTemplateExpandRequest prompt_template_expand = 105;
+    SlashCommandListRequest slash_command_list = 106;
+    GoalManageRequest goal_manage = 107;
+    LoopManageRequest loop_manage = 108;
   }
 
   // Legacy tunnel control/frame payloads (pre-rewrite protocol) and the
@@ -155,6 +160,11 @@ message AgentEnvelope {
     ClarifyTurnDelta clarify_turn_delta = 108;
     PlanningResponse planning_resp = 109;
     PlanningChanged planning_changed = 110;
+    PromptTemplateListResponse prompt_template_list_resp = 111;
+    PromptTemplateExpandResponse prompt_template_expand_resp = 112;
+    SlashCommandListResponse slash_command_list_resp = 113;
+    GoalManageResponse goal_manage_resp = 114;
+    LoopManageResponse loop_manage_resp = 115;
   }
 
   // Legacy tunnel control/frame payloads (pre-rewrite protocol) and the
@@ -726,6 +736,12 @@ message ChatRequest {
   // The desktop runtime binds ReadConversation authorization to this list;
   // a markdown conversation token is display-only and cannot grant access.
   repeated ChatConversationReference referenced_conversations = 12;
+  // WebUI 输入框“/”指令带来的单轮语义。goal_action 非空表示经 K-brain 的 goal
+  // 接口开始这一轮（set/resume）；prompt_command 表示 message 是提示词指令，
+  // 由 K-brain 展开后交给模型，历史与界面保留原文。
+  string goal_action = 13;
+  string goal_text = 14;
+  bool prompt_command = 15;
 }
 
 message ChatMessageRef {
@@ -1085,6 +1101,94 @@ message SkillFilesListResponse {
   string root_dir = 1;
   repeated string paths = 2;
   bool truncated = 3;
+}
+
+// Markdown 提示词模板（输入框“/”指令）：桌面端转调 K-brain 的
+// GET /v1/prompts?workdir= 与 POST /v1/prompts/templates/{name}/expand。
+// 项目级模板是否生效由 K-brain 按项目信任状态决定。
+message PromptTemplateListRequest {
+  string workdir = 1;
+}
+
+message PromptTemplateSummary {
+  string name = 1;
+  string description = 2;
+  string argument_hint = 3;
+}
+
+message PromptTemplateListResponse {
+  repeated PromptTemplateSummary templates = 1;
+}
+
+message PromptTemplateExpandRequest {
+  string name = 1;
+  // 指令名之后的原始参数文本，由 K-brain 按命令行规则切分。
+  string text = 2;
+  string workdir = 3;
+}
+
+message PromptTemplateExpandResponse {
+  string name = 1;
+  string text = 2;
+}
+
+// 会话目标的非运行动作（目前只有 clear）。set/resume 会开始一轮运行，走
+// ChatRequest 的 goal_action，复用聊天的流式与镜像链路。
+message GoalManageRequest {
+  string conversation_id = 1;
+  string action = 2;
+}
+
+message GoalManageResponse {
+  string conversation_id = 1;
+  string goal = 2;
+  // none、active、continuing、met、paused 或 cleared。
+  string status = 3;
+  int32 round = 4;
+  int32 max_rounds = 5;
+  string reason = 6;
+}
+
+// 桌面端“/”指令目录：动作由客户端按名称处理，prompt 由 K-brain 展开。
+message SlashCommandListRequest {
+  string workdir = 1;
+}
+
+message SlashCommandSummary {
+  string name = 1;
+  string description = 2;
+  string argument_hint = 3;
+  // action 或 prompt。
+  string kind = 4;
+  string source = 5;
+}
+
+message SlashCommandListResponse {
+  repeated SlashCommandSummary commands = 1;
+}
+
+// 会话内按间隔重复的提示词，落在 K-brain 的 cron 上。
+message LoopManageRequest {
+  string conversation_id = 1;
+  // create、list 或 cancel。
+  string action = 2;
+  string cron = 3;
+  string interval = 4;
+  string prompt = 5;
+  string reasoning = 6;
+  string loop_id = 7;
+}
+
+message LoopSummary {
+  string id = 1;
+  string interval = 2;
+  string cron = 3;
+  string prompt = 4;
+  bool enabled = 5;
+}
+
+message LoopManageResponse {
+  repeated LoopSummary loops = 1;
 }
 
 message SkillMetadataReadRequest {

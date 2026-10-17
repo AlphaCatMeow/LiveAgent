@@ -116,16 +116,6 @@ export type InstalledAppsListResponse = {
   apps: Array<{ name: string; bundleId: string; path: string; iconDataUrl: string }>;
 };
 
-/** 输入框“/”提示词指令的模板摘要；空串表示缺失。 */
-export type PromptTemplateListResponse = {
-  templates: Array<{ name: string; description: string; argumentHint: string }>;
-};
-
-export type PromptTemplateExpandResponse = {
-  name: string;
-  text: string;
-};
-
 /** 桌面端“/”指令目录：action 由客户端处理，prompt 由 K-brain 展开。 */
 export type SlashCommandSummary = {
   name: string;

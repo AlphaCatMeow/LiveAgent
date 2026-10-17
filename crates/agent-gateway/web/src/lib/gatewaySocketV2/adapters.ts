@@ -75,8 +75,6 @@ import {
   ManagedProcessRequestSchema,
   MemoryManageRequestSchema,
   PlanningRequestSchema,
-  PromptTemplateExpandRequestSchema,
-  PromptTemplateListRequestSchema,
   ProviderCustomHeaderSchema,
   ProviderCustomHeadersSchema,
   ProviderListRequestSchema,
@@ -733,20 +731,6 @@ function agentRequestPayload(type: string, body: J): GatewayEnvelope["payload"] 
           loopId: trimStr(body.loopId),
         }),
       };
-    case "prompts.list":
-      return {
-        case: "promptTemplateList",
-        value: create(PromptTemplateListRequestSchema, { workdir: trimStr(body.workdir) }),
-      };
-    case "prompts.expand":
-      return {
-        case: "promptTemplateExpand",
-        value: create(PromptTemplateExpandRequestSchema, {
-          name: trimStr(body.name),
-          text: typeof body.text === "string" ? body.text : "",
-          workdir: trimStr(body.workdir),
-        }),
-      };
     // Computer Use 设置页的只读引导状态。action 与桌面端的两条 Tauri 命令同名，
     // 写动作（安装 / 授权）不在这条通道上——见 proto 的 CuaDriverRequest 注释。
     case "cua.driver.probe":
@@ -1390,16 +1374,6 @@ function decodeAgentResponse(envelope: AgentEnvelope, options: { agentOnline: bo
           enabled: loop.enabled,
         })),
       };
-    case "promptTemplateListResp":
-      return {
-        templates: payload.value.templates.map((template) => ({
-          name: template.name,
-          description: template.description,
-          argumentHint: template.argumentHint,
-        })),
-      };
-    case "promptTemplateExpandResp":
-      return { name: payload.value.name, text: payload.value.text };
     case "uploadedImagePreviewResp":
       return { mimeType: payload.value.mimeType, data: payload.value.data };
     case "memoryManageResp":

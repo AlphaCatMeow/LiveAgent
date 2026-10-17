@@ -11,6 +11,17 @@
 - 指令标签：消息开头的内置动作渲染为 command 类型，避免被识别成 Skill。init/review 与自定义模板标签、结构化提及的完整统一仍需收尾。
 - 技能：GUI 从 K-brain 按工作目录读取已选技能；显式 /skill: 解析与执行的一致性仍需补测。
 
+### 2026-10-18 评审修复
+
+- /goal 子命令不区分大小写，新增 `/goal pause`。暂停仅在目标处于 active/continuing 时生效，否则 K-brain 返回 409，且不会取消与目标无关的普通运行。WebUI 暂无暂停入口，输入 `/goal pause` 会提示不支持。
+- 用户在目标轮次中停止时，GUI 调用 goal pause（忽略 409），再读取目标状态刷新目标栏，防止后端自行发起的续跑在后台继续。挂接续跑轮次时定期核对目标状态；目标已暂停或会话不存在时立即报错。
+- 会话忙或发送被拒时，指令不入队，直接报错并把草稿放回输入框。GUI 的发送层返回 false 也按被拒处理。WebUI 在已有待确认请求或请求失败时同样报错。
+- 草稿带会话引用、大段粘贴或附件：GUI 按普通草稿完整发送；WebUI 以及 `/goal` 不支持，报错并保留草稿。
+- 指令名按目录写法发送。草稿开头是 Skill 标签时不按指令执行；编辑排队消息时也不按指令执行。编辑排队的 WebUI 指令轮次后，正文一旦改动，就去掉其指令语义。
+- Gateway 只把带指令语义的聊天请求和 slash_command_list/goal_manage/loop_manage 转发给声明了 `COMPOSER_COMMANDS_V1` 的桌面端。clearGoal、createLoop、cancelLoop 会改状态，不自动重发。
+- 提示词模板的 list/expand 转发链路（3.5 末尾）已停用：提示词指令改为随聊天请求带 `prompt_command`，由 K-brain 展开。proto 字段保留。
+- K-brain 侧：loop 的 cron 间隔不少于 60 秒（秒字段必须固定）；`GOAL_MET` 判定为严格前缀，即去掉前导空白和 markdown 标记后以 `GOAL_MET` 开头，且后一个字符不是字母、数字、`_` 或 `-`。
+
 ### 尚未完成，PR 保持草稿
 
 - WebUI 类型检查与构建已修复；目标栏、composer-action 的 TS 事件处理与完整的目标指令透传尚未完成端到端验收。不能把 proto 和 Rust 转发已存在当成功能可用。
@@ -104,7 +115,7 @@ Claude Code 的 `/compact` 可以附带压缩要求，但 K-brain 的 `CompactRe
   - WebUI 用 Gateway 实现。
 - 某端不支持的指令在弹层里隐藏，不显示禁用项。
 - 涉及镜像文件时两端同步修改，完成前运行 `node scripts/check-mirror.mjs`。
-- WebUI 的请求不由 Gateway 直接调用 K-brain。Gateway 校验 agent_request 后转给桌面端 Agent，由桌面端调用 K-brain，Skill 列表就走这条链路（`internal/protocol/pbws/guard.go:54`，`services/gateway/envelope_handler.rs:1016`）。这条链路目前没有提示词相关的消息，第二期按同样方式补上：
+- WebUI 的请求不由 Gateway 直接调用 K-brain。Gateway 校验 agent_request 后转给桌面端 Agent，由桌面端调用 K-brain，Skill 列表就走这条链路（`internal/protocol/pbws/guard.go:54`，`services/gateway/envelope_handler.rs:1016`）。以下提示词模板转发是早期方案，现已停用（见 2026-10-18 评审修复），仅作记录：
   - `crates/agent-gateway/proto/v2/gateway.proto` 新增 `PromptTemplateListRequest/Response` 和 `PromptTemplateExpandRequest/Response`，加入 GatewayEnvelope 和 AgentEnvelope 的 payload；按 `buf.gen.yaml` 重新生成 Go 和 WebUI 的 TS 代码，桌面端 Rust 的生成代码同步更新。
   - `guard.go` 把两个请求加入直通白名单，对模板名、参数和 workdir 做长度上限校验。
   - 桌面端在 `envelope_handler.rs` 和 `gateway_bridge.rs` 处理这两个请求，转调 K-brain 的 `GET /v1/prompts?workdir=` 和 `POST /v1/prompts/templates/{name}/expand`。

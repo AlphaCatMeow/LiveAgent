@@ -7,6 +7,7 @@ import type {
 } from "@liveagent/app/lib/agentTypes";
 import { toast } from "@liveagent/ui/components/ui/toast-manager";
 import type { HostedSearchBlock } from "@liveagent/ui/lib/chat/hostedSearch";
+import { taskResultDetails } from "@liveagent/ui/lib/chat/taskProgress";
 import type { ConversationViewState } from "../chat/conversation/conversationState";
 import { appendMessagesToConversation } from "../chat/conversation/conversationState";
 import { createKBrainClient } from "./client";
@@ -224,7 +225,12 @@ function toolCall(call: KBrainToolCall): ToolCall {
   };
 }
 
-function toolResult(result: KBrainToolResult): ToolResultMessage {
+function toolResult(
+  result: KBrainToolResult,
+  call: ToolCall | undefined,
+  runId: string,
+  revision: number,
+): ToolResultMessage {
   return {
     role: "toolResult",
     toolCallId: result.id,
@@ -237,7 +243,9 @@ function toolResult(result: KBrainToolResult): ToolResultMessage {
           : [],
       ),
     ],
-    details: questionResultDetails(result.name, result.output),
+    details:
+      questionResultDetails(result.name, result.output) ??
+      taskResultDetails(result.name, call?.arguments, result, runId, revision),
     isError: result.failed === true || result.cancelled === true,
     timestamp: Date.now(),
   };
@@ -552,7 +560,12 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
       case "tool.result": {
         const payload = eventPayload<{ tool_result?: KBrainToolResult }>(event);
         if (!payload?.tool_result) break;
-        const result = toolResult(payload.tool_result);
+        const result = toolResult(
+          payload.tool_result,
+          calls.get(payload.tool_result.id),
+          event.run_id,
+          event.seq,
+        );
         const call = calls.get(result.toolCallId) ?? {
           type: "toolCall",
           id: result.toolCallId,
@@ -680,11 +693,16 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
           if (call)
             params.onToolResult(
               call,
-              toolResult({
-                id: call.id,
-                name: "AskUserQuestion",
-                output: JSON.stringify(resolution),
-              }),
+              toolResult(
+                {
+                  id: call.id,
+                  name: "AskUserQuestion",
+                  output: JSON.stringify(resolution),
+                },
+                call,
+                event.run_id,
+                event.seq,
+              ),
             );
         }
         params.onStatus?.(null);

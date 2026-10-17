@@ -941,7 +941,10 @@ fn prompt_workdir_query(workdir: &str) -> String {
     }
 }
 
-/// 调 K-brain 的提示词接口并解析 JSON；非 2xx 时取 error/message 字段作为错误。
+/// 指令目录请求的上限：WebUI 打开“/”弹层时同步等待，K-brain 卡住时要尽快失败。
+const KBRAIN_COMMANDS_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// 调 K-brain 的指令接口并解析 JSON；非 2xx 时取 error/message 字段作为错误。
 async fn kbrain_prompt_request(
     connection: &KBrainBackendConnection,
     method: reqwest::Method,
@@ -950,6 +953,7 @@ async fn kbrain_prompt_request(
 ) -> Result<Value, String> {
     let client = reqwest::Client::builder()
         .no_proxy()
+        .timeout(KBRAIN_COMMANDS_REQUEST_TIMEOUT)
         .build()
         .map_err(|error| format!("create K-brain HTTP client failed: {error}"))?;
     let mut request = client
@@ -985,73 +989,6 @@ async fn kbrain_prompt_request(
         return Err(format!("{message} (HTTP {status})"));
     }
     Ok(payload)
-}
-
-async fn kbrain_prompt_template_list(
-    connection: &KBrainBackendConnection,
-    workdir: &str,
-) -> Result<proto::PromptTemplateListResponse, String> {
-    let payload = kbrain_prompt_request(
-        connection,
-        reqwest::Method::GET,
-        &format!("/v1/prompts{}", prompt_workdir_query(workdir)),
-        None,
-    )
-    .await?;
-    let field = |file: &Value, key: &str| {
-        file.get(key)
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string()
-    };
-    let templates = payload
-        .get("files")
-        .and_then(Value::as_array)
-        .map(|files| {
-            files
-                .iter()
-                .filter(|file| !field(file, "name").trim().is_empty())
-                .map(|file| proto::PromptTemplateSummary {
-                    name: field(file, "name"),
-                    description: field(file, "description"),
-                    argument_hint: field(file, "argumentHint"),
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    Ok(proto::PromptTemplateListResponse { templates })
-}
-
-async fn kbrain_prompt_template_expand(
-    connection: &KBrainBackendConnection,
-    request: &proto::PromptTemplateExpandRequest,
-) -> Result<proto::PromptTemplateExpandResponse, String> {
-    let name = request.name.trim();
-    if name.is_empty() {
-        return Err("prompt template name is required".to_string());
-    }
-    let payload = kbrain_prompt_request(
-        connection,
-        reqwest::Method::POST,
-        &format!(
-            "/v1/prompts/templates/{}/expand{}",
-            urlencoding::encode(name),
-            prompt_workdir_query(&request.workdir)
-        ),
-        Some(json!({ "text": request.text })),
-    )
-    .await?;
-    let text = |key: &str| {
-        payload
-            .get(key)
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string()
-    };
-    Ok(proto::PromptTemplateExpandResponse {
-        name: text("name"),
-        text: text("text"),
-    })
 }
 
 async fn kbrain_slash_commands(
@@ -1103,24 +1040,6 @@ pub async fn handle_slash_command_list(
 ) -> Result<proto::SlashCommandListResponse, String> {
     let connection = ensure_kbrain_connection(&app).await?;
     kbrain_slash_commands(&connection, &request.workdir).await
-}
-
-/// WebUI 输入框“/”提示词指令：列出 K-brain 的 Markdown 提示词模板。
-pub async fn handle_prompt_template_list(
-    app: AppHandle,
-    request: proto::PromptTemplateListRequest,
-) -> Result<proto::PromptTemplateListResponse, String> {
-    let connection = ensure_kbrain_connection(&app).await?;
-    kbrain_prompt_template_list(&connection, &request.workdir).await
-}
-
-/// WebUI 输入框“/”提示词指令：由 K-brain 展开模板，结果回填输入框，不发送。
-pub async fn handle_prompt_template_expand(
-    app: AppHandle,
-    request: proto::PromptTemplateExpandRequest,
-) -> Result<proto::PromptTemplateExpandResponse, String> {
-    let connection = ensure_kbrain_connection(&app).await?;
-    kbrain_prompt_template_expand(&connection, &request).await
 }
 
 pub async fn handle_skill_files_list() -> Result<proto::SkillFilesListResponse, String> {
@@ -2349,11 +2268,11 @@ mod tests {
 
     use super::{
         decode_kbrain_terminal_response, flatten_history_messages_json,
-        flatten_history_messages_json_window, is_builtin_share_tool_name,
-        kbrain_prompt_template_expand, kbrain_prompt_template_list, kbrain_provider_models,
-        kbrain_terminal_request, parse_occurrence_query, parse_runs_limit, prompt_workdir_query,
-        proto, redact_builtin_tool_content_json, resolve_stored_provider_models_config,
-        sanitize_provider_summaries, KBrainBackendConnection,
+        flatten_history_messages_json_window, is_builtin_share_tool_name, kbrain_provider_models,
+        kbrain_slash_commands, kbrain_terminal_request, parse_occurrence_query, parse_runs_limit,
+        prompt_workdir_query, proto, redact_builtin_tool_content_json,
+        resolve_stored_provider_models_config, sanitize_provider_summaries,
+        KBrainBackendConnection,
     };
     use crate::commands::chat_history::{
         self, history_message_content_hash, ChatHistoryMessageRef, ChatHistorySegmentRecord,
@@ -2448,7 +2367,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prompt_template_list_maps_files_and_drops_unnamed_entries() {
+    async fn slash_command_list_maps_catalog_and_surfaces_errors() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind local K-brain fixture");
@@ -2456,62 +2375,37 @@ mod tests {
         let server = tokio::spawn(serve_one_prompt_request(
             listener,
             "200 OK",
-            r#"{"files":[{"name":"fix","description":"Fix an issue","argumentHint":"<issue>"},{"name":"  "},{"name":"bare"}]}"#,
+            r#"{"version":"v1","commands":[{"name":"goal","description":"Keep working","argument_hint":"<goal>","kind":"action","source":"builtin"},{"name":"  "},{"name":"fix","kind":"prompt","source":"project"}]}"#,
         ));
-        let response = kbrain_prompt_template_list(&prompt_fixture_connection(address), "/repo")
+        let response = kbrain_slash_commands(&prompt_fixture_connection(address), "/repo")
             .await
-            .expect("prompt list");
+            .expect("slash commands");
         let (headers, body) = server.await.expect("fixture task");
-        assert!(headers.starts_with("GET /v1/prompts?workdir=%2Frepo "));
+        assert!(headers.starts_with("GET /v1/commands?workdir=%2Frepo "));
         assert!(
             headers.contains("authorization: Bearer fixture-token")
                 || headers.contains("Authorization: Bearer fixture-token")
         );
         assert!(body.is_none());
         let names: Vec<_> = response
-            .templates
+            .commands
             .iter()
-            .map(|template| {
+            .map(|command| {
                 (
-                    template.name.as_str(),
-                    template.description.as_str(),
-                    template.argument_hint.as_str(),
+                    command.name.as_str(),
+                    command.argument_hint.as_str(),
+                    command.kind.as_str(),
+                    command.source.as_str(),
                 )
             })
             .collect();
         assert_eq!(
             names,
-            vec![("fix", "Fix an issue", "<issue>"), ("bare", "", "")]
+            vec![
+                ("goal", "<goal>", "action", "builtin"),
+                ("fix", "", "prompt", "project")
+            ]
         );
-    }
-
-    #[tokio::test]
-    async fn prompt_template_expand_posts_raw_arguments_and_surfaces_errors() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind local K-brain fixture");
-        let address = listener.local_addr().expect("fixture address");
-        let server = tokio::spawn(serve_one_prompt_request(
-            listener,
-            "200 OK",
-            r#"{"name":"fix","text":"Fix issue 12"}"#,
-        ));
-        let response = kbrain_prompt_template_expand(
-            &prompt_fixture_connection(address),
-            &proto::PromptTemplateExpandRequest {
-                name: " fix ".to_string(),
-                text: "  12  ".to_string(),
-                workdir: String::new(),
-            },
-        )
-        .await
-        .expect("prompt expand");
-        let (headers, body) = server.await.expect("fixture task");
-        assert!(headers.starts_with("POST /v1/prompts/templates/fix/expand "));
-        // 参数原样转发，由 K-brain 按命令行规则切分。
-        assert_eq!(body, Some(json!({ "text": "  12  " })));
-        assert_eq!(response.name, "fix");
-        assert_eq!(response.text, "Fix issue 12");
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -2519,31 +2413,15 @@ mod tests {
         let address = listener.local_addr().expect("fixture address");
         let server = tokio::spawn(serve_one_prompt_request(
             listener,
-            "404 Not Found",
-            r#"{"error":"prompt template not found"}"#,
+            "400 Bad Request",
+            r#"{"error":"workdir is invalid"}"#,
         ));
-        let error = kbrain_prompt_template_expand(
-            &prompt_fixture_connection(address),
-            &proto::PromptTemplateExpandRequest {
-                name: "missing".to_string(),
-                ..Default::default()
-            },
-        )
-        .await
-        .expect_err("missing template");
-        server.await.expect("fixture task");
-        assert!(error.starts_with("prompt template not found (HTTP 404"));
-
-        let blank = kbrain_prompt_template_expand(
-            &prompt_fixture_connection(address),
-            &proto::PromptTemplateExpandRequest {
-                name: "  ".to_string(),
-                ..Default::default()
-            },
-        )
-        .await
-        .expect_err("blank name");
-        assert_eq!(blank, "prompt template name is required");
+        let error = kbrain_slash_commands(&prompt_fixture_connection(address), "")
+            .await
+            .expect_err("bad workdir");
+        let (headers, _) = server.await.expect("fixture task");
+        assert!(headers.starts_with("GET /v1/commands "));
+        assert!(error.starts_with("workdir is invalid (HTTP 400"));
     }
 
     #[test]

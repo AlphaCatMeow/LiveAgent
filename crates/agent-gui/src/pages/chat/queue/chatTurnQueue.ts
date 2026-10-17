@@ -68,6 +68,21 @@ export function createQueuedChatTurn(input: QueuedChatTurnInput): QueuedChatTurn
   };
 }
 
+/**
+ * 编辑排队的 WebUI 轮次后保存：正文改过就去掉原来的“/”指令语义（goal set/resume、
+ * 提示词指令），按普通消息发送，避免改了文字仍执行旧目标或把普通文本当模板展开。
+ * 正文未变时原样保留。
+ */
+export function gatewayRequestAfterQueuedEdit(
+  request: QueuedGatewayChatRequest | undefined,
+  originalText: string,
+  editedText: string,
+): QueuedGatewayChatRequest | undefined {
+  if (!request?.composerCommand || originalText.trim() === editedText.trim()) return request;
+  const { composerCommand: _dropped, ...rest } = request;
+  return rest;
+}
+
 export function buildQueuedChatTurnPreview(draft: MentionComposerDraft) {
   const parts = draft.segments.map((segment) => {
     switch (segment.type) {

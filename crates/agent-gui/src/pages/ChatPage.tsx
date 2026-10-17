@@ -1878,12 +1878,12 @@ function ChatPageContent(props: ChatPageProps) {
           const latest = composerCommandLatestRef.current;
           return latest.isDraftReserved(latest.getCurrentConversationId());
         },
-        sendTurn: (text, command, options) => {
+        sendTurn: async (text, command, options) => {
           const latest = composerCommandLatestRef.current;
           if (latest.isBusy(latest.getCurrentConversationId())) {
             throw new Error(t("chat.commands.busy"));
           }
-          return sendActionRef.current({
+          const accepted = await sendActionRef.current({
             // 带上草稿时按普通草稿发送：会话引用、大段粘贴导入与附件都照常处理。
             ...(options?.draft ? { composerDraftOverride: options.draft } : { textOverride: text }),
             composerCommand: command,
@@ -1891,6 +1891,8 @@ function ChatPageContent(props: ChatPageProps) {
               ? { runtimeControlsOverride: options.runtimeControls }
               : {}),
           });
+          // false（开始前被拒）由宿主转成错误，草稿放回输入框。
+          return accepted;
         },
         compact: () => manualCompactActionRef.current({ conversationId: currentConversationId }),
         getModelOptions: () => composerCommandLatestRef.current.modelOptions,
@@ -3828,6 +3830,7 @@ function ChatPageContent(props: ChatPageProps) {
                 : {}),
             });
             if (accepted) conversationRuntimeRegistry.uploads.set(conversationId, []);
+            // false（开始前被拒）由宿主转成错误，草稿放回输入框。
             return accepted;
           },
         }),

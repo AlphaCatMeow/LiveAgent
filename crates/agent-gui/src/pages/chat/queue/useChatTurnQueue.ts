@@ -52,6 +52,7 @@ import {
   type ChatQueueItemDetail,
   type ChatQueueSnapshot,
   createQueuedChatTurn,
+  gatewayRequestAfterQueuedEdit,
   getQueuedConversationIds,
   insertQueuedChatTurnAtSlot,
   moveQueuedChatTurn,
@@ -187,6 +188,8 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
         commandSafetyMode: CommandSafetyMode;
         runtimeControls: ChatRuntimeControls;
         gatewayRequest?: QueuedChatTurn["gatewayRequest"];
+        /** 进入编辑时的正文；保存时据此判断 WebUI 指令语义是否还成立。 */
+        originalText: string;
       })
     | null
   >(null);
@@ -457,7 +460,13 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
       commandSafetyMode,
       runtimeControls: editSlot?.runtimeControls ?? settings.chatRuntimeControls,
       createdAt: editSlot?.createdAt,
-      gatewayRequest: editSlot?.gatewayRequest,
+      gatewayRequest: editSlot
+        ? gatewayRequestAfterQueuedEdit(
+            editSlot.gatewayRequest,
+            editSlot.originalText,
+            draft?.text ?? "",
+          )
+        : undefined,
     });
 
     setQueuedChatTurnsState((current) => {
@@ -776,6 +785,7 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
       commandSafetyMode: queuedTurn.commandSafetyMode,
       runtimeControls: { ...queuedTurn.runtimeControls },
       gatewayRequest: queuedTurn.gatewayRequest ? { ...queuedTurn.gatewayRequest } : undefined,
+      originalText: queuedTurn.draft.text,
     };
     setQueuedChatTurnsState((current) => removeQueuedChatTurn(current, key));
     composerRef.current?.setDraft(queuedTurn.draft);
@@ -1260,6 +1270,11 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
           uploadedFiles: Array.isArray(uploadedFiles) ? uploadedFiles : [],
           id: session.item.id,
           createdAt: session.item.createdAt,
+          gatewayRequest: gatewayRequestAfterQueuedEdit(
+            session.item.gatewayRequest,
+            session.item.draft.text,
+            typeof draft?.text === "string" ? draft.text : "",
+          ),
         });
         remoteQueuedChatTurnEditSlotsRef.current.delete(itemId);
         setQueuedChatTurnsState((current) =>

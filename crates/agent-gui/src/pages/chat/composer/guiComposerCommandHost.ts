@@ -30,7 +30,8 @@ export function createGuiComposerCommandHost(params: {
   getRuntimeControls: () => ChatRuntimeControls;
   /**
    * 发送一轮消息；options.planMode 只作用于这一轮。options.draft 是带会话引用、
-   * 大段粘贴的草稿，发送层按普通草稿处理（含待上传附件）。会话正忙时应抛错。
+   * 大段粘贴的草稿，发送层按普通草稿处理（含待上传附件）。会话正忙时应抛错；
+   * 返回 false 表示发送在开始前被拒。
    */
   sendTurn: (
     text: string,
@@ -86,13 +87,18 @@ export function createGuiComposerCommandHost(params: {
     }));
   host.carriesComposerContext = true;
   if (params.isDraftReserved) host.isDraftReserved = params.isDraftReserved;
-  host.sendTurn = (text, command, options) =>
-    params.sendTurn(text, command, {
+  host.sendTurn = async (text, command, options) => {
+    const accepted = await params.sendTurn(text, command, {
       ...options,
       runtimeControls: options?.planMode
         ? { ...params.getRuntimeControls(), planModeEnabled: true }
         : undefined,
     });
+    // 发送层在开始前拒绝（会话加载中、粘贴导入进行中等）时返回 false：转成错误，
+    // 输入框据此放回草稿并显示原因。已开始的轮次（含被停止的）返回 true。
+    if (accepted === false) throw new Error(t("chat.commands.failed"));
+    return accepted;
+  };
   host.recordCommandResult = async (command, result) => {
     await client.recordCommandNote(sessionId(), command, result);
     await params.reloadConversation?.();

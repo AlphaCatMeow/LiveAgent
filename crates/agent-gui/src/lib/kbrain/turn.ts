@@ -181,6 +181,8 @@ const maxReconnects = 3;
 // 后端在上一轮终止事件之后才发起目标续跑；按请求标识轮询，直到它被接受。
 const goalAttachPollMs = 150;
 const goalAttachTimeoutMs = 60_000;
+// 每隔这么多次查询核对一次目标状态（约 1 秒）。
+const goalAttachCheckEvery = 6;
 
 function waitMs(ms: number, signal: AbortSignal): Promise<void> {
   throwIfAborted(signal);
@@ -416,10 +418,24 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
   const attachRun = async () => {
     const requestId = params.attachClientRequestId ?? "";
     const deadline = Date.now() + goalAttachTimeoutMs;
-    for (;;) {
+    for (let attempt = 1; ; attempt += 1) {
       const found = await client.lookupRun(kbrainSessionId, requestId, params.signal);
       if (found) return found;
       if (Date.now() > deadline) throw new Error("K-brain did not start the next goal round");
+      // 后端启动续跑失败会把目标改成暂停；会话不存在时 getGoal 直接报错。定期核对
+      // 目标状态，这两种情况立即结束，不必空等到超时。
+      if (attempt % goalAttachCheckEvery === 0) {
+        const goal = await client.getGoal(kbrainSessionId, params.signal);
+        params.onGoalUpdate?.(goal);
+        if (goal.status !== "active" && goal.status !== "continuing") {
+          // 查询与读目标之间这一轮可能刚被接受又结束，再查一次再放弃。
+          const late = await client.lookupRun(kbrainSessionId, requestId, params.signal);
+          if (late) return late;
+          throw new Error(
+            `K-brain did not start the next goal round (goal ${goal.status}${goal.reason ? `: ${goal.reason}` : ""})`,
+          );
+        }
+      }
       await waitMs(goalAttachPollMs, params.signal);
     }
   };

@@ -12,7 +12,11 @@ import {
   upsertHostedSearchToRound,
   upsertToolCallToRound,
 } from "../../../lib/chat/messages/uiMessages";
+import { createKBrainClient } from "../../../lib/kbrain/client";
+import { settleGoalAfterTurn } from "../../../lib/kbrain/goalSettle";
+import { publishGoalState } from "../../../lib/kbrain/goalStore";
 import { getKBrainHistoryWindow } from "../../../lib/kbrain/history";
+import { getKBrainSessionId } from "../../../lib/kbrain/mapping";
 import { canonicalKBrainToolPolicies } from "../../../lib/kbrain/toolPolicies";
 import { runKBrainTurn } from "../../../lib/kbrain/turn";
 import type {
@@ -173,6 +177,8 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
   // 直到目标达成、暂停或用户停止。
   // 回调里写入、轮次结束后读取；经函数读取，避免控制流把它收窄成初始值。
   let latestGoalState: KBrainGoalState | undefined;
+  // 本次发送是否牵涉目标（/goal 指令、续跑轮次或收到进行中的目标状态）；结束时据此对齐。
+  let goalInvolved = command?.kind === "goal";
   const readGoalState = () => latestGoalState;
   let attachClientRequestId: string | undefined;
   try {
@@ -195,6 +201,7 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
         ...turnCommandParams(command, attachClientRequestId),
         onGoalUpdate: (state) => {
           latestGoalState = state;
+          if (state.status === "active" || state.status === "continuing") goalInvolved = true;
           if ("onGoalUpdate" in params) params.onGoalUpdate?.(state);
         },
         cwd: params.conversationCwd,
@@ -370,6 +377,15 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
       break;
     }
   } finally {
+    if (goalInvolved) {
+      void settleGoalAfterTurn({
+        client: createKBrainClient(),
+        conversationId: params.conversationId,
+        sessionId: getKBrainSessionId(params.conversationId),
+        stopped: cancellation.userStop.signal.aborted,
+        publish: publishGoalState,
+      });
+    }
     approvalController.abort();
     cancellation.userStop.signal.removeEventListener("abort", cancelApprovals);
     status(null);

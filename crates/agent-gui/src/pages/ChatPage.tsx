@@ -1837,13 +1837,26 @@ function ChatPageContent(props: ChatPageProps) {
   // reloadConversation 每次渲染都是新引用；宿主经 ref 调用，保持宿主引用稳定。
   const reloadConversationLatestRef = useRef(reloadConversation);
   reloadConversationLatestRef.current = reloadConversation;
+  // 会话忙时普通消息会入队，指令轮次不入队：发送前据此报错，输入框保留草稿。
+  const isComposerConversationBusy = (conversationId: string) =>
+    Boolean(conversationId) &&
+    (isConversationRunning(conversationId) ||
+      conversationRuntimeCacheRef.current.get(conversationId)?.isSending === true);
+  const isComposerDraftReserved = (conversationId: string) =>
+    queuedChatTurnEditSlotRef.current?.conversationId === conversationId;
   const composerCommandLatestRef = useRef({
     handleSelectModel,
+    isBusy: isComposerConversationBusy,
+    isDraftReserved: isComposerDraftReserved,
+    getCurrentConversationId: () => currentConversationIdRef.current.trim(),
     modelOptions,
     runtimeControls: settings.chatRuntimeControls,
   });
   composerCommandLatestRef.current = {
     handleSelectModel,
+    isBusy: isComposerConversationBusy,
+    isDraftReserved: isComposerDraftReserved,
+    getCurrentConversationId: () => currentConversationIdRef.current.trim(),
     modelOptions,
     runtimeControls: settings.chatRuntimeControls,
   };
@@ -1861,14 +1874,24 @@ function ChatPageContent(props: ChatPageProps) {
         reloadConversation: () => reloadConversationLatestRef.current(currentConversationId),
         getWorkdir: () => displayedConversationWorkdir,
         getRuntimeControls: () => composerCommandLatestRef.current.runtimeControls,
-        sendTurn: (text, command, options) =>
-          sendActionRef.current({
-            textOverride: text,
+        isDraftReserved: () => {
+          const latest = composerCommandLatestRef.current;
+          return latest.isDraftReserved(latest.getCurrentConversationId());
+        },
+        sendTurn: (text, command, options) => {
+          const latest = composerCommandLatestRef.current;
+          if (latest.isBusy(latest.getCurrentConversationId())) {
+            throw new Error(t("chat.commands.busy"));
+          }
+          return sendActionRef.current({
+            // 带上草稿时按普通草稿发送：会话引用、大段粘贴导入与附件都照常处理。
+            ...(options?.draft ? { composerDraftOverride: options.draft } : { textOverride: text }),
             composerCommand: command,
             ...(options?.runtimeControls
               ? { runtimeControlsOverride: options.runtimeControls }
               : {}),
-          }),
+          });
+        },
         compact: () => manualCompactActionRef.current({ conversationId: currentConversationId }),
         getModelOptions: () => composerCommandLatestRef.current.modelOptions,
         selectModel: (selection) => composerCommandLatestRef.current.handleSelectModel(selection),
@@ -3477,7 +3500,7 @@ function ChatPageContent(props: ChatPageProps) {
       sendTurn: (
         text: string,
         command?: ComposerTurnCommand,
-        options?: { runtimeControls?: ChatRuntimeControls },
+        options?: { runtimeControls?: ChatRuntimeControls; draft?: MentionComposerDraft },
       ) => unknown;
     };
   };
@@ -3544,6 +3567,7 @@ function ChatPageContent(props: ChatPageProps) {
         reloadConversation: () => reloadConversationLatestRef.current(conversationId),
         getWorkdir: () => entry.latest.workdir,
         getRuntimeControls: () => composerCommandLatestRef.current.runtimeControls,
+        isDraftReserved: () => composerCommandLatestRef.current.isDraftReserved(conversationId),
         sendTurn: (text, command, options) => entry.latest.sendTurn(text, command, options),
         compact: () => manualCompactActionRef.current({ conversationId }),
         getModelOptions: () => composerCommandLatestRef.current.modelOptions,
@@ -3785,15 +3809,27 @@ function ChatPageContent(props: ChatPageProps) {
           contextUsageTokensSource: paneContextUsageTokensSource,
           workdir: workspaceRoot,
           selectModel: focusGuard(handleSelectModel),
-          sendTurn: (text, command, options) =>
-            sendActionRef.current({
+          sendTurn: async (text, command, options) => {
+            const runtime = conversationRuntimeRegistry.getSnapshot(conversationId);
+            if (isConversationRunning(conversationId) || runtime?.isSending) {
+              throw new Error(t("chat.commands.busy"));
+            }
+            // 附件取本 Pane 会话自己的待上传文件，与 paneSendDraft 一致。
+            const uploads = conversationRuntimeRegistry.uploads.getSnapshot(conversationId).slice();
+            const accepted = await sendActionRef.current({
               conversationIdOverride: conversationId,
-              textOverride: text,
+              ...(options?.draft
+                ? { composerDraftOverride: options.draft }
+                : { textOverride: text }),
+              uploadedFilesOverride: uploads,
               composerCommand: command,
               ...(options?.runtimeControls
                 ? { runtimeControlsOverride: options.runtimeControls }
                 : {}),
-            }),
+            });
+            if (accepted) conversationRuntimeRegistry.uploads.set(conversationId, []);
+            return accepted;
+          },
         }),
       },
       sendDraft: paneSendDraft,

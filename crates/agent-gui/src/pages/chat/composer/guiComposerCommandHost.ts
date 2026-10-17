@@ -1,3 +1,4 @@
+import type { MentionComposerDraft } from "@liveagent/ui/components/chat/MentionComposerModel";
 import {
   type ComposerCommandHost,
   type ComposerTurnCommand,
@@ -27,12 +28,21 @@ export function createGuiComposerCommandHost(params: {
   getWorkdir: () => string | undefined;
   /** 当前会话的推理/联网开关；/plan 任务以它为底只打开 planModeEnabled。 */
   getRuntimeControls: () => ChatRuntimeControls;
-  /** 发送一轮消息；options.planMode 只作用于这一轮。 */
+  /**
+   * 发送一轮消息；options.planMode 只作用于这一轮。options.draft 是带会话引用、
+   * 大段粘贴的草稿，发送层按普通草稿处理（含待上传附件）。会话正忙时应抛错。
+   */
   sendTurn: (
     text: string,
     command?: ComposerTurnCommand,
-    options?: { planMode?: boolean; runtimeControls?: ChatRuntimeControls },
+    options?: {
+      planMode?: boolean;
+      runtimeControls?: ChatRuntimeControls;
+      draft?: MentionComposerDraft;
+    },
   ) => unknown;
+  /** 输入框正在编辑排队消息时返回 true，指令不拦截。 */
+  isDraftReserved?: () => boolean;
   compact: () => Promise<ManualCompactionResult>;
   getModelOptions: () => readonly SharedModelOption[];
   selectModel: (selection: SelectedModel) => void;
@@ -74,6 +84,8 @@ export function createGuiComposerCommandHost(params: {
       kind: command.kind,
       source: command.source,
     }));
+  host.carriesComposerContext = true;
+  if (params.isDraftReserved) host.isDraftReserved = params.isDraftReserved;
   host.sendTurn = (text, command, options) =>
     params.sendTurn(text, command, {
       ...options,
@@ -87,6 +99,10 @@ export function createGuiComposerCommandHost(params: {
   };
   host.clearGoal = async () => {
     const state = await client.postGoal(sessionId(), { action: "clear" });
+    params.onGoalState?.(state);
+  };
+  host.pauseGoal = async () => {
+    const state = await client.postGoal(sessionId(), { action: "pause" });
     params.onGoalState?.(state);
   };
   host.loops = {

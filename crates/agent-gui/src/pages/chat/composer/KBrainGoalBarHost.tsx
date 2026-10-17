@@ -89,7 +89,14 @@ export function KBrainGoalBarHost({
         onPause: () => withSession((id) => client.postGoal(id, { action: "pause" })),
         onUpdate: (goal) => withSession((id) => client.postGoal(id, { action: "update", goal })),
         onClear: () => withSession((id) => client.postGoal(id, { action: "clear" })),
-        onResume: () => commandHost?.sendTurn?.("/goal resume", { kind: "goal", action: "resume" }),
+        onResume: async () => {
+          try {
+            await commandHost?.sendTurn?.("/goal resume", { kind: "goal", action: "resume" });
+          } catch (error) {
+            // 例如会话仍在运行：提示原因，目标保持暂停。
+            toast.error(error instanceof Error ? error.message : String(error));
+          }
+        },
       }}
     />
   );

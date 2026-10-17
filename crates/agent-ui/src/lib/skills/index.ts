@@ -226,7 +226,7 @@ export function extractSkillMentionNamesFromText(
     const before = index > 0 ? text[index - 1] : "";
     if (before && !/\s/.test(before)) continue;
 
-    let nameStart = index + 1;
+    const nameStart = index + 1;
     const first = text[nameStart];
     if (!first || !isSkillMentionNameChar(first)) continue;
 
@@ -237,21 +237,16 @@ export function extractSkillMentionNamesFromText(
     // A slash right after the name means a filesystem path (/usr/bin), not a skill.
     if (text[nameEnd] === "/") continue;
 
-    // “/skill:名称”是显式引用形态：冒号后才是技能名，前缀本身不是指令。
+    // “/skill:名称”是显式引用形态：冒号后才是技能名，前缀本身不是指令。冒号也是
+    // 名称字符，所以上面的扫描已把整个“skill:名称”读进来，这里去掉前缀。
     let name = text.slice(nameStart, nameEnd);
-    if (name.toLowerCase() === "skill" && text[nameEnd] === ":") {
-      const after = nameEnd + 1;
-      let skillEnd = after;
-      while (skillEnd < text.length && isSkillMentionNameChar(text[skillEnd])) {
-        skillEnd += 1;
-      }
-      if (skillEnd === after || text[skillEnd] === "/") continue;
-      name = text.slice(after, skillEnd);
-      nameEnd = skillEnd;
-      nameStart = after;
+    if (name.toLowerCase().startsWith("skill:")) {
+      name = name.slice("skill:".length);
+      if (!name) continue;
     }
     if (isCommonSkillMentionEnvVar(name)) continue;
-    if (excluded.has(name.toLowerCase())) continue;
+    // 输入框只把草稿开头的“/名称”当指令，句中的同名引用仍按 Skill 解析。
+    if (!text.slice(0, index).trim() && excluded.has(name.toLowerCase())) continue;
     if (seen.has(name)) continue;
     seen.add(name);
     names.push(name);

@@ -532,8 +532,13 @@ export const ZH_CN_COMMON_TRANSLATIONS = {
   "chat.commands.modelNotFound": "未找到模型",
   "chat.commands.rewindNone": "当前对话没有可回退的检查点",
   "chat.commands.rewindBusy": "Agent 运行中或检查点加载中，暂时无法回退",
-  "chat.commands.goalUsage": "用法：/goal <目标> | /goal resume | /goal clear",
+  "chat.commands.goalUsage": "用法：/goal <目标> | /goal resume | /goal pause | /goal clear",
   "chat.commands.goalCleared": "目标已清除。",
+  "chat.commands.goalPaused": "目标已暂停。",
+  "chat.commands.goalPauseUnsupported": "此处暂不支持在输入框暂停目标",
+  "chat.commands.busy": "当前对话仍在运行；请等它结束或先停止，再发送指令。",
+  "chat.commands.contextUnsupported":
+    "此指令在这里无法附带会话引用、大段粘贴或附件；请移除后重试。",
   "chat.commands.loopUsage":
     "用法：/loop <间隔> <提示词>（间隔如 10m、2h、1d）| /loop list | /loop cancel <id>",
   "chat.commands.loopCreated": "已创建定时任务",
@@ -565,7 +570,7 @@ export const ZH_CN_COMMON_TRANSLATIONS = {
   "chat.commands.categoryCommandsHint": "内置指令与提示词模板",
   "chat.commands.categorySkillsHint": "已启用的技能，作用于本轮对话",
   "chat.commands.builtin.goal.description": "持续工作直到目标达成",
-  "chat.commands.builtin.goal.hint": "<目标> | resume | clear",
+  "chat.commands.builtin.goal.hint": "<目标> | resume | pause | clear",
   "chat.commands.builtin.loop.description": "在当前对话中按间隔重复执行提示词",
   "chat.commands.builtin.loop.hint": "<间隔> <提示词> | list | cancel <id>",
   "chat.commands.builtin.plan.description": "切换到计划模式，或只为这一个任务做计划",

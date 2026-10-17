@@ -983,34 +983,111 @@ export const MentionComposer = memo(
       ],
     );
 
+    const applyDraft = useCallback(
+      (draft: MentionComposerDraft) => {
+        const el = editorRef.current;
+        if (!el) return;
+        resetPromptHistoryRecall();
+        el.innerHTML = "";
+        largePastesRef.current.clear();
+        closeCommitTooltip();
+        closeComposerContextMenu();
+
+        const sanitizedSegments = sanitizeAppMentionSegments(
+          el,
+          sanitizeConversationMentionSegments(el, draft.segments, {
+            currentConversationId,
+            conversationMentionsEnabled,
+            includeExistingChips: false,
+          }),
+          { includeExistingChips: false },
+        );
+        for (const segment of sanitizedSegments) {
+          if (segment.type === "largePaste") {
+            largePastesRef.current.set(segment.paste.id, segment.paste);
+            el.appendChild(createLargePasteChip(segment.paste));
+          } else if (segment.type === "fileMention") {
+            const chip = createFileMentionChip(segment.reference.path, segment.reference.kind);
+            if (chip) el.appendChild(chip);
+          } else if (segment.type === "skillMention") {
+            el.appendChild(createSkillMentionChip(segment.skill));
+          } else if (segment.type === "appMention") {
+            el.appendChild(createAppMentionChip(segment.app));
+          } else if (segment.type === "commitMention") {
+            el.appendChild(createCommitMentionChip(segment.commit));
+          } else if (segment.type === "gitFileMention") {
+            el.appendChild(createGitFileMentionChip(segment.file));
+          } else if (segment.type === "conversationMention") {
+            const chip = createConversationMentionChip(segment.conversation);
+            if (chip) el.appendChild(chip);
+          } else if (segment.type === "codeMention") {
+            const chip = createCodeMentionChip(segment.reference);
+            if (chip) el.appendChild(chip);
+          } else if (segment.text) {
+            el.appendChild(document.createTextNode(normalizeLogicalLineEndings(segment.text)));
+          }
+        }
+        largePasteCounterRef.current = Math.max(
+          largePasteCounterRef.current,
+          largePastesRef.current.size,
+        );
+
+        ensureTrailingCaretAnchor(el);
+        closeMentionSession();
+        refreshEmptyState();
+        placeCaretAtEditorEnd();
+        scheduleComposerSelectionScroll(el);
+      },
+      [
+        closeCommitTooltip,
+        closeComposerContextMenu,
+        closeMentionSession,
+        conversationMentionsEnabled,
+        currentConversationId,
+        placeCaretAtEditorEnd,
+        refreshEmptyState,
+        resetPromptHistoryRecall,
+      ],
+    );
+
     const executeCommand = useCallback(
-      (parsed: ParsedComposerCommand, options: { consumeDraft: boolean }) => {
+      (parsed: ParsedComposerCommand, draft: MentionComposerDraft) => {
         if (!commandHost) return;
         setCommandPanel(null);
         void runComposerCommand(parsed, {
           host: commandHost,
           t,
-          consumeDraft: () => {
-            if (options.consumeDraft) setEditorText("");
+          draft,
+          consumeDraft: () => setEditorText(""),
+          restoreDraft: () => {
+            // 只在输入框仍为空时放回，避免覆盖用户在失败前新输入的内容。
+            const el = editorRef.current;
+            if (el && editorTextIsEmpty(el)) applyDraft(draft);
           },
           showPanel: setCommandPanel,
         });
       },
-      [commandHost, setEditorText, t],
+      [applyDraft, commandHost, setEditorText, t],
     );
 
     const runCommandDraft = useCallback(() => {
       const el = editorRef.current;
-      if (!el || !commandHost) return false;
+      if (!el || !commandHost || commandHost.isDraftReserved?.()) return false;
+      const draft = buildDraft();
+      // 只有草稿以纯文本“/名称”开头才是指令；开头是 Skill 等标签时照常发送。
+      const lead = draft.segments.find(
+        (segment) => segment.type !== "text" || segment.text.trim() !== "",
+      );
+      if (lead?.type !== "text" || !lead.text.trimStart().startsWith("/")) return false;
       const parsed = parseComposerCommandDraft(
         normalizeSerializedText(serializeChildren(el, largePastesRef.current)),
         commands,
       );
       if (!parsed) return false;
       closeMentionSession();
-      executeCommand(parsed, { consumeDraft: true });
+      executeCommand(parsed, draft);
       return true;
-    }, [closeMentionSession, commandHost, commands, executeCommand]);
+    }, [buildDraft, closeMentionSession, commandHost, commands, executeCommand]);
 
     useImperativeHandle(
       ref,
@@ -1027,60 +1104,7 @@ export const MentionComposer = memo(
         },
         setText: setEditorText,
         runCommandDraft,
-        setDraft: (draft: MentionComposerDraft) => {
-          const el = editorRef.current;
-          if (!el) return;
-          resetPromptHistoryRecall();
-          el.innerHTML = "";
-          largePastesRef.current.clear();
-          closeCommitTooltip();
-          closeComposerContextMenu();
-
-          const sanitizedSegments = sanitizeAppMentionSegments(
-            el,
-            sanitizeConversationMentionSegments(el, draft.segments, {
-              currentConversationId,
-              conversationMentionsEnabled,
-              includeExistingChips: false,
-            }),
-            { includeExistingChips: false },
-          );
-          for (const segment of sanitizedSegments) {
-            if (segment.type === "largePaste") {
-              largePastesRef.current.set(segment.paste.id, segment.paste);
-              el.appendChild(createLargePasteChip(segment.paste));
-            } else if (segment.type === "fileMention") {
-              const chip = createFileMentionChip(segment.reference.path, segment.reference.kind);
-              if (chip) el.appendChild(chip);
-            } else if (segment.type === "skillMention") {
-              el.appendChild(createSkillMentionChip(segment.skill));
-            } else if (segment.type === "appMention") {
-              el.appendChild(createAppMentionChip(segment.app));
-            } else if (segment.type === "commitMention") {
-              el.appendChild(createCommitMentionChip(segment.commit));
-            } else if (segment.type === "gitFileMention") {
-              el.appendChild(createGitFileMentionChip(segment.file));
-            } else if (segment.type === "conversationMention") {
-              const chip = createConversationMentionChip(segment.conversation);
-              if (chip) el.appendChild(chip);
-            } else if (segment.type === "codeMention") {
-              const chip = createCodeMentionChip(segment.reference);
-              if (chip) el.appendChild(chip);
-            } else if (segment.text) {
-              el.appendChild(document.createTextNode(normalizeLogicalLineEndings(segment.text)));
-            }
-          }
-          largePasteCounterRef.current = Math.max(
-            largePasteCounterRef.current,
-            largePastesRef.current.size,
-          );
-
-          ensureTrailingCaretAnchor(el);
-          closeMentionSession();
-          refreshEmptyState();
-          placeCaretAtEditorEnd();
-          scheduleComposerSelectionScroll(el);
-        },
+        setDraft: applyDraft,
         insertFileMention: (path: string, kind: "file" | "dir") => {
           const el = editorRef.current;
           if (!el) return;
@@ -1230,19 +1254,17 @@ export const MentionComposer = memo(
         focus: () => editorRef.current?.focus(),
       }),
       [
+        applyDraft,
         buildDraft,
         clearTransientText,
         closeCommitTooltip,
         closeComposerContextMenu,
         closeMentionSession,
         focusEditorAtSavedSelection,
-        placeCaretAtEditorEnd,
         refreshEmptyState,
         resetPromptHistoryRecall,
         runCommandDraft,
         setEditorText,
-        conversationMentionsEnabled,
-        currentConversationId,
         disabled,
       ],
     );

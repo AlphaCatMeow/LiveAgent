@@ -1,4 +1,7 @@
-import type { MentionComposerSkill } from "@liveagent/ui/components/chat/MentionComposerModel";
+import type {
+  MentionComposerDraft,
+  MentionComposerSkill,
+} from "@liveagent/ui/components/chat/MentionComposerModel";
 
 /* ------------------------------------------------------------------ */
 /*  Host contract                                                      */
@@ -44,8 +47,18 @@ export interface ComposerCommandHost {
   sendTurn?: (
     text: string,
     command?: ComposerTurnCommand,
-    options?: { planMode?: boolean },
+    options?: { planMode?: boolean; draft?: MentionComposerDraft },
   ) => unknown;
+  /**
+   * sendTurn 能带上草稿的结构化上下文（options.draft 里的会话引用、大段粘贴）和
+   * 输入框的待上传附件。不声明时，带这些内容的指令会报错并保留草稿，不会静默丢弃。
+   */
+  carriesComposerContext?: boolean;
+  /**
+   * 输入框正在编辑某条排队消息时返回 true：草稿属于那条排队项，发送走保存编辑，
+   * 不按指令执行。
+   */
+  isDraftReserved?: () => boolean;
   /**
    * 把不经过模型的指令（/loop、/goal clear）和结果作为一问一答写进当前会话，
    * 转录区里显示，之后的对话也能看到。不提供或写入失败时退回输入框上方的面板。
@@ -53,6 +66,8 @@ export interface ComposerCommandHost {
   recordCommandResult?: (command: string, result: string) => Promise<void>;
   /** /goal clear：清除当前会话目标。 */
   clearGoal?: () => unknown;
+  /** /goal pause：暂停当前会话目标；不提供时 /goal pause 报不支持。 */
+  pauseGoal?: () => unknown;
   /** /plan 不带任务：打开计划模式。ChatComposerBar 会用运行时开关补上。 */
   enablePlanMode?: () => void;
   /** /compact：手动压缩当前会话。 */
@@ -311,7 +326,9 @@ export function parseComposerCommandDraft(
   for (const command of commands) {
     if (command.kind === "skill") continue;
     if (command.name.toLowerCase() === name) {
-      return { command, args: (match[2] ?? "").trim(), text: trimmed };
+      // 发送前把指令名统一成目录里的写法：后端按原样（区分大小写）查找用户模板。
+      const text = `/${command.name}${trimmed.slice(match[1].length + 1)}`;
+      return { command, args: (match[2] ?? "").trim(), text };
     }
   }
   return null;
@@ -333,6 +350,10 @@ export type ComposerCommandEffects = {
   t: (key: string) => string;
   /** 指令被接受、开始执行前移除草稿；用法错误时保留草稿让用户改。 */
   consumeDraft: () => void;
+  /** 执行失败（含发送被拒）时把移除的草稿放回输入框；输入框已有新内容时不覆盖。 */
+  restoreDraft?: () => void;
+  /** 发送前的草稿快照，带会话引用、大段粘贴等结构化内容。 */
+  draft?: MentionComposerDraft;
   showPanel: (panel: ComposerCommandPanelState) => void;
 };
 
@@ -406,6 +427,62 @@ async function runLoop(text: string, args: string, effects: ComposerCommandEffec
   await report(text, describeCreatedLoop(loop, t), { type: "loopCreated", loop }, effects);
 }
 
+/** 草稿里发送时只能经结构化通道带上的内容；纯文本发送会丢掉它们。 */
+function draftHasStructuredContext(draft: MentionComposerDraft | undefined) {
+  if (!draft) return false;
+  return (
+    draft.largePastes.length > 0 ||
+    (draft.conversationMentions?.length ?? 0) > 0 ||
+    draft.segments.some(
+      (segment) => segment.type === "largePaste" || segment.type === "conversationMention",
+    )
+  );
+}
+
+/** 把草稿开头的指令名换成目录里的写法（与 parsed.text 一致）。 */
+function draftWithCommandName(draft: MentionComposerDraft, name: string): MentionComposerDraft {
+  const rename = (text: string) => text.replace(/^(\s*)\/[A-Za-z0-9_:-]+/, `$1/${name}`);
+  const index = draft.segments.findIndex(
+    (segment) => segment.type !== "text" || segment.text.trim() !== "",
+  );
+  const first = draft.segments[index];
+  if (!first || first.type !== "text") return draft;
+  const segments = [...draft.segments];
+  segments[index] = { type: "text", text: rename(first.text) };
+  return {
+    ...draft,
+    segments,
+    text: rename(draft.text),
+    textWithoutLargePastes: rename(draft.textWithoutLargePastes),
+  };
+}
+
+/**
+ * 经 sendTurn 发出一轮。草稿带会话引用或大段粘贴时，宿主能带上就随 options.draft
+ * 一起交给它；带不上（或 /goal 这类后端只收纯文本的指令）就报错，草稿由调用方放回。
+ */
+async function sendCommandTurn(
+  parsed: ParsedComposerCommand,
+  command: ComposerTurnCommand | undefined,
+  options: { planMode?: boolean },
+  effects: ComposerCommandEffects,
+) {
+  const { host, t } = effects;
+  if (!host.sendTurn) return;
+  const structured = draftHasStructuredContext(effects.draft);
+  if (structured && (!host.carriesComposerContext || command?.kind === "goal")) {
+    throw new Error(t("chat.commands.contextUnsupported"));
+  }
+  const draft =
+    host.carriesComposerContext && effects.draft
+      ? draftWithCommandName(effects.draft, parsed.command.name)
+      : undefined;
+  const sendOptions = { ...options, ...(draft ? { draft } : {}) };
+  effects.consumeDraft();
+  if (Object.keys(sendOptions).length > 0) await host.sendTurn(parsed.text, command, sendOptions);
+  else await host.sendTurn(parsed.text, command);
+}
+
 async function runAction(
   parsed: ParsedComposerCommand,
   id: ComposerActionId,
@@ -414,28 +491,39 @@ async function runAction(
   const { host, t } = effects;
   const { args } = parsed;
   switch (id) {
-    case "goal":
+    case "goal": {
       if (!args) throw new Error(t("chat.commands.goalUsage"));
-      effects.consumeDraft();
-      if (args === "clear") {
+      const subcommand = args.toLowerCase();
+      if (subcommand === "clear") {
+        effects.consumeDraft();
         await host.clearGoal?.();
         const message = t("chat.commands.goalCleared");
         await report(parsed.text, message, { type: "notice", message }, effects);
-      } else if (args === "resume") {
-        await host.sendTurn?.(parsed.text, { kind: "goal", action: "resume" });
+      } else if (subcommand === "pause") {
+        if (!host.pauseGoal) throw new Error(t("chat.commands.goalPauseUnsupported"));
+        effects.consumeDraft();
+        await host.pauseGoal();
+        const message = t("chat.commands.goalPaused");
+        await report(parsed.text, message, { type: "notice", message }, effects);
+      } else if (subcommand === "resume") {
+        await sendCommandTurn(parsed, { kind: "goal", action: "resume" }, {}, effects);
       } else {
         // 转录区显示用户输入的原文（含 /goal），目标正文单独交给 goal 接口。
-        await host.sendTurn?.(parsed.text, { kind: "goal", action: "set", goal: args });
+        await sendCommandTurn(parsed, { kind: "goal", action: "set", goal: args }, {}, effects);
       }
       return;
+    }
     case "loop":
       await runLoop(parsed.text, args, effects);
       return;
     case "plan":
-      effects.consumeDraft();
       // 带任务时整条原文发送（转录区显示 /plan 指令标签），本轮按计划模式运行。
-      if (args) await host.sendTurn?.(parsed.text, undefined, { planMode: true });
-      else host.enablePlanMode?.();
+      if (args) {
+        await sendCommandTurn(parsed, undefined, { planMode: true }, effects);
+      } else {
+        effects.consumeDraft();
+        host.enablePlanMode?.();
+      }
       return;
     case "compact":
       effects.consumeDraft();
@@ -460,12 +548,13 @@ export async function runComposerCommand(
   const { command } = parsed;
   try {
     if (command.kind === "prompt") {
-      effects.consumeDraft();
-      await effects.host.sendTurn?.(parsed.text, { kind: "prompt" });
+      await sendCommandTurn(parsed, { kind: "prompt" }, {}, effects);
       return;
     }
     await runAction(parsed, command.id, effects);
   } catch (error) {
+    // 失败（含会话忙、发送被拒）不吞草稿：放回输入框，让用户改了再发。
+    effects.restoreDraft?.();
     effects.showPanel({
       type: "error",
       message: `/${command.name}: ${errorMessage(error) || effects.t("chat.commands.failed")}`,

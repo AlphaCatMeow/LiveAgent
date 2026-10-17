@@ -577,8 +577,14 @@ export const EN_US_COMMON_TRANSLATIONS = {
   "chat.commands.rewindNone": "No checkpoint to rewind in this conversation",
   "chat.commands.rewindBusy":
     "Rewind is unavailable while the agent is running or checkpoints are loading",
-  "chat.commands.goalUsage": "Usage: /goal <goal> | /goal resume | /goal clear",
+  "chat.commands.goalUsage": "Usage: /goal <goal> | /goal resume | /goal pause | /goal clear",
   "chat.commands.goalCleared": "Goal cleared.",
+  "chat.commands.goalPaused": "Goal paused.",
+  "chat.commands.goalPauseUnsupported": "Pausing a goal from the composer is not available here",
+  "chat.commands.busy":
+    "This conversation is still running; wait for it to finish or stop it, then send the command again.",
+  "chat.commands.contextUnsupported":
+    "This command cannot carry referenced conversations, large pastes or attachments here; remove them and try again.",
   "chat.commands.loopUsage":
     "Usage: /loop <interval> <prompt> (interval like 10m, 2h, 1d) | /loop list | /loop cancel <id>",
   "chat.commands.loopCreated": "Loop created",
@@ -611,7 +617,7 @@ export const EN_US_COMMON_TRANSLATIONS = {
   "chat.commands.categoryCommandsHint": "Built-in commands and prompt templates",
   "chat.commands.categorySkillsHint": "Enabled Skills for this turn",
   "chat.commands.builtin.goal.description": "Keep working until the goal is met",
-  "chat.commands.builtin.goal.hint": "<goal> | resume | clear",
+  "chat.commands.builtin.goal.hint": "<goal> | resume | pause | clear",
   "chat.commands.builtin.loop.description": "Run a prompt in this conversation on an interval",
   "chat.commands.builtin.loop.hint": "<interval> <prompt> | list | cancel <id>",
   "chat.commands.builtin.plan.description": "Switch to plan mode, or plan one task",

@@ -547,11 +547,31 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
   // /model 无参数时打开模型弹层：弹层开关在这里受控，宿主没提供
   // openModelPicker 时由本组件补上。
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const pendingUploadCountRef = useRef(pendingUploadedFiles.length);
+  pendingUploadCountRef.current = pendingUploadedFiles.length;
   const modelPickerAvailable = hasModels && !controlsDisabled;
   // 宿主没给的 /model 选择弹层与 /rewind 由这里按本输入框的会话补上。
   const effectiveCommandHost = useMemo(() => {
     if (!commandHost) return commandHost;
     const host: ComposerCommandHost = { ...commandHost };
+    const sendTurn = commandHost.sendTurn;
+    if (sendTurn && !commandHost.carriesComposerContext) {
+      // 宿主发送时不带附件：有待上传文件就报错并保留草稿，不让附件被静默丢下。
+      host.sendTurn = (text, command, options) => {
+        if (pendingUploadCountRef.current > 0) {
+          throw new Error(t("chat.commands.contextUnsupported"));
+        }
+        return sendTurn(text, command, options);
+      };
+    } else if (sendTurn) {
+      // /goal 的轮次由后端按目标正文发起，不收附件。
+      host.sendTurn = (text, command, options) => {
+        if (command?.kind === "goal" && pendingUploadCountRef.current > 0) {
+          throw new Error(t("chat.commands.contextUnsupported"));
+        }
+        return sendTurn(text, command, options);
+      };
+    }
     if (!host.openModelPicker && modelPickerAvailable) {
       host.openModelPicker = () => setModelPickerOpen(true);
     }
@@ -1204,7 +1224,7 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
         {goalBar || queuedTurns.length > 0 ? (
           <div
             ref={queuePanelRef}
-            className="relative z-30 mx-auto mb-minus-1px flex w-inset-1p5rem flex-col"
+            className="relative z-30 mx-auto mb-minus-1px flex w-inset-1p5rem flex-col empty:hidden"
           >
             {/* 目标栏与指令队列同在一个纵向容器里：上下排列，不互相覆盖，并一起计入输入区高度。 */}
             {goalBar}

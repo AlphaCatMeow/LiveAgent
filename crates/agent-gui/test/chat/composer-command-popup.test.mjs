@@ -11,7 +11,14 @@ const env = await createDomTestEnv({
     "@liveagent/ui/i18n/index": { useLocale: () => locale },
     "@liveagent/ui/components/IconSet": new Proxy(
       {},
-      { get: (_target, name) => (name === "__esModule" ? true : EmptyIcon) },
+      {
+        get: (_target, name) =>
+          name === "__esModule"
+            ? true
+            : String(name).endsWith("_SVG_MARKUP")
+              ? "<svg></svg>"
+              : EmptyIcon,
+      },
     ),
   },
 });
@@ -133,6 +140,24 @@ test("IME does not select a model",async()=>{await type("/mod");await key("Enter
 test("unknown slash text sends normally",async()=>{await type("/usr/path");await key("Enter");assert.equal(sends,1);});
 test("without skills catalog commands remain usable",async()=>{await mount({enabledSkills:[],commandHost});await type("/");assert.ok(optionNames().includes("model"));});
 test("without a host enabled skills remain available",async()=>{await mount({enabledSkills:[skill("reviewer")]});await type("/");assert.ok(document.body.textContent.includes("reviewer"));});
+
+test("rejected command send restores the draft and shows the error",async()=>{
+ const rejecting={...commandHost,sendTurn:async()=>{throw new Error("busy now");}};
+ await mount({enabledSkills:[],commandHost:rejecting});await type("/deploy staging");await key("Enter");
+ assert.equal(editor.textContent.replace(/\u200b/g,""),"/deploy staging");assert.equal(sends,0);
+ assert.ok(document.querySelector('[data-composer-command-panel="error"]')?.textContent.includes("busy now"));
+});
+test("editing a queued turn keeps slash drafts as plain sends",async()=>{
+ await mount({enabledSkills:[],commandHost:{...commandHost,isDraftReserved:()=>true}});await type("/deploy staging");await key("Enter");
+ assert.equal(sends,1);assert.deepEqual(calls,[]);
+});
+test("a leading skill chip is not executed as a same-named command",async()=>{
+ const ref=env.React.createRef();await mount({enabledSkills:[skill("deploy")],commandHost,ref});
+ await env.act(async()=>new Promise((resolve)=>setTimeout(resolve,0)));
+ await env.act(async()=>ref.current.setDraft({segments:[{type:"skillMention",skill:skill("deploy")},{type:"text",text:" now"}],text:"/deploy now",textWithoutLargePastes:"/deploy now",largePastes:[],skillMentions:[],appMentions:[],commitMentions:[],gitFileMentions:[],codeMentions:[],isEmpty:false}));
+ assert.equal(ref.current.runCommandDraft(),false);
+ await env.act(async()=>ref.current.setText("/deploy now"));assert.equal(ref.current.runCommandDraft(),true);
+});
 
 test.after(async () => {
   await env.act(async () => root.unmount());

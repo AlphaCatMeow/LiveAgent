@@ -167,6 +167,7 @@ mod tests {
             enable_web_ssh_terminal: false,
             enable_web_git: false,
             enable_web_tunnels: false,
+            ..RemoteSettingsPayload::default()
         });
 
         assert_eq!(normalized.gateway_url, "https://agent.cnweb.org");
@@ -240,6 +241,7 @@ mod tests {
                 enable_web_ssh_terminal: true,
                 enable_web_git: true,
                 enable_web_tunnels: true,
+                ..RemoteSettingsPayload::default()
             },
         )
         .expect("seed manual Agent ID");

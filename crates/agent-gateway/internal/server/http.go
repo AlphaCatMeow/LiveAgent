@@ -3,6 +3,9 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -32,7 +35,19 @@ func NewHTTPServer(cfg *config.Config, sm *session.Manager, tokens *agenttoken.S
 // adapter. The shared management bearer alone never enables image delegation.
 func NewHTTPServerWithImages(cfg *config.Config, sm *session.Manager, tokens *agenttoken.Store, images *handler.ImageGateway, sttManagers ...*stt.Manager) http.Handler {
 	rootMux := http.NewServeMux()
-	rootMux.HandleFunc("GET /healthz", handler.Health())
+	rootMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		// A public health response must never convince the desktop to adopt an
+		// unrelated listener. Only the child given this launch nonce can return it.
+		// Send only a one-way launch probe, never the Gateway access token: a
+		// different listener could win the race between reservation and bind.
+		probe := sha256.Sum256([]byte(cfg.InstanceNonce))
+		if cfg.InstanceNonce != "" && subtle.ConstantTimeCompare(
+			[]byte(r.Header.Get("X-LiveAgent-Instance-Probe")), []byte(hex.EncodeToString(probe[:])),
+		) == 1 {
+			w.Header().Set("X-LiveAgent-Instance", cfg.InstanceNonce)
+		}
+		handler.Health()(w, r)
+	})
 
 	// v2 统一协议（WebSocket+Protobuf）三链路。
 	v2 := pbws.NewServer(cfg, sm, tokens)

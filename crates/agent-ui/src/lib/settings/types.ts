@@ -674,6 +674,9 @@ export const CLOSE_WINDOW_BEHAVIOR_OPTIONS = [
 
 export type RemoteSettings = {
   enabled: boolean;
+  managedLocal: boolean;
+  localGatewayPort: number;
+  localGatewayToken: string;
   gatewayUrl: string;
   gatewayPort: number;
   token: string;

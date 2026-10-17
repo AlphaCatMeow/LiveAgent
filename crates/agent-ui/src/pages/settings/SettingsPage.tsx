@@ -258,7 +258,13 @@ export function SettingsPage(props: SettingsPageProps) {
         order: 20,
         labelKey: "settings.navRemote",
         icon: <Cloud className={extension.iconClassName} />,
-        render: () => <RemoteSection settings={settings} setSettings={setSettings} />,
+        render: () => (
+          <RemoteSection
+            settings={settings}
+            setSettings={setSettings}
+            surface={extension.surface}
+          />
+        ),
       },
       ...extension.sections,
     ],

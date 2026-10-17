@@ -21,6 +21,9 @@ export function useGatewayStatus(params: UseGatewayStatusParams) {
       agentId: remote.agentId,
       autoReconnect: remote.autoReconnect,
       enabled: remote.enabled,
+      managedLocal: remote.managedLocal,
+      localGatewayPort: remote.localGatewayPort,
+      localGatewayToken: remote.localGatewayToken,
       gatewayUrl: remote.gatewayUrl,
       gatewayPort: remote.gatewayPort,
       heartbeatInterval: remote.heartbeatInterval,
@@ -30,6 +33,9 @@ export function useGatewayStatus(params: UseGatewayStatusParams) {
       remote.agentId,
       remote.autoReconnect,
       remote.enabled,
+      remote.managedLocal,
+      remote.localGatewayPort,
+      remote.localGatewayToken,
       remote.gatewayUrl,
       remote.gatewayPort,
       remote.heartbeatInterval,
@@ -43,6 +49,7 @@ export function useGatewayStatus(params: UseGatewayStatusParams) {
   useEffect(() => {
     if (isKBrainBackendEnabled() && !isTauriHost()) return;
     let cancelled = false;
+    setRemoteRuntimeStatus(buildFallbackGatewayStatus(remoteSnapshot));
 
     void invoke<GatewayRuntimeStatus>("gateway_status")
       .then((status) => {

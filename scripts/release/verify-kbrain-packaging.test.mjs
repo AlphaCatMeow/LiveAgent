@@ -21,7 +21,7 @@ async function executable(path, data) {
 
 test("Tauri base and release configs retain both external binaries and preparation hooks", async () => {
   const result = await verifyTauriConfiguration();
-  assert.deepEqual(result.externalBin, ["binaries/k-brain", "binaries/k-brain-computer"]);
+  assert.deepEqual(result.externalBin, ["binaries/k-brain", "binaries/k-brain-computer", "binaries/liveagent-gateway"]);
   assert.match(result.beforeDevCommand, /prepare:kbrain/);
   assert.match(result.beforeBuildCommand, /prepare:kbrain/);
 });
@@ -36,7 +36,7 @@ test("release workflow uses fixed triples for non-matrix jobs and packages both 
 
 test("desktop jobs download locked releases without checking out or compiling K-brain", async () => {
   const workflow = await readFile(join(root, ".github/workflows/desktop-release.yml"), "utf8");
-  assert.doesNotMatch(workflow, /kbrain-backend:|kbrain-source-|setup-go|go build|git clone.*K-brain/);
+  assert.doesNotMatch(workflow, /kbrain-backend:|kbrain-source-|go build|KBRAIN_REPO_ROOT|git clone.*K-brain/);
   for (const job of ["macos", "windows", "linux"]) {
     const section = workflow.split(`\n  ${job}:`)[1]?.split(/\n  [\w-]+:/)[0];
     assert.ok(section, `${job} packaging job must exist`);

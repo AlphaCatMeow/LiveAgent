@@ -108,6 +108,7 @@ function buildSteps() {
     miseStep("Virtual core tests", "pnpm", ["test:virtual-core"]),
     miseStep("GUI TypeScript and Vite build", "pnpm", ["build:gui"]),
     miseStep("WebUI TypeScript and Vite build", "pnpm", ["build:webui"]),
+    miseStep("Gateway sidecar with embedded WebUI build", "node", ["scripts/prepare-gateway.mjs"]),
     // Separate target dir: on Windows a running debug client locks target\debug\k-brain.exe and
     // the tauri build script cannot replace the sidecar, failing the check for an unrelated reason.
     miseStep("Tauri Rust check", "cargo", [

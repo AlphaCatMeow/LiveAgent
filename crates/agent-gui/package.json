@@ -10,6 +10,7 @@
     "tauri": "tauri",
     "prepare:kbrain": "node ../../scripts/release/prepare-kbrain.mjs",
     "prepare:kbrain:release": "node ../../scripts/release/prepare-kbrain.mjs --release",
+    "gateway:prepare": "node ../../scripts/prepare-gateway.mjs",
     "test": "node ../../scripts/run-node-tests.mjs test",
     "test:frontend": "node ../../scripts/run-node-tests.mjs --exclude-dir backend test",
     "test:backend": "node ../../scripts/run-node-tests.mjs test/backend",

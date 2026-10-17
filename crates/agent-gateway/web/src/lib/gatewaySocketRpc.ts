@@ -94,8 +94,6 @@ import {
   normalizeHistoryListPageSize,
   normalizeManagedProcessState,
   normalizeTerminalBytes,
-  type PromptTemplateExpandResponse,
-  type PromptTemplateListResponse,
   type RawChatCommandResponse,
   type RawChatQueueResponse,
   type RawManagedProcessOpPayload,
@@ -1181,9 +1179,9 @@ export class GatewayWebSocketRpcClient extends GatewayWebSocketTransport {
     });
   }
 
-  /** /goal clear：清除会话目标（set/resume 会开始一轮运行，走聊天请求）。 */
+  /** /goal clear：清除会话目标（set/resume 会开始一轮运行，走聊天请求）。改状态的请求不自动重发。 */
   async clearGoal(conversationId: string): Promise<GoalManageResponse> {
-    return this.requestWithRecovery<GoalManageResponse>("goal.manage", {
+    return this.request<GoalManageResponse>("goal.manage", {
       conversationId,
       action: "clear",
     });
@@ -1196,6 +1194,7 @@ export class GatewayWebSocketRpcClient extends GatewayWebSocketTransport {
     });
   }
 
+  /** 创建 /loop。断线后不自动重发：桌面端可能已经建好，重发会多出一条重复的定时任务。 */
   async createLoop(input: {
     conversationId: string;
     cron: string;
@@ -1203,7 +1202,7 @@ export class GatewayWebSocketRpcClient extends GatewayWebSocketTransport {
     prompt: string;
     reasoning?: string;
   }): Promise<LoopManageResponse> {
-    return this.requestWithRecovery<LoopManageResponse>("loops.manage", {
+    return this.request<LoopManageResponse>("loops.manage", {
       conversationId: input.conversationId,
       action: "create",
       cron: input.cron,
@@ -1214,30 +1213,10 @@ export class GatewayWebSocketRpcClient extends GatewayWebSocketTransport {
   }
 
   async cancelLoop(conversationId: string, loopId: string): Promise<LoopManageResponse> {
-    return this.requestWithRecovery<LoopManageResponse>("loops.manage", {
+    return this.request<LoopManageResponse>("loops.manage", {
       conversationId,
       action: "cancel",
       loopId,
-    });
-  }
-
-  /** 输入框“/”提示词指令列表；项目级模板是否生效由 K-brain 按项目信任决定。 */
-  async listPromptTemplates(workdir?: string): Promise<PromptTemplateListResponse> {
-    return this.requestWithRecovery<PromptTemplateListResponse>("prompts.list", {
-      workdir: workdir ?? "",
-    });
-  }
-
-  /** 展开提示词模板；text 为指令名之后的参数文本。展开不改状态，可安全重试。 */
-  async expandPromptTemplate(
-    name: string,
-    text: string,
-    workdir?: string,
-  ): Promise<PromptTemplateExpandResponse> {
-    return this.requestWithRecovery<PromptTemplateExpandResponse>("prompts.expand", {
-      name,
-      text,
-      workdir: workdir ?? "",
     });
   }
 

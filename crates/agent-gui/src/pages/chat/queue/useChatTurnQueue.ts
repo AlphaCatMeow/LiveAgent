@@ -36,6 +36,7 @@ import {
 import type { ActiveGatewayBridgeRequest, SendChatAction } from "../gateway/gatewayBridgeTypes";
 import {
   type GatewayChatClaimedRequest,
+  gatewayComposerTurnCommand,
   normalizeGatewayCommandSafetyMode,
   normalizeGatewayExecutionMode,
   normalizeGatewayWorkdir,
@@ -610,6 +611,9 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
           workdirOverride: queuedTurn.workdir,
           commandSafetyModeOverride: queuedTurn.commandSafetyMode,
           runtimeControlsOverride: queuedTurn.runtimeControls,
+          ...(gatewayRequest?.composerCommand
+            ? { composerCommand: gatewayRequest.composerCommand }
+            : {}),
           gatewayBridgeRequestOverride: gatewayBridgeRequest,
           preserveComposerOnStart: true,
           beforeRuntimeStart: markGatewayStarted,
@@ -826,6 +830,9 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
     const runtimeControls = payload.runtimeControls
       ? normalizeChatRuntimeControls(payload.runtimeControls)
       : settings.chatRuntimeControls;
+    // 排队的 WebUI 轮次同样要带上“/”指令语义（goal set/resume、提示词指令）。
+    const composerCommand = gatewayComposerTurnCommand(payload);
+    if (composerCommand === null) return false;
     const queuedTurn = createQueuedChatTurn({
       id: `gateway-${requestId}`,
       conversationId: targetConversationId,
@@ -852,6 +859,7 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
             : "auto",
         selectedModel: payload.selectedModel,
         runtimeControls: payload.runtimeControls,
+        ...(composerCommand ? { composerCommand } : {}),
       },
     });
 

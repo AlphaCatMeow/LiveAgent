@@ -6,6 +6,7 @@ export type {
   ChatQueueSnapshot,
 } from "@liveagent/ui/contracts/chatQueue";
 
+import type { ComposerTurnCommand } from "@liveagent/ui/lib/chat/composerCommands";
 import type { PendingUploadedFile } from "@liveagent/ui/lib/chat/uploadedFiles";
 import type { ChatRuntimeControls, CommandSafetyMode, ExecutionMode } from "../../../lib/settings";
 import type {
@@ -22,6 +23,8 @@ export type QueuedGatewayChatRequest = {
   queuePolicy?: "auto" | "append" | "interrupt";
   selectedModel?: GatewaySelectedModelEvent;
   runtimeControls?: GatewayChatRuntimeControlsEvent;
+  /** WebUI“/”指令的单轮语义；出队发送时原样交给 sendChat。 */
+  composerCommand?: ComposerTurnCommand;
 };
 
 export type QueuedChatTurn = {

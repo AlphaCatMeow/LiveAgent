@@ -339,6 +339,11 @@ jobs:
       - name: Build sidecar with embedded WebUI
         run: node scripts/prepare-gateway.mjs --target ${{ matrix.target }}
 
+      - name: Download checksum-verified K-brain release
+        env:
+          TAURI_ENV_TARGET_TRIPLE: ${{ matrix.target }}
+        run: node scripts/release/prepare-kbrain.mjs --release
+
       - name: Run existing Gateway and settings tests
         run: cargo test --manifest-path crates/agent-gui/src-tauri/Cargo.toml --lib -- settings::tests services::gateway::tests services::gateway::connection::transport_supervisor_tests
 

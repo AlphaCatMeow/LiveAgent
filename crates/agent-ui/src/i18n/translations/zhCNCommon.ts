@@ -561,8 +561,6 @@ export const ZH_CN_COMMON_TRANSLATIONS = {
   "chat.goalBar.resume": "恢复目标",
   "chat.goalBar.edit": "修改目标",
   "chat.goalBar.save": "保存",
-  "chat.goalBar.expand": "展开全部",
-  "chat.goalBar.collapse": "收起",
   "chat.goalBar.editHint": "Ctrl+Enter 保存，Esc 取消",
   "chat.goalBar.cancelEdit": "取消修改",
   "chat.goalBar.clear": "取消目标",

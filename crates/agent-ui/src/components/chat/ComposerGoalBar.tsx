@@ -1,7 +1,5 @@
 import {
   Check,
-  ChevronDown,
-  ChevronUp,
   Goal,
   Pause,
   Play,
@@ -12,7 +10,7 @@ import {
 import { useConfirmDialog } from "@liveagent/ui/components/ui/confirm-dialog";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { cn } from "@liveagent/ui/lib/shared/utils";
-import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 
 /** 目标栏展示的会话目标；status 取 K-brain goal 状态里会持续显示的几种。 */
 export type ComposerGoalBarState = {
@@ -75,10 +73,7 @@ export function ComposerGoalBar({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(state.goal);
   const [busy, setBusy] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-  const [overflowing, setOverflowing] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  const textRef = useRef<HTMLParagraphElement | null>(null);
   const running = state.status !== "paused";
   const elapsed = useElapsed(state.startedAt, running);
 
@@ -88,18 +83,6 @@ export function ComposerGoalBar({
   useEffect(() => {
     if (editing) inputRef.current?.select();
   }, [editing]);
-  // 折叠态最多显示五行；正文被截断时才给出“展开全部”。
-  // biome-ignore lint/correctness/useExhaustiveDependencies: 正文变化后重新测量
-  useLayoutEffect(() => {
-    const node = textRef.current;
-    if (!node || expanded) return;
-    const measure = () => setOverflowing(node.scrollHeight > node.clientHeight + 1);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [expanded, editing, state.goal]);
-
   const run = async (action: () => unknown) => {
     if (busy) return;
     setBusy(true);
@@ -175,9 +158,21 @@ export function ComposerGoalBar({
           )}
         />
         <span className="shrink-0 font-medium text-foreground/90">{label}</span>
-        <span className="min-w-0 flex-1 truncate text-muted-foreground/70">
-          {editing ? t("chat.goalBar.editHint") : [progress, elapsed].filter(Boolean).join(" · ")}
-        </span>
+        {editing ? (
+          <span className="min-w-0 flex-1 truncate text-muted-foreground/70">
+            {t("chat.goalBar.editHint")}
+          </span>
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-muted-foreground" title={state.goal}>
+            {state.goal}
+            {elapsed || progress ? (
+              <span className="text-muted-foreground/70">
+                {" · "}
+                {[progress, elapsed].filter(Boolean).join(" · ")}
+              </span>
+            ) : null}
+          </span>
+        )}
         <div className="flex shrink-0 items-center gap-0.5">
           {editing ? (
             <>
@@ -253,33 +248,7 @@ export function ComposerGoalBar({
             "focus-visible:ring-1 focus-visible:ring-ring",
           )}
         />
-      ) : (
-        <div className="pb-1 pl-5 text-xs leading-5 text-muted-foreground">
-          <p
-            ref={textRef}
-            className={cn(
-              "whitespace-pre-wrap [overflow-wrap:anywhere]",
-              expanded ? "max-h-60 overflow-y-auto pr-1" : "line-clamp-5",
-            )}
-          >
-            {state.goal}
-          </p>
-          {overflowing || expanded ? (
-            <button
-              type="button"
-              onClick={() => setExpanded((value) => !value)}
-              aria-expanded={expanded}
-              className={cn(
-                "mt-0.5 inline-flex items-center gap-0.5 rounded text-tiny text-muted-foreground/80",
-                "hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-              )}
-            >
-              {expanded ? t("chat.goalBar.collapse") : t("chat.goalBar.expand")}
-              {expanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
-            </button>
-          ) : null}
-        </div>
-      )}
+      ) : null}
       {dialog}
     </div>
   );

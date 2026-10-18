@@ -608,8 +608,6 @@ export const EN_US_COMMON_TRANSLATIONS = {
   "chat.goalBar.resume": "Resume goal",
   "chat.goalBar.edit": "Edit goal",
   "chat.goalBar.save": "Save",
-  "chat.goalBar.expand": "Show all",
-  "chat.goalBar.collapse": "Show less",
   "chat.goalBar.editHint": "Ctrl+Enter to save, Esc to cancel",
   "chat.goalBar.cancelEdit": "Cancel editing",
   "chat.goalBar.clear": "Cancel goal",

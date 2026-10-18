@@ -4,6 +4,7 @@ import type {
   WorkspaceProjectRootAccess,
   WorkspaceProjectRootClient,
   WorkspaceProjectRootGrant,
+  WorkspaceSharedRootScope,
 } from "@liveagent/ui/contracts/workspaceProjectRoots";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { cn } from "@liveagent/ui/lib/shared/utils";
@@ -52,6 +53,124 @@ function RootAccessToggle(props: {
   );
 }
 
+type RootRowHandlers = {
+  onAliasChange: (id: string, alias: string) => void;
+  onAccessChange: (id: string, access: WorkspaceProjectRootAccess) => void;
+  onRemove: (id: string) => void;
+};
+
+function RootRow(props: { root: WorkspaceProjectRootGrant; loaded: boolean } & RootRowHandlers) {
+  const { root, loaded, onAliasChange, onAccessChange, onRemove } = props;
+  const { t } = useLocale();
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-3 rounded-xl bg-settings-tile px-4 py-3 transition-colors",
+        "hover:bg-settings-tile-hover max-[560px]:flex-wrap",
+      )}
+    >
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/60 text-muted-foreground">
+        <Folder className="size-3.5" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <Input
+            variant="plain"
+            value={root.alias}
+            onChange={(event) => onAliasChange(root.id, event.currentTarget.value)}
+            aria-label={t("chat.workspaceSettingsDirectoryAlias")}
+            maxLength={32}
+            pattern="[a-z][a-z0-9_-]{0,31}"
+            disabled={!loaded}
+            className={cn("h-8 min-w-0 max-w-180px", "text-sm font-medium shadow-none")}
+          />
+          {/* 正常状态不显示徽标，只有异常/待批准时提醒。 */}
+          {root.state !== "active" ? (
+            <span
+              className={cn(
+                "shrink-0 rounded-full border px-1.5 py-0.5 text-tiny font-medium",
+                rootStateTone(root.state),
+              )}
+            >
+              {t(
+                `chat.workspaceSettingsDirectoryState${root.state
+                  .split("-")
+                  .map((part) => part[0].toUpperCase() + part.slice(1))
+                  .join("")}`,
+              )}
+            </span>
+          ) : null}
+        </div>
+        <div
+          className="truncate font-mono text-xs leading-4 text-muted-foreground"
+          title={root.displayPath}
+        >
+          {root.displayPath}
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-1 max-[560px]:w-full max-[560px]:justify-end">
+        <RootAccessToggle
+          value={root.access}
+          disabled={!loaded}
+          ariaLabel={t("chat.workspaceSettingsDirectoryAccess")}
+          readLabel={t("chat.workspaceSettingsDirectoryRead")}
+          writeLabel={t("chat.workspaceSettingsDirectoryWrite")}
+          onChange={(access) => onAccessChange(root.id, access)}
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          className="shrink-0 text-muted-foreground hover:text-destructive"
+          title={t("chat.workspaceSettingsRemoveDirectory")}
+          disabled={!loaded}
+          onClick={() => onRemove(root.id)}
+        >
+          <Trash2 className="size-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function AddRootButton(props: { disabled: boolean; onClick: () => void }) {
+  const { t } = useLocale();
+  return (
+    <button
+      type="button"
+      onClick={props.onClick}
+      disabled={props.disabled}
+      className={cn(
+        "flex w-full items-center justify-center gap-1.5",
+        "cursor-pointer rounded-lg bg-settings-tile px-4 py-2.5",
+        "text-xs font-medium text-muted-foreground transition-colors",
+        "hover:bg-muted/30 hover:text-foreground disabled:pointer-events-none disabled:opacity-50",
+      )}
+    >
+      <Plus className="size-3.5" />
+      {t("chat.workspaceSettingsAddDirectory")}
+    </button>
+  );
+}
+
+export type SharedRootGroupView = {
+  scope: WorkspaceSharedRootScope;
+  roots: readonly WorkspaceProjectRootGrant[];
+  loading: boolean;
+  loaded: boolean;
+  onAdd: () => void;
+} & RootRowHandlers;
+
+const SHARED_GROUP_TITLE_KEYS = {
+  repository: "chat.workspaceSettingsRepositoryDirectories",
+  global: "chat.workspaceSettingsGlobalDirectories",
+} as const;
+
+const SHARED_GROUP_DESCRIPTION_KEYS = {
+  repository: "chat.workspaceSettingsRepositoryDirectoriesDescription",
+  global: "chat.workspaceSettingsGlobalDirectoriesDescription",
+} as const;
+
 export function WorkspaceDirectorySettingsPanel(props: {
   project: WorkspaceProject;
   rootClient?: WorkspaceProjectRootClient;
@@ -64,6 +183,7 @@ export function WorkspaceDirectorySettingsPanel(props: {
   onAliasChange: (id: string, alias: string) => void;
   onAccessChange: (id: string, access: WorkspaceProjectRootAccess) => void;
   onRemove: (id: string) => void;
+  sharedGroups?: readonly SharedRootGroupView[];
 }) {
   const {
     project,
@@ -77,6 +197,7 @@ export function WorkspaceDirectorySettingsPanel(props: {
     onAliasChange,
     onAccessChange,
     onRemove,
+    sharedGroups,
   } = props;
   const { t } = useLocale();
 
@@ -86,6 +207,17 @@ export function WorkspaceDirectorySettingsPanel(props: {
 
       {/* 主目录与附加目录合并为同一张列表卡片，形成统一的目录清单。 */}
       <div className="space-y-2">
+        {/* 有分层授权时给项目级列表加标题，避免误把仓库/全局目录加到这里。 */}
+        {sharedGroups?.length ? (
+          <div>
+            <h4 className="text-xs font-semibold text-foreground/80">
+              {t("chat.workspaceSettingsProjectDirectories")}
+            </h4>
+            <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+              {t("chat.workspaceSettingsProjectDirectoriesDescription")}
+            </p>
+          </div>
+        ) : null}
         <div className="flex items-center gap-3 rounded-xl bg-settings-tile px-4 py-3">
           <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-background text-foreground/70">
             <FolderTree className="size-3.5" />
@@ -122,94 +254,48 @@ export function WorkspaceDirectorySettingsPanel(props: {
           </div>
         ) : (
           roots.map((root) => (
-            <div
+            <RootRow
               key={root.id}
-              className={cn(
-                "flex items-center gap-3 rounded-xl bg-settings-tile px-4 py-3 transition-colors",
-                "hover:bg-settings-tile-hover max-[560px]:flex-wrap",
-              )}
-            >
-              <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/60 text-muted-foreground">
-                <Folder className="size-3.5" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex min-w-0 items-center gap-1.5">
-                  <Input
-                    variant="plain"
-                    value={root.alias}
-                    onChange={(event) => onAliasChange(root.id, event.currentTarget.value)}
-                    aria-label={t("chat.workspaceSettingsDirectoryAlias")}
-                    maxLength={32}
-                    pattern="[a-z][a-z0-9_-]{0,31}"
-                    disabled={!loaded}
-                    className={cn("h-8 min-w-0 max-w-180px", "text-sm font-medium shadow-none")}
-                  />
-                  {/* 正常状态不显示徽标，只有异常/待批准时提醒。 */}
-                  {root.state !== "active" ? (
-                    <span
-                      className={cn(
-                        "shrink-0 rounded-full border px-1.5 py-0.5 text-tiny font-medium",
-                        rootStateTone(root.state),
-                      )}
-                    >
-                      {t(
-                        `chat.workspaceSettingsDirectoryState${root.state
-                          .split("-")
-                          .map((part) => part[0].toUpperCase() + part.slice(1))
-                          .join("")}`,
-                      )}
-                    </span>
-                  ) : null}
-                </div>
-                <div
-                  className="truncate font-mono text-xs leading-4 text-muted-foreground"
-                  title={root.displayPath}
-                >
-                  {root.displayPath}
-                </div>
-              </div>
-              <div className="flex shrink-0 items-center gap-1 max-[560px]:w-full max-[560px]:justify-end">
-                <RootAccessToggle
-                  value={root.access}
-                  disabled={!loaded}
-                  ariaLabel={t("chat.workspaceSettingsDirectoryAccess")}
-                  readLabel={t("chat.workspaceSettingsDirectoryRead")}
-                  writeLabel={t("chat.workspaceSettingsDirectoryWrite")}
-                  onChange={(access) => onAccessChange(root.id, access)}
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  className="shrink-0 text-muted-foreground hover:text-destructive"
-                  title={t("chat.workspaceSettingsRemoveDirectory")}
-                  disabled={!loaded}
-                  onClick={() => onRemove(root.id)}
-                >
-                  <Trash2 className="size-3.5" />
-                </Button>
-              </div>
-            </div>
+              root={root}
+              loaded={loaded}
+              onAliasChange={onAliasChange}
+              onAccessChange={onAccessChange}
+              onRemove={onRemove}
+            />
           ))
         )}
 
-        {rootClient ? (
-          <button
-            type="button"
-            onClick={onAdd}
-            disabled={!loaded || loading}
-            className={cn(
-              "flex w-full items-center justify-center gap-1.5",
-              "cursor-pointer rounded-lg bg-settings-tile px-4 py-2.5",
-              "text-xs font-medium text-muted-foreground transition-colors",
-              "hover:bg-muted/30 hover:text-foreground disabled:pointer-events-none disabled:opacity-50",
-            )}
-          >
-            <Plus className="size-3.5" />
-            {t("chat.workspaceSettingsAddDirectory")}
-          </button>
-        ) : null}
+        {rootClient ? <AddRootButton disabled={!loaded || loading} onClick={onAdd} /> : null}
       </div>
+
+      {/* 仓库级（含所有工作树）与全局授权；同名或重叠时以上面的项目级为准。 */}
+      {(sharedGroups ?? []).map((group) => (
+        <div key={group.scope} className="space-y-2">
+          <div>
+            <h4 className="text-xs font-semibold text-foreground/80">
+              {t(SHARED_GROUP_TITLE_KEYS[group.scope])}
+            </h4>
+            <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+              {t(SHARED_GROUP_DESCRIPTION_KEYS[group.scope])}
+            </p>
+          </div>
+          {group.loading ? (
+            <Skeleton className="h-14 w-full rounded-xl bg-muted/50" />
+          ) : (
+            group.roots.map((root) => (
+              <RootRow
+                key={root.id}
+                root={root}
+                loaded={group.loaded}
+                onAliasChange={group.onAliasChange}
+                onAccessChange={group.onAccessChange}
+                onRemove={group.onRemove}
+              />
+            ))
+          )}
+          <AddRootButton disabled={!group.loaded || group.loading} onClick={group.onAdd} />
+        </div>
+      ))}
 
       {!rootClient ? (
         <div className="flex gap-3 rounded-xl bg-settings-tile p-4">

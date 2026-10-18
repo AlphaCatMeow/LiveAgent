@@ -27,4 +27,25 @@ export type WorkspaceProjectRootClient = {
     roots: readonly WorkspaceProjectRootDraft[],
   ) => Promise<readonly WorkspaceProjectRootGrant[]>;
   revoke: (project: Pick<WorkspaceProject, "id">) => Promise<void>;
+  /**
+   * Grants shared beyond one project: `repository` covers the project's git
+   * repository and all of its worktrees, `global` covers every conversation.
+   * Hosts without layered grants omit this and only show project grants.
+   */
+  scoped?: WorkspaceScopedRootClient;
+};
+
+export type WorkspaceSharedRootScope = "repository" | "global";
+
+export type WorkspaceScopedRootClient = {
+  /** Rejects for `repository` when the project is not inside a git repository. */
+  list: (
+    scope: WorkspaceSharedRootScope,
+    project: WorkspaceProject,
+  ) => Promise<readonly WorkspaceProjectRootGrant[]>;
+  save: (
+    scope: WorkspaceSharedRootScope,
+    project: WorkspaceProject,
+    roots: readonly WorkspaceProjectRootDraft[],
+  ) => Promise<readonly WorkspaceProjectRootGrant[]>;
 };

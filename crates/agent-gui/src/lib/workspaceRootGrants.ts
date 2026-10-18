@@ -45,6 +45,48 @@ export async function applyWorkspaceRootGrants(
   });
 }
 
+export type WorkspaceRootScope = "project" | "repository" | "global";
+
+/** A root in force for one turn after layering project/repository/global grants. */
+export type ResolvedWorkspaceRoot = {
+  id: string;
+  alias: string;
+  canonicalPath: string;
+  access: WorkspaceRootAccess;
+  scope: WorkspaceRootScope;
+};
+
+export async function resolveWorkspaceRootGrants(
+  workdir: string,
+  project?: Pick<WorkspaceProject, "id" | "path">,
+) {
+  return invoke<ResolvedWorkspaceRoot[]>("workspace_root_grants_resolve", {
+    workdir,
+    projectId: project?.id ?? null,
+    projectPath: project?.path ?? null,
+  });
+}
+
+/** Repository grants are shared by a repository and all of its worktrees. */
+export async function listScopedWorkspaceRootGrants(
+  scope: Exclude<WorkspaceRootScope, "project">,
+  workdir: string,
+) {
+  return invoke<WorkspaceRootGrant[]>("workspace_root_grants_list_scoped", { scope, workdir });
+}
+
+export async function applyScopedWorkspaceRootGrants(
+  scope: Exclude<WorkspaceRootScope, "project">,
+  workdir: string,
+  grants: readonly WorkspaceRootGrantDraft[],
+) {
+  return invoke<WorkspaceRootGrant[]>("workspace_root_grants_apply_scoped", {
+    scope,
+    workdir,
+    grants,
+  });
+}
+
 export async function revokeWorkspaceRootGrants(project: Pick<WorkspaceProject, "id">) {
   await invoke("workspace_root_grants_revoke", {
     projectId: project.id,

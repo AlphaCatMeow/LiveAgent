@@ -218,6 +218,15 @@ export const ZH_CN_COMMON_TRANSLATIONS = {
   "chat.workspaceSettingsDirectoriesDescription":
     "附加目录授权仅作用于结构化文件工具，命令与进程工具仍遵循现有策略。",
   "chat.workspaceSettingsAddDirectory": "添加目录",
+  "chat.workspaceSettingsProjectDirectories": "本项目",
+  "chat.workspaceSettingsProjectDirectoriesDescription":
+    "只在这个工作空间的对话里可访问，优先级最高。",
+  "chat.workspaceSettingsRepositoryDirectories":"本仓库（含所有工作树）",
+  "chat.workspaceSettingsRepositoryDirectoriesDescription":
+    "在这个 git 仓库及它的任何工作树里对话时都可访问。与本项目的目录同名或重叠时，以本项目为准。",
+  "chat.workspaceSettingsGlobalDirectories": "全局",
+  "chat.workspaceSettingsGlobalDirectoriesDescription":
+    "所有对话都可访问，不能是磁盘根目录或用户主目录。与本项目、本仓库的目录同名或重叠时，以它们为准。",
   "chat.workspaceSettingsDirectoriesUnavailable": "目录授权服务不可用",
   "chat.workspaceSettingsDirectoriesDesktopOnly":
     "当前环境尚未连接本机目录授权服务，请在桌面端完成配置。",

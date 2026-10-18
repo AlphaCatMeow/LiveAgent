@@ -11,6 +11,7 @@ import type {
   WorkspaceProjectRootAccess,
   WorkspaceProjectRootClient,
   WorkspaceProjectRootGrant,
+  WorkspaceSharedRootScope,
 } from "@liveagent/ui/contracts/workspaceProjectRoots";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { cn } from "@liveagent/ui/lib/shared/utils";
@@ -43,6 +44,30 @@ import {
 } from "./workspace-project-settings/workspaceProjectSettingsUtils";
 
 type ProjectSettingsPanel = "general" | "directories" | "resources" | "prompt";
+
+const SHARED_ROOT_SCOPES = ["repository", "global"] as const satisfies WorkspaceSharedRootScope[];
+
+type SharedRootGroup = {
+  roots: WorkspaceProjectRootGrant[];
+  loading: boolean;
+  loaded: boolean;
+  dirty: boolean;
+  unavailable: boolean;
+};
+
+type SharedRootGroups = Record<WorkspaceSharedRootScope, SharedRootGroup>;
+
+const EMPTY_SHARED_ROOT_GROUP: SharedRootGroup = {
+  roots: [],
+  loading: true,
+  loaded: false,
+  dirty: false,
+  unavailable: false,
+};
+
+function emptySharedRootGroups(): SharedRootGroups {
+  return { repository: EMPTY_SHARED_ROOT_GROUP, global: EMPTY_SHARED_ROOT_GROUP };
+}
 
 export type {
   WorkspaceProjectRootAccess,
@@ -116,6 +141,7 @@ export function WorkspaceProjectSettingsModal(props: {
   const [rootsLoaded, setRootsLoaded] = useState(!rootClient);
   const [rootsDirty, setRootsDirty] = useState(false);
   const [rootError, setRootError] = useState<string | null>(null);
+  const [sharedRoots, setSharedRoots] = useState<SharedRootGroups>(emptySharedRootGroups);
   const [saving, setSaving] = useState(false);
   const [directoryPickerActive, setDirectoryPickerActive] = useState(false);
 
@@ -147,6 +173,48 @@ export function WorkspaceProjectSettingsModal(props: {
       cancelled = true;
     };
   }, [project, rootClient]);
+
+  useEffect(() => {
+    const scoped = rootClient?.scoped;
+    if (!scoped) return;
+    let cancelled = false;
+    setSharedRoots(emptySharedRootGroups);
+    for (const scope of SHARED_ROOT_SCOPES) {
+      void scoped
+        .list(scope, project)
+        .then((result) => {
+          if (cancelled) return;
+          setSharedRoots((current) => ({
+            ...current,
+            [scope]: { ...current[scope], roots: [...result], loading: false, loaded: true },
+          }));
+        })
+        .catch((error: unknown) => {
+          if (cancelled) return;
+          // A project outside any git repository simply has no repository layer.
+          setSharedRoots((current) => ({
+            ...current,
+            [scope]: { ...current[scope], loading: false, unavailable: true },
+          }));
+          if (scope === "global") {
+            setRootError(error instanceof Error ? error.message : String(error));
+          }
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [project, rootClient]);
+
+  const updateSharedRoots = (
+    scope: WorkspaceSharedRootScope,
+    update: (roots: WorkspaceProjectRootGrant[]) => WorkspaceProjectRootGrant[],
+  ) => {
+    setSharedRoots((current) => ({
+      ...current,
+      [scope]: { ...current[scope], roots: update(current[scope].roots), dirty: true },
+    }));
+  };
 
   const listedSkills = useMemo(() => {
     const rows: Array<{
@@ -202,7 +270,7 @@ export function WorkspaceProjectSettingsModal(props: {
     setMode(next);
   };
 
-  const addDirectory = async () => {
+  const addDirectory = async (scope: "project" | WorkspaceSharedRootScope = "project") => {
     if (!rootClient) return;
     setRootError(null);
     const suspendSettingsModal = suspendsParentModal;
@@ -212,22 +280,28 @@ export function WorkspaceProjectSettingsModal(props: {
       }
       const path = await pickDirectory(project.path);
       if (!path) return;
-      if (roots.some((root) => root.displayPath === path)) {
+      const scopeRoots = scope === "project" ? roots : sharedRoots[scope].roots;
+      if (scopeRoots.some((root) => root.displayPath === path)) {
         setRootError(t("chat.workspaceSettingsDirectoryDuplicate"));
         return;
       }
-      const alias = rootAliasFromPath(path, new Set(roots.map((root) => root.alias)));
-      setRoots((current) => [
-        ...current,
-        {
-          id: `draft-${Date.now()}-${current.length}`,
-          alias,
-          displayPath: path,
-          access: "read",
-          state: "pending-approval",
-        },
-      ]);
-      setRootsDirty(true);
+      // Aliases are unique per turn across all layers, so avoid every layer's.
+      const allAliases = [roots, sharedRoots.repository.roots, sharedRoots.global.roots]
+        .flat()
+        .map((root) => root.alias);
+      const draft: WorkspaceProjectRootGrant = {
+        id: `draft-${Date.now()}-${scopeRoots.length}`,
+        alias: rootAliasFromPath(path, new Set(allAliases)),
+        displayPath: path,
+        access: "read",
+        state: "pending-approval",
+      };
+      if (scope === "project") {
+        setRoots((current) => [...current, draft]);
+        setRootsDirty(true);
+      } else {
+        updateSharedRoots(scope, (current) => [...current, draft]);
+      }
     } catch (error) {
       setRootError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -248,6 +322,21 @@ export function WorkspaceProjectSettingsModal(props: {
         await rootClient.save(
           project,
           roots.map(({ id, alias, displayPath, access }) => ({
+            id,
+            alias: alias.trim(),
+            displayPath,
+            access,
+          })),
+        );
+      }
+      const scoped = rootClient?.scoped;
+      for (const scope of SHARED_ROOT_SCOPES) {
+        const group = sharedRoots[scope];
+        if (!scoped || !group.dirty || !group.loaded) continue;
+        await scoped.save(
+          scope,
+          project,
+          group.roots.map(({ id, alias, displayPath, access }) => ({
             id,
             alias: alias.trim(),
             displayPath,
@@ -403,6 +492,29 @@ export function WorkspaceProjectSettingsModal(props: {
                   setRoots((current) => current.filter((item) => item.id !== id));
                   setRootsDirty(true);
                 }}
+                sharedGroups={
+                  rootClient?.scoped
+                    ? SHARED_ROOT_SCOPES.filter((scope) => !sharedRoots[scope].unavailable).map(
+                        (scope) => ({
+                          scope,
+                          ...sharedRoots[scope],
+                          onAdd: () => void addDirectory(scope),
+                          onAliasChange: (id: string, alias: string) =>
+                            updateSharedRoots(scope, (current) =>
+                              current.map((item) => (item.id === id ? { ...item, alias } : item)),
+                            ),
+                          onAccessChange: (id: string, access: WorkspaceProjectRootAccess) =>
+                            updateSharedRoots(scope, (current) =>
+                              current.map((item) => (item.id === id ? { ...item, access } : item)),
+                            ),
+                          onRemove: (id: string) =>
+                            updateSharedRoots(scope, (current) =>
+                              current.filter((item) => item.id !== id),
+                            ),
+                        }),
+                      )
+                    : []
+                }
               />
             ) : null}
 

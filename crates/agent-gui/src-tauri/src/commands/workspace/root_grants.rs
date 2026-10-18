@@ -110,6 +110,11 @@ fn validate_project_id(project_id: &str) -> Result<&str, String> {
     if value.len() > 256 {
         return Err("projectId 过长".to_string());
     }
+    // Repository/global grants share this table under `scope:` owner ids; a
+    // project id must never be able to address them.
+    if value.starts_with(SCOPE_OWNER_PREFIX) {
+        return Err(format!("projectId 不能以 {SCOPE_OWNER_PREFIX} 开头"));
+    }
     Ok(value)
 }
 
@@ -182,6 +187,30 @@ fn validate_drafts(
     drafts: Vec<WorkspaceRootGrantDraft>,
 ) -> Result<(PathBuf, Vec<ValidatedDraft>), String> {
     let primary = canonical_directory(project_path, "项目主目录")?;
+    let validated = validate_drafts_against(Some(&primary), drafts)?;
+    Ok((primary, validated))
+}
+
+/// Global grants have no primary root, so they instead refuse filesystem roots
+/// and the home directory: either would turn the allowlist into a blanket grant.
+fn reject_overbroad_global_root(canonical_path: &Path) -> Result<(), String> {
+    let is_filesystem_root = canonical_path.parent().is_none();
+    let is_home = dirs::home_dir()
+        .and_then(|home| fs::canonicalize(home).ok())
+        .is_some_and(|home| home.starts_with(canonical_path));
+    if is_filesystem_root || is_home {
+        return Err(format!(
+            "全局附加目录不能是磁盘根目录、用户主目录或它们的上级：{}",
+            canonical_path.display()
+        ));
+    }
+    Ok(())
+}
+
+fn validate_drafts_against(
+    primary: Option<&Path>,
+    drafts: Vec<WorkspaceRootGrantDraft>,
+) -> Result<Vec<ValidatedDraft>, String> {
     let mut aliases = HashSet::new();
     let mut ids = HashSet::new();
     let mut validated: Vec<ValidatedDraft> = Vec::with_capacity(drafts.len());
@@ -201,20 +230,26 @@ fn validate_drafts(
         let display_path = draft.display_path.trim().to_string();
         let canonical_path = canonical_directory(&display_path, "附加目录")?;
 
-        // A child/equal root adds no capability beyond the primary root. A
-        // broader read-only reference is useful (for example a monorepo parent)
-        // and is the one intentional primary/additional overlap we allow.
-        if canonical_path == primary || canonical_path.starts_with(&primary) {
-            return Err(format!(
-                "附加目录不能等于或位于项目主目录内：{}",
-                canonical_path.display()
-            ));
-        }
-        if primary.starts_with(&canonical_path) && draft.access != WorkspaceRootAccess::Read {
-            return Err(format!(
-                "包含项目主目录的附加目录只能设置为只读：{}",
-                canonical_path.display()
-            ));
+        match primary {
+            // A child/equal root adds no capability beyond the primary root. A
+            // broader read-only reference is useful (for example a monorepo parent)
+            // and is the one intentional primary/additional overlap we allow.
+            Some(primary) => {
+                if canonical_path.starts_with(primary) {
+                    return Err(format!(
+                        "附加目录不能等于或位于项目主目录内：{}",
+                        canonical_path.display()
+                    ));
+                }
+                if primary.starts_with(&canonical_path) && draft.access != WorkspaceRootAccess::Read
+                {
+                    return Err(format!(
+                        "包含项目主目录的附加目录只能设置为只读：{}",
+                        canonical_path.display()
+                    ));
+                }
+            }
+            None => reject_overbroad_global_root(&canonical_path)?,
         }
 
         for previous in &validated {
@@ -235,7 +270,7 @@ fn validate_drafts(
             access: draft.access,
         });
     }
-    Ok((primary, validated))
+    Ok(validated)
 }
 
 fn row_to_grant(row: &rusqlite::Row<'_>) -> rusqlite::Result<(WorkspaceRootGrant, String)> {
@@ -261,7 +296,8 @@ fn list_with_conn(
     project_id: &str,
     project_path_key: &str,
 ) -> Result<Vec<WorkspaceRootGrant>, String> {
-    let project_id = validate_project_id(project_id)?;
+    // Callers validate the owner: project commands via `validate_project_id`,
+    // scoped commands by constructing a `scope:` owner themselves.
     let mut statement = conn
         .prepare(
             "SELECT grant_id, project_id, project_path_key, alias, display_path, canonical_path, \
@@ -328,6 +364,18 @@ fn apply_with_conn(
     let project_id = validate_project_id(project_id)?.to_string();
     let (canonical_primary, validated) = validate_drafts(project_path, drafts)?;
     let path_key = project_path_key(&canonical_primary.to_string_lossy());
+    save_owner_with_conn(conn, &project_id, &path_key, validated)
+}
+
+/// Replaces every grant owned by `owner_id` (a project id or a `scope:` owner).
+fn save_owner_with_conn(
+    conn: &mut Connection,
+    owner_id: &str,
+    path_key: &str,
+    validated: Vec<ValidatedDraft>,
+) -> Result<Vec<WorkspaceRootGrant>, String> {
+    let project_id = owner_id.to_string();
+    let path_key = path_key.to_string();
     let now = now_ms();
 
     let transaction = conn
@@ -439,6 +487,221 @@ pub(crate) async fn revoke_workspace_root_grants_for_projects(
     .map_err(|error| format!("workspace root grants batch revoke join 失败：{error}"))?
 }
 
+const SCOPE_OWNER_PREFIX: &str = "scope:";
+const GLOBAL_SCOPE_OWNER: &str = "scope:global";
+const REPOSITORY_SCOPE_OWNER_PREFIX: &str = "scope:repository:";
+
+/// Where a grant lives. Project grants keep their historical project-id owner;
+/// repository and global grants reuse the same table under `scope:` owner ids,
+/// so no schema migration is needed and the existing UNIQUE constraints apply.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkspaceRootScope {
+    Project,
+    Repository,
+    Global,
+}
+
+/// A grant that is in force for one turn, after layering project, repository
+/// and global grants on top of the turn's working directory.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedWorkspaceRoot {
+    pub id: String,
+    pub alias: String,
+    pub canonical_path: String,
+    pub access: WorkspaceRootAccess,
+    pub scope: WorkspaceRootScope,
+}
+
+/// Main worktree root of the repository containing `workdir`. Linked worktrees
+/// resolve to the same root, which is what lets them share repository grants.
+fn repository_root(workdir: &Path) -> Option<PathBuf> {
+    for dir in workdir.ancestors() {
+        let dot_git = dir.join(".git");
+        let Ok(metadata) = fs::metadata(&dot_git) else {
+            continue;
+        };
+        if metadata.is_dir() {
+            return fs::canonicalize(dir).ok();
+        }
+        // Linked worktree: `.git` is a file whose `gitdir:` points at
+        // `<common>/.git/worktrees/<name>`, which records `commondir`.
+        let text = fs::read_to_string(&dot_git).ok()?;
+        let gitdir = dir.join(
+            text.lines()
+                .find_map(|line| line.strip_prefix("gitdir:"))?
+                .trim(),
+        );
+        let common = match fs::read_to_string(gitdir.join("commondir")) {
+            Ok(relative) => gitdir.join(relative.trim()),
+            Err(_) => gitdir,
+        };
+        return fs::canonicalize(common)
+            .ok()?
+            .parent()
+            .map(Path::to_path_buf);
+    }
+    None
+}
+
+struct ScopeOwner {
+    owner_id: String,
+    path_key: String,
+    primary: Option<PathBuf>,
+}
+
+fn scope_owner(scope: WorkspaceRootScope, workdir: &str) -> Result<ScopeOwner, String> {
+    match scope {
+        WorkspaceRootScope::Global => Ok(ScopeOwner {
+            owner_id: GLOBAL_SCOPE_OWNER.to_string(),
+            path_key: GLOBAL_SCOPE_OWNER.to_string(),
+            primary: None,
+        }),
+        WorkspaceRootScope::Repository => {
+            let workdir = canonical_directory(workdir, "工作目录")?;
+            let root = repository_root(&workdir)
+                .ok_or_else(|| "当前工作目录不在 git 仓库内，无法设置仓库级授权".to_string())?;
+            let path_key = project_path_key(&root.to_string_lossy());
+            Ok(ScopeOwner {
+                owner_id: format!("{REPOSITORY_SCOPE_OWNER_PREFIX}{path_key}"),
+                path_key,
+                primary: Some(root),
+            })
+        }
+        WorkspaceRootScope::Project => {
+            Err("项目级授权请使用 workspace_root_grants_list/apply".to_string())
+        }
+    }
+}
+
+/// Collapses the per-scope grant lists into the roots a turn may use.
+///
+/// `layers` arrives in precedence order: project, then repository, then global.
+/// `workdir` is the turn's canonical primary root, which is always writable.
+fn merge_layered_grants(
+    workdir: &Path,
+    layers: Vec<(WorkspaceRootScope, Vec<WorkspaceRootGrant>)>,
+) -> Vec<ResolvedWorkspaceRoot> {
+    // First come, first served: a grant is dropped when it is stale, adds nothing
+    // beyond the workdir, or collides (same/nested path, same alias) with a grant
+    // already accepted from a higher-precedence layer.
+    let mut accepted: Vec<ResolvedWorkspaceRoot> = Vec::new();
+    for (scope, grants) in layers {
+        for grant in grants {
+            if grant.state != WorkspaceRootGrantState::Active {
+                continue;
+            }
+            let path = Path::new(&grant.canonical_path);
+            if path.starts_with(workdir) {
+                continue;
+            }
+            let collides = accepted.iter().any(|root| {
+                root.alias == grant.alias || paths_overlap(path, Path::new(&root.canonical_path))
+            });
+            if collides {
+                continue;
+            }
+            // A root enclosing the workdir would otherwise make sibling worktrees
+            // and the main checkout writable.
+            let access = if workdir.starts_with(path) {
+                WorkspaceRootAccess::Read
+            } else {
+                grant.access
+            };
+            accepted.push(ResolvedWorkspaceRoot {
+                id: grant.id,
+                alias: grant.alias,
+                canonical_path: grant.canonical_path,
+                access,
+                scope,
+            });
+        }
+    }
+    accepted
+}
+
+fn resolve_with_conn(
+    conn: &Connection,
+    workdir: &Path,
+    project: Option<(&str, &str)>,
+) -> Result<Vec<ResolvedWorkspaceRoot>, String> {
+    let mut layers = Vec::new();
+    if let Some((project_id, project_path)) = project {
+        let primary = canonical_directory(project_path, "项目主目录")?;
+        let path_key = project_path_key(&primary.to_string_lossy());
+        layers.push((
+            WorkspaceRootScope::Project,
+            list_with_conn(conn, project_id, &path_key)?,
+        ));
+    }
+    if repository_root(workdir).is_some() {
+        let owner = scope_owner(WorkspaceRootScope::Repository, &workdir.to_string_lossy())?;
+        layers.push((
+            WorkspaceRootScope::Repository,
+            list_with_conn(conn, &owner.owner_id, &owner.path_key)?,
+        ));
+    }
+    layers.push((
+        WorkspaceRootScope::Global,
+        list_with_conn(conn, GLOBAL_SCOPE_OWNER, GLOBAL_SCOPE_OWNER)?,
+    ));
+    Ok(merge_layered_grants(workdir, layers))
+}
+
+/// Lists repository- or global-scoped grants. `workdir` picks the repository.
+#[tauri::command]
+pub async fn workspace_root_grants_list_scoped(
+    scope: WorkspaceRootScope,
+    workdir: String,
+) -> Result<Vec<WorkspaceRootGrant>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let owner = scope_owner(scope, &workdir)?;
+        let conn = open_db()?;
+        list_with_conn(&conn, &owner.owner_id, &owner.path_key)
+    })
+    .await
+    .map_err(|error| format!("workspace_root_grants_list_scoped join 失败：{error}"))?
+}
+
+#[tauri::command]
+pub async fn workspace_root_grants_apply_scoped(
+    scope: WorkspaceRootScope,
+    workdir: String,
+    grants: Vec<WorkspaceRootGrantDraft>,
+) -> Result<Vec<WorkspaceRootGrant>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let owner = scope_owner(scope, &workdir)?;
+        let validated = validate_drafts_against(owner.primary.as_deref(), grants)?;
+        let mut conn = open_db()?;
+        save_owner_with_conn(&mut conn, &owner.owner_id, &owner.path_key, validated)
+    })
+    .await
+    .map_err(|error| format!("workspace_root_grants_apply_scoped join 失败：{error}"))?
+}
+
+/// Roots in force for a turn running in `workdir`. The project pair is passed
+/// only when the workdir matches a registered project; repository and global
+/// grants apply either way.
+#[tauri::command]
+pub async fn workspace_root_grants_resolve(
+    workdir: String,
+    project_id: Option<String>,
+    project_path: Option<String>,
+) -> Result<Vec<ResolvedWorkspaceRoot>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let workdir = canonical_directory(&workdir, "工作目录")?;
+        let project = match (project_id.as_deref(), project_path.as_deref()) {
+            (Some(id), Some(path)) => Some((validate_project_id(id)?, path)),
+            _ => None,
+        };
+        let conn = open_db()?;
+        resolve_with_conn(&conn, &workdir, project)
+    })
+    .await
+    .map_err(|error| format!("workspace_root_grants_resolve join 失败：{error}"))?
+}
+
 #[tauri::command]
 pub async fn workspace_root_grants_list(
     project_id: String,
@@ -450,8 +713,9 @@ pub async fn workspace_root_grants_list(
         // grants which can no longer be safely evaluated against its primary root.
         let canonical_primary = canonical_directory(&project_path, "项目主目录")?;
         let path_key = project_path_key(&canonical_primary.to_string_lossy());
+        let project_id = validate_project_id(&project_id)?;
         let conn = open_db()?;
-        list_with_conn(&conn, &project_id, &path_key)
+        list_with_conn(&conn, project_id, &path_key)
     })
     .await
     .map_err(|error| format!("workspace_root_grants_list join 失败：{error}"))?
@@ -568,6 +832,150 @@ mod tests {
         )
         .unwrap_err()
         .contains("不是目录"));
+    }
+
+    fn grant(alias: &str, path: &Path, access: WorkspaceRootAccess) -> WorkspaceRootGrant {
+        WorkspaceRootGrant {
+            id: alias.to_string(),
+            project_id: "p".to_string(),
+            project_path_key: "k".to_string(),
+            alias: alias.to_string(),
+            display_path: path.to_string_lossy().into_owned(),
+            canonical_path: path.to_string_lossy().into_owned(),
+            access,
+            state: WorkspaceRootGrantState::Active,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    #[test]
+    fn merge_prefers_higher_layer_and_drops_conflicts() {
+        use WorkspaceRootAccess::{Read, Write};
+        let base = Path::new("/r");
+        let workdir = base.join("repo/.wt/a");
+        let mut stale = grant("stale", &base.join("gone"), Write);
+        stale.state = WorkspaceRootGrantState::Missing;
+        let merged = merge_layered_grants(
+            &workdir,
+            vec![
+                (
+                    WorkspaceRootScope::Project,
+                    vec![grant("data", &base.join("data/img"), Write), stale],
+                ),
+                (
+                    WorkspaceRootScope::Repository,
+                    vec![
+                        grant("repo", &base.join("repo"), Write),
+                        grant("inner", &workdir.join("docs"), Write),
+                    ],
+                ),
+                (
+                    WorkspaceRootScope::Global,
+                    vec![
+                        grant("outer", &base.join("data"), Read),
+                        grant("data", &base.join("other"), Read),
+                        grant("tools", &base.join("tools"), Write),
+                    ],
+                ),
+            ],
+        );
+        let summary: Vec<_> = merged
+            .iter()
+            .map(|root| (root.alias.as_str(), root.access, root.scope))
+            .collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("data", Write, WorkspaceRootScope::Project),
+                // Encloses the workdir, so it is forced read-only.
+                ("repo", Read, WorkspaceRootScope::Repository),
+                ("tools", Write, WorkspaceRootScope::Global),
+            ]
+        );
+    }
+
+    #[test]
+    fn repository_root_resolves_linked_worktree_to_main_checkout() {
+        let temp = TempDir::new().expect("tempdir");
+        let main = temp.path().join("main");
+        let admin = main.join(".git/worktrees/wt");
+        let worktree = temp.path().join("wt");
+        fs::create_dir_all(&admin).expect("admin");
+        fs::create_dir_all(worktree.join("src")).expect("worktree");
+        fs::write(admin.join("commondir"), "../..\n").expect("commondir");
+        fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}\n", admin.to_string_lossy()),
+        )
+        .expect("dot git");
+
+        let expected = fs::canonicalize(&main).unwrap();
+        assert_eq!(repository_root(&main), Some(expected.clone()));
+        assert_eq!(repository_root(&worktree.join("src")), Some(expected));
+    }
+
+    #[test]
+    fn repository_grants_resolve_from_linked_worktree_through_db() {
+        let temp = TempDir::new().expect("tempdir");
+        let main = temp.path().join("main");
+        let admin = main.join(".git/worktrees/wt");
+        let worktree = temp.path().join("wt");
+        let shared = temp.path().join("shared");
+        fs::create_dir_all(&admin).expect("admin");
+        fs::create_dir_all(&worktree).expect("worktree");
+        fs::create_dir_all(&shared).expect("shared");
+        fs::write(admin.join("commondir"), "../..\n").expect("commondir");
+        fs::write(
+            worktree.join(".git"),
+            format!("gitdir: {}\n", admin.to_string_lossy()),
+        )
+        .expect("dot git");
+        let mut conn = test_connection();
+
+        let owner = scope_owner(WorkspaceRootScope::Repository, &main.to_string_lossy())
+            .expect("repository owner");
+        let validated = validate_drafts_against(
+            owner.primary.as_deref(),
+            vec![draft("shared", &shared, WorkspaceRootAccess::Write)],
+        )
+        .expect("validate");
+        save_owner_with_conn(&mut conn, &owner.owner_id, &owner.path_key, validated)
+            .expect("save repository grants");
+
+        let workdir = fs::canonicalize(&worktree).unwrap();
+        let resolved = resolve_with_conn(&conn, &workdir, None).expect("resolve");
+        assert_eq!(resolved.len(), 1);
+        assert_eq!(resolved[0].alias, "shared");
+        assert_eq!(resolved[0].access, WorkspaceRootAccess::Write);
+        assert_eq!(resolved[0].scope, WorkspaceRootScope::Repository);
+    }
+
+    #[test]
+    fn scope_owner_ids_are_not_addressable_as_projects() {
+        assert!(validate_project_id("scope:global").is_err());
+    }
+
+    #[test]
+    fn global_scope_rejects_home_and_filesystem_root() {
+        let home = dirs::home_dir().expect("home");
+        assert!(validate_drafts_against(
+            None,
+            vec![draft("home", &home, WorkspaceRootAccess::Read)]
+        )
+        .unwrap_err()
+        .contains("全局附加目录"));
+        let root = fs::canonicalize(&home)
+            .unwrap()
+            .ancestors()
+            .last()
+            .unwrap()
+            .to_path_buf();
+        assert!(validate_drafts_against(
+            None,
+            vec![draft("root", &root, WorkspaceRootAccess::Read)]
+        )
+        .is_err());
     }
 
     #[test]

@@ -236,6 +236,15 @@ export const EN_US_COMMON_TRANSLATIONS = {
   "chat.workspaceSettingsDirectoriesDescription":
     "Additional directory grants only apply to structured file tools; command and process tools still follow existing tool policy.",
   "chat.workspaceSettingsAddDirectory": "Add directory",
+  "chat.workspaceSettingsProjectDirectories": "This project",
+  "chat.workspaceSettingsProjectDirectoriesDescription":
+    "Only available in this workspace's conversations; takes precedence over other layers.",
+  "chat.workspaceSettingsRepositoryDirectories":"This repository (all worktrees)",
+  "chat.workspaceSettingsRepositoryDirectoriesDescription":
+    "Available in conversations in this git repository or any of its worktrees. Project directories win on alias or path conflicts.",
+  "chat.workspaceSettingsGlobalDirectories": "Global",
+  "chat.workspaceSettingsGlobalDirectoriesDescription":
+    "Available in every conversation; cannot be a drive root or your home directory. Project and repository directories win on conflicts.",
   "chat.workspaceSettingsDirectoriesUnavailable": "Directory grant service unavailable",
   "chat.workspaceSettingsDirectoriesDesktopOnly":
     "This environment is not connected to local directory permissions. Configure them in the desktop app.",

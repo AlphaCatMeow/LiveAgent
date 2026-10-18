@@ -17,8 +17,8 @@ import type { ExportDestination, ImageStudioClient } from "../../lib/imaging/typ
 import { AssetImage } from "./AssetImage";
 import { AssetLightbox } from "./AssetLightbox";
 import type { DraftStorage } from "./drafts";
-import { ImageComposer } from "./ImageComposer";
 import { splitFramedPrompt } from "./framing";
+import { ImageComposer } from "./ImageComposer";
 import { ResultGallery } from "./ResultGallery";
 import {
   formatJobTime,

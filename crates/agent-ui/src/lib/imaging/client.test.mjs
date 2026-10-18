@@ -755,7 +755,18 @@ test("deleteJob sends DELETE to the job path and surfaces 409 as a typed error",
   const client = setup(async (url, init) => {
     calls.push({ url: new URL(url), init });
     if (busy)
-      return json({ version, error: { code: "IMAGE_PROJECT_BUSY", message: "Image job is still active", retryable: false, requestId: "r" } }, 409);
+      return json(
+        {
+          version,
+          error: {
+            code: "IMAGE_PROJECT_BUSY",
+            message: "Image job is still active",
+            retryable: false,
+            requestId: "r",
+          },
+        },
+        409,
+      );
     return json({ version, deleted: true });
   });
   await client.deleteJob("ij_fixture");

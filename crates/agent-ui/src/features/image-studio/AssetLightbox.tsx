@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { Loader2, X } from "../../components/IconSet";
 import type { ImagePreviewSlide } from "../../components/chat/imagePreviewModel";
+import { Loader2, X } from "../../components/IconSet";
 import type { ImageAsset, ImageStudioClient } from "../../lib/imaging/types";
 
 // Reuses the chat lightbox (zoom, pan, slide switching, save/copy). Loaded on first

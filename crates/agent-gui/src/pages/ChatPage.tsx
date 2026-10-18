@@ -2,7 +2,6 @@ import { invoke } from "@liveagent/app/shims/tauriCore";
 import { listen } from "@liveagent/app/shims/tauriEvent";
 import { openUrl } from "@liveagent/app/shims/tauriOpener";
 import { ApplicationView } from "@liveagent/ui/application/ApplicationView";
-import { ThemeToggleButton } from "@liveagent/ui/components/ThemeToggleButton";
 import { AppHeaderFrame, AppWorkbenchChrome } from "@liveagent/ui/application/AppWorkbenchChrome";
 import { useApplicationViewState } from "@liveagent/ui/application/useApplicationViewState";
 import { ConversationViewTabs } from "@liveagent/ui/components/chat/ConversationViewTabs";
@@ -20,6 +19,7 @@ import {
   WorkspacePanelGroup,
   WorkspaceToolsPanel,
 } from "@liveagent/ui/components/project-tools/WorkspacePanels";
+import { ThemeToggleButton } from "@liveagent/ui/components/ThemeToggleButton";
 import { useConfirmDialog } from "@liveagent/ui/components/ui/confirm-dialog";
 import { SidebarProvider, useSidebar } from "@liveagent/ui/components/ui/sidebar";
 import { PaneChrome } from "@liveagent/ui/components/workbench/PaneChrome";

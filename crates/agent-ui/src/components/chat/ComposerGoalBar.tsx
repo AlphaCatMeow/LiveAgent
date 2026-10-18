@@ -65,7 +65,7 @@ export function ComposerGoalBar({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(state.goal);
   const [busy, setBusy] = useState(false);
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const running = state.status !== "paused";
   const elapsed = useElapsed(state.startedAt, running);
 
@@ -75,7 +75,6 @@ export function ComposerGoalBar({
   useEffect(() => {
     if (editing) inputRef.current?.select();
   }, [editing]);
-
   const run = async (action: () => unknown) => {
     if (busy) return;
     setBusy(true);
@@ -96,8 +95,13 @@ export function ComposerGoalBar({
       setEditing(false);
     });
   };
-  const onEditKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+  const onEditKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    // 多行编辑：Enter 换行，Ctrl/Cmd+Enter 保存。
+    if (
+      event.key === "Enter" &&
+      (event.ctrlKey || event.metaKey) &&
+      !event.nativeEvent.isComposing
+    ) {
       event.preventDefault();
       submitEdit();
     } else if (event.key === "Escape") {
@@ -131,7 +135,8 @@ export function ComposerGoalBar({
     <div
       data-composer-goal-bar={state.status}
       className={cn(
-        "rounded-t-lg border border-b-0 border-black/[0.055] bg-white/70",
+        // 比输入框窄一圈，落在其圆角以内，也少挡转录区的文字。
+        "mx-auto w-inset-3rem rounded-t-lg border border-b-0 border-black/[0.055] bg-white/70",
         "px-2 py-1",
         "shadow-ui-clarifypanel-22 backdrop-blur-2xl backdrop-saturate-[165%]",
         "dark:border-white/[0.10] dark:bg-white/[0.06] dark:shadow-ui-clarifypanel-23",
@@ -146,18 +151,9 @@ export function ComposerGoalBar({
         />
         <span className="shrink-0 font-medium text-foreground/90">{label}</span>
         {editing ? (
-          <input
-            ref={inputRef}
-            value={draft}
-            disabled={locked}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={onEditKeyDown}
-            aria-label={t("chat.goalBar.edit")}
-            className={cn(
-              "h-6 min-w-0 flex-1 rounded-md border border-border/70 bg-background/70 px-1.5",
-              "text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring",
-            )}
-          />
+          <span className="min-w-0 flex-1 truncate text-muted-foreground/70">
+            {t("chat.goalBar.editHint")}
+          </span>
         ) : (
           <span className="min-w-0 flex-1 truncate text-muted-foreground" title={state.goal}>
             {state.goal}
@@ -229,6 +225,22 @@ export function ComposerGoalBar({
           )}
         </div>
       </div>
+      {editing ? (
+        <textarea
+          ref={inputRef}
+          value={draft}
+          disabled={locked}
+          rows={4}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={onEditKeyDown}
+          aria-label={t("chat.goalBar.edit")}
+          className={cn(
+            "mb-1 block max-h-60 min-h-20 w-full resize-y rounded-md border border-border/70",
+            "bg-background/70 px-2 py-1.5 text-xs leading-5 text-foreground outline-none",
+            "focus-visible:ring-1 focus-visible:ring-ring",
+          )}
+        />
+      ) : null}
       {dialog}
     </div>
   );

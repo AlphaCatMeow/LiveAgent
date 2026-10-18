@@ -543,7 +543,9 @@ function HeightClampedCode({ children }: { children: ReactNode }) {
             )}
           >
             {expanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
-            <span>{expanded ? t("chat.markdown.collapseCode") : t("chat.markdown.expandAllCode")}</span>
+            <span>
+              {expanded ? t("chat.markdown.collapseCode") : t("chat.markdown.expandAllCode")}
+            </span>
           </button>
         </div>
       ) : null}

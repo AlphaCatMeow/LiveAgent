@@ -1,12 +1,4 @@
-import {
-  Check,
-  Goal,
-  Pause,
-  Play,
-  SquarePen,
-  Trash2,
-  X,
-} from "@liveagent/ui/components/IconSet";
+import { Check, Goal, Pause, Play, SquarePen, Trash2, X } from "@liveagent/ui/components/IconSet";
 import { useConfirmDialog } from "@liveagent/ui/components/ui/confirm-dialog";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { cn } from "@liveagent/ui/lib/shared/utils";

@@ -188,6 +188,13 @@ export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
     });
   }
 
+  async function searchHistory<T>(args: Record<string, unknown> = {}): Promise<T> {
+    return request<T>("/v1/history/search", {
+      method: "POST",
+      body: JSON.stringify(args),
+    });
+  }
+
   async function createSession(input: KBrainCreateSessionRequest): Promise<KBrainSession> {
     return request<KBrainSession>("/v1/sessions", {
       method: "POST",
@@ -813,6 +820,7 @@ export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
   return {
     createSession,
     requestMemory,
+    searchHistory,
     importLegacyHistory,
     listSessions,
     listModels,

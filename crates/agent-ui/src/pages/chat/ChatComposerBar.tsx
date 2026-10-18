@@ -353,6 +353,9 @@ export type ChatComposerBarProps = {
   /** 输入框上方的目标栏（/goal）；与指令队列上下排列。 */
   goalBar?: ReactNode;
   queuedTurns: ChatQueueTurnPreview[];
+  queuePaused?: boolean;
+  queueControlPending?: boolean;
+  onQueuePausedChange?: (paused: boolean) => void;
   onRunQueuedTurnNow: (id: string) => void;
   onMoveQueuedTurnUp: (id: string) => void;
   onEditQueuedTurn: (id: string) => void;
@@ -455,6 +458,9 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
     onRemovePendingUpload,
     goalBar,
     queuedTurns,
+    queuePaused,
+    queueControlPending,
+    onQueuePausedChange,
     onRunQueuedTurnNow,
     onMoveQueuedTurnUp,
     onEditQueuedTurn,
@@ -1221,23 +1227,23 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
             {taskProgressBar}
           </div>
         ) : null}
-        {goalBar || queuedTurns.length > 0 ? (
+        {goalBar || queuedTurns.length > 0 || queuePaused ? (
           <div
             ref={queuePanelRef}
             className="relative z-30 mx-auto mb-minus-1px flex w-inset-1p5rem flex-col empty:hidden"
           >
             {/* 目标栏与指令队列同在一个纵向容器里：上下排列，不互相覆盖，并一起计入输入区高度。 */}
             {goalBar}
-            {queuedTurns.length > 0 ? (
-              <>
-                <div
-                  className={cn(
-                    "rounded-t-lg border border-b-0 border-black/[0.055] bg-white/70",
-                    "px-1.5 pb-1 pt-1",
-                    "shadow-ui-clarifypanel-22 backdrop-blur-2xl backdrop-saturate-[165%]",
-                    "dark:border-white/[0.10] dark:bg-white/[0.06] dark:shadow-ui-clarifypanel-23",
-                  )}
-                >
+            {queuedTurns.length > 0 || queuePaused ? (
+              <div
+                className={cn(
+                  "rounded-t-lg border border-b-0 border-black/[0.055] bg-white/70",
+                  "px-1.5 pb-1 pt-1",
+                  "shadow-ui-clarifypanel-22 backdrop-blur-2xl backdrop-saturate-[165%]",
+                  "dark:border-white/[0.10] dark:bg-white/[0.06] dark:shadow-ui-clarifypanel-23",
+                )}
+              >
+                <div className="flex min-w-0 items-center gap-1">
                   <button
                     type="button"
                     onClick={toggleQueueCollapsed}
@@ -1245,7 +1251,7 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
                     aria-label={toggleQueueTooltip}
                     aria-expanded={!queueCollapsed}
                     className={cn(
-                      "flex h-6 w-full items-center gap-1.5 rounded-md px-2",
+                      "flex h-6 min-w-0 flex-1 items-center gap-1.5 rounded-md px-2",
                       "text-tiny font-medium text-muted-foreground transition-colors",
                       "hover:bg-black/[0.04] hover:text-foreground dark:hover:bg-white/[0.06]",
                       "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
@@ -1255,6 +1261,11 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
                     <span className="min-w-0 truncate">
                       {t("chat.queue.title").replace("{count}", String(queuedTurns.length))}
                     </span>
+                    {queuePaused ? (
+                      <span className="shrink-0 text-muted-foreground" role="status">
+                        {t("chat.queue.paused")}
+                      </span>
+                    ) : null}
                     <ChevronUp
                       className={cn(
                         "ml-auto size-3 shrink-0 transition-transform duration-200 ease-out",
@@ -1262,121 +1273,134 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
                       )}
                     />
                   </button>
-                  <div
-                    aria-hidden={queueCollapsed}
-                    className={cn(
-                      "grid transition-[grid-template-rows,opacity] duration-200 ease-out",
-                      queueCollapsed ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr] opacity-100",
-                    )}
-                  >
-                    <div className="min-h-0 overflow-hidden">
-                      <div className="relative min-h-0 pt-0.5">
-                        <ul
-                          ref={queueListRef}
-                          className={cn(
-                            "chat-queue-scroll flex min-w-0 flex-col gap-0.5 overflow-x-hidden overscroll-contain",
-                            "[scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden [&::-webkit-scrollbar]:size-0",
-                            queuedTurns.length > 3
-                              ? "h-88px overflow-y-scroll"
-                              : "max-h-88px overflow-y-hidden",
-                          )}
-                        >
-                          {queuedTurns.map((item, index) => (
-                            <li
-                              key={item.id}
-                              className={cn(
-                                "relative grid h-7 min-h-7 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5",
-                                "rounded-md pl-2 pr-1 text-xs transition-colors",
-                                "hover:bg-black/[0.04] dark:hover:bg-white/[0.06]",
-                              )}
-                            >
-                              <span className="w-3 shrink-0 text-center text-tiny tabular-nums text-muted-foreground/60">
-                                {index + 1}
+                  {typeof queuePaused === "boolean" && onQueuePausedChange ? (
+                    <button
+                      type="button"
+                      data-workbench-preserve-focus=""
+                      disabled={queueControlPending}
+                      onClick={() => onQueuePausedChange(!queuePaused)}
+                      aria-label={t(queuePaused ? "chat.queue.resume" : "chat.queue.pause")}
+                      title={t("chat.queue.pauseHint")}
+                      className="h-6 shrink-0 rounded-md px-2 text-tiny font-medium text-muted-foreground hover:bg-black/[0.04] hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50 dark:hover:bg-white/[0.06]"
+                    >
+                      {t(queuePaused ? "chat.queue.resume" : "chat.queue.pause")}
+                    </button>
+                  ) : null}
+                </div>
+                <div
+                  aria-hidden={queueCollapsed}
+                  className={cn(
+                    "grid transition-[grid-template-rows,opacity] duration-200 ease-out",
+                    queueCollapsed ? "grid-rows-[0fr] opacity-0" : "grid-rows-[1fr] opacity-100",
+                  )}
+                >
+                  <div className="min-h-0 overflow-hidden">
+                    <div className="relative min-h-0 pt-0.5">
+                      <ul
+                        ref={queueListRef}
+                        className={cn(
+                          "chat-queue-scroll flex min-w-0 flex-col gap-0.5 overflow-x-hidden overscroll-contain",
+                          "[scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden [&::-webkit-scrollbar]:size-0",
+                          queuedTurns.length > 3
+                            ? "h-88px overflow-y-scroll"
+                            : "max-h-88px overflow-y-hidden",
+                        )}
+                      >
+                        {queuedTurns.map((item, index) => (
+                          <li
+                            key={item.id}
+                            className={cn(
+                              "relative grid h-7 min-h-7 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5",
+                              "rounded-md pl-2 pr-1 text-xs transition-colors",
+                              "hover:bg-black/[0.04] dark:hover:bg-white/[0.06]",
+                            )}
+                          >
+                            <span className="w-3 shrink-0 text-center text-tiny tabular-nums text-muted-foreground/60">
+                              {index + 1}
+                            </span>
+                            <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+                              <span
+                                className={cn(
+                                  "block min-w-0 flex-1 overflow-hidden",
+                                  "text-ellipsis whitespace-nowrap text-xs leading-4 text-foreground/88",
+                                )}
+                              >
+                                {item.previewText || t("chat.queue.emptyMessage")}
                               </span>
-                              <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
-                                <span
+                              {item.fileCount > 0 ? (
+                                <span className="max-w-18 shrink-0 overflow-hidden text-ellipsis whitespace-nowrap text-tiny leading-4 text-muted-foreground">
+                                  {t("chat.queue.fileCount").replace(
+                                    "{count}",
+                                    String(item.fileCount),
+                                  )}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="flex shrink-0 items-center gap-0.5">
+                              <RuntimeControlTooltip label={t("chat.queue.moveUp")}>
+                                <button
+                                  type="button"
+                                  disabled={queueCollapsed || index === 0}
+                                  onClick={() => onMoveQueuedTurnUp(item.id)}
+                                  aria-label={t("chat.queue.moveUp")}
                                   className={cn(
-                                    "block min-w-0 flex-1 overflow-hidden",
-                                    "text-ellipsis whitespace-nowrap text-xs leading-4 text-foreground/88",
+                                    "inline-flex size-5 items-center justify-center rounded-md text-muted-foreground transition-colors",
+                                    "hover:bg-background/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-25",
                                   )}
                                 >
-                                  {item.previewText || t("chat.queue.emptyMessage")}
-                                </span>
-                                {item.fileCount > 0 ? (
-                                  <span className="max-w-18 shrink-0 overflow-hidden text-ellipsis whitespace-nowrap text-tiny leading-4 text-muted-foreground">
-                                    {t("chat.queue.fileCount").replace(
-                                      "{count}",
-                                      String(item.fileCount),
-                                    )}
-                                  </span>
-                                ) : null}
-                              </div>
-                              <div className="flex shrink-0 items-center gap-0.5">
-                                <RuntimeControlTooltip label={t("chat.queue.moveUp")}>
-                                  <button
-                                    type="button"
-                                    disabled={queueCollapsed || index === 0}
-                                    onClick={() => onMoveQueuedTurnUp(item.id)}
-                                    aria-label={t("chat.queue.moveUp")}
-                                    className={cn(
-                                      "inline-flex size-5 items-center justify-center rounded-md text-muted-foreground transition-colors",
-                                      "hover:bg-background/80 hover:text-foreground disabled:pointer-events-none disabled:opacity-25",
-                                    )}
-                                  >
-                                    <ArrowUp className="size-3" />
-                                  </button>
-                                </RuntimeControlTooltip>
-                                <RuntimeControlTooltip label={t("chat.queue.edit")}>
-                                  <button
-                                    type="button"
-                                    disabled={queueCollapsed}
-                                    onClick={() => onEditQueuedTurn(item.id)}
-                                    aria-label={t("chat.queue.edit")}
-                                    className={cn(
-                                      "inline-flex size-5 items-center justify-center rounded-md text-muted-foreground transition-colors",
-                                      "hover:bg-background/80 hover:text-foreground",
-                                    )}
-                                  >
-                                    <SquarePen className="size-3" />
-                                  </button>
-                                </RuntimeControlTooltip>
-                                <RuntimeControlTooltip label={t("chat.queue.runNow")}>
-                                  <button
-                                    type="button"
-                                    disabled={queueCollapsed}
-                                    onClick={() => onRunQueuedTurnNow(item.id)}
-                                    aria-label={t("chat.queue.runNow")}
-                                    className={cn(
-                                      "inline-flex size-5 items-center justify-center rounded-md text-muted-foreground transition-colors",
-                                      "hover:bg-background/80 hover:text-foreground",
-                                    )}
-                                  >
-                                    <Play className="size-3" />
-                                  </button>
-                                </RuntimeControlTooltip>
-                                <RuntimeControlTooltip label={t("chat.queue.delete")}>
-                                  <button
-                                    type="button"
-                                    disabled={queueCollapsed}
-                                    onClick={() => onRemoveQueuedTurn(item.id)}
-                                    aria-label={t("chat.queue.delete")}
-                                    className={cn(
-                                      "inline-flex size-5 items-center justify-center rounded-md text-muted-foreground transition-colors",
-                                      "hover:bg-destructive/10 hover:text-destructive",
-                                    )}
-                                  >
-                                    <Trash2 className="size-3" />
-                                  </button>
-                                </RuntimeControlTooltip>
-                              </div>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
+                                  <ArrowUp className="size-3" />
+                                </button>
+                              </RuntimeControlTooltip>
+                              <RuntimeControlTooltip label={t("chat.queue.edit")}>
+                                <button
+                                  type="button"
+                                  disabled={queueCollapsed}
+                                  onClick={() => onEditQueuedTurn(item.id)}
+                                  aria-label={t("chat.queue.edit")}
+                                  className={cn(
+                                    "inline-flex size-5 items-center justify-center rounded-md text-muted-foreground transition-colors",
+                                    "hover:bg-background/80 hover:text-foreground",
+                                  )}
+                                >
+                                  <SquarePen className="size-3" />
+                                </button>
+                              </RuntimeControlTooltip>
+                              <RuntimeControlTooltip label={t("chat.queue.runNow")}>
+                                <button
+                                  type="button"
+                                  disabled={queueCollapsed}
+                                  onClick={() => onRunQueuedTurnNow(item.id)}
+                                  aria-label={t("chat.queue.runNow")}
+                                  className={cn(
+                                    "inline-flex size-5 items-center justify-center rounded-md text-muted-foreground transition-colors",
+                                    "hover:bg-background/80 hover:text-foreground",
+                                  )}
+                                >
+                                  <Play className="size-3" />
+                                </button>
+                              </RuntimeControlTooltip>
+                              <RuntimeControlTooltip label={t("chat.queue.delete")}>
+                                <button
+                                  type="button"
+                                  disabled={queueCollapsed}
+                                  onClick={() => onRemoveQueuedTurn(item.id)}
+                                  aria-label={t("chat.queue.delete")}
+                                  className={cn(
+                                    "inline-flex size-5 items-center justify-center rounded-md text-muted-foreground transition-colors",
+                                    "hover:bg-destructive/10 hover:text-destructive",
+                                  )}
+                                >
+                                  <Trash2 className="size-3" />
+                                </button>
+                              </RuntimeControlTooltip>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   </div>
                 </div>
-              </>
+              </div>
             ) : null}
           </div>
         ) : null}

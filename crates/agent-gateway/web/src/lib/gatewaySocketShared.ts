@@ -631,6 +631,7 @@ export function normalizeChatQueueSnapshot(
   return {
     conversationId,
     revision,
+    ...(typeof raw.paused === "boolean" ? { paused: raw.paused } : {}),
     items: Array.isArray(raw.items) ? raw.items : [],
   };
 }

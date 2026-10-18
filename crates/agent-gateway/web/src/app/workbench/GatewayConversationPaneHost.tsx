@@ -198,6 +198,7 @@ export type GatewayConversationPrimarySurface = {
   pendingUploadedFiles: PendingUploadedFile[];
   onRemovePendingUpload: ChatComposerBarProps["onRemovePendingUpload"];
   queuedTurns: ChatQueueTurnPreview[];
+  queuePaused?: boolean;
   onRunQueuedTurnNow: ChatComposerBarProps["onRunQueuedTurnNow"];
   onMoveQueuedTurnUp: ChatComposerBarProps["onMoveQueuedTurnUp"];
   onEditQueuedTurn: ChatComposerBarProps["onEditQueuedTurn"];
@@ -385,11 +386,21 @@ export function GatewayConversationPaneHost(props: GatewayConversationPaneHostPr
 
   // ---- 每会话队列:订阅网关中继的队列快照,revision 单调递增去旧 ----------
   const [queuedTurns, setQueuedTurns] = useState<ChatQueueTurnPreview[]>([]);
+  const [queuePaused, setQueuePaused] = useState<boolean | undefined>();
+  const [queueControlPending, setQueueControlPending] = useState(false);
+  const queueControlPendingRef = useRef(false);
   const queuedTurnsRef = useRef<ChatQueueTurnPreview[]>([]);
   const queueRevisionRef = useRef(0);
+  const queueConversationRef = useRef(conversationId);
+  queueConversationRef.current = conversationId;
   const applyQueueSnapshot = useCallback(
     (snapshot: ChatQueueSnapshotLike | null | undefined) => {
-      if (!snapshot || snapshot.conversationId !== conversationId) return;
+      if (
+        !snapshot ||
+        snapshot.conversationId !== conversationId ||
+        queueConversationRef.current !== conversationId
+      )
+        return;
       const revision = Number(snapshot.revision ?? 0);
       if (revision < queueRevisionRef.current) return;
       queueRevisionRef.current = revision;
@@ -400,6 +411,7 @@ export function GatewayConversationPaneHost(props: GatewayConversationPaneHostPr
       }));
       queuedTurnsRef.current = items;
       setQueuedTurns(items);
+      setQueuePaused(typeof snapshot.paused === "boolean" ? snapshot.paused : undefined);
     },
     [conversationId],
   );
@@ -408,6 +420,7 @@ export function GatewayConversationPaneHost(props: GatewayConversationPaneHostPr
     queueRevisionRef.current = 0;
     queuedTurnsRef.current = [];
     setQueuedTurns([]);
+    setQueuePaused(undefined);
     let cancelled = false;
     const unsubscribe = api.subscribeChatQueue(applyQueueSnapshot);
     void api
@@ -421,6 +434,33 @@ export function GatewayConversationPaneHost(props: GatewayConversationPaneHostPr
       unsubscribe();
     };
   }, [api, applyQueueSnapshot, conversationId, isDraft]);
+
+  const handleQueuePausedChange = useCallback(
+    async (paused: boolean) => {
+      if (queueControlPendingRef.current) return;
+      queueControlPendingRef.current = true;
+      setQueueControlPending(true);
+      try {
+        const response = await api.chatQueueSetPaused(
+          conversationId,
+          paused,
+          queueRevisionRef.current,
+        );
+        applyQueueSnapshot(response.snapshot);
+        if (!response.accepted) throw new Error(response.message || t("chat.queue.controlFailed"));
+      } catch (error) {
+        context.notifyError(error instanceof Error ? error.message : t("chat.queue.controlFailed"));
+        void api
+          .chatQueueGet(conversationId)
+          .then((response) => applyQueueSnapshot(response.snapshot))
+          .catch(() => undefined);
+      } finally {
+        queueControlPendingRef.current = false;
+        setQueueControlPending(false);
+      }
+    },
+    [api, applyQueueSnapshot, context, conversationId, t],
+  );
 
   // 队列操作直接以本会话 id 走网关 RPC(等价桌面端按会话路由);编辑队列项
   // 需要页面级编辑会话,与桌面端一致先聚焦本 Pane。
@@ -610,12 +650,12 @@ export function GatewayConversationPaneHost(props: GatewayConversationPaneHostPr
   const handleStop = useCallback(() => {
     // 与桌面端/聚焦舞台一致:有排队回合先"停当前、跑下一条",否则纯停止。
     const nextQueuedTurn = queuedTurnsRef.current[0];
-    if (nextQueuedTurn) {
+    if (nextQueuedTurn && !queuePaused) {
       handleRunQueuedTurnNow(nextQueuedTurn.id);
       return;
     }
     void context.cancelChat(conversationId);
-  }, [context, conversationId, handleRunQueuedTurnNow]);
+  }, [context, conversationId, handleRunQueuedTurnNow, queuePaused]);
   // 背景 Pane 的“/”指令：目录、发送、目标清除与定时任务都按本会话路由；
   // /plan、/model 与 /rewind 依赖主 Pane 的开关、模型与回退上下文，这里不提供。
   // context 每次渲染都是新对象：读数经 ref 取最新值，宿主引用只随 api 与会话变化，
@@ -1035,6 +1075,9 @@ export function GatewayConversationPaneHost(props: GatewayConversationPaneHostPr
                   }
             }
             queuedTurns={usePrimary && primary ? primary.queuedTurns : queuedTurns}
+            queuePaused={usePrimary ? primary?.queuePaused : queuePaused}
+            queueControlPending={queueControlPending}
+            onQueuePausedChange={handleQueuePausedChange}
             onRunQueuedTurnNow={
               usePrimary && primary ? primary.onRunQueuedTurnNow : handleRunQueuedTurnNow
             }

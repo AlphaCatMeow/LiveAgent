@@ -1,3 +1,4 @@
+import { createKBrainQueueClient } from "./queueClient";
 import { fetchKBrain, KBrainTransportError } from "./transport";
 import {
   KBRAIN_PROTOCOL_VERSION,
@@ -818,6 +819,7 @@ export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
   }
 
   return {
+    ...createKBrainQueueClient(inputOptions),
     createSession,
     requestMemory,
     searchHistory,

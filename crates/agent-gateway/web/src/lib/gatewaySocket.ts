@@ -144,6 +144,11 @@ export type GatewayWebSocketClientLike = {
   chatCommand(input: GatewayChatCommandInput): Promise<ChatCommandAccepted>;
   cancelChat(conversationId: string, runId?: string): Promise<void>;
   chatQueueGet(conversationId: string): Promise<ChatQueueResponse>;
+  chatQueueSetPaused(
+    conversationId: string,
+    paused: boolean,
+    revision: number,
+  ): Promise<ChatQueueResponse>;
   chatQueueGetItem(conversationId: string, itemId: string): Promise<ChatQueueResponse>;
   chatQueueRunNow(conversationId: string, itemId: string): Promise<ChatQueueResponse>;
   chatQueueCompactNow(conversationId: string, operationId: string): Promise<ChatQueueResponse>;

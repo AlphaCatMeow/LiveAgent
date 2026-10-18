@@ -103,7 +103,15 @@ func TestBackendQueueRelayAgainstRealKBrain(t *testing.T) {
 	}
 	statePath := filepath.Join(root, "relay.json")
 	controls := make(chan *gatewayv2.ChatControlEvent, 32)
-	cb := Callbacks{OnControl: func(_ string, event *gatewayv2.ChatControlEvent) { controls <- event }}
+	queues := make(chan backendQueueSnapshot, 512)
+	cb := Callbacks{OnControl: func(_ string, event *gatewayv2.ChatControlEvent) { controls <- event }, OnQueue: func(_ string, raw string, _ uint64) {
+		var snapshot backendQueueSnapshot
+		if err := json.Unmarshal([]byte(raw), &snapshot); err != nil {
+			t.Error(err)
+			return
+		}
+		queues <- snapshot
+	}}
 	relay, err := NewRelayWithQueueState(client, "target", ModelRef{Provider: "fixture", Model: "fixture-model"}, root, statePath, cb)
 	if err != nil {
 		t.Fatal(err)
@@ -133,6 +141,14 @@ func TestBackendQueueRelayAgainstRealKBrain(t *testing.T) {
 	var snapshot queueSnapshot
 	if err = json.Unmarshal([]byte(get.SnapshotJSON), &snapshot); err != nil || len(snapshot.Items) != 2 || snapshot.Items[0].ID != "gateway-second" {
 		t.Fatalf("backend snapshot=%+v err=%v", get, err)
+	}
+	stale := relay.Queue(context.Background(), &gatewayv2.ChatQueueRequest{ConversationId: "conv", Action: "pause", Revision: 0})
+	if stale.Accepted || stale.ErrorCode != "conflict" {
+		t.Fatalf("explicit zero revision was silently replaced: %+v", stale)
+	}
+	paused := relay.Queue(context.Background(), &gatewayv2.ChatQueueRequest{ConversationId: "conv", Action: "pause", Revision: get.Revision}, cb)
+	if !paused.Accepted {
+		t.Fatalf("pause=%+v", paused)
 	}
 	begin := relay.Queue(context.Background(), &gatewayv2.ChatQueueRequest{ConversationId: "conv", Action: "edit_begin", ItemId: "gateway-second"})
 	if !begin.Accepted {
@@ -167,6 +183,27 @@ func TestBackendQueueRelayAgainstRealKBrain(t *testing.T) {
 	if !restored.usesBackendQueue() {
 		t.Fatal("restored transport fell back to a local queue")
 	}
+	// The accepted run has an SSE reader even with no pending watcher mutation.
+	// A second client changes pause state directly; the original reader must
+	// propagate queue.updated instead of waiting for another queued receipt.
+	current, err := client.sessionQueue(context.Background(), http.MethodGet, sessionID, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := client.sessionQueue(context.Background(), http.MethodPost, sessionID, "/actions", map[string]any{"action": "resume", "revision": current.Snapshot.Revision})
+	if err != nil || !resumed.Accepted {
+		t.Fatalf("resume=%+v %v", resumed, err)
+	}
+	deadlineQueue := time.After(3 * time.Second)
+	waitingQueue := true
+	for waitingQueue {
+		select {
+		case update := <-queues:
+			waitingQueue = update.Revision != resumed.Snapshot.Revision || update.Paused
+		case <-deadlineQueue:
+			t.Fatal("external resume was not forwarded")
+		}
+	}
 	releaseOnce.Do(func() { close(release) })
 	finished := map[string]bool{}
 	deadline := time.After(8 * time.Second)
@@ -199,6 +236,61 @@ func TestBackendQueueRelayAgainstRealKBrain(t *testing.T) {
 	}
 	if fmt.Sprint(prompts) != "[hold-first edited-second]" {
 		t.Fatalf("replayed or deleted request executed: %v", prompts)
+	}
+}
+
+func TestBackendQueueProjectionAndFanoutPreserveCanonicalIdentity(t *testing.T) {
+	client, _ := New("http://backend.test", "", nil)
+	relay, _ := NewRelay(client, "target", ModelRef{}, "")
+	defer relay.Close()
+	relay.sessions["browser-alias"] = "canonical"
+	relay.backendRuns["request"] = backendQueueRun{ConversationID: "browser-alias", SessionID: "canonical", ItemID: "item", GatewayRunID: "gateway-run"}
+	out := backendQueueResponse{Accepted: true, Snapshot: backendQueueSnapshot{ConversationID: "canonical", Revision: 4, Paused: true, Items: []backendQueueItem{{ID: "item", PreviewText: "pending"}}}}
+	seen := map[string]bool{}
+	relay.emitBackendQueue(Callbacks{OnQueue: func(id, raw string, revision uint64) {
+		var snapshot backendQueueSnapshot
+		if err := json.Unmarshal([]byte(raw), &snapshot); err != nil {
+			t.Fatal(err)
+		}
+		if snapshot.ConversationID != id || snapshot.Items[0].ID != "gateway-run" || !snapshot.Paused || revision != 4 {
+			t.Fatalf("invalid projection: %s", raw)
+		}
+		seen[id] = true
+	}}, out)
+	if !seen["canonical"] || !seen["browser-alias"] || out.Snapshot.Items[0].ID != "item" {
+		t.Fatalf("fanout or original mutated: %v %+v", seen, out)
+	}
+}
+
+func TestBackendQueueCanonicalReloadCanOperateBeforeHistoryMapping(t *testing.T) {
+	reads, actions := 0, 0
+	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/sessions/canonical/queue/actions" {
+			actions++
+			var input map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+				t.Error(err)
+			}
+			if input["item_id"] != "backend-item" || input["revision"] != float64(4) {
+				t.Errorf("canonical action lost identity: %v", input)
+			}
+		} else if r.URL.Path == "/v1/sessions/canonical/queue" {
+			reads++
+		} else {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		fmt.Fprint(w, `{"version":"kbrain.agent.v1","accepted":true,"snapshot":{"conversationId":"canonical","revision":4,"paused":true,"items":[]}}`)
+	}))
+	defer h.Close()
+	client, _ := New(h.URL, "", h.Client())
+	relay, _ := NewRelay(client, "target", ModelRef{}, "")
+	defer relay.Close()
+	relay.backendQueue = true
+	relay.sessions["old-alias"] = "canonical"
+	relay.backendRuns["request"] = backendQueueRun{ConversationID: "old-alias", SessionID: "canonical", ItemID: "backend-item", GatewayRunID: "gateway-item"}
+	response := relay.Queue(context.Background(), &gatewayv2.ChatQueueRequest{ConversationId: "canonical", Action: "remove", ItemId: "gateway-item", Revision: 4})
+	if !response.Accepted || reads != 1 || actions != 1 || relay.sessions["canonical"] != "canonical" {
+		t.Fatalf("canonical queue restoration failed: %+v reads=%d actions=%d", response, reads, actions)
 	}
 }
 

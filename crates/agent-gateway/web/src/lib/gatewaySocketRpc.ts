@@ -165,6 +165,19 @@ export class GatewayWebSocketRpcClient extends GatewayWebSocketTransport {
     );
   }
 
+  async chatQueueSetPaused(
+    conversationId: string,
+    paused: boolean,
+    revision: number,
+  ): Promise<ChatQueueResponse> {
+    return normalizeChatQueueResponse(
+      await this.requestWithRecovery<RawChatQueueResponse>(
+        paused ? "chat_queue.pause" : "chat_queue.resume",
+        { conversation_id: conversationId, revision },
+      ),
+    );
+  }
+
   async chatQueueGetItem(conversationId: string, itemId: string): Promise<ChatQueueResponse> {
     return normalizeChatQueueResponse(
       await this.requestWithRecovery<RawChatQueueResponse>("chat_queue.get_item", {

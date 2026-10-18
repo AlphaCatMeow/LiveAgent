@@ -18,17 +18,20 @@ func (r *Relay) backendQueueProjection(conversationID string, out backendQueueRe
 	r.mu.Lock()
 	aliases := map[string]string{}
 	for _, binding := range r.backendRuns {
-		if binding.ConversationID == conversationID && binding.ItemID != "" {
+		if binding.SessionID == out.Snapshot.ConversationID && binding.ItemID != "" {
 			aliases[binding.ItemID] = binding.GatewayRunID
 		}
 	}
 	r.mu.Unlock()
+	out.Snapshot.Items = append([]backendQueueItem{}, out.Snapshot.Items...)
 	for i := range out.Snapshot.Items {
 		if alias := aliases[out.Snapshot.Items[i].ID]; alias != "" {
 			out.Snapshot.Items[i].ID = alias
 		}
 	}
 	if out.Item != nil {
+		item := *out.Item
+		out.Item = &item
 		if alias := aliases[out.Item.ID]; alias != "" {
 			out.Item.ID = alias
 		}
@@ -41,6 +44,22 @@ func (r *Relay) backendQueueProjection(conversationID string, out backendQueueRe
 		result.ItemJSON = string(item)
 	}
 	return result
+}
+
+func (r *Relay) emitBackendQueue(cb Callbacks, out backendQueueResponse) {
+	// Reloaded WebUI pages restore canonical backend IDs while live pages may
+	// still use durable Gateway aliases. Publish the same revision to both.
+	ids := map[string]bool{out.Snapshot.ConversationID: true}
+	r.mu.Lock()
+	for alias, sessionID := range r.sessions {
+		if sessionID == out.Snapshot.ConversationID {
+			ids[alias] = true
+		}
+	}
+	r.mu.Unlock()
+	for id := range ids {
+		r.emitQueue(cb, id, r.backendQueueProjection(id, out))
+	}
 }
 
 func (r *Relay) startBackendQueuedRun(ctx context.Context, gatewayRunID, conversationID, requestID, cwd string, prompt PromptRequest, policy string, cb Callbacks) (bool, error) {
@@ -103,15 +122,22 @@ func (r *Relay) startBackendQueuedRun(ctx context.Context, gatewayRunID, convers
 	if !out.Accepted || out.Receipt == nil {
 		return false, fmt.Errorf("K-brain queue rejected: %s", out.Message)
 	}
-	binding.ItemID = out.Receipt.ID
 	r.mu.Lock()
+	current, pending := r.backendRuns[key]
+	if !pending {
+		// A concurrent reader may already have observed the terminal event.
+		r.mu.Unlock()
+		return true, nil
+	}
+	binding = current
+	binding.ItemID = out.Receipt.ID
 	r.backendRuns[key] = binding
 	err = r.persistQueueLocked()
 	r.mu.Unlock()
 	if err != nil {
 		return false, err
 	}
-	r.emitQueue(cb, conversationID, r.backendQueueProjection(conversationID, out))
+	r.emitBackendQueue(cb, out)
 	r.watchBackendQueuedRun(binding, cb)
 	return true, nil
 }
@@ -128,14 +154,26 @@ func (r *Relay) backendQueueAction(ctx context.Context, req *gatewayv2.ChatQueue
 	sessionID := r.sessions[conversationID]
 	itemID := req.GetItemId()
 	for _, binding := range r.backendRuns {
-		if binding.ConversationID == conversationID && binding.GatewayRunID == itemID {
+		if (binding.ConversationID == conversationID || binding.SessionID == conversationID || binding.SessionID == sessionID) && binding.GatewayRunID == itemID {
 			itemID = binding.ItemID
 			break
 		}
 	}
 	r.mu.Unlock()
 	if sessionID == "" {
-		return queueError("not_found", "backend session mapping not found")
+		// A restored page may address the canonical session before history GET
+		// has established its alias. A successful backend read validates it.
+		if _, err := r.client.sessionQueue(ctx, http.MethodGet, conversationID, "", nil); err != nil {
+			return queueError("not_found", err.Error())
+		}
+		sessionID = conversationID
+		r.mu.Lock()
+		r.sessions[conversationID] = sessionID
+		err := r.persistQueueLocked()
+		r.mu.Unlock()
+		if err != nil {
+			return queueError("persistence_error", err.Error())
+		}
 	}
 	action := req.GetAction()
 	switch action {
@@ -156,7 +194,7 @@ func (r *Relay) backendQueueAction(ctx context.Context, req *gatewayv2.ChatQueue
 		// Older WebUI actions omit revision except edit_commit. Resolve their
 		// revision once; the backend still rejects a concurrent mutation.
 		revision := req.GetRevision()
-		if revision == 0 && action != "edit_commit" {
+		if revision == 0 && action != "edit_commit" && action != "pause" && action != "resume" {
 			current, readErr := r.client.sessionQueue(ctx, http.MethodGet, sessionID, "", nil)
 			if readErr != nil {
 				return queueError("backend_error", readErr.Error())
@@ -191,12 +229,12 @@ func (r *Relay) backendQueueAction(ctx context.Context, req *gatewayv2.ChatQueue
 	}
 	result := r.backendQueueProjection(conversationID, out)
 	if len(callbacks) > 0 && out.Accepted {
-		r.emitQueue(callbacks[0], conversationID, result)
+		r.emitBackendQueue(callbacks[0], out)
 		if action == "get" {
 			r.mu.Lock()
 			var bindings []backendQueueRun
 			for _, binding := range r.backendRuns {
-				if binding.ConversationID == conversationID {
+				if binding.SessionID == sessionID {
 					bindings = append(bindings, binding)
 				}
 			}
@@ -216,7 +254,7 @@ func (r *Relay) cancelBackendQueuedRun(ctx context.Context, conversationID, gate
 	r.mu.Lock()
 	var candidates []backendQueueRun
 	for _, run := range r.backendRuns {
-		if run.ConversationID == conversationID && (gatewayRunID == "" || run.GatewayRunID == gatewayRunID) {
+		if (run.ConversationID == conversationID || run.SessionID == conversationID || run.SessionID == r.sessions[conversationID]) && (gatewayRunID == "" || run.GatewayRunID == gatewayRunID) {
 			candidates = append(candidates, run)
 		}
 	}
@@ -301,7 +339,7 @@ func (r *Relay) watchBackendQueuedRun(binding backendQueueRun, cb Callbacks) {
 				r.emitTerminal(binding.GatewayRunID, binding.ConversationID, cb, "failed", "queue_recovery_required", "backend queue receipt is missing")
 				return
 			}
-			r.emitQueue(cb, binding.ConversationID, r.backendQueueProjection(binding.ConversationID, out))
+			r.emitBackendQueue(cb, out)
 			if out.Receipt.State == "cancelled" || out.Receipt.State == "failed" || out.Receipt.State == "interrupted" {
 				status := out.Receipt.State
 				if status == "interrupted" {
@@ -332,6 +370,16 @@ func (r *Relay) watchBackendQueuedRun(binding backendQueueRun, cb Callbacks) {
 						if event.Seq != binding.LastSeq+1 {
 							return errors.New("queue event sequence gap")
 						}
+						if event.Type == "queue.updated" {
+							var snapshot backendQueueSnapshot
+							if err := json.Unmarshal(event.Payload, &snapshot); err != nil {
+								return err
+							}
+							if snapshot.ConversationID != binding.SessionID {
+								return errors.New("queue snapshot identity mismatch")
+							}
+							r.emitBackendQueue(cb, backendQueueResponse{Accepted: true, Snapshot: snapshot})
+						}
 						if event.RunID == run.RunID {
 							if event.Type == "permission.requested" {
 								if err := r.client.rejectUnsupportedPermission(ctx, event); err != nil {
@@ -360,6 +408,11 @@ func (r *Relay) watchBackendQueuedRun(binding backendQueueRun, cb Callbacks) {
 						binding.LastSeq = event.Seq
 						if !terminal {
 							r.mu.Lock()
+							// The POST acknowledgement may fill ItemID after the reader
+							// started. Preserve it when advancing the stream cursor.
+							if current, ok := r.backendRuns[key]; ok && binding.ItemID == "" {
+								binding.ItemID = current.ItemID
+							}
 							r.backendRuns[key] = binding
 							persistErr := r.persistQueueLocked()
 							r.mu.Unlock()

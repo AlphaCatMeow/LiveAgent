@@ -334,6 +334,9 @@ export function GatewayAppView({
     projectToolsDisabledMessage,
     queuedChatEditSessionRef,
     queuedChatTurnsForDisplayedConversation,
+    queuePaused,
+    queueControlPending,
+    handleQueuePausedChange,
     removeQueuedTurn,
     requestWorkspaceFilePreviewClose,
     projectSettingsProject,
@@ -709,7 +712,7 @@ export function GatewayAppView({
 
   const handlePrimaryComposerStop = useCallback(() => {
     const nextQueuedTurn = queuedChatTurnsForDisplayedConversation[0];
-    if (nextQueuedTurn) {
+    if (nextQueuedTurn && !queuePaused) {
       runQueuedTurnNow(nextQueuedTurn.id);
       return;
     }
@@ -718,6 +721,7 @@ export function GatewayAppView({
     cancelChat,
     displayedConversationId,
     queuedChatTurnsForDisplayedConversation,
+    queuePaused,
     runQueuedTurnNow,
   ]);
 
@@ -924,6 +928,7 @@ export function GatewayAppView({
       );
     },
     queuedTurns: queuedChatTurnsForDisplayedConversation,
+    queuePaused,
     onRunQueuedTurnNow: runQueuedTurnNow,
     onMoveQueuedTurnUp: moveQueuedTurnUp,
     onEditQueuedTurn: editQueuedTurn,
@@ -1983,7 +1988,7 @@ export function GatewayAppView({
                                   onStop={() => {
                                     const nextQueuedTurn =
                                       queuedChatTurnsForDisplayedConversation[0];
-                                    if (nextQueuedTurn) {
+                                    if (nextQueuedTurn && !queuePaused) {
                                       // Keep WebUI's stop button aligned with the desktop
                                       // composer: stop the active run, then drain the queue.
                                       runQueuedTurnNow(nextQueuedTurn.id);
@@ -2019,6 +2024,9 @@ export function GatewayAppView({
                                     );
                                   }}
                                   queuedTurns={queuedChatTurnsForDisplayedConversation}
+                                  queuePaused={queuePaused}
+                                  queueControlPending={queueControlPending}
+                                  onQueuePausedChange={handleQueuePausedChange}
                                   onRunQueuedTurnNow={runQueuedTurnNow}
                                   onMoveQueuedTurnUp={moveQueuedTurnUp}
                                   onEditQueuedTurn={editQueuedTurn}

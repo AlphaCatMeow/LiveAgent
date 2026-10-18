@@ -217,6 +217,12 @@ function useGatewayAppController() {
   // Sidebar errors raised outside the sidebar store (project removal flow).
   const [sidebarActionError, setSidebarActionError] = useState<string | null>(null);
   const [queuedChatTurns, setQueuedChatTurns] = useState<ChatQueueItemSummary[]>([]);
+  const [queuePausedState, setQueuePausedState] = useState<{
+    conversationId: string;
+    paused: boolean;
+  } | null>(null);
+  const [queueControlConversationId, setQueueControlConversationId] = useState("");
+  const queueControlInFlightRef = useRef(false);
   const [, setChatQueueRevision] = useState(0);
   const [selectedHistoryId, setSelectedHistoryId] = useState(
     initialHomeConversation.selectedHistoryId,
@@ -689,7 +695,57 @@ function useGatewayAppController() {
     queuedChatTurnsRef.current = snapshot.items.slice();
     setChatQueueRevision(revision);
     setQueuedChatTurns(snapshot.items.slice());
+    setQueuePausedState(
+      typeof snapshot.paused === "boolean"
+        ? { conversationId: snapshot.conversationId, paused: snapshot.paused }
+        : null,
+    );
   }, []);
+
+  const handleQueuePausedChange = useCallback(
+    async (paused: boolean) => {
+      const target = resolveVisibleConversationId(
+        selectedHistoryIdRef.current,
+        conversationIdRef.current,
+      );
+      if (
+        !api ||
+        !target ||
+        queueControlInFlightRef.current ||
+        chatQueueConversationIdRef.current !== target
+      )
+        return;
+      const revision = chatQueueRevisionRef.current;
+      queueControlInFlightRef.current = true;
+      setQueueControlConversationId(target);
+      try {
+        const response = await api.chatQueueSetPaused(target, paused, revision);
+        applyChatQueueSnapshot(response.snapshot);
+        if (!response.accepted)
+          throw new Error(
+            response.message || translate("chat.queue.controlFailed", settings.locale),
+          );
+      } catch (error) {
+        if (
+          resolveVisibleConversationId(selectedHistoryIdRef.current, conversationIdRef.current) ===
+          target
+        ) {
+          setChatError(
+            asErrorMessage(error, translate("chat.queue.controlFailed", settings.locale)),
+          );
+        }
+        // A dropped acknowledgement does not imply that the mutation failed.
+        void api
+          .chatQueueGet(target)
+          .then((response) => applyChatQueueSnapshot(response.snapshot))
+          .catch(() => undefined);
+      } finally {
+        queueControlInFlightRef.current = false;
+        setQueueControlConversationId("");
+      }
+    },
+    [api, applyChatQueueSnapshot, settings.locale],
+  );
 
   useEffect(() => {
     if (!api) return;
@@ -2335,6 +2391,12 @@ function useGatewayAppController() {
     projectToolsDisabledMessage,
     queuedChatEditSessionRef,
     queuedChatTurnsForDisplayedConversation,
+    queuePaused:
+      queuePausedState?.conversationId === displayedConversationId
+        ? queuePausedState.paused
+        : undefined,
+    queueControlPending: queueControlConversationId === displayedConversationId,
+    handleQueuePausedChange,
     removeQueuedTurn,
     requestWorkspaceFilePreviewClose,
     projectSettingsProject,

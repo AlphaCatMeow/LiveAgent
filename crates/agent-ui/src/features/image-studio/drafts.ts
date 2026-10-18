@@ -1,4 +1,5 @@
 import type { CreateJobRequest, ImageTarget } from "../../lib/imaging/types";
+import { type Framing, sanitizeFraming } from "./framing";
 import { parameterError } from "./parameterModel";
 import { type FrozenSubmission, freezeSubmission } from "./studioModel";
 
@@ -13,6 +14,8 @@ export interface StudioDraft {
   parameters: Record<string, unknown>;
   inputs: CreateJobRequest["inputs"];
   parentAssetId?: string;
+  /** Ratio/resolution for models without size parameters; sent inside the prompt. */
+  framing?: Framing;
 }
 export interface DraftStorage {
   getItem(key: string): string | null;
@@ -42,6 +45,7 @@ export function sanitizeDraft(value: unknown, targets: ImageTarget[]): StudioDra
           configurable: true,
         });
     }
+  const framing = sanitizeFraming(data.framing);
   const inputs: StudioDraft["inputs"] = [];
   if (Array.isArray(data.inputs))
     for (const input of data.inputs.slice(0, 16)) {
@@ -63,6 +67,7 @@ export function sanitizeDraft(value: unknown, targets: ImageTarget[]): StudioDra
     ...(assetId(data.parentAssetId) && inputs.some((input) => input.assetId === data.parentAssetId)
       ? { parentAssetId: data.parentAssetId }
       : {}),
+    ...(framing ? { framing } : {}),
   };
 }
 export function serializeDraft(
@@ -221,7 +226,6 @@ export function restoreSubmission(raw: string | null, scope: DraftScope): Frozen
   )
     throw new Error("Invalid saved submission request");
   const frozen = freezeSubmission(
-    null,
     request as unknown as CreateJobRequest,
     () => submission.key as string,
   );

@@ -4,6 +4,7 @@ import type {
   ImageEvent,
   ImageJob,
   ImageProject,
+  ImageTarget,
 } from "../../lib/imaging/types";
 
 export interface FrozenSubmission {
@@ -19,6 +20,8 @@ export interface StudioState {
   jobs: Record<string, ImageJob>;
   assets: Record<string, ImageAsset>;
   selectedAssetId?: string;
+  /** History entry shown in the preview; may have no assets (failed or still running). */
+  selectedJobId?: string;
   lastSeqByJob: Record<string, number>;
   snapshotNeeded: Record<string, boolean>;
 }
@@ -112,13 +115,8 @@ export function applyImageEvent(state: StudioState, event: ImageEvent): StudioSt
     lastSeqByJob: { ...state.lastSeqByJob, [job.id]: event.seq },
   };
 }
-export function freezeSubmission(
-  previous: FrozenSubmission | null,
-  request: CreateJobRequest,
-  key: () => string,
-  explicitlyNew = false,
-): FrozenSubmission {
-  if (previous && !explicitlyNew) return previous;
+/** Snapshots a request so later draft edits cannot change what was sent. */
+export function freezeSubmission(request: CreateJobRequest, key: () => string): FrozenSubmission {
   const frozen = {
     ...request,
     parameters: Object.freeze({ ...request.parameters }),
@@ -154,7 +152,7 @@ export function submissionWasRejected(error: unknown): error is { code: string; 
 }
 export function errorAction(error: { code?: string } | undefined): string {
   const code = error?.code ?? "";
-  if (/401|403|AUTH|CREDENTIAL|FORBIDDEN/.test(code)) return "请前往图像设置检查连接与认证。";
+  if (/401|403|AUTH|CREDENTIAL|FORBIDDEN/.test(code)) return "请前往供应商设置检查地址与认证。";
   if (/429|RATE|QUOTA/.test(code)) return "请等待限额恢复后再操作。";
   if (/422|PARAMETER|INVALID/.test(code)) return "请修改提示词、参数或输入图片。";
   if (/UNKNOWN|UNCERTAIN/.test(code))
@@ -162,6 +160,35 @@ export function errorAction(error: { code?: string } | undefined): string {
   if (/EVENT_GAP/.test(code)) return "事件历史已过期，请重新获取任务快照。";
   return "请刷新核对任务；确认后可修改输入重新生成。";
 }
+export type NoticeTone = "info" | "success" | "warning" | "error";
+/** Notices are plain strings from many controller paths; classify them in one place. */
+export function noticeTone(text: string): NoticeTone {
+  if (/失败|已失效/.test(text)) return "error";
+  if (/^(已删除历史记录|图片已保存)/.test(text)) return "success";
+  if (/请|不支持|不可用|上限|不兼容|未确认|可能|计费/.test(text)) return "warning";
+  return "info";
+}
+/** Errors wait for the user; everything else fades on its own. */
+export const noticeDuration: Record<NoticeTone, number | null> = {
+  success: 4000,
+  info: 4000,
+  warning: 8000,
+  error: null,
+};
+/** Job-level and per-item errors usually repeat the same upstream message; show each once. */
+export function jobErrorLines(job: ImageJob): string[] {
+  const errors = [job.error, ...job.items.map((item) => item.error)].filter(
+    (error): error is NonNullable<typeof error> => Boolean(error),
+  );
+  return [...new Set(errors.map((error) => `${error.message} ${errorAction(error)}`))];
+}
+export const formatJobTime = (iso: string) =>
+  new Date(iso).toLocaleString(undefined, {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 export const statusLabels: Record<ImageJob["status"], string> = {
   queued: "排队中",
   running: "生成中",
@@ -173,3 +200,25 @@ export const statusLabels: Record<ImageJob["status"], string> = {
   cancelled: "已取消",
   result_unknown: "结果未知",
 };
+
+// K-brain reports machine codes; unknown codes fall through verbatim so a new
+// backend reason is still visible rather than silently swallowed.
+const targetDisabledReasons: Record<string, string> = {
+  awaiting_verification: "旧配置，等待验证",
+  auth_required: "供应商未配置 API Key",
+  unsupported_image_model: "该模型不支持生成图片",
+  unsupported_image_protocol: "供应商接口类型不支持生图",
+  unsupported_provider_headers: "供应商自定义请求头不受支持",
+  unsupported_provider_endpoint: "供应商接口地址不受支持",
+};
+export function targetDisabledText(target: Pick<ImageTarget, "disabledReason">): string {
+  const reason = target.disabledReason?.trim();
+  if (!reason) return "该模型暂不可用，请检查供应商配置。";
+  return targetDisabledReasons[reason] ?? reason;
+}
+// Provider-derived targets are named "<provider> · <model>" by K-brain.
+export function splitTargetName(name: string): { model: string; provider?: string } {
+  const at = name.indexOf(" · ");
+  if (at <= 0) return { model: name };
+  return { provider: name.slice(0, at), model: name.slice(at + 3) };
+}

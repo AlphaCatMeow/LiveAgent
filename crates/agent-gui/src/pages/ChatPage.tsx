@@ -2,6 +2,7 @@ import { invoke } from "@liveagent/app/shims/tauriCore";
 import { listen } from "@liveagent/app/shims/tauriEvent";
 import { openUrl } from "@liveagent/app/shims/tauriOpener";
 import { ApplicationView } from "@liveagent/ui/application/ApplicationView";
+import { ThemeToggleButton } from "@liveagent/ui/components/ThemeToggleButton";
 import { AppHeaderFrame, AppWorkbenchChrome } from "@liveagent/ui/application/AppWorkbenchChrome";
 import { useApplicationViewState } from "@liveagent/ui/application/useApplicationViewState";
 import { ConversationViewTabs } from "@liveagent/ui/components/chat/ConversationViewTabs";
@@ -4485,7 +4486,14 @@ function ChatPageContent(props: ChatPageProps) {
                 resourceHost={resourceHost}
                 imageStudioHost={
                   imageStudioHost
-                    ? { ...imageStudioHost, onOpenSettings: () => onOpenSettings("image-studio") }
+                    ? {
+                        ...imageStudioHost,
+                        onOpenSettings: () => onOpenSettings("image-studio"),
+                        // Desktop hub views have no app header, so the page carries the toggle.
+                        headerActions: (
+                          <ThemeToggleButton theme={settings.theme} onToggle={onToggleTheme} />
+                        ),
+                      }
                     : undefined
                 }
                 isAgentMode={isAgentMode}

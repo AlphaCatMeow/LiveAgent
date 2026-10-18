@@ -21,8 +21,7 @@ test('empty successful response becomes failed; unknown usage remains unknown',(
 });
 test('submission freezes request, double clicks and unknown retries retain the original key',()=>{
  const request={projectId:'p',parameters:{size:'1K'},inputs:[],prompt:'first'};
- const one=freezeSubmission(null,request,()=> 'key1'); request.parameters.size='4K'; request.prompt='changed';
- assert.equal(one.request.parameters.size,'1K'); assert.equal(freezeSubmission(one,request,()=> 'key2'),one);
- const unknown=markSubmissionUnknown(one); assert.equal(freezeSubmission(unknown,request,()=> 'key2').key,'key1');
- assert.equal(freezeSubmission(unknown,request,()=> 'key2',true).key,'key2');
+ const one=freezeSubmission(request,()=> 'key1'); request.parameters.size='4K'; request.prompt='changed';
+ assert.equal(one.request.parameters.size,'1K'); assert.equal(one.key,'key1');
+ assert.equal(markSubmissionUnknown(one).key,'key1');
 });

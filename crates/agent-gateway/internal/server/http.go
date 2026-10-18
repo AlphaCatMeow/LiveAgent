@@ -28,12 +28,18 @@ import (
 
 // NewHTTPServer 构造 HTTP 路由；生产启动时 tokens 始终是已初始化的 Agent 目录与凭证存储。
 func NewHTTPServer(cfg *config.Config, sm *session.Manager, tokens *agenttoken.Store, sttManagers ...*stt.Manager) http.Handler {
-	return NewHTTPServerWithImages(cfg, sm, tokens, singleUserImages(cfg), sttManagers...)
+	return NewHTTPServerWithLocalImages(cfg, sm, tokens, NewLocalImageHub(cfg), sttManagers...)
 }
 
 // NewHTTPServerWithImages accepts an explicitly configured trusted identity
 // adapter. The shared management bearer alone never enables image delegation.
 func NewHTTPServerWithImages(cfg *config.Config, sm *session.Manager, tokens *agenttoken.Store, images *handler.ImageGateway, sttManagers ...*stt.Manager) http.Handler {
+	return NewHTTPServerWithLocalImages(cfg, sm, tokens, fixedImageHub(cfg, images), sttManagers...)
+}
+
+// NewHTTPServerWithLocalImages serves Image Studio through a hub the owning
+// desktop can rebind at runtime (see WatchDesktopParent).
+func NewHTTPServerWithLocalImages(cfg *config.Config, sm *session.Manager, tokens *agenttoken.Store, images *LocalImageHub, sttManagers ...*stt.Manager) http.Handler {
 	rootMux := http.NewServeMux()
 	rootMux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		// A public health response must never convince the desktop to adopt an
@@ -67,7 +73,7 @@ func NewHTTPServerWithImages(cfg *config.Config, sm *session.Manager, tokens *ag
 	rootMux.HandleFunc("GET /api/public/history-shares/{token}", publicHistoryShare(cfg, sm))
 
 	apiMux := http.NewServeMux()
-	apiMux.HandleFunc("GET /api/image/identity", singleUserImageIdentity(cfg, images))
+	apiMux.HandleFunc("GET /api/image/identity", images.identity())
 	apiMux.Handle("/api/image/", images)
 	apiMux.Handle("/api/image", images)
 	apiMux.HandleFunc("GET /api/status", handler.Status(sm))

@@ -10,7 +10,8 @@ const settings = {
   customSettings: { fontScale: { sidebar: 1, chat: 1, rightDock: 1, settings: 1 } },
 };
 
-test("SettingsPage keeps the original provider interface and label for a K-brain host", async () => {
+for (const surface of ["desktop", "gateway"]) {
+test(`SettingsPage keeps provider controls without image service tabs on ${surface}`, async () => {
   const shared = (name) => fileURLToPath(new URL(`../../../agent-ui/src/pages/settings/${name}`, import.meta.url));
   let section;
   let providerProps;
@@ -31,7 +32,7 @@ test("SettingsPage keeps the original provider interface and label for a K-brain
       [shared("memory/MemoryPanel.tsx")]: { MemoryPanel: () => null },
       "@liveagent/ui/i18n/index": { useLocale: () => ({ t: (key) => key }) },
       "@liveagent/adapters/settingsExtension": {
-        createSettingsExtension: () => ({ surface: "desktop", iconClassName: "", slots: {}, sections: [] }),
+        createSettingsExtension: () => ({ surface, iconClassName: "", slots: {}, sections: [] }),
       },
       "@liveagent/adapters/providerSettings": {
         ProviderSettingsExtension: () => null,
@@ -62,22 +63,28 @@ test("SettingsPage keeps the original provider interface and label for a K-brain
       initialSection: "providers",
       sttSettingsService: {},
       settingsHost: { isKbrain: true, kbrain },
+      imageClient: { getSettings: async () => { calls.push("image-settings"); throw new Error("image settings must not load"); } },
+      registerLeaveGuard: () => { throw new Error("image leave guard must not register"); },
+      initialProviderId: "existing-provider",
     })));
     await env.act(async () => Promise.resolve());
     assert.match(host.textContent, /original-provider-interface/);
     const tabs = [...host.querySelectorAll("button")].filter((button) => ["对话模型", "图像服务"].includes(button.textContent));
-    assert.deepEqual(tabs.map((button) => button.textContent), ["对话模型", "图像服务"]);
-    assert.equal(tabs[0].getAttribute("aria-pressed"), "true");
-    assert.equal(tabs[1].getAttribute("aria-pressed"), "false");
+    assert.deepEqual(tabs, []);
+    assert.doesNotMatch(host.textContent, /图像服务|新增连接/);
     assert.equal(section.labelKey, "settings.navProviders");
     const zhCN = env.loadModule("@liveagent/ui/i18n/translations/zhCNSettings.ts");
     assert.equal(zhCN.ZH_CN_SETTINGS_TRANSLATIONS["settings.navProviders"], "供应商设置");
     assert.equal(providerProps.settings, settings);
     assert.equal(typeof providerProps.setSettings, "function");
-    assert.deepEqual(calls, [], "the removed simplified backend editor must not load");
+    assert.equal(providerProps.initialProviderId, "existing-provider");
+    await env.act(async () => providerProps.onInitialProviderHandled());
+    assert.equal(providerProps.initialProviderId, undefined);
+    assert.deepEqual(calls, [], "provider settings must not load the backend or image editor");
   } finally {
     await env.act(async () => root.unmount());
     host.remove();
     env.cleanup();
   }
 });
+}

@@ -22,6 +22,36 @@ use crate::services::workspace_watch::WorkspaceWatchService;
 
 use super::*;
 
+/// The managed Gateway serves the WebUI Image Studio from the desktop's K-Brain.
+/// Every start reads the live backend under the manager's lock, and each K-Brain
+/// start/restart/shutdown rebinds a running Gateway to the new port/token.
+fn follow_kbrain_for_images(
+    app: &tauri::AppHandle,
+    gateway: &Arc<crate::services::local_gateway::LocalGatewayManager>,
+) {
+    use tauri::Manager as _;
+    let source_app = app.clone();
+    gateway.set_image_backend_source(Arc::new(move || {
+        super::connection::local_image_backend(&source_app)
+    }));
+    let Some(state) = app.try_state::<Arc<crate::services::kbrain_backend::KBrainBackendState>>()
+    else {
+        return;
+    };
+    let mut changes = state.subscribe_connection();
+    let gateway = Arc::clone(gateway);
+    tauri::async_runtime::spawn(async move {
+        while changes.changed().await.is_ok() {
+            let gateway = Arc::clone(&gateway);
+            let result =
+                tauri::async_runtime::spawn_blocking(move || gateway.refresh_image_backend()).await;
+            if let Ok(Err(error)) = result {
+                eprintln!("failed to rebind the local gateway to K-Brain: {error}");
+            }
+        }
+    });
+}
+
 impl GatewayController {
     pub fn new(
         app_handle: tauri::AppHandle,
@@ -38,6 +68,8 @@ impl GatewayController {
         let tunnel_store = TunnelStore::new(app_handle.clone());
         let workspace_watch = Arc::new(WorkspaceWatchService::new(app_handle.clone()));
         let chat_ingress = ChatIngressMirror::spawn(app_handle.clone());
+        let local_gateway = Arc::new(crate::services::local_gateway::LocalGatewayManager::new());
+        follow_kbrain_for_images(&app_handle, &local_gateway);
         Self {
             app_handle,
             automation_store,
@@ -48,7 +80,7 @@ impl GatewayController {
             managed_process_registry,
             git_clone_task_registry,
             config_tx,
-            local_gateway: Arc::new(crate::services::local_gateway::LocalGatewayManager::new()),
+            local_gateway,
             runner_task: Mutex::new(None),
             status: Mutex::new(GatewayStatusSnapshot {
                 online: false,

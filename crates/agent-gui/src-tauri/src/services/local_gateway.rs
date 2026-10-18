@@ -4,11 +4,12 @@
 //! worker, never on the desktop event loop. Dropping/closing a window does not
 //! stop the service; the application calls `shutdown` on actual exit.
 
+use std::io::Write as _;
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
@@ -27,6 +28,56 @@ pub struct LocalGatewayOptions {
     pub token: String,
 }
 
+#[derive(Clone, PartialEq, Eq)]
+pub struct LocalImageBackend {
+    pub url: String,
+    pub token: String,
+}
+
+impl LocalImageBackend {
+    /// Mirrors the Gateway's rule (image_single_user.go): http(s) on a numeric
+    /// loopback host with no userinfo/query/fragment, plus a usable bearer token.
+    pub fn is_authenticated_loopback(&self) -> bool {
+        let Ok(url) = tauri::Url::parse(&self.url) else {
+            return false;
+        };
+        // Numeric hosts only, like Go's net.ParseIP: "localhost" is rejected.
+        let host = url
+            .host_str()
+            .unwrap_or_default()
+            .trim_start_matches('[')
+            .trim_end_matches(']');
+        let loopback = host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback());
+        matches!(url.scheme(), "http" | "https")
+            && loopback
+            && url.username().is_empty()
+            && url.password().is_none()
+            && url.query().is_none()
+            && url.fragment().is_none()
+            && !self.token.trim().is_empty()
+            && !self.token.bytes().any(|byte| byte.is_ascii_control())
+    }
+}
+
+/// Reads the live K-Brain for the WebUI Image Studio; called under the operation lock.
+/// The backend is not part of `LocalGatewayOptions`: it is passed at spawn and then
+/// rebound over the stdin control pipe, so K-Brain restarts never restart the Gateway.
+pub type ImageBackendSource = Arc<dyn Fn() -> Option<LocalImageBackend> + Send + Sync>;
+
+/// One stdin control line understood by the Gateway (server.WatchDesktopParent).
+/// `None` disables image routes, e.g. while K-Brain is stopped.
+fn image_backend_control_line(backend: Option<&LocalImageBackend>) -> String {
+    let message = match backend {
+        Some(backend) => {
+            serde_json::json!({ "type": "image_backend", "url": backend.url, "token": backend.token })
+        }
+        None => serde_json::json!({ "type": "image_backend" }),
+    };
+    format!("{message}\n")
+}
+
 // Never derive Debug for options: bearer credentials must not reach logs.
 impl std::fmt::Debug for LocalGatewayOptions {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -36,6 +87,33 @@ impl std::fmt::Debug for LocalGatewayOptions {
             .field("port", &self.port)
             .field("token", &"[redacted]")
             .finish()
+    }
+}
+
+const IMAGE_ENV_URL: &str = "LIVEAGENT_GATEWAY_IMAGE_KBRAIN_URL";
+const IMAGE_ENV_TOKEN: &str = "LIVEAGENT_GATEWAY_IMAGE_KBRAIN_TOKEN";
+/// Inherited shell settings must not turn on the legacy chat-backend image path
+/// or the direct K-Brain chat relay in a desktop-owned Gateway.
+const INHERITED_IMAGE_ENV: [&str; 3] = [
+    "LIVEAGENT_GATEWAY_IMAGE_SINGLE_USER",
+    "LIVEAGENT_GATEWAY_KBRAIN_URL",
+    "LIVEAGENT_GATEWAY_KBRAIN_TOKEN",
+];
+
+/// Sets the Image Studio pair (or clears it) and strips inherited chat-backend settings.
+fn apply_image_backend_env(command: &mut Command, backend: Option<&LocalImageBackend>) {
+    for name in INHERITED_IMAGE_ENV {
+        command.env_remove(name);
+    }
+    match backend {
+        Some(backend) => {
+            command.env(IMAGE_ENV_URL, &backend.url);
+            command.env(IMAGE_ENV_TOKEN, &backend.token);
+        }
+        None => {
+            command.env_remove(IMAGE_ENV_URL);
+            command.env_remove(IMAGE_ENV_TOKEN);
+        }
     }
 }
 
@@ -51,6 +129,8 @@ struct OwnedGateway {
     options: LocalGatewayOptions,
     nonce: String,
     ready: bool,
+    /// What this child currently serves for Image Studio (spawn env or last rebind).
+    image_backend: Option<LocalImageBackend>,
 }
 
 impl OwnedGateway {
@@ -83,6 +163,7 @@ impl Drop for OwnedGateway {
 pub struct LocalGatewayManager {
     operation: Mutex<()>,
     child: Mutex<Option<OwnedGateway>>,
+    image_backend_source: Mutex<Option<ImageBackendSource>>,
     cancellation: AtomicU64,
     shutting_down: AtomicBool,
     startup_timeout: Duration,
@@ -103,6 +184,7 @@ impl LocalGatewayManager {
         Self {
             operation: Mutex::new(()),
             child: Mutex::new(None),
+            image_backend_source: Mutex::new(None),
             cancellation: AtomicU64::new(0),
             shutting_down: AtomicBool::new(false),
             startup_timeout,
@@ -141,6 +223,68 @@ impl LocalGatewayManager {
         epoch: u64,
     ) -> Result<LocalGatewayReady, String> {
         let _operation = self.operation.lock().unwrap_or_else(|e| e.into_inner());
+        self.start_locked(options, epoch)
+    }
+
+    /// Follow K-Brain from now on: every start reads the live backend under the
+    /// operation lock, so the last start always carries the newest URL/token.
+    pub fn set_image_backend_source(&self, source: ImageBackendSource) {
+        *self
+            .image_backend_source
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(source);
+    }
+
+    fn current_image_backend(&self) -> Option<LocalImageBackend> {
+        let source = self
+            .image_backend_source
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        source.and_then(|source| source())
+    }
+
+    /// Rebind a running Gateway to the current K-Brain (first start, restart on a
+    /// new port/token, or stop) by writing one stdin control line. The process, its
+    /// agent connection and browser sessions are untouched. Serialized with start,
+    /// so a change during startup is delivered once the child is ready.
+    pub fn refresh_image_backend(&self) -> Result<(), String> {
+        let _operation = self.operation.lock().unwrap_or_else(|e| e.into_inner());
+        if self.shutting_down.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        let latest = self.current_image_backend();
+        let mut slot = self.lock_child();
+        let Some(owned) = slot.as_mut() else {
+            return Ok(());
+        };
+        if !owned.ready || !matches!(owned.child.try_wait(), Ok(None)) {
+            // A dead child is replaced by the supervisor, which spawns with `latest`.
+            return Ok(());
+        }
+        if owned.image_backend == latest {
+            return Ok(());
+        }
+        let line = image_backend_control_line(latest.as_ref());
+        let stdin = owned
+            .child
+            .stdin
+            .as_mut()
+            .ok_or_else(|| "Local Gateway control pipe is unavailable".to_string())?;
+        stdin
+            .write_all(line.as_bytes())
+            .and_then(|_| stdin.flush())
+            .map_err(|_| "Unable to update the local Gateway image backend".to_string())?;
+        owned.image_backend = latest;
+        Ok(())
+    }
+
+    /// Caller holds `operation`.
+    fn start_locked(
+        &self,
+        options: LocalGatewayOptions,
+        epoch: u64,
+    ) -> Result<LocalGatewayReady, String> {
         if self.cancelled(epoch) {
             return Err("Local Gateway startup was cancelled".into());
         }
@@ -209,6 +353,8 @@ impl LocalGatewayManager {
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
+        let image_backend = self.current_image_backend();
+        apply_image_backend_env(&mut command, image_backend.as_ref());
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -229,6 +375,7 @@ impl LocalGatewayManager {
             options,
             nonce,
             ready: false,
+            image_backend,
         });
 
         let result = self.wait_until_ready(&client, epoch);
@@ -374,4 +521,144 @@ fn validate_options(options: &LocalGatewayOptions) -> Result<(), String> {
         return Err("Local Gateway must be a Windows executable (.exe)".into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod image_backend_tests {
+    use super::*;
+
+    fn options() -> LocalGatewayOptions {
+        LocalGatewayOptions {
+            binary: std::env::current_exe().expect("test binary"),
+            data_dir: std::env::temp_dir(),
+            port: 1,
+            token: "gateway-fixture".into(),
+        }
+    }
+
+    fn backend(url: &str, token: &str) -> LocalImageBackend {
+        LocalImageBackend {
+            url: url.into(),
+            token: token.into(),
+        }
+    }
+
+    fn envs(command: &Command) -> Vec<(String, Option<String>)> {
+        command
+            .get_envs()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.map(|v| v.to_string_lossy().into_owned()),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn spawned_command_gets_the_image_pair_and_never_the_chat_backend() {
+        let mut command = Command::new("gateway");
+        command.env("LIVEAGENT_GATEWAY_KBRAIN_URL", "http://127.0.0.1:9");
+        apply_image_backend_env(
+            &mut command,
+            Some(&backend("http://127.0.0.1:47321", "kb-fixture")),
+        );
+        let env = envs(&command);
+        let get = |name: &str| {
+            env.iter()
+                .find(|(key, _)| key == name)
+                .map(|(_, value)| value.clone())
+        };
+        assert_eq!(
+            get(IMAGE_ENV_URL),
+            Some(Some("http://127.0.0.1:47321".into()))
+        );
+        assert_eq!(get(IMAGE_ENV_TOKEN), Some(Some("kb-fixture".into())));
+        for name in INHERITED_IMAGE_ENV {
+            // Removal overrides even a value set earlier on the same command.
+            assert_eq!(
+                get(name),
+                Some(None),
+                "{name} must be removed so the chat relay stays off"
+            );
+        }
+        let mut disabled = Command::new("gateway");
+        apply_image_backend_env(&mut disabled, None);
+        assert!(envs(&disabled).iter().all(|(_, value)| value.is_none()));
+    }
+
+    #[test]
+    fn control_line_is_one_json_line_the_gateway_understands() {
+        let line = image_backend_control_line(Some(&backend("http://127.0.0.1:47321", "a\"b")));
+        assert!(line.ends_with('\n') && line.matches('\n').count() == 1);
+        let value: serde_json::Value = serde_json::from_str(line.trim_end()).unwrap();
+        assert_eq!(value["type"], "image_backend");
+        assert_eq!(value["url"], "http://127.0.0.1:47321");
+        assert_eq!(value["token"], "a\"b");
+        let cleared: serde_json::Value =
+            serde_json::from_str(image_backend_control_line(None).trim_end()).unwrap();
+        assert_eq!(cleared, serde_json::json!({ "type": "image_backend" }));
+    }
+
+    #[test]
+    fn loopback_rule_matches_the_gateway() {
+        for good in [
+            "http://127.0.0.1:47321",
+            "http://[::1]:47321",
+            "https://127.0.0.1:47321",
+        ] {
+            assert!(backend(good, "kb").is_authenticated_loopback(), "{good}");
+        }
+        for bad in [
+            "http://example.com:47321",
+            "http://localhost:47321",
+            "http://127.0.0.1:1@evil.com",
+            "http://user:pw@127.0.0.1:47321",
+            "http://127.0.0.1:47321/?token=x",
+            "http://127.0.0.1:47321/#x",
+            "ftp://127.0.0.1:47321",
+        ] {
+            assert!(!backend(bad, "kb").is_authenticated_loopback(), "{bad}");
+        }
+        assert!(!backend("http://127.0.0.1:47321", " ").is_authenticated_loopback());
+        assert!(!backend("http://127.0.0.1:47321", "kb\n").is_authenticated_loopback());
+    }
+
+    #[test]
+    fn debug_output_redacts_the_token() {
+        let printed = format!("{:?}", options());
+        assert!(!printed.contains("gateway-fixture"));
+    }
+
+    #[test]
+    fn source_is_read_live_and_refresh_never_spawns_or_revives() {
+        let manager = LocalGatewayManager::new();
+        assert!(
+            manager.current_image_backend().is_none(),
+            "no source: images off"
+        );
+        let live = Arc::new(Mutex::new(Some(backend("http://127.0.0.1:2", "live"))));
+        let reader = Arc::clone(&live);
+        manager.set_image_backend_source(Arc::new(move || reader.lock().unwrap().clone()));
+        assert!(manager.current_image_backend() == Some(backend("http://127.0.0.1:2", "live")));
+        *live.lock().unwrap() = None;
+        assert!(
+            manager.current_image_backend().is_none(),
+            "K-Brain gone disables images"
+        );
+        assert!(
+            manager.refresh_image_backend().is_ok(),
+            "nothing running: nothing to rebind"
+        );
+        assert!(
+            manager.lock_child().is_none(),
+            "refresh never spawns a Gateway"
+        );
+        manager.shutdown().unwrap();
+        assert!(manager.refresh_image_backend().is_ok());
+        assert!(
+            manager.lock_child().is_none(),
+            "refresh never revives a shut-down Gateway"
+        );
+    }
 }

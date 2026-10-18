@@ -1,5 +1,9 @@
 import type { AskUserQuestionAnswer } from "@liveagent/ui/lib/chat/askUserQuestion";
 import type { PlanDecisionAnswer } from "@liveagent/ui/lib/chat/planMode";
+import type {
+  ToolRootRequest,
+  ToolRootRequestAnswerer,
+} from "@liveagent/ui/lib/chat/toolRootRequest";
 import { useSyncExternalStore } from "react";
 import {
   answerAskUserQuestion,
@@ -17,6 +21,12 @@ import {
   getToolApprovalVersion,
   subscribeToolApprovals,
 } from "../lib/tools/toolApproval";
+import {
+  answerRootRequest,
+  getPendingRootRequest,
+  getRootRequestVersion,
+  subscribeRootRequests,
+} from "../lib/tools/rootRequests";
 
 export const deferLargeToolImages = false;
 export const retainRunningToolContent = true;
@@ -51,3 +61,16 @@ export function usePlanDecisionState(toolCallId: string, _toolArguments: Record<
 export function submitPlanDecision(toolCallId: string, answer: PlanDecisionAnswer) {
   return Promise.resolve(answerPlanDecision(toolCallId, answer));
 }
+
+/** A tool call paused on a denied path, waiting for the user's grant. */
+export function usePendingRootRequest(toolCallId: string): ToolRootRequest | null {
+  useSyncExternalStore(subscribeRootRequests, getRootRequestVersion, getRootRequestVersion);
+  return getPendingRootRequest(toolCallId);
+}
+
+export function useHasPendingRootRequest(toolCallIds: readonly string[]): boolean {
+  useSyncExternalStore(subscribeRootRequests, getRootRequestVersion, getRootRequestVersion);
+  return toolCallIds.some((id) => getPendingRootRequest(id) !== null);
+}
+
+export const answerToolRootRequest: ToolRootRequestAnswerer | null = answerRootRequest;

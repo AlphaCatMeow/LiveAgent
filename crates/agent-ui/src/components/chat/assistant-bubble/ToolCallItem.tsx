@@ -1,8 +1,10 @@
 import {
+  answerToolRootRequest,
   readAskUserQuestionDeadline,
   retainRunningToolContent,
   submitAskUserQuestionAnswers,
   submitPlanDecision,
+  usePendingRootRequest,
   usePendingToolApproval,
   usePlanDecisionState,
 } from "@liveagent/adapters/assistantBubble";
@@ -11,6 +13,7 @@ import { AssistantStatus } from "@liveagent/ui/components/chat/AssistantStatus";
 import { FileChangeBadge } from "@liveagent/ui/components/chat/FileChangeBadge";
 import { LazyCollapse } from "@liveagent/ui/components/chat/LazyCollapse";
 import { PlanModeCard } from "@liveagent/ui/components/chat/PlanModeCard";
+import { RootGrantCard } from "@liveagent/ui/components/chat/RootGrantCard";
 import { ToolScrollablePre, ToolSection } from "@liveagent/ui/components/chat/ToolSurfaces";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import {
@@ -170,6 +173,8 @@ function ToolCallItem({
   // 工具审批由宿主适配器读取。审批发生在工具执行前，不能用 isRunning 作门。
   const pendingApproval = usePendingToolApproval(item.toolCall.id, item.toolCall.arguments);
   const isApprovalPending = !readOnly && !isRedactedToolContent && !result && pendingApproval;
+  const pendingRootRequest = usePendingRootRequest(item.toolCall.id);
+  const rootRequest = !readOnly && !result && answerToolRootRequest ? pendingRootRequest : null;
   const shouldAutoOpen =
     !isRedactedToolContent &&
     (item.toolCall.name === "Image" || builtinResultKind === "display_image" || shouldKeepAskOpen);
@@ -267,6 +272,8 @@ function ToolCallItem({
 
   const statusLabel = isApprovalPending
     ? t("chat.toolApproval.waitingStatus")
+    : rootRequest
+      ? t("chat.rootGrantWaitingStatus")
     : isRunning
       ? isAskUser
         ? askQuestions.length > 0
@@ -592,10 +599,21 @@ function ToolCallItem({
     );
   }
 
+  // A paused call waiting on a root grant must be answerable even while collapsed.
+  const rootGrantCard =
+    rootRequest && answerToolRootRequest ? (
+      <RootGrantCard
+        toolCallId={item.toolCall.id}
+        request={rootRequest}
+        onAnswer={answerToolRootRequest}
+      />
+    ) : null;
+
   if (!canExpand) {
     return (
       <div className={containerClassName}>
         <div className={summaryClassName}>{summaryContent}</div>
+        {rootGrantCard}
       </div>
     );
   }
@@ -613,6 +631,7 @@ function ToolCallItem({
       >
         {summaryContent}
       </button>
+      {rootGrantCard}
       {body}
     </div>
   );

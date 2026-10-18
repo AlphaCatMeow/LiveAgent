@@ -3,6 +3,10 @@ import { readAskUserQuestionDeadlineAt } from "@liveagent/ui/lib/chat/askUserQue
 import type { PlanDecisionAnswer } from "@liveagent/ui/lib/chat/planMode";
 import { readPlanApprovedMarker, readPlanPendingMarker } from "@liveagent/ui/lib/chat/planMode";
 import { readToolApprovalPending } from "@liveagent/ui/lib/chat/toolApprovalArgs";
+import type {
+  ToolRootRequest,
+  ToolRootRequestAnswerer,
+} from "@liveagent/ui/lib/chat/toolRootRequest";
 import { useSyncExternalStore } from "react";
 import { submitAskUserQuestionAnswer } from "../lib/chat/askUserQuestionBridge";
 import {
@@ -52,3 +56,15 @@ export function usePlanDecisionState(toolCallId: string, toolArguments: Record<s
 export function submitPlanDecision(toolCallId: string, answer: PlanDecisionAnswer) {
   return submitPlanDecisionViaGateway(toolCallId, answer);
 }
+
+// Root grants are stored on the desktop host; the web UI does not answer root
+// requests yet, so the desktop card is the only place to grant a paused call.
+export function usePendingRootRequest(_toolCallId: string): ToolRootRequest | null {
+  return null;
+}
+
+export function useHasPendingRootRequest(_toolCallIds: readonly string[]): boolean {
+  return false;
+}
+
+export const answerToolRootRequest: ToolRootRequestAnswerer | null = null;

@@ -31,6 +31,7 @@ import {
 } from "../../../lib/kbrain/uploadStagingRoot";
 import { requestBackendQuestion } from "../../../lib/tools/askUserQuestionTools";
 import { projectBackendPlan } from "../../../lib/tools/planModeTools";
+import { requestRootGrant } from "../../../lib/tools/rootRequests";
 import { requestToolApproval } from "../../../lib/tools/toolApproval";
 import type { RunAgentConversationTurnParams } from "./runAgentConversationTurn";
 import type { RunTextConversationTurnParams } from "./runTextConversationTurn";
@@ -251,6 +252,8 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
             ...(answer.custom ? { custom: true } : {}),
           }));
         },
+        onRootRequest: (request, signal) =>
+          requestRootGrant({ request, workdir: params.conversationCwd, signal }),
         onPermissionRequest: async (request) => {
           const settlement = await requestToolApproval({
             toolCallId: request.permission_id,

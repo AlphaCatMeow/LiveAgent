@@ -93,7 +93,33 @@ export type KBrainToolResult = {
   output: string;
   failed?: boolean;
   cancelled?: boolean;
+  /** Machine-readable failure reason (K-brain with `capabilities.run_roots.denial_codes`). */
+  error?: KBrainToolError;
 };
+
+export type KBrainWorkspaceRoot = { path: string; access: "read" | "write" };
+
+export type KBrainToolError = {
+  code: string;
+  path?: string;
+  access?: "read" | "write";
+  roots?: KBrainWorkspaceRoot[];
+};
+
+/** Payload of `root.requested`: a tool call is paused on a denied path. */
+export type KBrainRootRequest = {
+  request_id: string;
+  tool_call_id?: string;
+  tool: string;
+  code: "path_outside_roots" | "path_read_only_root";
+  path: string;
+  access: "read" | "write";
+  roots?: KBrainWorkspaceRoot[];
+};
+
+export type KBrainRootResolution =
+  | { decision: "grant"; roots: KBrainWorkspaceRoot[] }
+  | { decision: "deny" };
 
 export type KBrainQuestionOption = {
   label: string;
@@ -272,6 +298,8 @@ export type KBrainRunOptions = {
   plan_mode_enabled?: boolean;
   /** Desktop-executed tools offered to the model for this run (e.g. Browser). */
   client_tools?: KBrainClientToolDefinition[];
+  /** Pause denied tool paths for a client grant (needs `capabilities.run_roots.requests`). */
+  root_requests?: boolean;
 };
 
 export type KBrainClientToolDefinition = {

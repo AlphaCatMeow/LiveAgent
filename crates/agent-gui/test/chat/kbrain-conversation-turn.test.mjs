@@ -69,7 +69,9 @@ for (const [mode, runTurn] of [["text", runTextConversationTurn], ["agent", runA
         gatewayBridgeEvents: { queueToken() {}, queueEvent() {}, queueToolStatus() {}, emitError() {} },
         hookLifecycle: Object.fromEntries(["startAgent", "startTurn", "ensureMessageEnded", "endTurn", "endAgent"].map((key) => [key, () => hooks.push(key)])),
       }), /backend unavailable fixture/);
-      assert.deepEqual(requests.map(({ path }) => path), failurePath === "/v1/sessions" ? [failurePath] : ["/v1/sessions", failurePath]);
+      // Agent turns probe /v1/health once for root-request support before starting the run.
+      const runPaths = mode === "agent" ? ["/v1/sessions", "/v1/health", failurePath] : ["/v1/sessions", failurePath];
+      assert.deepEqual(requests.map(({ path }) => path), failurePath === "/v1/sessions" ? [failurePath] : runPaths);
       assert.equal(attemptedUrls.length, requests.length);
       assert.ok(attemptedUrls.every((url) => new URL(url).origin === origin));
       assert.ok(requests.every(({ authorization }) => authorization === "Bearer backend-token"));

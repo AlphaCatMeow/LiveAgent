@@ -649,6 +649,41 @@ fn resolve_with_conn(
     Ok(merge_layered_grants(workdir, layers))
 }
 
+/// Directory to grant for a denied tool path: the path itself when it is a
+/// directory, otherwise its nearest existing ancestor (a Write may target a
+/// file that does not exist yet).
+fn grant_directory_for(path: &Path) -> Result<PathBuf, String> {
+    for candidate in path.ancestors() {
+        if let Ok(metadata) = fs::metadata(candidate) {
+            if metadata.is_dir() {
+                return canonical_directory(&candidate.to_string_lossy(), "授权目录");
+            }
+        }
+    }
+    Err(format!("找不到可授权的目录：{}", path.display()))
+}
+
+#[tauri::command]
+pub async fn workspace_root_grant_directory(path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let input = Path::new(path.trim());
+        if !input.is_absolute() {
+            return Err(format!("路径必须是绝对路径：{}", path.trim()));
+        }
+        let directory = grant_directory_for(input)?;
+        // Hand back a display path the user would recognise, not the
+        // `\\?\`-prefixed canonical form.
+        Ok(dunce_display(&directory))
+    })
+    .await
+    .map_err(|error| format!("workspace_root_grant_directory join 失败：{error}"))?
+}
+
+fn dunce_display(path: &Path) -> String {
+    let text = path.to_string_lossy();
+    text.strip_prefix(r"\\?\").unwrap_or(&text).to_string()
+}
+
 /// Lists repository- or global-scoped grants. `workdir` picks the repository.
 #[tauri::command]
 pub async fn workspace_root_grants_list_scoped(
@@ -949,6 +984,23 @@ mod tests {
         assert_eq!(resolved[0].alias, "shared");
         assert_eq!(resolved[0].access, WorkspaceRootAccess::Write);
         assert_eq!(resolved[0].scope, WorkspaceRootScope::Repository);
+    }
+
+    #[test]
+    fn grant_directory_is_nearest_existing_directory() {
+        let temp = TempDir::new().expect("tempdir");
+        let dir = temp.path().join("shared");
+        fs::create_dir_all(&dir).expect("dir");
+        let file = dir.join("notes.txt");
+        fs::write(&file, "x").expect("file");
+        let expected = fs::canonicalize(&dir).unwrap();
+
+        assert_eq!(grant_directory_for(&dir).unwrap(), expected);
+        assert_eq!(grant_directory_for(&file).unwrap(), expected);
+        assert_eq!(
+            grant_directory_for(&dir.join("new/deeper/file.txt")).unwrap(),
+            expected
+        );
     }
 
     #[test]

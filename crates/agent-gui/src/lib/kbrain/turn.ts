@@ -24,6 +24,8 @@ import type {
   KBrainModelRef,
   KBrainQuestionAnswer,
   KBrainQuestionRequest,
+  KBrainRootRequest,
+  KBrainRootResolution,
   KBrainRunOptions,
   KBrainSubagent,
   KBrainToolCall,
@@ -148,6 +150,11 @@ export type KBrainTurnParams = {
     request: KBrainQuestionRequest,
     signal?: AbortSignal,
   ) => Promise<KBrainQuestionAnswer[]>;
+  /** Answers `root.requested`; when set (and K-brain supports it) runs opt into root requests. */
+  onRootRequest?: (
+    request: KBrainRootRequest,
+    signal: AbortSignal,
+  ) => Promise<KBrainRootResolution>;
   onPermissionRequest?: (
     request: {
       permission_id: string;
@@ -447,6 +454,12 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
       await waitMs(goalAttachPollMs, params.signal);
     }
   };
+  // Only opt in when this host answers root requests and K-brain advertises them;
+  // otherwise a denied path would leave the run waiting on an unhandled event.
+  const rootRequests =
+    Boolean(params.onRootRequest) &&
+    params.options?.mode === "agent" &&
+    (await client.supportsRootRequests().catch(() => false));
   const startRun = async () => {
     if (params.attachClientRequestId) return attachRun();
     const run = {
@@ -455,7 +468,9 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
       prompt: params.prompt,
       ...(promptContent.length ? { content: promptContent } : {}),
       model,
-      ...(params.options ? { options: params.options } : {}),
+      ...(params.options || rootRequests
+        ? { options: { ...params.options, ...(rootRequests ? { root_requests: true } : {}) } }
+        : {}),
       ...(params.hook_policy ? { hook_policy: params.hook_policy } : {}),
       ...(params.hook_scope_id ? { hook_scope_id: params.hook_scope_id } : {}),
       ...(resumeMessageId ? { resume_message_id: resumeMessageId } : {}),
@@ -501,6 +516,7 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
   let sawTerminal = false;
   let permissionFailure: Error | undefined;
   const pendingPermissions = new Set<AbortController>();
+  const pendingRootRequests = new Map<string, AbortController>();
   const pendingQuestions = new Map<string, AbortController>();
   const pendingClientTools = new Map<string, AbortController>();
   // Never cleared: replayed events after a reconnect must not run the same action twice.
@@ -513,6 +529,8 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
     pendingQuestions.clear();
     for (const controller of pendingClientTools.values()) controller.abort();
     pendingClientTools.clear();
+    for (const controller of pendingRootRequests.values()) controller.abort();
+    pendingRootRequests.clear();
   };
   const abortStream = () => streamAbortController.abort();
   params.signal.addEventListener("abort", abortStream, { once: true });
@@ -743,6 +761,33 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
           handledClientTools.add(resolution.call_id);
           pendingClientTools.get(resolution.call_id)?.abort();
           pendingClientTools.delete(resolution.call_id);
+        }
+        break;
+      }
+      case "root.requested": {
+        const request = eventPayload<KBrainRootRequest>(event);
+        if (!request?.request_id || pendingRootRequests.has(request.request_id)) break;
+        const onRootRequest = params.onRootRequest;
+        const controller = new AbortController();
+        pendingRootRequests.set(request.request_id, controller);
+        void (onRootRequest
+          ? onRootRequest(request, controller.signal)
+          : Promise.resolve<KBrainRootResolution>({ decision: "deny" })
+        )
+          .then((resolution) => {
+            if (controller.signal.aborted) return;
+            return client.resolveRootRequest(kbrainSessionId, request.request_id, resolution);
+          })
+          // 404/409: the request was already answered or the call was cancelled.
+          .catch(() => undefined)
+          .finally(() => pendingRootRequests.delete(request.request_id));
+        break;
+      }
+      case "root.resolved": {
+        const resolution = eventPayload<{ request_id?: string }>(event);
+        if (resolution?.request_id) {
+          pendingRootRequests.get(resolution.request_id)?.abort();
+          pendingRootRequests.delete(resolution.request_id);
         }
         break;
       }

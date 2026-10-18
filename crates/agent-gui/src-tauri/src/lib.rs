@@ -112,6 +112,7 @@ macro_rules! app_invoke_handler {
             commands::root_grants::workspace_root_grants_list_scoped,
             commands::root_grants::workspace_root_grants_apply_scoped,
             commands::root_grants::workspace_root_grants_resolve,
+            commands::root_grants::workspace_root_grant_directory,
             // Subagent worktrees
             commands::subagent_worktree::subagent_worktree_create,
             commands::subagent_worktree::subagent_worktree_status,

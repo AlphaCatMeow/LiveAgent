@@ -218,6 +218,14 @@ export const ZH_CN_COMMON_TRANSLATIONS = {
   "chat.workspaceSettingsDirectoriesDescription":
     "附加目录授权仅作用于结构化文件工具，命令与进程工具仍遵循现有策略。",
   "chat.workspaceSettingsAddDirectory": "添加目录",
+  "chat.rootGrantOutsideTitle": "Agent 想访问授权目录之外的路径，授权它所在的目录后会继续执行",
+  "chat.rootGrantReadOnlyTitle": "Agent 想写入只读目录，授权写入后会继续执行",
+  "chat.rootGrantScopeTurn": "仅本轮",
+  "chat.rootGrantScopeProject": "本项目",
+  "chat.rootGrantScopeRepository": "本仓库",
+  "chat.rootGrantScopeGlobal": "全局",
+  "chat.rootGrantDeny": "拒绝",
+  "chat.rootGrantWaitingStatus": "等待授权目录",
   "chat.workspaceSettingsProjectDirectories": "本项目",
   "chat.workspaceSettingsProjectDirectoriesDescription":
     "只在这个工作空间的对话里可访问，优先级最高。",

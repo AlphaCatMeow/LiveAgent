@@ -1,3 +1,4 @@
+import { getKBrainRuntimeConnection } from "./runtimeConnection";
 import { fetchKBrain, KBrainTransportError } from "./transport";
 import {
   KBRAIN_PROTOCOL_VERSION,
@@ -26,6 +27,7 @@ import {
   type KBrainTextGenerateRequest,
   type KBrainTextGenerateResponse,
   type KBrainUpdateSessionRequest,
+  type KBrainRootResolution,
 } from "./types";
 
 export type KBrainCheckpointTurn = {
@@ -173,6 +175,8 @@ async function readError(response: Response) {
   Object.assign(error, { status: response.status });
   return error;
 }
+
+const rootRequestSupport = new Map<string, Promise<boolean>>();
 
 export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -663,6 +667,31 @@ export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
     );
   }
 
+  async function resolveRootRequest(
+    conversationId: string,
+    requestId: string,
+    resolution: KBrainRootResolution,
+  ): Promise<void> {
+    await request<unknown>(
+      `/v1/sessions/${encodeURIComponent(conversationId)}/root-requests/${encodeURIComponent(requestId)}`,
+      { method: "POST", body: JSON.stringify({ request_id: requestId, ...resolution }) },
+    );
+  }
+
+  /** Probed once per backend URL; a failed probe is retried on the next turn. */
+  function supportsRootRequests(): Promise<boolean> {
+    const key = inputOptions.baseUrl ?? getKBrainRuntimeConnection()?.baseUrl ?? "";
+    let probe = rootRequestSupport.get(key);
+    if (!probe) {
+      probe = request<{ capabilities?: { run_roots?: { requests?: boolean } } }>("/v1/health").then(
+        (health) => health.capabilities?.run_roots?.requests === true,
+      );
+      rootRequestSupport.set(key, probe);
+      probe.catch(() => rootRequestSupport.delete(key));
+    }
+    return probe;
+  }
+
   async function closeSession(conversationId: string): Promise<void> {
     await request<unknown>(`/v1/sessions/${encodeURIComponent(conversationId)}/close`, {
       method: "POST",
@@ -827,6 +856,8 @@ export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
     createLoop,
     cancelLoop,
     cancelRun,
+    resolveRootRequest,
+    supportsRootRequests,
     closeSession,
     resolvePermission,
     resolveQuestion,

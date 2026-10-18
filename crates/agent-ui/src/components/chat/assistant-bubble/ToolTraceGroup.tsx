@@ -1,4 +1,7 @@
-import { retainRunningToolContent } from "@liveagent/adapters/assistantBubble";
+import {
+  retainRunningToolContent,
+  useHasPendingRootRequest,
+} from "@liveagent/adapters/assistantBubble";
 import { AssistantStatus } from "@liveagent/ui/components/chat/AssistantStatus";
 import { LazyCollapse } from "@liveagent/ui/components/chat/LazyCollapse";
 import { useAttentionDisclosure } from "@liveagent/ui/components/chat/useAttentionDisclosure";
@@ -154,9 +157,13 @@ function ToolTraceGroupInner(props: {
     [items, runningToolCallIds],
   );
   const batchCounts = useMemo(() => getToolBatchCounts(items), [items]);
+  const toolCallIds = useMemo(() => items.map((item) => item.toolCall.id), [items]);
+  // A call paused on a root grant can only continue once the user answers the
+  // card inside this group, so it must open the group like any other prompt.
+  const rootGrantPending = useHasPendingRootRequest(toolCallIds) && !readOnly;
   const attentionRequired = useMemo(
-    () => hasActiveUserInteraction(items, runningToolCallIds),
-    [items, runningToolCallIds],
+    () => rootGrantPending || hasActiveUserInteraction(items, runningToolCallIds),
+    [items, rootGrantPending, runningToolCallIds],
   );
   const [open, setOpen] = useAttentionDisclosure(attentionRequired);
 

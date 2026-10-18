@@ -164,6 +164,13 @@ function createToolCallItemRenderer() {
         usePendingToolApproval() {
           return null;
         },
+        usePendingRootRequest() {
+          return null;
+        },
+        answerToolRootRequest: null,
+        useHasPendingRootRequest() {
+          return false;
+        },
       },
       "@liveagent/ui/components/chat/AskUserQuestionCard": {
         AskUserQuestionCard: NullComponent,

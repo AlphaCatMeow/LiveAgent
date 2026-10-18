@@ -236,6 +236,14 @@ export const EN_US_COMMON_TRANSLATIONS = {
   "chat.workspaceSettingsDirectoriesDescription":
     "Additional directory grants only apply to structured file tools; command and process tools still follow existing tool policy.",
   "chat.workspaceSettingsAddDirectory": "Add directory",
+  "chat.rootGrantOutsideTitle": "The agent wants a path outside the authorized directories. Grant its directory to continue.",
+  "chat.rootGrantReadOnlyTitle": "The agent wants to write to a read-only directory. Grant write access to continue.",
+  "chat.rootGrantScopeTurn": "This turn only",
+  "chat.rootGrantScopeProject": "This project",
+  "chat.rootGrantScopeRepository": "This repository",
+  "chat.rootGrantScopeGlobal": "Global",
+  "chat.rootGrantDeny": "Deny",
+  "chat.rootGrantWaitingStatus": "Waiting for directory access",
   "chat.workspaceSettingsProjectDirectories": "This project",
   "chat.workspaceSettingsProjectDirectoriesDescription":
     "Only available in this workspace's conversations; takes precedence over other layers.",

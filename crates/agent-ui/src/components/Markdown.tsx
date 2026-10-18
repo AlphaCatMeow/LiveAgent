@@ -492,6 +492,9 @@ function CodeBlockActions({ code }: { code: string }) {
 /** 代码块折叠前的最大显示高度（约 12 行，行高 22px）。 */
 const CODE_BLOCK_CLAMP_PX = 280;
 const CODE_BLOCK_EXPANDED_CLASSNAME = "max-h-[60vh] w-full overflow-y-auto";
+// 设了 overflow 的容器不再与代码块的 my-4 外边距折叠，复制按钮会比代码块高出一截；
+// 把外边距移到容器上，按钮仍与代码块顶部对齐。
+const CODE_BLOCK_OVERFLOW_CLASSNAME = "my-4 [&_[data-streamdown='code-block']]:!my-0";
 
 /**
  * 代码自动换行后，长行也会占多行：按实际渲染高度判断是否折叠，而不是逻辑行数。
@@ -518,7 +521,11 @@ function HeightClampedCode({ children }: { children: ReactNode }) {
     <>
       <div
         ref={contentRef}
-        className={cn("relative w-full", expanded && CODE_BLOCK_EXPANDED_CLASSNAME)}
+        className={cn(
+          "relative w-full",
+          overflowing && CODE_BLOCK_OVERFLOW_CLASSNAME,
+          expanded && CODE_BLOCK_EXPANDED_CLASSNAME,
+        )}
         style={clamped ? { maxHeight: CODE_BLOCK_CLAMP_PX, overflow: "hidden" } : undefined}
       >
         {children}
@@ -597,7 +604,7 @@ export function CollapsibleCodePre({
     <div className="relative w-full">
       <CodeBlockActions code={codeContent} />
       {expanded ? (
-        <div className={CODE_BLOCK_EXPANDED_CLASSNAME}>
+        <div className={cn(CODE_BLOCK_OVERFLOW_CLASSNAME, CODE_BLOCK_EXPANDED_CLASSNAME)}>
           {cloneElement(childElement, { "data-block": "true" })}
         </div>
       ) : (

@@ -611,6 +611,8 @@ export function CollapsibleCodePre({
         <div
           className="mt-2 w-full overflow-hidden rounded-xl bg-muted/40"
           data-liveagent-code-preview="collapsed"
+          // 预览会自动换行：超长单行或长行多行同样按渲染高度限高，与 HeightClampedCode 一致。
+          style={{ maxHeight: CODE_BLOCK_CLAMP_PX }}
         >
           <div className="flex h-8 items-center px-3 text-xs font-medium tracking-0p06em text-muted-foreground/85">
             {language || DEFAULT_CODE_BLOCK_LANGUAGE}

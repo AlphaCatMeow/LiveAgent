@@ -88,7 +88,7 @@ export function ComposerGoalBar({
   useEffect(() => {
     if (editing) inputRef.current?.select();
   }, [editing]);
-  // 折叠态最多显示两行；正文被截断时才给出“展开全部”。
+  // 折叠态最多显示五行；正文被截断时才给出“展开全部”。
   // biome-ignore lint/correctness/useExhaustiveDependencies: 正文变化后重新测量
   useLayoutEffect(() => {
     const node = textRef.current;
@@ -259,7 +259,7 @@ export function ComposerGoalBar({
             ref={textRef}
             className={cn(
               "whitespace-pre-wrap [overflow-wrap:anywhere]",
-              expanded ? "max-h-60 overflow-y-auto pr-1" : "line-clamp-2",
+              expanded ? "max-h-60 overflow-y-auto pr-1" : "line-clamp-5",
             )}
           >
             {state.goal}

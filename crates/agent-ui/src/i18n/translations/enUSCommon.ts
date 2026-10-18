@@ -561,6 +561,7 @@ export const EN_US_COMMON_TRANSLATIONS = {
   "chat.markdown.copyCode": "Copy code",
   "chat.markdown.copied": "Copied",
   "chat.markdown.expandCode": "Expand {count} lines",
+  "chat.markdown.expandAllCode": "Show all",
   "chat.markdown.collapseCode": "Collapse code",
   "chat.composer.noMatchingFiles": "No matching files",
   "chat.composer.noMatchingFilesOrApps": "No matching files or apps",

@@ -517,6 +517,7 @@ export const ZH_CN_COMMON_TRANSLATIONS = {
   "chat.markdown.copyCode": "复制代码",
   "chat.markdown.copied": "已复制",
   "chat.markdown.expandCode": "展开 {count} 行",
+  "chat.markdown.expandAllCode": "展开全部",
   "chat.markdown.collapseCode": "收起代码",
   "chat.composer.noMatchingFiles": "未找到匹配的文件",
   "chat.composer.noMatchingFilesOrApps": "未找到匹配的文件或应用",

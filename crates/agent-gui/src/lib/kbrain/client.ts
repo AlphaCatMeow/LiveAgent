@@ -15,6 +15,7 @@ import {
   type KBrainPromptRequest,
   type KBrainProviderSecrets,
   type KBrainQuestionAnswer,
+  type KBrainRootResolution,
   type KBrainRunAccepted,
   type KBrainSession,
   type KBrainSessionLoop,
@@ -27,7 +28,6 @@ import {
   type KBrainTextGenerateRequest,
   type KBrainTextGenerateResponse,
   type KBrainUpdateSessionRequest,
-  type KBrainRootResolution,
 } from "./types";
 
 export type KBrainCheckpointTurn = {

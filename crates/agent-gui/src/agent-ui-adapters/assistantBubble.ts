@@ -17,16 +17,16 @@ import {
   subscribePlanDecisions,
 } from "../lib/tools/planModeTools";
 import {
-  getPendingToolApproval,
-  getToolApprovalVersion,
-  subscribeToolApprovals,
-} from "../lib/tools/toolApproval";
-import {
   answerRootRequest,
   getPendingRootRequest,
   getRootRequestVersion,
   subscribeRootRequests,
 } from "../lib/tools/rootRequests";
+import {
+  getPendingToolApproval,
+  getToolApprovalVersion,
+  subscribeToolApprovals,
+} from "../lib/tools/toolApproval";
 
 export const deferLargeToolImages = false;
 export const retainRunningToolContent = true;

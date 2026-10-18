@@ -6,6 +6,7 @@ import { toast } from "@liveagent/ui/components/ui/toast-manager";
 import type { ComposerCommandHost } from "@liveagent/ui/lib/chat/composerCommands";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { createKBrainClient } from "../../../lib/kbrain/client";
+import { clearGoalAwaitingInput } from "../../../lib/kbrain/goalAwaitInput";
 import { publishGoalState, readGoalState, subscribeGoalState } from "../../../lib/kbrain/goalStore";
 import { getKBrainSessionId } from "../../../lib/kbrain/mapping";
 import type { KBrainGoalState } from "../../../lib/kbrain/types";
@@ -88,7 +89,11 @@ export function KBrainGoalBarHost({
       actions={{
         onPause: () => withSession((id) => client.postGoal(id, { action: "pause" })),
         onUpdate: (goal) => withSession((id) => client.postGoal(id, { action: "update", goal })),
-        onClear: () => withSession((id) => client.postGoal(id, { action: "clear" })),
+        onClear: () => {
+          // 目标清除后，下一条消息不能再按“回复等待中的目标”去恢复。
+          clearGoalAwaitingInput(conversationId);
+          return withSession((id) => client.postGoal(id, { action: "clear" }));
+        },
         onResume: async () => {
           try {
             await commandHost?.sendTurn?.("/goal resume", { kind: "goal", action: "resume" });

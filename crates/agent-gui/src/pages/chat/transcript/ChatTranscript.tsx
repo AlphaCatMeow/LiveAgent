@@ -4,8 +4,9 @@ import { ContextMenuItem, ContextMenuPopup } from "@liveagent/ui/components/ui/c
 import { useLocale } from "@liveagent/ui/i18n/index";
 import {
   clearSearchJumpTarget,
-  peekSearchJumpTarget,
+  getSearchJumpTargetSnapshot,
   resolveSearchJumpRowKey,
+  subscribeSearchJumpTarget,
 } from "@liveagent/ui/lib/chat/searchJumpTarget";
 import { buildFloorEntries } from "@liveagent/ui/lib/chat-floor-nav/floorModel";
 import { BOTTOM_REATTACH_ZONE_PX } from "@liveagent/ui/lib/chat-scroll/scrollFollowCore";
@@ -22,6 +23,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { RowInteractionProvider, useRowInteractionStore } from "./rowInteraction";
 import { TranscriptList, type TranscriptNavHandle } from "./TranscriptList";
@@ -131,9 +133,13 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
   // 会话搜索跳转：目标消息在已加载窗口内就滚过去；否则逐页加载更早历史，
   // 直到命中或没有更多历史为止（最多 SEARCH_JUMP_MAX_PAGES 页）。
   const searchJumpPagesRef = useRef(0);
+  const pendingSearchJump = useSyncExternalStore(
+    subscribeSearchJumpTarget,
+    getSearchJumpTargetSnapshot,
+  );
   useEffect(() => {
     if (isHistorySwitching) return;
-    const target = peekSearchJumpTarget(conversationId);
+    const target = pendingSearchJump?.conversationId === conversationId ? pendingSearchJump : null;
     if (!target) {
       searchJumpPagesRef.current = 0;
       return;
@@ -168,6 +174,7 @@ export const ChatTranscript = memo(function ChatTranscript(props: ChatTranscript
   }, [
     conversationId,
     handleFloorJump,
+    pendingSearchJump,
     hasMoreHistory,
     historyItems,
     isHistorySwitching,

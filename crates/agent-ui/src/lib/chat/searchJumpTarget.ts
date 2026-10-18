@@ -10,12 +10,27 @@ export type SearchJumpTarget = {
 };
 
 let pending: SearchJumpTarget | null = null;
+const listeners = new Set<() => void>();
+
+/** Subscribe to target changes, so a jump within the already-open conversation still runs. */
+export function subscribeSearchJumpTarget(listener: () => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+export function getSearchJumpTargetSnapshot(): SearchJumpTarget | null {
+  return pending;
+}
 
 export function setSearchJumpTarget(target: SearchJumpTarget | null) {
   pending =
     target?.conversationId.trim() && (target.messageId || target.messageIndex !== undefined)
       ? target
       : null;
+
+  for (const listener of listeners) listener();
 }
 
 export function peekSearchJumpTarget(conversationId: string): SearchJumpTarget | null {

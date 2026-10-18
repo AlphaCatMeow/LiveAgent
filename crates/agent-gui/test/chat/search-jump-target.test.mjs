@@ -46,3 +46,17 @@ test("search jump target is scoped to its conversation and cleared once consumed
   mod.setSearchJumpTarget({ conversationId: "c1" });
   assert.equal(mod.peekSearchJumpTarget("c1"), null);
 });
+
+test("search jump target notifies subscribers so an already-open conversation can jump", () => {
+  const mod = loadModule();
+  let calls = 0;
+  const unsubscribe = mod.subscribeSearchJumpTarget(() => {
+    calls += 1;
+  });
+  mod.setSearchJumpTarget({ conversationId: "c1", messageIndex: 4 });
+  assert.equal(calls, 1);
+  assert.equal(mod.getSearchJumpTargetSnapshot()?.messageIndex, 4);
+  unsubscribe();
+  mod.setSearchJumpTarget(null);
+  assert.equal(calls, 1);
+});

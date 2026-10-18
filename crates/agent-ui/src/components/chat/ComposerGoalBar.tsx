@@ -1,8 +1,18 @@
-import { Check, Goal, Pause, Play, SquarePen, Trash2, X } from "@liveagent/ui/components/IconSet";
+import {
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Goal,
+  Pause,
+  Play,
+  SquarePen,
+  Trash2,
+  X,
+} from "@liveagent/ui/components/IconSet";
 import { useConfirmDialog } from "@liveagent/ui/components/ui/confirm-dialog";
 import { useLocale } from "@liveagent/ui/i18n/index";
 import { cn } from "@liveagent/ui/lib/shared/utils";
-import { type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /** 目标栏展示的会话目标；status 取 K-brain goal 状态里会持续显示的几种。 */
 export type ComposerGoalBarState = {
@@ -65,7 +75,10 @@ export function ComposerGoalBar({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(state.goal);
   const [busy, setBusy] = useState(false);
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [overflowing, setOverflowing] = useState(false);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const textRef = useRef<HTMLParagraphElement | null>(null);
   const running = state.status !== "paused";
   const elapsed = useElapsed(state.startedAt, running);
 
@@ -75,6 +88,17 @@ export function ComposerGoalBar({
   useEffect(() => {
     if (editing) inputRef.current?.select();
   }, [editing]);
+  // 折叠态最多显示两行；正文被截断时才给出“展开全部”。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 正文变化后重新测量
+  useLayoutEffect(() => {
+    const node = textRef.current;
+    if (!node || expanded) return;
+    const measure = () => setOverflowing(node.scrollHeight > node.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [expanded, editing, state.goal]);
 
   const run = async (action: () => unknown) => {
     if (busy) return;
@@ -96,8 +120,13 @@ export function ComposerGoalBar({
       setEditing(false);
     });
   };
-  const onEditKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+  const onEditKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    // 多行编辑：Enter 换行，Ctrl/Cmd+Enter 保存。
+    if (
+      event.key === "Enter" &&
+      (event.ctrlKey || event.metaKey) &&
+      !event.nativeEvent.isComposing
+    ) {
       event.preventDefault();
       submitEdit();
     } else if (event.key === "Escape") {
@@ -131,7 +160,8 @@ export function ComposerGoalBar({
     <div
       data-composer-goal-bar={state.status}
       className={cn(
-        "rounded-t-lg border border-b-0 border-black/[0.055] bg-white/70",
+        // 比输入框窄一圈，落在其圆角以内，也少挡转录区的文字。
+        "mx-auto w-inset-3rem rounded-t-lg border border-b-0 border-black/[0.055] bg-white/70",
         "px-2 py-1",
         "shadow-ui-clarifypanel-22 backdrop-blur-2xl backdrop-saturate-[165%]",
         "dark:border-white/[0.10] dark:bg-white/[0.06] dark:shadow-ui-clarifypanel-23",
@@ -145,30 +175,9 @@ export function ComposerGoalBar({
           )}
         />
         <span className="shrink-0 font-medium text-foreground/90">{label}</span>
-        {editing ? (
-          <input
-            ref={inputRef}
-            value={draft}
-            disabled={locked}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={onEditKeyDown}
-            aria-label={t("chat.goalBar.edit")}
-            className={cn(
-              "h-6 min-w-0 flex-1 rounded-md border border-border/70 bg-background/70 px-1.5",
-              "text-xs text-foreground outline-none focus-visible:ring-1 focus-visible:ring-ring",
-            )}
-          />
-        ) : (
-          <span className="min-w-0 flex-1 truncate text-muted-foreground" title={state.goal}>
-            {state.goal}
-            {elapsed || progress ? (
-              <span className="text-muted-foreground/70">
-                {" · "}
-                {[progress, elapsed].filter(Boolean).join(" · ")}
-              </span>
-            ) : null}
-          </span>
-        )}
+        <span className="min-w-0 flex-1 truncate text-muted-foreground/70">
+          {editing ? t("chat.goalBar.editHint") : [progress, elapsed].filter(Boolean).join(" · ")}
+        </span>
         <div className="flex shrink-0 items-center gap-0.5">
           {editing ? (
             <>
@@ -229,6 +238,48 @@ export function ComposerGoalBar({
           )}
         </div>
       </div>
+      {editing ? (
+        <textarea
+          ref={inputRef}
+          value={draft}
+          disabled={locked}
+          rows={4}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={onEditKeyDown}
+          aria-label={t("chat.goalBar.edit")}
+          className={cn(
+            "mb-1 block max-h-60 min-h-20 w-full resize-y rounded-md border border-border/70",
+            "bg-background/70 px-2 py-1.5 text-xs leading-5 text-foreground outline-none",
+            "focus-visible:ring-1 focus-visible:ring-ring",
+          )}
+        />
+      ) : (
+        <div className="pb-1 pl-5 text-xs leading-5 text-muted-foreground">
+          <p
+            ref={textRef}
+            className={cn(
+              "whitespace-pre-wrap [overflow-wrap:anywhere]",
+              expanded ? "max-h-60 overflow-y-auto pr-1" : "line-clamp-2",
+            )}
+          >
+            {state.goal}
+          </p>
+          {overflowing || expanded ? (
+            <button
+              type="button"
+              onClick={() => setExpanded((value) => !value)}
+              aria-expanded={expanded}
+              className={cn(
+                "mt-0.5 inline-flex items-center gap-0.5 rounded text-tiny text-muted-foreground/80",
+                "hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              )}
+            >
+              {expanded ? t("chat.goalBar.collapse") : t("chat.goalBar.expand")}
+              {expanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+            </button>
+          ) : null}
+        </div>
+      )}
       {dialog}
     </div>
   );

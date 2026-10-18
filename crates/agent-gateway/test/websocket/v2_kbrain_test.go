@@ -351,6 +351,8 @@ func TestV2KBrainEmptyConversationIdentityAndRetries(t *testing.T) {
 	var clientRequests []string
 	kbrainServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/health":
+			http.NotFound(w, r)
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/sessions":
 			mu.Lock()
 			sessionRequests++

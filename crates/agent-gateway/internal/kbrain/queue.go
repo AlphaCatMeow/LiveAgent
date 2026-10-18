@@ -31,9 +31,12 @@ type queueItem struct {
 }
 
 // Queue handles the shipped chat_queue contract for remote K-brain targets.
-// K-brain owns execution and its event journal; Gateway persists queue identity,
-// CAS revisions, and only accepted run cursors needed for restart recovery.
+// Compatible backends own queue execution and revisions; the legacy relay
+// executor remains available for older backends and previously accepted work.
 func (r *Relay) Queue(ctx context.Context, req *gatewayv2.ChatQueueRequest, callbacks ...Callbacks) (response QueueResponse) {
+	if r.usesBackendQueue() {
+		return r.backendQueueAction(ctx, req, callbacks...)
+	}
 	mutating := false
 	var afterCommit func()
 	var rollbackRun func()
@@ -404,15 +407,17 @@ type queueCurrent struct {
 }
 
 type queueStateDocument struct {
-	Version   int                      `json:"version"`
-	Target    string                   `json:"target"`
-	Backend   string                   `json:"backend"`
-	Sessions  map[string]string        `json:"sessions"`
-	Items     map[string][]queuedRun   `json:"items"`
-	Revisions map[string]uint64        `json:"revisions"`
-	Edits     map[string]queueEdit     `json:"edits"`
-	Dedupe    map[string]string        `json:"dedupe"`
-	Current   map[string]*queueCurrent `json:"current"`
+	Version      int                        `json:"version"`
+	Target       string                     `json:"target"`
+	Backend      string                     `json:"backend"`
+	Sessions     map[string]string          `json:"sessions"`
+	Items        map[string][]queuedRun     `json:"items"`
+	Revisions    map[string]uint64          `json:"revisions"`
+	Edits        map[string]queueEdit       `json:"edits"`
+	Dedupe       map[string]string          `json:"dedupe"`
+	Current      map[string]*queueCurrent   `json:"current"`
+	BackendRuns  map[string]backendQueueRun `json:"backend_runs,omitempty"`
+	BackendQueue bool                       `json:"backend_queue,omitempty"`
 }
 
 func (r *Relay) restoreQueue(cb Callbacks) error {
@@ -435,6 +440,12 @@ func (r *Relay) restoreQueue(cb Callbacks) error {
 	defer r.mu.Unlock()
 	r.sessions, r.queues, r.queueRevisions = document.Sessions, document.Items, document.Revisions
 	r.queueEdits, r.dedupe = document.Edits, document.Dedupe
+	if document.BackendRuns != nil {
+		r.backendRuns = document.BackendRuns
+	}
+	if document.BackendQueue {
+		r.backendQueue = true
+	}
 	for conversationID, items := range r.queues {
 		for i := range items {
 			items[i].Callbacks = cb
@@ -533,7 +544,7 @@ func (r *Relay) persistQueueLocked() error {
 			RecoveryRequired:  state.restored,
 		}
 	}
-	document := queueStateDocument{Version: 1, Target: r.target, Backend: r.client.BaseURL, Sessions: r.sessions, Items: r.queues, Revisions: r.queueRevisions, Edits: r.queueEdits, Dedupe: dedupe, Current: current}
+	document := queueStateDocument{Version: 1, Target: r.target, Backend: r.client.BaseURL, Sessions: r.sessions, Items: r.queues, Revisions: r.queueRevisions, Edits: r.queueEdits, Dedupe: dedupe, Current: current, BackendRuns: r.backendRuns, BackendQueue: r.backendQueue}
 	data, err := json.Marshal(document)
 	if err != nil {
 		return fmt.Errorf("encode kbrain queue state: %w", err)

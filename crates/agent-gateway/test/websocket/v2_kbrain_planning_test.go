@@ -13,6 +13,10 @@ import (
 
 func TestV2KBrainPlanningRelaysWithoutDesktop(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/health" {
+			http.NotFound(w, r)
+			return
+		}
 		if r.URL.Path != "/v1/planning" || r.Method != "POST" {
 			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
@@ -35,6 +39,7 @@ func TestV2KBrainPlanningRelaysWithoutDesktop(t *testing.T) {
 	cfg.KBrainProvider = "fixture"
 	cfg.KBrainModel = "fixture"
 	srv := pbws.NewServer(cfg, session.NewManager(), nil)
+	defer srv.Close()
 	mux := http.NewServeMux()
 	mux.Handle("/ws/v2", srv.BrowserHandler())
 	browser, cleanup := dialV2Path(t, mux, "/ws/v2")

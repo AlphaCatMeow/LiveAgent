@@ -59,9 +59,13 @@ func main() {
 	})
 	sttManager := stt.NewManager(sttStore)
 
+	httpHandler := server.NewHTTPServer(cfg, sm, tokens, sttManager)
+	if closer, ok := httpHandler.(io.Closer); ok {
+		defer closer.Close()
+	}
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           server.NewHTTPServer(cfg, sm, tokens, sttManager),
+		Handler:           httpHandler,
 		ReadHeaderTimeout: 10 * time.Second,
 		// 空闲 keep-alive 连接必须回收，否则 REST/静态资源访问方挂住连接会把 fd
 		// 慢性耗尽到 ulimit。刻意不设全局 Read/WriteTimeout：流式上传与隧道长响应

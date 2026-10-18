@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,6 +26,17 @@ import (
 	"github.com/liveagent/agent-gateway/internal/session"
 	"github.com/liveagent/agent-gateway/internal/stt"
 )
+
+type httpHandler struct {
+	http.Handler
+	closeOnce sync.Once
+	protocol  *pbws.Server
+}
+
+func (h *httpHandler) Close() error {
+	h.closeOnce.Do(h.protocol.Close)
+	return nil
+}
 
 // NewHTTPServer 构造 HTTP 路由；生产启动时 tokens 始终是已初始化的 Agent 目录与凭证存储。
 func NewHTTPServer(cfg *config.Config, sm *session.Manager, tokens *agenttoken.Store, sttManagers ...*stt.Manager) http.Handler {
@@ -127,7 +139,7 @@ func NewHTTPServerWithImages(cfg *config.Config, sm *session.Manager, tokens *ag
 		serveIndex(w, r)
 	})
 
-	return rootMux
+	return &httpHandler{Handler: rootMux, protocol: v2}
 }
 
 func isWebUIStaticAssetPath(cleanPath string) bool {

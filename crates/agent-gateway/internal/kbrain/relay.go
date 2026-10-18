@@ -14,23 +14,30 @@ import (
 	gatewayv2 "github.com/liveagent/agent-gateway/internal/proto/v2"
 )
 
-// Relay owns Gateway-side identity mapping and FIFO queue state for one
-// K-brain target. Provider-specific wire formats stay behind K-brain HTTP/SSE.
+// Relay maps Gateway identities to one K-brain target. Compatible backends own
+// the queue; older backends retain the legacy relay executor until migration.
 type Relay struct {
 	client       *Client
 	target       string
 	defaultModel ModelRef
 	createCWD    string
 
-	mu             sync.Mutex
-	sessions       map[string]string
-	runs           map[string]*runState
-	dedupe         map[string]string
-	queues         map[string][]queuedRun
-	queueRevisions map[string]uint64
-	queueEdits     map[string]queueEdit
-	activeRuns     map[string]string
-	queuePath      string
+	mu              sync.Mutex
+	sessions        map[string]string
+	runs            map[string]*runState
+	dedupe          map[string]string
+	queues          map[string][]queuedRun
+	queueRevisions  map[string]uint64
+	queueEdits      map[string]queueEdit
+	activeRuns      map[string]string
+	queuePath       string
+	backendQueue    bool
+	backendRuns     map[string]backendQueueRun
+	backendWatching map[string]bool
+	backendSubmitMu sync.Mutex
+	backendContext  context.Context
+	backendCancel   context.CancelFunc
+	backendWorkers  sync.WaitGroup
 }
 
 type runState struct {
@@ -104,24 +111,36 @@ func newRelay(client *Client, target string, defaultModel ModelRef, cwd, queuePa
 		return nil, errors.New("kbrain relay target is required")
 	}
 	r := &Relay{
-		client:         client,
-		target:         target,
-		defaultModel:   defaultModel,
-		createCWD:      cwd,
-		queuePath:      strings.TrimSpace(queuePath),
-		sessions:       map[string]string{},
-		runs:           map[string]*runState{},
-		dedupe:         map[string]string{},
-		queues:         map[string][]queuedRun{},
-		queueRevisions: map[string]uint64{},
-		queueEdits:     map[string]queueEdit{},
-		activeRuns:     map[string]string{},
+		client:          client,
+		target:          target,
+		defaultModel:    defaultModel,
+		createCWD:       cwd,
+		queuePath:       strings.TrimSpace(queuePath),
+		sessions:        map[string]string{},
+		runs:            map[string]*runState{},
+		dedupe:          map[string]string{},
+		queues:          map[string][]queuedRun{},
+		queueRevisions:  map[string]uint64{},
+		queueEdits:      map[string]queueEdit{},
+		activeRuns:      map[string]string{},
+		backendRuns:     map[string]backendQueueRun{},
+		backendWatching: map[string]bool{},
 	}
+	r.backendContext, r.backendCancel = context.WithCancel(context.Background())
 	if r.queuePath != "" {
 		if err := r.restoreQueue(callbacks); err != nil {
 			return nil, err
 		}
 		r.resumeRestoredRuns()
+		if r.backendQueue {
+			bindings := make([]backendQueueRun, 0, len(r.backendRuns))
+			for _, binding := range r.backendRuns {
+				bindings = append(bindings, binding)
+			}
+			for _, binding := range bindings {
+				r.watchBackendQueuedRun(binding, callbacks)
+			}
+		}
 	}
 	return r, nil
 }
@@ -298,6 +317,9 @@ func (r *Relay) Start(ctx context.Context, gatewayRunID, conversationID, clientR
 }
 
 func (r *Relay) StartWithCWD(ctx context.Context, gatewayRunID, conversationID, clientRequestID, cwd string, prompt PromptRequest, queuePolicy string, cb Callbacks) (bool, error) {
+	if r.usesBackendQueue() {
+		return r.startBackendQueuedRun(ctx, gatewayRunID, conversationID, clientRequestID, cwd, prompt, queuePolicy, cb)
+	}
 	gatewayRunID = strings.TrimSpace(gatewayRunID)
 	conversationID = strings.TrimSpace(conversationID)
 	clientRequestID = strings.TrimSpace(clientRequestID)
@@ -387,6 +409,9 @@ func (r *Relay) StartWithCWD(ctx context.Context, gatewayRunID, conversationID, 
 // Cancel cancels the selected running run or removes a queued run. Running
 // cancellation reaches K-brain's real cancel endpoint when upstream IDs exist.
 func (r *Relay) Cancel(ctx context.Context, conversationID, gatewayRunID string) (bool, error) {
+	if r.usesBackendQueue() {
+		return r.cancelBackendQueuedRun(ctx, conversationID, gatewayRunID)
+	}
 	conversationID = strings.TrimSpace(conversationID)
 	gatewayRunID = strings.TrimSpace(gatewayRunID)
 	if ctx == nil {

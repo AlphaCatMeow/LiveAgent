@@ -7,6 +7,7 @@ package pbws
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -75,12 +76,23 @@ func NewServer(cfg *config.Config, sm *session.Manager, tokens *agenttoken.Store
 			}
 			relay, relayErr := kbrain.NewRelayWithQueueState(client, cfg.KBrainAgentID, kbrain.ModelRef{Provider: cfg.KBrainProvider, Model: cfg.KBrainModel}, "", queuePath, s.kbrainCallbacks(cfg.KBrainAgentID))
 			if relayErr == nil {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				if err := relay.EnableBackendQueue(ctx, s.kbrainCallbacks(cfg.KBrainAgentID)); err != nil {
+					slog.Warn("K-brain queue capability negotiation failed", "err", err)
+				}
+				cancel()
 				s.kbrainRelay = relay
 				s.kbrainTargetID = cfg.KBrainAgentID
 			}
 		}
 	}
 	return s
+}
+
+func (s *Server) Close() {
+	if s.kbrainRelay != nil {
+		s.kbrainRelay.Close()
+	}
 }
 
 // acquireConnSlot 在升级前占用一个连接槽位；超限返回 false（调用方回 503）。

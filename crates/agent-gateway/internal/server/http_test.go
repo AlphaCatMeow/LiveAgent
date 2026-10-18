@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,20 @@ import (
 	"github.com/liveagent/agent-gateway/internal/protocol/shared"
 	"github.com/liveagent/agent-gateway/internal/session"
 )
+
+func TestHTTPHandlerExposesIdempotentClose(t *testing.T) {
+	handler := NewHTTPServer(&config.Config{Token: "test-token"}, session.NewManager(), nil)
+	closer, ok := handler.(io.Closer)
+	if !ok {
+		t.Fatal("HTTP handler does not expose protocol resource cleanup")
+	}
+	if err := closer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := closer.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestNewHTTPServerServesRootWithoutRedirect(t *testing.T) {
 	handler := NewHTTPServer(&config.Config{Token: "dev-token"}, session.NewManager(), nil)

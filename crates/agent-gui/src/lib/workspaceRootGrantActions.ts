@@ -13,7 +13,10 @@ import {
 } from "./workspaceRootGrants";
 
 function comparablePath(path: string) {
-  return path.replace(/^\\\\\?\\/, "").replace(/[\\/]+$/, "").toLowerCase();
+  return path
+    .replace(/^\\\\\?\\/, "")
+    .replace(/[\\/]+$/, "")
+    .toLowerCase();
 }
 
 /** Adds `directory` to an existing grant list, widening access if already present. */

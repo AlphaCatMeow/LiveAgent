@@ -274,27 +274,27 @@ function ToolCallItem({
     ? t("chat.toolApproval.waitingStatus")
     : rootRequest
       ? t("chat.rootGrantWaitingStatus")
-    : isRunning
-      ? isAskUser
-        ? askQuestions.length > 0
-          ? t("chat.askUser.waiting")
-          : t("chat.askUser.preparing")
-        : isPlanCard
-          ? t("chat.planMode.submitted")
-          : t("chat.tool.running")
-      : shellSessionStatus === "running"
-        ? t("chat.tool.running")
-        : shellSessionStatus === "cancelled"
-          ? t("chat.tool.stopped")
-          : shellSessionStatus === "completed"
-            ? t("chat.tool.success")
-            : shellSessionFailed
-              ? t("chat.tool.failed")
-              : result
-                ? result.isError
-                  ? t("chat.tool.failed")
-                  : t("chat.tool.success")
-                : t("chat.tool.waiting");
+      : isRunning
+        ? isAskUser
+          ? askQuestions.length > 0
+            ? t("chat.askUser.waiting")
+            : t("chat.askUser.preparing")
+          : isPlanCard
+            ? t("chat.planMode.submitted")
+            : t("chat.tool.running")
+        : shellSessionStatus === "running"
+          ? t("chat.tool.running")
+          : shellSessionStatus === "cancelled"
+            ? t("chat.tool.stopped")
+            : shellSessionStatus === "completed"
+              ? t("chat.tool.success")
+              : shellSessionFailed
+                ? t("chat.tool.failed")
+                : result
+                  ? result.isError
+                    ? t("chat.tool.failed")
+                    : t("chat.tool.success")
+                  : t("chat.tool.waiting");
 
   const statusTextClass =
     result?.isError || shellSessionFailed ? "text-[hsl(var(--chat-error))]" : "text-foreground/45";

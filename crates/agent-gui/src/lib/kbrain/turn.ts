@@ -770,9 +770,10 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
         const onRootRequest = params.onRootRequest;
         const controller = new AbortController();
         pendingRootRequests.set(request.request_id, controller);
-        void (onRootRequest
-          ? onRootRequest(request, controller.signal)
-          : Promise.resolve<KBrainRootResolution>({ decision: "deny" })
+        void (
+          onRootRequest
+            ? onRootRequest(request, controller.signal)
+            : Promise.resolve<KBrainRootResolution>({ decision: "deny" })
         )
           .then((resolution) => {
             if (controller.signal.aborted) return;

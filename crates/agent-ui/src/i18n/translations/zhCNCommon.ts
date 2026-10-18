@@ -221,7 +221,7 @@ export const ZH_CN_COMMON_TRANSLATIONS = {
   "chat.workspaceSettingsProjectDirectories": "本项目",
   "chat.workspaceSettingsProjectDirectoriesDescription":
     "只在这个工作空间的对话里可访问，优先级最高。",
-  "chat.workspaceSettingsRepositoryDirectories":"本仓库（含所有工作树）",
+  "chat.workspaceSettingsRepositoryDirectories": "本仓库（含所有工作树）",
   "chat.workspaceSettingsRepositoryDirectoriesDescription":
     "在这个 git 仓库及它的任何工作树里对话时都可访问。与本项目的目录同名或重叠时，以本项目为准。",
   "chat.workspaceSettingsGlobalDirectories": "全局",

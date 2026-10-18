@@ -386,19 +386,20 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
       try {
         // Repository and global grants apply even when the workdir (e.g. a new
         // worktree) is not a registered project.
-        additionalRoots = (await resolveWorkspaceRootGrants(effectiveWorkdir, effectiveProject)).map(
-          (root) => ({
-            id: root.id,
-            alias: root.alias,
-            path: root.canonicalPath,
-            access: root.access,
-          }),
-        );
+        additionalRoots = (
+          await resolveWorkspaceRootGrants(effectiveWorkdir, effectiveProject)
+        ).map((root) => ({
+          id: root.id,
+          alias: root.alias,
+          path: root.canonicalPath,
+          access: root.access,
+        }));
       } catch (error) {
         // Fail closed: unavailable or stale grants must not widen this turn's
         // structured file-tool capability, but the user has to know why.
         console.warn("Failed to load workspace root grants", error);
-        setErrorMessage(`附加目录授权未加载，本轮只能访问工作目录：${asErrorMessage(error, String(error))}`,
+        setErrorMessage(
+          `附加目录授权未加载，本轮只能访问工作目录：${asErrorMessage(error, String(error))}`,
         );
       }
     }

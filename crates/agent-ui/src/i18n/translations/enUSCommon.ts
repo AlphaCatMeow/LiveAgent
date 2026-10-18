@@ -247,7 +247,7 @@ export const EN_US_COMMON_TRANSLATIONS = {
   "chat.workspaceSettingsProjectDirectories": "This project",
   "chat.workspaceSettingsProjectDirectoriesDescription":
     "Only available in this workspace's conversations; takes precedence over other layers.",
-  "chat.workspaceSettingsRepositoryDirectories":"This repository (all worktrees)",
+  "chat.workspaceSettingsRepositoryDirectories": "This repository (all worktrees)",
   "chat.workspaceSettingsRepositoryDirectoriesDescription":
     "Available in conversations in this git repository or any of its worktrees. Project directories win on alias or path conflicts.",
   "chat.workspaceSettingsGlobalDirectories": "Global",

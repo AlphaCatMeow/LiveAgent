@@ -1687,7 +1687,9 @@ mod tests {
             json!("auto")
         );
         // 合法值原样保留(含空白裁剪)。
-        for mode in ["ask", "auto", "sandbox", "sandboxOffline"] {
+        for mode in [
+            "ask", "auto", "autoEdit", "always", "autoReview", "sandbox", "sandboxOffline",
+        ] {
             assert_eq!(
                 normalize_command_safety_mode_value(Some(&json!(format!(" {mode} ")))),
                 json!(mode)

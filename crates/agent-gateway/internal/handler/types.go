@@ -162,11 +162,11 @@ func NormalizeWorkdir(value string) string {
 	return normalizeTrimmedText(value)
 }
 
-// NormalizeCommandSafetyMode 归一化命令安全模式。仅放行四个合法值;空串或未知值
+// NormalizeCommandSafetyMode 归一化命令安全模式。仅放行受支持的值;空串或未知值
 // 归为空串,表示"远端未指定",桌面端据此回落到本地 settings.system.commandSafetyMode。
 func NormalizeCommandSafetyMode(value string) string {
 	switch normalizeTrimmedText(value) {
-	case "ask", "auto", "sandbox", "sandboxOffline":
+	case "ask", "auto", "autoEdit", "always", "autoReview", "sandbox", "sandboxOffline":
 		return normalizeTrimmedText(value)
 	default:
 		return ""

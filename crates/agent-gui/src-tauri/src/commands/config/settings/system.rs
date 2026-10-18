@@ -609,13 +609,15 @@ fn normalize_browser_automation_mode_value(raw: Option<&Value>) -> Value {
 }
 
 /// 命令安全模式的合法取值,与前端 COMMAND_SAFETY_MODES 一致。
-const COMMAND_SAFETY_MODES: [&str; 4] = ["ask", "auto", "sandbox", "sandboxOffline"];
+const COMMAND_SAFETY_MODES: [&str; 7] = [
+    "ask", "auto", "autoEdit", "always", "autoReview", "sandbox", "sandboxOffline",
+];
 /// 键缺失(全新配置/旧快照)时的默认值。
 const COMMAND_SAFETY_MODE_DEFAULT: &str = "auto";
 /// 存在但无法识别时收敛到的最严格值(逐次人工放行)。
 const COMMAND_SAFETY_MODE_FAIL_CLOSED: &str = "ask";
 
-/// "ask" | "auto" | "sandbox" | "sandboxOffline"。
+/// 保留受支持的权限模式，未知值收敛到 "ask"。
 ///
 /// - 键缺失 / null / 空串:沿用默认 "auto"(全新配置与旧快照的正常形态)。
 /// - **存在但无法识别:收敛到最严格的 "ask"**(P2#6)。该设置全部意义在于约束,而

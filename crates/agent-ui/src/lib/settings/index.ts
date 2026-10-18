@@ -1492,14 +1492,17 @@ export function normalizeCommandSafetyMode(input: unknown): CommandSafetyMode {
 }
 
 /**
- * 严格度序:`auto` < `sandbox` < `sandboxOffline` < `ask`(逐次人工放行最严)。
+ * 远端选择只能收紧本地模式；旧沙箱约束优先于新增自动审批模式。
  * 供“取更严格者”的钳制使用,不参与持久化。
  */
 const COMMAND_SAFETY_MODE_STRICTNESS: Record<CommandSafetyMode, number> = {
+  always: -1,
   auto: 0,
-  sandbox: 1,
-  sandboxOffline: 2,
-  ask: 3,
+  autoEdit: 1,
+  autoReview: 2,
+  sandbox: 3,
+  sandboxOffline: 4,
+  ask: 5,
 };
 
 /**
@@ -1511,6 +1514,10 @@ export function strictestCommandSafetyMode(
   a: CommandSafetyMode,
   b: CommandSafetyMode,
 ): CommandSafetyMode {
+  // 自动编辑与自动审查的授权范围不包含彼此，合并时保留人工确认。
+  if ((a === "autoEdit" && b === "autoReview") || (a === "autoReview" && b === "autoEdit")) {
+    return "ask";
+  }
   return COMMAND_SAFETY_MODE_STRICTNESS[a] >= COMMAND_SAFETY_MODE_STRICTNESS[b] ? a : b;
 }
 

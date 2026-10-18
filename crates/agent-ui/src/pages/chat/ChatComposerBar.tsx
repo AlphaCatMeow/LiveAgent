@@ -1827,6 +1827,10 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
               {commandSafetyMode && onCommandSafetyModeChange ? (
                 <CommandSafetyModeSelector
                   value={commandSafetyMode}
+                  planModeEnabled={chatRuntimeControls.planModeEnabled}
+                  onPlanModeChange={(planModeEnabled) =>
+                    onChatRuntimeControlsChange({ planModeEnabled })
+                  }
                   disabled={controlsDisabled || !isAgentMode}
                   onChange={onCommandSafetyModeChange}
                 />

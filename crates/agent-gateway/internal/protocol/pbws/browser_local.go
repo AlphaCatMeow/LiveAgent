@@ -296,6 +296,7 @@ func kbrainOptions(body handler.ChatRequestBody) *kbrain.RunOptions {
 		Mode:           "chat",
 		Search:         "disabled",
 		ApprovalPolicy: "ask",
+		PermissionMode: "normal",
 	}
 	if body.ExecutionMode == "tools" || body.ExecutionMode == "agent-dev" {
 		options.Mode = "agent"
@@ -303,6 +304,13 @@ func kbrainOptions(body handler.ChatRequestBody) *kbrain.RunOptions {
 	switch body.CommandSafetyMode {
 	case "auto":
 		options.ApprovalPolicy = "auto"
+		options.PermissionMode = "full_access"
+	case "autoEdit":
+		options.PermissionMode = "auto_edit"
+	case "always":
+		options.PermissionMode = "always"
+	case "autoReview":
+		options.PermissionMode = "auto_review"
 	case "sandboxOffline":
 		options.ApprovalPolicy = "deny"
 	}
@@ -316,6 +324,9 @@ func kbrainOptions(body handler.ChatRequestBody) *kbrain.RunOptions {
 		}
 		if body.RuntimeControls.PlanModeEnabled != nil {
 			options.PlanModeEnabled = *body.RuntimeControls.PlanModeEnabled
+			if options.PlanModeEnabled {
+				options.PermissionMode = "plan"
+			}
 		}
 	}
 	if strings.TrimSpace(body.Workdir) != "" {

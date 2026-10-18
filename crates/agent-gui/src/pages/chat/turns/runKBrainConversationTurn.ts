@@ -1,5 +1,6 @@
 import type { AssistantMessage, ToolCall, ToolResultMessage } from "@liveagent/app/lib/agentTypes";
 import type { ComposerTurnCommand } from "@liveagent/ui/lib/chat/composerCommands";
+import { resolveKBrainPermissionMode } from "@liveagent/ui/lib/chat/permissionModes";
 import { appendMessagesToConversation } from "../../../lib/chat/conversation/conversationState";
 import { buildConversationStateFromWindow } from "../../../lib/chat/history/chatHistory";
 import {
@@ -60,6 +61,10 @@ function canonicalRunOptions(params: Params, uploadsRoot?: string): KBrainRunOpt
     ...(reasoning ? { reasoning } : {}),
     search: params.runtime.nativeWebSearchEnabled === true ? "enabled" : "disabled",
     approval_policy: safety === "auto" ? "auto" : "ask",
+    permission_mode: resolveKBrainPermissionMode(
+      safety,
+      agentMode && params.planModeEnabled === true,
+    ),
     ...(roots.length ? { workspace_roots: roots } : {}),
     ...(Object.keys(policies).length ? { tools: { policies } } : {}),
     ...(agentMode && params.planModeEnabled !== undefined

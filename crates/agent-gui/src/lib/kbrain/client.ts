@@ -525,6 +525,18 @@ export function createKBrainClient(inputOptions: KBrainClientOptions = {}) {
     signal?: AbortSignal,
   ): Promise<KBrainRunAccepted> {
     signal?.throwIfAborted();
+    const mode = input.options?.permission_mode;
+    if (mode === "always" || mode === "auto_edit" || mode === "auto_review") {
+      const health = await request<{ capabilities?: { permission_modes?: string[] } }>(
+        "/v1/health",
+        { signal },
+      );
+      if (!health.capabilities?.permission_modes?.includes(mode)) {
+        throw new Error(
+          `K-brain does not support permission mode ${mode}; update the backend before using this mode.`,
+        );
+      }
+    }
     const path = `/v1/sessions/${encodeURIComponent(input.conversation_id)}/runs`;
     let accepted: KBrainRunAccepted;
     try {

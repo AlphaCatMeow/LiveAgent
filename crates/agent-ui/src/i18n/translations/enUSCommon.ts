@@ -470,10 +470,19 @@ export const EN_US_COMMON_TRANSLATIONS = {
   "chat.runtime.reasoningCompact.xhigh": "XHigh",
   "chat.runtime.reasoningCompact.max": "Max",
   "chat.safety.label": "Command execution mode",
-  "chat.safety.ask": "Per-action approval",
+  "chat.safety.ask": "Confirm changes",
   "chat.safety.askDesc":
     "Requests approval before each run; read-only operations need no confirmation",
-  "chat.safety.auto": "Auto-execute",
+  "chat.safety.auto": "Full access",
+  "chat.safety.autoEdit": "Auto edit",
+  "chat.safety.autoEditDesc":
+    "Automatically approve file writes and edits; confirm commands and other actions",
+  "chat.safety.always": "Always allow",
+  "chat.safety.alwaysDesc":
+    "Use K-brain always mode without interactive or AI review; explicit denials and workspace boundaries still apply",
+  "chat.safety.autoReview": "Auto review",
+  "chat.safety.autoReviewDesc":
+    "K-brain reviews actions; low-risk actions proceed, unknown or elevated risk requires confirmation",
   "chat.safety.autoDesc":
     "Runs according to the tool permission policies, without per-step approval",
   "chat.safety.sandbox": "Sandbox",

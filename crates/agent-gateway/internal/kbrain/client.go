@@ -143,6 +143,7 @@ type RunOptions struct {
 	Mode            string          `json:"mode,omitempty"`
 	Search          string          `json:"search,omitempty"`
 	ApprovalPolicy  string          `json:"approval_policy,omitempty"`
+	PermissionMode  string          `json:"permission_mode,omitempty"`
 	WorkspaceRoots  []WorkspaceRoot `json:"workspace_roots,omitempty"`
 	Tools           *ToolSelection  `json:"tools,omitempty"`
 	PlanModeEnabled bool            `json:"plan_mode_enabled,omitempty"`
@@ -360,6 +361,29 @@ func (c *Client) CreateSession(ctx context.Context, cwd string, model ModelRef) 
 
 func (c *Client) StartRun(ctx context.Context, sessionID string, in PromptRequest) (RunAccepted, int, error) {
 	var out RunAccepted
+	if in.Options != nil {
+		mode := in.Options.PermissionMode
+		if mode == "always" || mode == "auto_edit" || mode == "auto_review" {
+			var health struct {
+				Capabilities struct {
+					PermissionModes []string `json:"permission_modes"`
+				} `json:"capabilities"`
+			}
+			resp, err := c.request(ctx, http.MethodGet, "/v1/health", nil, &health)
+			if err != nil {
+				return out, 0, err
+			}
+			found := false
+			for _, supported := range health.Capabilities.PermissionModes {
+				if supported == mode {
+					found = true
+				}
+			}
+			if resp.StatusCode != http.StatusOK || !found {
+				return out, 0, fmt.Errorf("K-brain does not support permission mode %s; update the backend", mode)
+			}
+		}
+	}
 	resp, err := c.request(ctx, http.MethodPost, "/v1/sessions/"+sessionID+"/runs", in, &out)
 	if err != nil {
 		return out, 0, err

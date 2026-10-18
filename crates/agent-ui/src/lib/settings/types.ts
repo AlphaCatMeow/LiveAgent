@@ -298,11 +298,21 @@ export type ToolPolicy = "allow" | "ask" | "deny";
 //   工作区+临时目录;offline 变体额外断网。Windows 免管理员双后端:sandbox=受限
 //   令牌(只围栏写,读放行);sandboxOffline=AppContainer(WFP 内核级全断网含
 //   loopback,默认拒读 ⇒ 系统目录/工作区可读、用户主目录等敏感目录读掩蔽)。
-export type CommandSafetyMode = "ask" | "auto" | "sandbox" | "sandboxOffline";
+export type CommandSafetyMode =
+  | "ask"
+  | "auto"
+  | "autoEdit"
+  | "always"
+  | "autoReview"
+  | "sandbox"
+  | "sandboxOffline";
 
 export const COMMAND_SAFETY_MODES: readonly CommandSafetyMode[] = [
   "ask",
   "auto",
+  "autoEdit",
+  "always",
+  "autoReview",
   "sandbox",
   "sandboxOffline",
 ];

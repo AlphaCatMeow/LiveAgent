@@ -8,6 +8,12 @@ import { SidebarProvider, useSidebar } from "@liveagent/ui/components/ui/sidebar
 import { type ToastTone, toast } from "@liveagent/ui/components/ui/toast-manager";
 import { LocaleContext, t as translate, useLocaleContextValue } from "@liveagent/ui/i18n/index";
 import { searchMentionConversations } from "@liveagent/ui/lib/chat/conversationSearch";
+import {
+  clearSearchJumpTarget,
+  getSearchJumpTargetSnapshot,
+  resolveSearchJumpRowKey,
+  subscribeSearchJumpTarget,
+} from "@liveagent/ui/lib/chat/searchJumpTarget";
 import { useMentionApps } from "@liveagent/ui/lib/chat/useMentionApps";
 import { useScrollFollow } from "@liveagent/ui/lib/chat-scroll/useScrollFollow";
 import { loadThinkingLiveSupplement } from "@liveagent/ui/lib/models/thinkingLive";
@@ -28,7 +34,15 @@ import { useWorkspaceProjectDeletion } from "@liveagent/ui/lib/useWorkspaceProje
 import { projectToolSurfaceTitleKey } from "@liveagent/ui/lib/workbench/projectToolSurfaces";
 import { useWorkspaceProjectSettingsActions } from "@liveagent/ui/lib/workspaceProjectRemoval";
 import type { ChatQueueTurnPreview } from "@liveagent/ui/pages/chat/ChatComposerBar";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { TrustedGatewayImageIdentity } from "@/agent-ui-adapters/imageStudio";
 import { createGatewayWorkspaceProjectRootClient } from "@/agent-ui-adapters/workspaceProjectRoots";
 import type { GatewayTranscriptNavHandle } from "@/components/GatewayTranscript";
@@ -43,6 +57,7 @@ import {
 import type { ChatCommandUpdate } from "@/lib/chat/stream/streamTypes";
 import { createTranscriptStoreRegistry } from "@/lib/chat/stream/useConversationChat";
 import { registerToolApprovalDecisionHandler } from "@/lib/chat/toolApprovalBridge";
+import { transcriptRowsToJumpCandidates } from "@/lib/chat/transcript/searchJumpCandidates";
 import type {
   AgentStatus,
   ChatEvent,
@@ -122,6 +137,8 @@ import type { SendChatFn } from "./types";
 import { shouldRestorePageComposerDraft } from "./workbench/pageComposerDraftRestore";
 import { sessionWorkbench } from "./workbench/sessionWorkbench";
 import { useGatewayWorkbench } from "./workbench/useGatewayWorkbench";
+
+const SEARCH_JUMP_MAX_PAGES = 20;
 
 function useGatewayAppController() {
   const historyShareToken = useMemo(() => parseHistoryShareToken(), []);
@@ -2004,6 +2021,46 @@ function useGatewayAppController() {
     token,
     transcriptStoreRegistry,
   });
+
+  // 会话搜索跳转：与桌面端 ChatTranscript 相同，目标在已加载窗口内就滚过去，
+  // 否则逐页加载更早历史，直到命中或没有更多历史（最多 SEARCH_JUMP_MAX_PAGES 页）。
+  const searchJumpPagesRef = useRef(0);
+  const pendingSearchJump = useSyncExternalStore(
+    subscribeSearchJumpTarget,
+    getSearchJumpTargetSnapshot,
+  );
+  useEffect(() => {
+    if (transcriptHistoryLoading || loadingOlderHistory) return;
+    const target =
+      pendingSearchJump?.conversationId === displayedConversationId ? pendingSearchJump : null;
+    if (!target) {
+      searchJumpPagesRef.current = 0;
+      return;
+    }
+    const rowKey = resolveSearchJumpRowKey(transcriptRowsToJumpCandidates(transcriptRows), target);
+    if (rowKey) {
+      clearSearchJumpTarget(target);
+      searchJumpPagesRef.current = 0;
+      const frame = requestAnimationFrame(() => handleFloorJump(rowKey));
+      return () => cancelAnimationFrame(frame);
+    }
+    if (!selectedHistoryHasMore || searchJumpPagesRef.current >= SEARCH_JUMP_MAX_PAGES) {
+      clearSearchJumpTarget(target);
+      searchJumpPagesRef.current = 0;
+      return;
+    }
+    searchJumpPagesRef.current += 1;
+    handleLoadEarlierHistory();
+  }, [
+    displayedConversationId,
+    handleFloorJump,
+    pendingSearchJump,
+    handleLoadEarlierHistory,
+    loadingOlderHistory,
+    selectedHistoryHasMore,
+    transcriptHistoryLoading,
+    transcriptRows,
+  ]);
 
   useEffect(() => {
     const nextDisplayedConversationId = displayedConversationId.trim();

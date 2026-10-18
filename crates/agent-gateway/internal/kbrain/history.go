@@ -215,7 +215,7 @@ func (r *Relay) HistoryGet(ctx context.Context, req *gatewayv2.HistoryGetRequest
 		messages = append(previous.Session.Messages, messages...)
 		oldest, more = previous.OldestOffset, previous.HasMoreBefore
 	}
-	raw, err := historyMessagesJSON(messages)
+	raw, err := historyMessagesJSON(messages, oldest)
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +266,9 @@ func sessionSummary(id string, session Session) *gatewayv2.ConversationSummary {
 }
 
 // The WebUI history parser consumes LiveAgent messages, not canonical messages.
-func historyMessagesJSON(messages []Message) (string, error) {
+// Each entry carries its canonical offset (firstOffset + slice index) so the
+// WebUI can match search hits, which report whole-session offsets.
+func historyMessagesJSON(messages []Message, firstOffset int32) (string, error) {
 	out := make([]map[string]any, 0, len(messages))
 	for i, message := range messages {
 		if message.Role != "user" && message.Role != "assistant" && message.Role != "tool" {
@@ -285,7 +287,7 @@ func historyMessagesJSON(messages []Message) (string, error) {
 				content = append(content, map[string]any{"type": "file", "data": block.FileURL, "mimeType": block.MIMEType, "filename": block.Filename})
 			}
 		}
-		entry := map[string]any{"role": message.Role, "content": content}
+		entry := map[string]any{"role": message.Role, "content": content, "messageIndex": int(firstOffset) + i}
 		if message.ID != "" {
 			entry["id"] = message.ID
 		}

@@ -7,6 +7,11 @@ import type {
 } from "@liveagent/app/lib/agentTypes";
 import { toast } from "@liveagent/ui/components/ui/toast-manager";
 import type { HostedSearchBlock } from "@liveagent/ui/lib/chat/hostedSearch";
+import {
+  encodeRunProgress,
+  parseRunProgress,
+  type RunProgress,
+} from "@liveagent/ui/lib/chat/runProgress";
 import { taskResultDetails } from "@liveagent/ui/lib/chat/taskProgress";
 import type { ConversationViewState } from "../chat/conversation/conversationState";
 import { appendMessagesToConversation } from "../chat/conversation/conversationState";
@@ -385,9 +390,34 @@ function fallbackRequestId(params: KBrainTurnParams) {
 }
 
 export async function runKBrainTurn(params: KBrainTurnParams): Promise<AssistantMessage> {
+  try {
+    return await executeKBrainTurn(params);
+  } finally {
+    params.onStatus?.(null);
+  }
+}
+
+async function executeKBrainTurn(params: KBrainTurnParams): Promise<AssistantMessage> {
   if (params.options?.client_tools?.length) {
     throw new Error("LiveAgent tools must execute in K-brain, not in the frontend");
   }
+  const started = performance.now();
+  let progress: RunProgress = { stage: "connecting" };
+  let clientFirstText: number | undefined;
+  let lastStatus: string | null = null;
+  let reconnecting = false;
+  const reportStatus = (status: string | null) => {
+    lastStatus = status;
+    params.onStatus?.(status);
+  };
+  const reportProgress = (next: RunProgress) => {
+    progress = {
+      ...next,
+      ...(clientFirstText === undefined ? {} : { client_first_text_ms: clientFirstText }),
+    };
+    reportStatus(encodeRunProgress(progress));
+  };
+  reportProgress(progress);
   const baseUrl = params.baseUrl;
   const client = createKBrainClient({
     baseUrl,
@@ -490,6 +520,7 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
   if (accepted.conversation_id !== kbrainSessionId || !accepted.run_id) {
     throw new Error("K-brain returned an invalid run identity");
   }
+  reportProgress({ stage: "preparing" });
 
   let text = "";
   let thinking = "";
@@ -527,11 +558,26 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
     afterSeq = event.seq;
     // Session streams can include background tasks started by an earlier run.
     if (event.run_id !== accepted.run_id && !event.type.startsWith("subagent.")) return;
+    if (reconnecting) {
+      reconnecting = false;
+      params.onStatus?.(lastStatus);
+    }
     switch (event.type) {
+      case "run.progress": {
+        const next = parseRunProgress(eventPayload<unknown>(event));
+        if (next) reportProgress(next);
+        break;
+      }
       case "assistant.text.delta": {
         const delta = eventPayload<{ text?: string }>(event)?.text ?? "";
         if (delta) {
           text += delta;
+          if (clientFirstText === undefined) {
+            clientFirstText = performance.now() - started;
+            reportProgress({ ...progress, stage: "responding" });
+          } else if (progress.stage !== "responding") {
+            reportProgress({ ...progress, stage: "responding" });
+          }
           params.onTextDelta(delta);
         }
         break;
@@ -540,6 +586,7 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
         const delta = eventPayload<{ text?: string }>(event)?.text ?? "";
         if (delta) {
           thinking += delta;
+          if (progress.stage !== "thinking") reportProgress({ ...progress, stage: "thinking" });
           params.onThinkingDelta(delta);
         }
         break;
@@ -553,6 +600,7 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
         const payload = eventPayload<{ tool_call?: KBrainToolCall }>(event);
         if (!payload?.tool_call) break;
         const call = toolCall(payload.tool_call);
+        reportProgress({ ...progress, stage: "tool" });
         calls.set(call.id, call);
         params.onToolCall(call);
         break;
@@ -628,7 +676,7 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
           status?: string | null;
           text?: string | null;
         }>(event);
-        params.onStatus?.(payload?.status ?? payload?.text ?? null);
+        reportStatus(payload?.status ?? payload?.text ?? null);
         break;
       }
       case "question.requested": {
@@ -641,7 +689,7 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
           streamAbortController.abort();
           return;
         }
-        params.onStatus?.("Waiting for your answer…");
+        reportStatus("Waiting for your answer…");
         const questionController = new AbortController();
         if (request.run_id !== accepted.run_id || !request.question_id || !request.tool_call_id)
           throw new Error("Question identity mismatch");
@@ -672,7 +720,7 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
           .catch((error) => {
             if (questionController.signal.aborted) return;
             permissionFailure = error instanceof Error ? error : new Error(String(error));
-            params.onStatus?.(null);
+            reportStatus(null);
             streamAbortController.abort();
           })
           .finally(() => pendingQuestions.delete(request.question_id));
@@ -705,7 +753,7 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
               ),
             );
         }
-        params.onStatus?.(null);
+        reportStatus(null);
         break;
       }
       case "client_tool.requested": {
@@ -747,7 +795,7 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
         break;
       }
       case "permission.requested": {
-        params.onStatus?.("Waiting for permission…");
+        reportStatus("Waiting for permission…");
         const request = eventPayload<{
           permission_id: string;
           tool: string;
@@ -788,14 +836,14 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
             )
               return;
             permissionFailure = error instanceof Error ? error : new Error(String(error));
-            params.onStatus?.(null);
+            reportStatus(null);
             streamAbortController.abort();
           })
           .finally(() => pendingPermissions.delete(permissionController));
         break;
       }
       case "permission.resolved":
-        params.onStatus?.(null);
+        reportStatus(null);
         break;
       case "run.failed":
         terminal = "error";
@@ -824,7 +872,8 @@ export async function runKBrainTurn(params: KBrainTurnParams): Promise<Assistant
     while (!sawTerminal) {
       throwIfAborted(params.signal);
       if (reconnects > 0) {
-        params.onStatus?.("Reconnecting to K-brain…");
+        reconnecting = true;
+        params.onStatus?.(encodeRunProgress({ stage: "reconnecting" }));
         await waitForReconnect(reconnects, params.signal);
       }
       try {

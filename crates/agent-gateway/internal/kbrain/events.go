@@ -78,6 +78,9 @@ func ToChatEvent(event Event) (*v2.ChatEvent, *v2.ChatControlEvent, error) {
 		}
 	case "tool.status":
 		base.Type = v2.ChatEvent_TOOL_STATUS
+	case "run.progress":
+		base.Type = v2.ChatEvent_TOOL_STATUS
+		payload = map[string]any{"status": "kbrain-progress:" + string(data)}
 	case "run.completed":
 		return nil, &v2.ChatControlEvent{RequestId: event.RunID, ConversationId: event.ConversationID, Type: "completed"}, nil
 	case "run.failed":

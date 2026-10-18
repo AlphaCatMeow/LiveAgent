@@ -1,4 +1,4 @@
-import { CompactingText } from "@liveagent/ui/components/chat/AssistantStatus";
+import { CompactingText, LiveAssistantStatus } from "@liveagent/ui/components/chat/AssistantStatus";
 import { AssistantWorkTrace } from "@liveagent/ui/components/chat/AssistantWorkTrace";
 import { HostedSearchGroupView } from "@liveagent/ui/components/chat/HostedSearchGroupView";
 import { LiveSparkle } from "@liveagent/ui/components/chat/LiveSparkle";
@@ -7,6 +7,7 @@ import { Markdown } from "@liveagent/ui/components/Markdown";
 import type { UiRound } from "@liveagent/ui/lib/chat/assistantBubbleAdapter";
 import { normalizeLiveToolStatus } from "@liveagent/ui/lib/chat/assistantStatus";
 import type { ChatFileLink } from "@liveagent/ui/lib/chat/chatFileLinks";
+import { parseRunProgress } from "@liveagent/ui/lib/chat/runProgress";
 import { cn } from "@liveagent/ui/lib/shared/utils";
 import { memo, type ReactNode, useMemo } from "react";
 import {
@@ -290,7 +291,13 @@ export const AssistantTurnContent = memo(function AssistantTurnContent(props: {
 
       {layout.interaction.map((entry) => renderEntry(entry, false, true))}
       {layout.answer.map((entry) => renderEntry(entry, false))}
-      {running ? <LiveSparkle paused={attentionRequired} /> : null}
+      {running ? (
+        !attentionRequired && parseRunProgress(normalizedToolStatus) ? (
+          <LiveAssistantStatus status={normalizedToolStatus} />
+        ) : (
+          <LiveSparkle paused={attentionRequired} />
+        )
+      ) : null}
     </div>
   );
 });

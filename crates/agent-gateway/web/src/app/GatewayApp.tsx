@@ -57,6 +57,7 @@ import {
 import type { ChatCommandUpdate } from "@/lib/chat/stream/streamTypes";
 import { createTranscriptStoreRegistry } from "@/lib/chat/stream/useConversationChat";
 import { registerToolApprovalDecisionHandler } from "@/lib/chat/toolApprovalBridge";
+import { transcriptRowsToJumpCandidates } from "@/lib/chat/transcript/searchJumpCandidates";
 import type {
   AgentStatus,
   ChatEvent,
@@ -2036,15 +2037,7 @@ function useGatewayAppController() {
       searchJumpPagesRef.current = 0;
       return;
     }
-    const rowKey = resolveSearchJumpRowKey(
-      transcriptRows.map((row) => ({
-        kind: row.kind,
-        key: row.key,
-        messageId: row.kind === "user" ? row.messageRef?.messageId : undefined,
-        messageIndex: row.kind === "user" ? row.messageRef?.messageIndex : undefined,
-      })),
-      target,
-    );
+    const rowKey = resolveSearchJumpRowKey(transcriptRowsToJumpCandidates(transcriptRows), target);
     if (rowKey) {
       clearSearchJumpTarget(target);
       searchJumpPagesRef.current = 0;

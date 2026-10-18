@@ -745,12 +745,18 @@ export function parseHistoryMessagesJson(raw: string): ChatEntry[] {
       const attachments = getUserMessageAttachments(userRecord);
       const referencedConversations = getUserMessageReferencedConversations(userRecord);
       const messageId = readString(message.id).trim();
+      // K-brain Gateway history carries each message's whole-session offset;
+      // search hits report that offset, so prefer it over the window position.
+      const canonicalIndex = readNumber((message as { messageIndex?: unknown }).messageIndex);
       const messageRef =
         readHistoryMessageRef(userRecord.liveAgentHistoryRef) ??
         (messageId
           ? {
               segmentIndex: 0,
-              messageIndex: historyIndex,
+              messageIndex:
+                typeof canonicalIndex === "number" && canonicalIndex >= 0
+                  ? Math.floor(canonicalIndex)
+                  : historyIndex,
               segmentId: "gateway-history",
               messageId,
               role: "user",

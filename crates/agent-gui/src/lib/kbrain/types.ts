@@ -267,6 +267,7 @@ export type KBrainRunOptions = {
   mode?: "chat" | "agent";
   search?: "disabled" | "enabled";
   approval_policy?: "ask" | "auto" | "deny";
+  permission_mode?: import("@liveagent/ui/lib/chat/permissionModes").KBrainPermissionMode;
   workspace_roots?: Array<{ path: string; access: "read" | "write" }>;
   tools?: { policies?: Record<string, "ask" | "allow" | "deny"> };
   plan_mode_enabled?: boolean;

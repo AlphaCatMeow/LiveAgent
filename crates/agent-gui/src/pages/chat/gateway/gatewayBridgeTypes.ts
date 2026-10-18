@@ -176,6 +176,9 @@ export function normalizeGatewayCommandSafetyMode(
   switch (value?.trim()) {
     case "ask":
     case "auto":
+    case "autoEdit":
+    case "always":
+    case "autoReview":
     case "sandbox":
     case "sandboxOffline":
       return value.trim() as CommandSafetyMode;

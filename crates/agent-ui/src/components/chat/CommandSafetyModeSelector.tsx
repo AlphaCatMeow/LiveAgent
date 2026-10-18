@@ -1,6 +1,6 @@
 import { useSandboxCapability } from "@liveagent/adapters/sandboxCapability";
 import type { CommandSafetyMode } from "@liveagent/app/lib/settings";
-import { Check, Hand, Shield, ShieldOff, Zap } from "@liveagent/ui/components/IconSet";
+import { Check, Hand, Lightbulb, Shield, ShieldOff, Zap } from "@liveagent/ui/components/IconSet";
 import { Button } from "@liveagent/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -16,6 +16,9 @@ import { useState } from "react";
 const MODE_I18N_KEYS: Record<CommandSafetyMode, string> = {
   ask: "chat.safety.ask",
   auto: "chat.safety.auto",
+  autoEdit: "chat.safety.autoEdit",
+  always: "chat.safety.always",
+  autoReview: "chat.safety.autoReview",
   sandbox: "chat.safety.sandbox",
   sandboxOffline: "chat.safety.sandboxOffline",
 };
@@ -23,11 +26,14 @@ const MODE_I18N_KEYS: Record<CommandSafetyMode, string> = {
 const MODE_DESC_I18N_KEYS: Record<CommandSafetyMode, string> = {
   ask: "chat.safety.askDesc",
   auto: "chat.safety.autoDesc",
+  autoEdit: "chat.safety.autoEditDesc",
+  always: "chat.safety.alwaysDesc",
+  autoReview: "chat.safety.autoReviewDesc",
   sandbox: "chat.safety.sandboxDesc",
   sandboxOffline: "chat.safety.sandboxOfflineDesc",
 };
 
-const SAFETY_MODES = ["ask", "auto", "sandbox", "sandboxOffline"] as const;
+const SAFETY_MODES = ["ask", "autoEdit", "autoReview", "auto", "always"] as const;
 
 /**
  * 读掩蔽是平台/后端相关的能力,不能作为跨平台的肯定承诺(P2#7)。
@@ -42,7 +48,15 @@ const SAFETY_MODES = ["ask", "auto", "sandbox", "sandboxOffline"] as const;
 const MECHANISMS_WITHOUT_READ_MASKING: ReadonlySet<string> = new Set(["restricted-token"]);
 
 function isCommandSafetyMode(value: unknown): value is CommandSafetyMode {
-  return value === "ask" || value === "auto" || value === "sandbox" || value === "sandboxOffline";
+  return (
+    value === "ask" ||
+    value === "auto" ||
+    value === "autoEdit" ||
+    value === "always" ||
+    value === "autoReview" ||
+    value === "sandbox" ||
+    value === "sandboxOffline"
+  );
 }
 
 function modeIcon(mode: CommandSafetyMode, className: string) {
@@ -64,8 +78,10 @@ export function CommandSafetyModeSelector(props: {
   value: CommandSafetyMode;
   disabled?: boolean;
   onChange: (mode: CommandSafetyMode) => void;
+  planModeEnabled?: boolean;
+  onPlanModeChange?: (enabled: boolean) => void;
 }) {
-  const { value, disabled, onChange } = props;
+  const { value, disabled, onChange, planModeEnabled, onPlanModeChange } = props;
   const { t } = useLocale();
   const [menuOpen, setMenuOpen] = useState(false);
   const capability = useSandboxCapability();
@@ -92,7 +108,13 @@ export function CommandSafetyModeSelector(props: {
   // 当前值本身不可用(如设置同步自 macOS,本机是 Windows)时仍显示,但标红提示
   // 由执行层报错兜底;这里不做静默改写,避免设置回写抖动。
   const selected = isCommandSafetyMode(value) ? value : "auto";
-  const selectedLabel = t(MODE_I18N_KEYS[selected]);
+  const selectedLabel = t(
+    planModeEnabled ? "chat.runtime.planModeTitle" : MODE_I18N_KEYS[selected],
+  );
+  const modes: readonly CommandSafetyMode[] =
+    selected === "sandbox" || selected === "sandboxOffline"
+      ? [...SAFETY_MODES, selected]
+      : SAFETY_MODES;
 
   return (
     <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
@@ -111,7 +133,11 @@ export function CommandSafetyModeSelector(props: {
         title={selectedLabel}
         aria-label={`${t("chat.safety.label")}: ${selectedLabel}`}
       >
-        {modeIcon(selected, triggerIconClass(selected))}
+        {planModeEnabled ? (
+          <Lightbulb className="size-4 shrink-0 text-sky-600" />
+        ) : (
+          modeIcon(selected, triggerIconClass(selected))
+        )}
       </DropdownMenuTrigger>
       <DropdownMenuContent
         variant="soft"
@@ -119,19 +145,37 @@ export function CommandSafetyModeSelector(props: {
         side="top"
         align="start"
       >
-        {SAFETY_MODES.map((mode) => {
+        {onPlanModeChange ? (
+          <DropdownMenuItem
+            onSelect={() => onPlanModeChange(true)}
+            className="h-auto items-start gap-2.5 py-2 text-xs whitespace-normal"
+          >
+            <Lightbulb className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="font-medium leading-4">{t("chat.runtime.planModeTitle")}</span>
+              <span className="text-tiny font-normal leading-4 text-muted-foreground">
+                {t("chat.runtime.planModeHint")}
+              </span>
+            </span>
+            {planModeEnabled ? <Check className="mt-0.5 size-3.5 shrink-0 text-primary" /> : null}
+          </DropdownMenuItem>
+        ) : null}
+        {modes.map((mode) => {
           const entryDisabled =
             mode === "sandbox"
               ? sandboxUnavailable
               : mode === "sandboxOffline"
                 ? offlineUnavailable
                 : false;
-          const isSelected = mode === selected;
+          const isSelected = !planModeEnabled && mode === selected;
           return (
             <DropdownMenuItem
               key={mode}
               disabled={entryDisabled}
-              onSelect={() => onChange(mode)}
+              onSelect={() => {
+                onPlanModeChange?.(false);
+                onChange(mode);
+              }}
               className={cn(
                 "h-auto items-start gap-2.5 py-2 text-xs whitespace-normal",
                 isSelected && "bg-accent text-accent-foreground",

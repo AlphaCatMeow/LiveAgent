@@ -13,12 +13,6 @@ import {
   upsertToolCallToRound,
 } from "../../../lib/chat/messages/uiMessages";
 import { createKBrainClient } from "../../../lib/kbrain/client";
-import {
-  assistantAwaitsUserInput,
-  assistantDeclaresGoalMet,
-  markGoalAwaitingInput,
-  takeGoalAwaitingInput,
-} from "../../../lib/kbrain/goalAwaitInput";
 import { settleGoalAfterTurn } from "../../../lib/kbrain/goalSettle";
 import {
   publishGoalState,
@@ -92,48 +86,6 @@ function turnCommandParams(
   }
   if (command?.kind === "prompt") return { promptCommand: true };
   return {};
-}
-
-/** 立即暂停目标，并把暂停后的状态推给目标栏；没有进行中的目标时后端回 409，忽略。 */
-async function pauseGoalForInput(conversationId: string) {
-  const sessionId = getKBrainSessionId(conversationId)?.trim();
-  if (!sessionId) return;
-  try {
-    publishGoalState(
-      conversationId,
-      await createKBrainClient().postGoal(sessionId, { action: "pause" }),
-    );
-  } catch {
-    // 409：目标已不在进行中；收尾时会再读一次目标状态。
-  }
-}
-
-/**
- * 用户回复那一轮里模型已宣告完成：后端不判定普通运行，这里清掉暂停中的目标，
- * 再按“达成”通知界面，与后端判定达成时的提示一致（达成本来也会清掉目标）。
- */
-async function completeGoalAfterReply(
-  conversationId: string,
-  notify: (state: KBrainGoalState) => void,
-) {
-  const sessionId = getKBrainSessionId(conversationId)?.trim();
-  if (!sessionId) return;
-  const goal = readStoredGoalState(conversationId)?.goal ?? "";
-  try {
-    const cleared = await createKBrainClient().postGoal(sessionId, { action: "clear" });
-    notify({ ...cleared, status: "met", goal: goal || cleared.goal, reason: undefined });
-  } catch {
-    // 清除失败时目标停在暂停态，用户可在目标栏手动清除。
-  }
-}
-
-/**
- * 最终回复文本：最后一个文字块。工具调用前说的话也会作为文字块排在前面，
- * 后端判定 GOAL_MET 只看最终回复，这里保持一致。
- */
-function assistantText(message: AssistantMessage): string {
-  const last = message.content.filter((block) => block.type === "text").at(-1);
-  return last?.type === "text" ? last.text : "";
 }
 
 export async function runKBrainConversationTurn(params: Params): Promise<void> {
@@ -223,34 +175,24 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
     } else projectToolResult(call, result);
   };
   hookLifecycle.startAgent();
-  const explicitCommand = "composerCommand" in params ? params.composerCommand : undefined;
-  // 目标因等待用户回复而暂停时，这条普通消息就是回复。后端的 goal resume 会把本轮
-  // 内容换成固定的目标检查提示，回复会被丢掉；所以先把回复当普通消息发给模型，
-  // 模型没有再次提问时再接一轮 goal resume。显式 /goal 指令自行决定目标去留。
-  let resumeGoalAfterReply = takeGoalAwaitingInput(params.conversationId) && !explicitCommand;
-  let command: ComposerTurnCommand | undefined = explicitCommand;
-  const notifyGoal = (state: KBrainGoalState) => {
-    if ("onGoalUpdate" in params && params.onGoalUpdate) params.onGoalUpdate(state);
-    else publishGoalState(params.conversationId, state);
-  };
-  // 回复这一轮就是在推进目标：后端目标仍是暂停态，目标栏先按进行中显示；
-  // 本轮结束后由完成、再次暂停或续接的 resume 给出真实状态。
-  const pausedGoal = resumeGoalAfterReply ? readStoredGoalState(params.conversationId) : undefined;
-  if (pausedGoal?.status === "paused") {
-    publishGoalState(params.conversationId, { ...pausedGoal, status: "active", reason: undefined });
-  }
-  // 续接 goal resume 的那一轮用新的请求标识，不复用用户消息的标识。
-  let followUpClientRequestId: string | undefined;
+  const command = "composerCommand" in params ? params.composerCommand : undefined;
   // 目标续跑：后端在每轮终止前用 goal.updated 给出下一轮的请求标识，这里挂接上去，
   // 直到目标达成、暂停或用户停止。
   // 回调里写入、轮次结束后读取；经函数读取，避免控制流把它收窄成初始值。
   let latestGoalState: KBrainGoalState | undefined;
+  // 目标在等用户回答时，这条普通消息就是回复，后端会把它作为目标的一轮接收。
+  // 目标栏先按进行中显示；本轮的去向（达成、再次等待或续跑）以后端事件为准，
+  // 结束时再读一次目标对齐。
+  const storedGoal = readStoredGoalState(params.conversationId);
+  const answersGoal =
+    !command && storedGoal?.status === "paused" && storedGoal.reason === "awaiting_input";
+  if (answersGoal && storedGoal) {
+    publishGoalState(params.conversationId, { ...storedGoal, status: "active", reason: undefined });
+  }
   // 本次发送是否牵涉目标（/goal 指令、续跑轮次或收到进行中的目标状态）；结束时据此对齐。
-  let goalInvolved = command?.kind === "goal" || resumeGoalAfterReply;
+  let goalInvolved = command?.kind === "goal" || answersGoal;
   const readGoalState = () => latestGoalState;
   let attachClientRequestId: string | undefined;
-  // 本轮回复在等用户回答，已暂停目标，不再挂接后端自动发起的下一轮。
-  let pausedForInput = false;
   try {
     const uploadsRoot = await resolveUploadStagingRoot();
     for (;;) {
@@ -261,16 +203,11 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
         sessionId: params.sessionId,
         clientRequestId:
           attachClientRequestId ||
-          followUpClientRequestId ||
           params.clientRequestId?.trim() ||
           params.trajectoryMessageId ||
           crypto.randomUUID(),
         turnId:
-          !attachClientRequestId &&
-          !followUpClientRequestId &&
-          user &&
-          "id" in user &&
-          typeof user.id === "string"
+          !attachClientRequestId && user && "id" in user && typeof user.id === "string"
             ? user.id
             : undefined,
         ...turnCommandParams(command, attachClientRequestId),
@@ -398,16 +335,6 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
         usage: projected.usage,
       });
       if (projected.errorMessage) gatewayBridgeEvents.emitError(projected.errorMessage);
-      const completed = projected.stopReason === "stop" && !cancellation.userStop.signal.aborted;
-      const awaitsInput = completed && assistantAwaitsUserInput(assistantText(projected));
-      const goalState = readGoalState();
-      // 后端在本轮结束后立刻自行发起下一轮，暂停必须赶在刷新历史之前发出；
-      // 下一轮已开始时暂停会把它取消。
-      if (awaitsInput && goalState?.status === "continuing") {
-        pausedForInput = true;
-        markGoalAwaitingInput(params.conversationId);
-        await pauseGoalForInput(params.conversationId);
-      }
       let state = appendMessagesToConversation(params.getNextConversationState(), [
         projected,
         ...results.values(),
@@ -423,34 +350,13 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
         }
       }
       params.applyConversationState(state);
+      const goalState = readGoalState();
       const nextRound =
-        completed && !pausedForInput && goalState?.status === "continuing" ? goalState : undefined;
-      if (resumeGoalAfterReply) {
-        resumeGoalAfterReply = false;
-        if (awaitsInput) {
-          // 模型拿到回复后仍在提问：目标保持暂停，继续等用户。
-          markGoalAwaitingInput(params.conversationId);
-        } else if (completed && assistantDeclaresGoalMet(assistantText(projected))) {
-          // 模型拿到回复后已完成目标：不再续跑，清掉暂停中的目标。
-          await completeGoalAfterReply(params.conversationId, notifyGoal);
-        } else if (completed) {
-          // 回复已交给模型，接一轮 goal resume 回到目标续跑。
-          params.settleLiveTranscript(transcriptStore);
-          params.applyConversationState(
-            appendMessagesToConversation(state, [
-              { role: "user", content: "/goal resume", timestamp: Date.now() },
-            ]),
-          );
-          hookLifecycle.ensureMessageEnded();
-          hookLifecycle.endTurn(round);
-          round += 1;
-          results.clear();
-          calls.clear();
-          command = { kind: "goal", action: "resume" };
-          followUpClientRequestId = crypto.randomUUID();
-          continue;
-        }
-      }
+        goalState?.status === "continuing" &&
+        projected.stopReason === "stop" &&
+        !cancellation.userStop.signal.aborted
+          ? goalState
+          : undefined;
       if (nextRound?.next_client_request_id) {
         // 把刚完成的一轮落进转录区，并先显示后端为下一轮写入的用户消息。
         params.settleLiveTranscript(transcriptStore);
@@ -464,7 +370,6 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
         round += 1;
         results.clear();
         calls.clear();
-        command = undefined;
         attachClientRequestId = nextRound.next_client_request_id;
         continue;
       }

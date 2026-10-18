@@ -25,6 +25,11 @@ export function showGoalProgress(
       return;
     case "paused":
       if (state.reason === "user") return;
+      if (state.reason === "awaiting_input") {
+        // 模型在等用户回答：用户直接回复即可，后端会把回复作为目标的下一轮。
+        toast.success(t("chat.goal.awaitingInput"), { id, description: goal, duration: 10_000 });
+        return;
+      }
       toast.warning(t("chat.goal.paused"), {
         id,
         description: goal,

@@ -380,7 +380,7 @@ func (c *Client) StartRun(ctx context.Context, sessionID string, in PromptReques
 				}
 			}
 			if resp.StatusCode != http.StatusOK || !found {
-				return out, 0, fmt.Errorf("K-brain does not support permission mode %s; update the backend", mode)
+				return out, 0, fmt.Errorf("kbrain does not support permission mode %s; update the backend", mode)
 			}
 		}
 	}

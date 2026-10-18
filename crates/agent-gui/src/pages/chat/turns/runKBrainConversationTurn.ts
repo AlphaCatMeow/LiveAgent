@@ -15,7 +15,10 @@ import {
 } from "../../../lib/chat/messages/uiMessages";
 import { createKBrainClient } from "../../../lib/kbrain/client";
 import { settleGoalAfterTurn } from "../../../lib/kbrain/goalSettle";
-import { publishGoalState } from "../../../lib/kbrain/goalStore";
+import {
+  publishGoalState,
+  readGoalState as readStoredGoalState,
+} from "../../../lib/kbrain/goalStore";
 import { getKBrainHistoryWindow } from "../../../lib/kbrain/history";
 import { getKBrainSessionId } from "../../../lib/kbrain/mapping";
 import { canonicalKBrainToolPolicies } from "../../../lib/kbrain/toolPolicies";
@@ -182,8 +185,17 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
   // 直到目标达成、暂停或用户停止。
   // 回调里写入、轮次结束后读取；经函数读取，避免控制流把它收窄成初始值。
   let latestGoalState: KBrainGoalState | undefined;
+  // 目标在等用户回答时，这条普通消息就是回复，后端会把它作为目标的一轮接收。
+  // 目标栏先按进行中显示；本轮的去向（达成、再次等待或续跑）以后端事件为准，
+  // 结束时再读一次目标对齐。
+  const storedGoal = readStoredGoalState(params.conversationId);
+  const answersGoal =
+    !command && storedGoal?.status === "paused" && storedGoal.reason === "awaiting_input";
+  if (answersGoal && storedGoal) {
+    publishGoalState(params.conversationId, { ...storedGoal, status: "active", reason: undefined });
+  }
   // 本次发送是否牵涉目标（/goal 指令、续跑轮次或收到进行中的目标状态）；结束时据此对齐。
-  let goalInvolved = command?.kind === "goal";
+  let goalInvolved = command?.kind === "goal" || answersGoal;
   const readGoalState = () => latestGoalState;
   let attachClientRequestId: string | undefined;
   try {

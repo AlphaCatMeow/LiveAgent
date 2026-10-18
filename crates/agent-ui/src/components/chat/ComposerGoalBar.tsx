@@ -122,7 +122,11 @@ export function ComposerGoalBar({
       if (confirmed) await actions.onClear();
     });
 
-  const label = running ? t("chat.goalBar.active") : t("chat.goalBar.paused");
+  const label = running
+    ? t("chat.goalBar.active")
+    : state.reason === "awaiting_input"
+      ? t("chat.goalBar.awaitingInput")
+      : t("chat.goalBar.paused");
   const progress =
     state.round > 0
       ? t("chat.goalBar.round")

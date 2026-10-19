@@ -91,6 +91,7 @@ function sameSidebarConversation(left: SidebarConversation, right: SidebarConver
     left.pinnedAt === right.pinnedAt &&
     left.isShared === right.isShared &&
     left.selectedModelJson === right.selectedModelJson &&
+    left.forkedFromSessionId === right.forkedFromSessionId &&
     left.isPending === right.isPending
   );
 }
@@ -121,6 +122,7 @@ export function mergeSidebarConversation(
     pinnedAt: "pinnedAt" in next ? next.pinnedAt : existing.pinnedAt,
     isShared: next.isShared ?? existing.isShared,
     selectedModelJson: mergeOptionalText(next.selectedModelJson, existing.selectedModelJson),
+    forkedFromSessionId: mergeOptionalText(next.forkedFromSessionId, existing.forkedFromSessionId),
     isPending: next.isPending === true ? true : undefined,
   };
 

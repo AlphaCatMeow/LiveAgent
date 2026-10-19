@@ -132,6 +132,14 @@ const HISTORY_LOADING_SKELETON_ROWS = [
   { title: "w-28", meta: "w-20" },
 ] as const;
 
+function forkSourceFor(
+  bySessionId: ReadonlyMap<string, SidebarConversation>,
+  item: SidebarConversation,
+) {
+  const source = item.forkedFromSessionId ? bySessionId.get(item.forkedFromSessionId) : undefined;
+  return source && source.id !== item.id ? { id: source.id, title: source.title } : null;
+}
+
 function isMobileSidebarLayout() {
   if (typeof window === "undefined") {
     return false;
@@ -425,6 +433,12 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
       group.push(item);
       result.set(key, group);
     }
+    return result;
+  }, [items]);
+  // Branch rows point at their source by backend session ID.
+  const conversationsBySessionId = useMemo(() => {
+    const result = new Map<string, SidebarConversation>();
+    for (const item of items) if (item.sessionId) result.set(item.sessionId, item);
     return result;
   }, [items]);
   const visibleProjectConversations = useCallback(
@@ -1155,6 +1169,7 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
         isDragging={reorder.draggingKey === sidebarConversationOrderKey(item.id)}
         key={item.id}
         item={item}
+        forkSource={forkSourceFor(conversationsBySessionId, item)}
         isActive={currentConversationId === item.id}
         isBusy={busyConversationIds.has(item.id)}
         isRunning={runningConversationIds.has(item.id)}
@@ -1198,6 +1213,7 @@ export const ChatHistorySidebar = memo(function ChatHistorySidebar(props: ChatHi
       reorder.onPointerDown,
       reorder.dropTarget,
       reorder.draggingKey,
+      conversationsBySessionId,
       currentConversationId,
       handleCancelRename,
       handleCommitRename,

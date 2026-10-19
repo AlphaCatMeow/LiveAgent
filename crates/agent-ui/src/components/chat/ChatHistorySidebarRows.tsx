@@ -13,6 +13,7 @@ import {
   FolderClosed,
   FolderOpen,
   FolderTree,
+  GitBranch,
   ListChecks,
   Loader2,
   MessageSquare,
@@ -120,6 +121,8 @@ type HistoryRowProps = {
 
   showIcon?: boolean;
   item: SidebarConversation;
+  /** Source of a branched conversation when it is loaded in the sidebar. */
+  forkSource?: { id: string; title: string } | null;
   isActive: boolean;
   isBusy: boolean;
   isRunning: boolean;
@@ -178,6 +181,7 @@ function areRenderedHistoryItemsEqual(previous: SidebarConversation, next: Sideb
     previous.cwd === next.cwd &&
     previous.isPinned === next.isPinned &&
     previous.isShared === next.isShared &&
+    previous.forkedFromSessionId === next.forkedFromSessionId &&
     previous.isPending === next.isPending
   );
 }
@@ -185,6 +189,8 @@ function areRenderedHistoryItemsEqual(previous: SidebarConversation, next: Sideb
 function areHistoryRowPropsEqual(previous: HistoryRowProps, next: HistoryRowProps) {
   return (
     areRenderedHistoryItemsEqual(previous.item, next.item) &&
+    previous.forkSource?.id === next.forkSource?.id &&
+    previous.forkSource?.title === next.forkSource?.title &&
     previous.showIcon === next.showIcon &&
     previous.reorderKey === next.reorderKey &&
     previous.onReorderPointerDown === next.onReorderPointerDown &&
@@ -229,6 +235,7 @@ function areHistoryRowPropsEqual(previous: HistoryRowProps, next: HistoryRowProp
 export const HistoryRow = memo(function HistoryRow(props: HistoryRowProps) {
   const {
     item,
+    forkSource,
     isActive,
     isBusy,
     isRunning,
@@ -264,6 +271,12 @@ export const HistoryRow = memo(function HistoryRow(props: HistoryRowProps) {
     onOpenInWorkbenchSplit,
   } = props;
   const { t } = useLocale();
+  const isBranch = Boolean(item.forkedFromSessionId);
+  const branchHint = isBranch
+    ? forkSource
+      ? t("chat.conversationBranchFrom").replace("{title}", forkSource.title)
+      : t("chat.conversationBranchSourceMissing")
+    : null;
   // Either blocked state replaces the spinner: the turn is suspended on the
   // user, not working. Approval wins when both are pending — it is the harder
   // block and the row has room for only one pill.
@@ -709,6 +722,16 @@ export const HistoryRow = memo(function HistoryRow(props: HistoryRowProps) {
         <ListChecks className={CONVERSATION_MENU_ICON_CLASS} />
         {t("chat.conversationBulkSelect")}
       </DropdownMenuItem>
+      {forkSource && !item.isPending ? (
+        <DropdownMenuItem
+          disabled={isInteractionDisabled}
+          onSelect={() => onSelectConversation(forkSource.id)}
+          className={CONVERSATION_MENU_ITEM_CLASS}
+        >
+          <GitBranch className={CONVERSATION_MENU_ICON_CLASS} />
+          {t("chat.conversationOpenBranchSource")}
+        </DropdownMenuItem>
+      ) : null}
       {onOpenInWorkbenchSplit && !item.isPending ? (
         <DropdownMenuItem
           disabled={isInteractionDisabled}
@@ -895,7 +918,7 @@ export const HistoryRow = memo(function HistoryRow(props: HistoryRowProps) {
                 "text-left outline-hidden transition-colors",
                 "focus-visible:ring-2 focus-visible:ring-ring web:max-820:[-webkit-touch-callout:none] web:max-820:select-none web:max-820:touch-pan-y",
               )}
-              title={item.title}
+              title={branchHint ? [item.title, branchHint].join("\n") : item.title}
             >
               {isSelectionMode ? (
                 <span
@@ -917,6 +940,13 @@ export const HistoryRow = memo(function HistoryRow(props: HistoryRowProps) {
                 >
                   <MessageSquare className="size-4 text-muted-foreground" />
                 </span>
+              ) : null}
+              {!isSelectionMode && branchHint ? (
+                <GitBranch
+                  role="img"
+                  aria-label={branchHint}
+                  className="size-3.5 shrink-0 text-muted-foreground"
+                />
               ) : null}
               <span className="[mask-image:var(--mask-image-sidebar-project-name-fade)] min-w-0 flex-1 overflow-hidden whitespace-nowrap text-sm font-normal leading-5">
                 {item.title}

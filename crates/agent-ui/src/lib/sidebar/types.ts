@@ -15,6 +15,8 @@ export type SidebarConversation = {
   pinnedAt?: number | null;
   isShared?: boolean;
   selectedModelJson?: string;
+  /** Backend session ID of the conversation this one was branched from. */
+  forkedFromSessionId?: string;
   // Local-only draft/persisting row; survives authoritative reconciles until
   // the backend confirms (an upsert event clears it) or it is removed locally.
   isPending?: boolean;

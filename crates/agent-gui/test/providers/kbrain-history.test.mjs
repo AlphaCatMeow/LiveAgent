@@ -239,3 +239,21 @@ test("task projections are counted once on newest windows while full active cont
     assert.equal(page.activeSegment, undefined);
   });
 });
+
+test("K-brain history summaries carry branch lineage only when the backend reports it", async () => {
+  installStorage();
+  const source = makeSession({ id: "source-session", title: "Source" });
+  const branch = makeSession({ id: "branch-session", title: "Source", forked_from: "source-session", fork_seq: 2 });
+  const blank = makeSession({ id: "blank-session", forked_from: "  " });
+  await withHttpFixture(async (request, response) => {
+    const url = new URL(request.url, DEFAULT_KBRAIN_URL);
+    if (request.method === "GET" && url.pathname === "/v1/sessions") return sendJson(response, { sessions: [source, branch, blank] });
+    return sendJson(response, { error: "unexpected route" }, 404);
+  }, async () => {
+    const listed = await history.listKBrainHistory(1, 20);
+    const bySession = new Map(listed.items.map((item) => [item.sessionId, item]));
+    assert.equal(bySession.get("branch-session").forkedFromSessionId, "source-session");
+    assert.equal("forkedFromSessionId" in bySession.get("source-session"), false);
+    assert.equal("forkedFromSessionId" in bySession.get("blank-session"), false);
+  });
+});

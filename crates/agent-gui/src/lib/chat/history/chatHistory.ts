@@ -50,6 +50,8 @@ export type ChatHistorySummary = {
   pinnedAt?: number | null;
   isShared?: boolean;
   isPending?: boolean;
+  /** Backend session ID of the conversation this one was branched from. */
+  forkedFromSessionId?: string;
 };
 
 export type ChatHistoryShareStatus = {

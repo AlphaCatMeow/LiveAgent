@@ -324,8 +324,15 @@ jobs:
       - name: Install Windows protobuf compiler
         if: runner.os == 'Windows'
         run: |
-          choco install protoc -y --no-progress
-          "$env:ChocolateyInstall\lib\protoc\tools\bin" | Out-File -Append $env:GITHUB_PATH
+          $archive = Join-Path $env:RUNNER_TEMP "protoc.zip"
+          $destination = Join-Path $env:RUNNER_TEMP "protoc-34.0"
+          Invoke-WebRequest -Uri "https://github.com/protocolbuffers/protobuf/releases/download/v34.0/protoc-34.0-win64.zip" -OutFile $archive
+          Expand-Archive -Path $archive -DestinationPath $destination -Force
+          $protoc = Join-Path $destination "bin\protoc.exe"
+          & $protoc --version
+          if ($LASTEXITCODE -ne 0) { throw "protoc verification failed: $LASTEXITCODE" }
+          "PROTOC=$protoc" | Out-File -Append $env:GITHUB_ENV
+          (Split-Path $protoc) | Out-File -Append $env:GITHUB_PATH
 
       - uses: Swatinem/rust-cache@v2
         with:

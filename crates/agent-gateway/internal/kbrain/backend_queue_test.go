@@ -265,7 +265,8 @@ func TestBackendQueueProjectionAndFanoutPreserveCanonicalIdentity(t *testing.T) 
 func TestBackendQueueCanonicalReloadCanOperateBeforeHistoryMapping(t *testing.T) {
 	reads, actions := 0, 0
 	h := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/sessions/canonical/queue/actions" {
+		switch r.URL.Path {
+		case "/v1/sessions/canonical/queue/actions":
 			actions++
 			var input map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
@@ -274,9 +275,9 @@ func TestBackendQueueCanonicalReloadCanOperateBeforeHistoryMapping(t *testing.T)
 			if input["item_id"] != "backend-item" || input["revision"] != float64(4) {
 				t.Errorf("canonical action lost identity: %v", input)
 			}
-		} else if r.URL.Path == "/v1/sessions/canonical/queue" {
+		case "/v1/sessions/canonical/queue":
 			reads++
-		} else {
+		default:
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		fmt.Fprint(w, `{"version":"kbrain.agent.v1","accepted":true,"snapshot":{"conversationId":"canonical","revision":4,"paused":true,"items":[]}}`)

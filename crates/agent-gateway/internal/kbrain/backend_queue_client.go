@@ -73,7 +73,7 @@ func (c *Client) sessionQueue(ctx context.Context, method, sessionID, suffix str
 		return out, fmt.Errorf("unsupported K-brain queue protocol %q", out.Version)
 	}
 	if out.Snapshot.ConversationID != sessionID {
-		return out, fmt.Errorf("K-brain queue identity mismatch")
+		return out, fmt.Errorf("kbrain queue identity mismatch")
 	}
 	return out, nil
 }
@@ -97,7 +97,7 @@ func (r *Relay) EnableBackendQueue(ctx context.Context, callbacks Callbacks) err
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == 404 {
 		if r.usesBackendQueue() {
 			return fmt.Errorf("backend-owned queue requires a compatible K-brain")
@@ -105,7 +105,7 @@ func (r *Relay) EnableBackendQueue(ctx context.Context, callbacks Callbacks) err
 		return nil
 	}
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("K-brain health: %s", resp.Status)
+		return fmt.Errorf("kbrain health: %s", resp.Status)
 	}
 	if err = json.NewDecoder(resp.Body).Decode(&health); err != nil {
 		return err

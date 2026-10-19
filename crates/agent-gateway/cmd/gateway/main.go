@@ -62,7 +62,11 @@ func main() {
 	images := server.NewLocalImageHub(cfg)
 	httpHandler := server.NewHTTPServerWithLocalImages(cfg, sm, tokens, images, sttManager)
 	if closer, ok := httpHandler.(io.Closer); ok {
-		defer closer.Close()
+		defer func() {
+			if err := closer.Close(); err != nil {
+				slog.Warn("http handler cleanup error", "err", err)
+			}
+		}()
 	}
 	httpServer := &http.Server{
 		Addr:              cfg.HTTPAddr,

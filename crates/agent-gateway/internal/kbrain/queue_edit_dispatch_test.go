@@ -107,19 +107,25 @@ func TestQueueEditDispatchesWhenActiveFinishesDuringEdit(t *testing.T) {
 				case <-time.After(2 * time.Second):
 					t.Fatal("first did not complete")
 				}
-				deadline := time.Now().Add(2 * time.Second)
-				for {
-					relay.mu.Lock()
-					idle := relay.activeRuns["conv"] == ""
-					relay.mu.Unlock()
-					if idle {
-						break
+				// finish releases the owner and persists queue.json under one lock hold,
+				// after the terminal callback has already fired.
+				waitIdle := func(what string) {
+					t.Helper()
+					deadline := time.Now().Add(2 * time.Second)
+					for {
+						relay.mu.Lock()
+						idle := relay.activeRuns["conv"] == ""
+						relay.mu.Unlock()
+						if idle {
+							return
+						}
+						if time.Now().After(deadline) {
+							t.Fatalf("%s owner not released", what)
+						}
+						time.Sleep(time.Millisecond)
 					}
-					if time.Now().After(deadline) {
-						t.Fatal("first owner not released")
-					}
-					time.Sleep(time.Millisecond)
 				}
+				waitIdle("first")
 				request := &gatewayv2.ChatQueueRequest{Action: action, ConversationId: "conv", ItemId: "second", Revision: begin.Revision, DraftJson: `{"text":"edited"}`, UploadedFilesJson: `[]`}
 				if failPersistence {
 					// A regular file cannot serve as the parent directory for the state file.
@@ -177,6 +183,8 @@ func TestQueueEditDispatchesWhenActiveFinishesDuringEdit(t *testing.T) {
 				if starts.Load() != 2 {
 					t.Fatalf("backend starts=%d, want exactly two", starts.Load())
 				}
+				// Returning earlier races TempDir cleanup with the final queue.json write.
+				waitIdle("second")
 			})
 		}
 	}

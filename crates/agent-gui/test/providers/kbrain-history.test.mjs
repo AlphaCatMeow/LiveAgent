@@ -86,6 +86,33 @@ function makeSession(overrides = {}) {
   };
 }
 
+test("background continuation history never substitutes row offsets for missing clocks", async () => {
+  installStorage();
+  const session = makeSession({ tasks: [], messages: [
+    { id: "u1", role: "user", content: [{ type: "text", text: "read all materials" }], created_at: "2026-10-19T10:00:00Z" },
+    { id: "a1", role: "assistant", content: [{ type: "text", text: "first agent done" }], created_at: "2026-10-19T10:00:08Z" },
+    { id: "u2", role: "user", content: [{ type: "text", text: "second agent finished" }] },
+    { id: "a2", role: "assistant", content: [{ type: "text", text: "second report" }], created_at: "2026-10-19T10:00:10Z" },
+    { id: "u3", role: "user", content: [{ type: "text", text: "third agent finished" }], created_at: "invalid" },
+    { id: "a3", role: "assistant", content: [{ type: "text", text: "third report" }], created_at: "2026-10-19T10:00:12Z" },
+  ] });
+  const { chatDuration } = loader.loadModule("@liveagent/ui/lib/chat/workTiming.ts");
+  await withHttpFixture(async (_request, response) => sendJson(response, {
+    session, revision: session.revision, oldest_offset: 0, has_more_before: false,
+    total_message_count: session.messages.length, active_messages: session.messages,
+  }), async () => {
+    mapping.setKBrainSessionId("three-agents", session.id);
+    const restored = await history.getKBrainHistoryWindow("three-agents");
+    for (const messages of [restored.activeSegment.messages, restored.segments.flatMap((segment) => segment.messages)]) {
+      assert.equal(chatDuration(messages[0].timestamp, messages[1].timestamp), 8000);
+      assert.equal(messages[2].timestamp, 0);
+      assert.equal(messages[4].timestamp, 0);
+      assert.equal(chatDuration(messages[2].timestamp, messages[3].timestamp), undefined);
+      assert.equal(chatDuration(messages[4].timestamp, messages[5].timestamp), undefined);
+    }
+  });
+});
+
 test("K-brain mapping keeps local and backend IDs bidirectionally without sessionId in the key", () => {
   installStorage();
   mapping.setKBrainSessionId("local-conversation", "remote-session", "http://kbrain.test/");

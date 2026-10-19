@@ -27,6 +27,7 @@ import {
   type CommitDetailsLoader,
   UserMessageContent,
 } from "@liveagent/ui/lib/chat/userMessageContent";
+import { chatDuration } from "@liveagent/ui/lib/chat/workTiming";
 import type { GitClient } from "@liveagent/ui/lib/git/types";
 import { copyTextToClipboard } from "@liveagent/ui/lib/shared/clipboard";
 import { cn } from "@liveagent/ui/lib/shared/utils";
@@ -970,10 +971,7 @@ const GatewayTranscriptListRegion = memo(function GatewayTranscriptListRegion(pr
           const isLatestLiveAssistant = rowIndex === liveAssistantIndex;
           const isLatestLiveStreaming = isStreaming && isLatestLiveAssistant;
           const retryTarget = findRetryTarget(rows, rowIndex);
-          const durationMs =
-            row.timestamp !== undefined && retryTarget?.timestamp !== undefined
-              ? Math.max(0, row.timestamp - retryTarget.timestamp)
-              : undefined;
+          const durationMs = chatDuration(retryTarget?.timestamp, row.timestamp);
           return (
             <article
               key={virtualRow.key}

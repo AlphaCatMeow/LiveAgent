@@ -100,6 +100,17 @@ const idleLive = {
   isSettled: false,
 };
 
+test("background work traces only derive elapsed time from real history clocks", () => {
+  const end = Date.parse("2026-10-19T10:00:00Z");
+  for (const start of [0, 2, 3, NaN, end + 1000, end - 8000]) {
+    const snapshot = createTranscriptRowModel().build([
+      { ...userItem("u1"), timestamp: start },
+      { ...assistantItem("a1", [{ ...round("r1", "done"), blocks: [toolBlock("read-1", "Read", "ok")] }]), timestamp: end },
+    ], idleLive);
+    assert.equal(workTraceRows(snapshot)[0].unit.durationMs, start === end - 8000 ? 8000 : undefined);
+  }
+});
+
 test("live work trace starts its clock at the triggering user message", () => {
   const model = createTranscriptRowModel();
   const history = [{ ...userItem("u1"), timestamp: 1_700_000_000_000 }];

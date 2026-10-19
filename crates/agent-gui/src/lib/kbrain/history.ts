@@ -129,7 +129,7 @@ function toMessage(
   toolArguments?: unknown,
   taskRunId?: string,
 ): Message | null {
-  const timestamp = epoch(message.created_at, index + 1);
+  const timestamp = epoch(message.created_at, 0);
   if (message.role === "user") {
     const content = userContent(message);
     // K-brain 只存文本。带附件的消息落库时正文与附件指令拼在一起，历史回读

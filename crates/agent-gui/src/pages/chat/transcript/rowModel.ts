@@ -10,6 +10,7 @@ import {
   rekeyContinuationRounds,
   stitchCompactedReplies,
 } from "@liveagent/ui/lib/chat/replyContinuity";
+import { chatDuration } from "@liveagent/ui/lib/chat/workTiming";
 import {
   CHECKPOINT_ROW_ESTIMATE_PX,
   estimateAssistantRowHeight,
@@ -517,10 +518,7 @@ function buildAssistantUnits(input: BuildAssistantUnitsInput): AssistantUnitRow[
       compacted,
       unit: {
         kind: "work-trace",
-        durationMs:
-          !live && timestamp !== undefined && retryTarget?.timestamp !== undefined
-            ? Math.max(0, timestamp - retryTarget.timestamp)
-            : undefined,
+        durationMs: !live ? chatDuration(retryTarget?.timestamp, timestamp) : undefined,
         startedAtMs: live ? liveStartedAtMs : undefined,
         entries: layout.work,
         latestToolGroupKey,

@@ -399,6 +399,8 @@ impl GatewayController {
         } else {
             None
         };
+        // The Image Studio backend is the manager's concern (see GatewayController::new):
+        // read from the live K-Brain at spawn and rebound over stdin, never started here.
         let manager = Arc::clone(&self.local_gateway);
         let mut task = tauri::async_runtime::spawn_blocking(move || match options {
             Some(options) => manager.start_with_epoch(options, start_epoch).map(|_| ()),
@@ -843,6 +845,22 @@ pub(crate) async fn await_abortable_on_reconfigure<T>(
         result = &mut fut => result.map(Some),
         _ = config_rx.changed() => Ok(None),
     }
+}
+
+/// The desktop's running K-Brain, offered to the WebUI Image Studio through the
+/// managed Gateway. Read-only: following K-Brain must never launch it (startup,
+/// updates). When K-Brain is down the Gateway (and chat) runs without images.
+pub(crate) fn local_image_backend(
+    app: &tauri::AppHandle,
+) -> Option<crate::services::local_gateway::LocalImageBackend> {
+    use tauri::Manager as _;
+    let state = app.try_state::<Arc<crate::services::kbrain_backend::KBrainBackendState>>()?;
+    let connection = state.running_connection()?;
+    let backend = crate::services::local_gateway::LocalImageBackend {
+        url: connection.base_url,
+        token: connection.token,
+    };
+    backend.is_authenticated_loopback().then_some(backend)
 }
 
 fn local_gateway_binary() -> Result<std::path::PathBuf, String> {

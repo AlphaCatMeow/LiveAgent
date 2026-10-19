@@ -25,6 +25,9 @@ function composer(c) {
     [path('components/ui/input.tsx')]: { Input: 'input' },
     [path('components/ui/textarea.tsx')]: { Textarea: 'textarea' },
     [path('features/image-studio/AssetImage.tsx')]: { AssetImage: 'img' },
+    [path('features/image-studio/ImageModelPicker.tsx')]: { ImageModelPicker: 'model-picker' },
+    [path('features/image-studio/ImageSizePicker.tsx')]: { ImageSizePicker: 'size-picker', describeImageSize: () => '' },
+    [path('features/image-studio/InputImageStack.tsx')]: { InputImageStack: 'input-stack' },
     [path('features/image-studio/ImageTargetSettings.tsx')]: { ImageTargetSettings: 'target-settings' },
     [path('features/image-studio/TargetParameterForm.tsx')]: { selectClass: '', TargetParameterForm: 'parameters' },
   } });
@@ -37,33 +40,24 @@ function composer(c) {
   };
 }
 
-test('review7: 26ms second click after fast acceptance never becomes a new paid intent; explicit confirmation remains usable', async () => {
+test('review7: after acceptance the same submit button sends the current draft as a fresh job; a double click counts once', async () => {
   const calls = []; const c = await setup({ createJob: async (request, key) => { calls.push({ request, key }); return job; } });
   try {
     c.updateDraft({ prompt: 'cat' }); const ui = composer(c);
-    await ui.click(ui.buttons().find(b => b.props.type === 'submit'));
-    assert.equal(c.view.submission.status, 'accepted');
-    await new Promise(resolve => setTimeout(resolve, 26));
-    const next = ui.buttons().find(b => /重新生成/.test(ui.text(b)));
-    await ui.click(next, 2);
-    assert.equal(calls.length, 1);
-    // The generic form/Enter action also cannot reinterpret acceptance as a new intent.
-    ui.render().props.onSubmit({ preventDefault() {} }); await Promise.resolve();
-    assert.equal(calls.length, 1);
-    await ui.click(ui.buttons().find(b => /重新生成/.test(ui.text(b))), 1);
-    const confirm = ui.buttons().find(b => /确认重新生成/.test(ui.text(b)));
-    assert.ok(confirm, 'a distinct explicit confirmation is required');
-    await ui.click(confirm, 2); assert.equal(calls.length, 1);
-    await ui.click(confirm, 1); assert.equal(calls.length, 2);
-    assert.notEqual(calls[0].key, calls[1].key);
-    await ui.click(confirm, 1); assert.equal(calls.length, 2, 'stale confirmation cannot create another intent');
-    await ui.click(ui.buttons().find(b => /重新生成/.test(ui.text(b))), 0);
-    await ui.click(ui.buttons().find(b => /确认重新生成/.test(ui.text(b))), 0);
-    assert.equal(calls.length, 3, 'keyboard activation can create a fresh explicit intent');
+    const submit = () => ui.buttons().find(b => b.props.type === 'submit');
+    await ui.click(submit());
+    assert.equal(c.view.submission.status, 'accepted'); assert.equal(calls.length, 1);
+    assert.equal(ui.buttons().some(b => /再次生成|确认重新生成|核对原请求/.test(ui.text(b))), false, 'one plain action, no confirmation flow');
+    c.updateDraft({ prompt: 'dog' });
+    await ui.click(submit(), 2); assert.equal(calls.length, 1, 'a double click is a single intent');
+    await ui.click(submit(), 1); assert.equal(calls.length, 2);
+    assert.equal(calls[1].request.prompt, 'dog'); assert.notEqual(calls[0].key, calls[1].key);
+    ui.render().props.onSubmit({ preventDefault() {} }); await Promise.resolve(); await Promise.resolve();
+    assert.equal(calls.length, 3, 'Enter/form submission is also a fresh job'); assert.notEqual(calls[1].key, calls[2].key);
   } finally { c.dispose(); }
 });
 
-test('review7: uncertain submission survives same-project selection, project changes and remount with original frozen request/key', async () => {
+test('review7: uncertain submission stays discoverable across selection, project changes and remount; the next click sends the current draft', async () => {
   const store = storage(); const calls = []; const client = { createJob: async (request, key) => { calls.push({ request, key }); throw new Error('lost receipt'); } };
   const c = await setup(client, store);
   c.updateDraft({ prompt: 'frozen' }); await c.submit(); const first = c.view.submission;
@@ -77,9 +71,7 @@ test('review7: uncertain submission survives same-project selection, project cha
     assert.equal(restored.view.submission?.status, 'unknown');
     assert.equal(restored.view.submission.key, first.key);
     assert.equal(restored.view.draft.prompt, 'edited after submit');
-    await restored.submit(true); // An unresolved request cannot be silently replaced, even by an explicit-new caller.
-    assert.equal(restored.view.submission.key, first.key);
-    await restored.submit(); assert.equal(calls.at(-1).key, first.key); assert.equal(calls.at(-1).request.prompt, 'frozen');
+    await restored.submit(); assert.notEqual(calls.at(-1).key, first.key); assert.equal(calls.at(-1).request.prompt, 'edited after submit');
     const otherOwner = await setup({}, store, 'other', 'b'); assert.equal(otherOwner.view.submission, null); otherOwner.dispose();
     const otherBackend = await setup({}, store, 'o', 'other'); assert.equal(otherBackend.view.submission, null); otherBackend.dispose();
   } finally { restored.dispose(); }
@@ -147,7 +139,7 @@ test('review7: input filtering/removal and operation changes atomically clear or
   } finally { c.dispose(); }
 });
 
-test('review7: settings refresh migrates from old target definitions without replacing project/jobs/frozen submission', async () => {
+test('review7: settings refresh migrates from old target definitions without replacing project/jobs/submission', async () => {
   const old = { ...target, parameters: [
     { key: 'quality', type: 'string', label: 'Quality', enum: ['high', 'low'] },
     { key: 'keep', type: 'string', label: 'Keep' },
@@ -170,10 +162,10 @@ test('review7: settings refresh migrates from old target definitions without rep
     await c.refreshTargets(); assert.deepEqual(c.view.dropped, ['quality', 'changed']);
     c.acknowledgeMigration(); assert.deepEqual(c.validation(), []);
     let replay; c.client.createJob = async (request, key) => { replay = { request, key }; return job; };
-    await c.submit(); assert.equal(replay.key, frozen.key); assert.deepEqual(replay.request.parameters, { quality: 'high', keep: 'yes', changed: 4 });
+    await c.submit(); assert.notEqual(replay.key, frozen.key); assert.deepEqual(replay.request.parameters, { quality: 'low', keep: 'yes', changed: 1 }, 'sends the migrated parameters');
     c.client.listTargets = async () => [{ ...old, enabled: false, disabledReason: 'disabled by settings' }]; await c.refreshTargets();
     assert.match(c.view.notice, /disabled by settings/); assert.ok(c.validation().length);
-    const key = c.view.submission.key; await c.regenerate(key); assert.equal(c.view.submission.key, key);
+    const key = c.view.submission.key; await c.submit(); assert.equal(c.view.submission.key, key, 'a disabled model blocks new requests');
     c.client.listTargets = async () => []; await c.refreshTargets();
     assert.equal(c.view.draft.targetId, 't'); assert.match(c.view.notice, /已删除/); assert.ok(c.validation().length); assert.equal(c.view.submission.key, key);
   } finally { c.dispose(); }
@@ -192,32 +184,32 @@ test('review7: target refresh ignores results after scope change, disposal or a 
   } finally { c.dispose(); }
 });
 
-test('review7: failed durable submission write prevents dispatch, then retries the same key once storage recovers', async () => {
-  const store = storage(); const original = store.setItem; let blocked = true; let calls = 0;
-  store.setItem = (key, value) => { if (blocked && key.includes(':submission:')) throw Error('full'); original(key, value); };
+test('review7: a failed submission record write still dispatches', async () => {
+  const store = storage(); const original = store.setItem; let calls = 0;
+  store.setItem = (key, value) => { if (key.includes(':submission:')) throw Error('full'); original(key, value); };
   const c = await setup({ createJob: async () => { calls++; return job; } }, store);
   try {
-    c.updateDraft({ prompt: 'cat' }); await c.submit(); const key = c.view.submission.key; assert.equal(calls, 0);
-    blocked = false; await c.submit(); assert.equal(calls, 1); assert.equal(c.view.submission.key, key);
+    c.updateDraft({ prompt: 'cat' }); await c.submit();
+    assert.equal(calls, 1); assert.equal(c.view.submission.status, 'accepted');
   } finally { c.dispose(); }
 });
 
-test('review7: replay auth rejection cannot clear an uncertain original or silently issue a new key', async () => {
+test('review7: after an uncertain attempt a rejected retry reports the rejection under its own key', async () => {
   const c = await setup({ createJob: async () => { throw Error('network'); } });
   try {
     c.updateDraft({ prompt: 'cat' }); await c.submit(); const key = c.view.submission.key;
-    c.client.createJob = async () => { throw { status: 401, code: 'IMAGE_AUTH_REQUIRED' }; };
-    await c.submit(); assert.equal(c.view.submission.status, 'unknown'); assert.equal(c.view.submission.key, key);
+    assert.equal(c.view.submission.status, 'unknown'); assert.match(c.view.notice, /提交结果未确认/);
+    const keys = []; c.client.createJob = async (_request, retryKey) => { keys.push(retryKey); throw { status: 401, code: 'IMAGE_AUTH_REQUIRED' }; };
+    await c.submit(); assert.notEqual(keys[0], key); assert.match(c.view.notice, /请求已被拒绝/);
   } finally { c.dispose(); }
 });
 
-test('review7: late original response cannot erase a later explicitly regenerated intent', async () => {
+test('review7: a late original response cannot erase a later request', async () => {
   const pending = deferred(); const c = await setup({ createJob: () => pending.promise });
   try {
     c.updateDraft({ prompt: 'cat' }); const original = c.submit();
     await c.selectProject('q'); await c.selectProject('p');
-    c.client.createJob = async () => job; await c.submit();
-    await c.regenerate(c.view.submission.key); const latest = c.view.submission.key;
+    c.client.createJob = async () => job; await c.submit(); const latest = c.view.submission.key;
     pending.reject({ status: 422, code: 'IMAGE_INVALID_INPUT' }); await original;
     await c.selectProject('q'); await c.selectProject('p'); assert.equal(c.view.submission.key, latest); assert.equal(c.view.submission.status, 'accepted');
   } finally { c.dispose(); }

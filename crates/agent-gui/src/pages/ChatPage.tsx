@@ -19,6 +19,7 @@ import {
   WorkspacePanelGroup,
   WorkspaceToolsPanel,
 } from "@liveagent/ui/components/project-tools/WorkspacePanels";
+import { ThemeToggleButton } from "@liveagent/ui/components/ThemeToggleButton";
 import { useConfirmDialog } from "@liveagent/ui/components/ui/confirm-dialog";
 import { SidebarProvider, useSidebar } from "@liveagent/ui/components/ui/sidebar";
 import { PaneChrome } from "@liveagent/ui/components/workbench/PaneChrome";
@@ -4485,7 +4486,14 @@ function ChatPageContent(props: ChatPageProps) {
                 resourceHost={resourceHost}
                 imageStudioHost={
                   imageStudioHost
-                    ? { ...imageStudioHost, onOpenSettings: () => onOpenSettings("image-studio") }
+                    ? {
+                        ...imageStudioHost,
+                        onOpenSettings: () => onOpenSettings("image-studio"),
+                        // Desktop hub views have no app header, so the page carries the toggle.
+                        headerActions: (
+                          <ThemeToggleButton theme={settings.theme} onToggle={onToggleTheme} />
+                        ),
+                      }
                     : undefined
                 }
                 isAgentMode={isAgentMode}

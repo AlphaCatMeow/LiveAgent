@@ -126,6 +126,7 @@ async function mounted(run) {
 const uiMocks = {
   react: React,
   "react/jsx-runtime": jsxRuntime,
+  "../../components/IconSet": new Proxy({}, { get: () => () => null }),
   "../../components/ui/button": { Button: ({ variant: _variant, size: _size, ...props }) => React.createElement("button", props) },
   "../../components/ui/input": { Input: props => React.createElement("input", props) },
 };
@@ -136,7 +137,7 @@ const click = async (container, text) => {
   await React.act(async () => button.click());
 };
 
-test("mounted workbench receives a same-client settings overlay save without losing its draft or remounting", async () => {
+test("mounted workbench receives a same-client provider settings save without losing its draft or remounting", async () => {
   await mounted(async ({ root, container }) => {
     let controller;
     let mounts = 0;
@@ -154,23 +155,24 @@ test("mounted workbench receives a same-client settings overlay save without los
       "./ResultGallery": { ResultGallery: () => null },
     } });
     const { ImageStudioPage } = uiLoader.loadModule("@liveagent/ui/features/image-studio/ImageStudioPage");
-    const { ImageSettings } = uiLoader.loadModule("@liveagent/ui/pages/settings/ImageSettings");
     const { client, calls } = mockBackend();
     Object.assign(client, {
       capabilities: async () => ({ supported: true }),
       listProjects: async () => ({ items: [{ id: "p", title: "Project" }] }),
       listJobs: async () => ({ items: [] }),
     });
-    const render = (showWorkbench = true, activeClient = client) => root.render(React.createElement(React.Fragment, null,
-      showWorkbench && React.createElement(ImageStudioPage, { key: "workbench", client: activeClient, ownerId: "owner", backendId: "backend" }),
-      React.createElement(ImageSettings, { key: "settings", client }),
-    ));
+    const render = (showWorkbench = true, activeClient = client) => root.render(
+      showWorkbench ? React.createElement(ImageStudioPage, { key: "workbench", client: activeClient, ownerId: "owner", backendId: "backend" }) : null,
+    );
     await React.act(async () => render());
     const original = controller;
     await React.act(async () => controller.updateDraft({ prompt: "Keep this draft" }));
     assert.equal(container.querySelector("output").textContent, "it_test:true");
-    await click(container, "禁用目标");
-    await click(container, "保存设置");
+    assert.doesNotMatch(container.textContent, /目标设置/);
+    // Provider settings save through the existing client, while this page remains mounted.
+    const edited = fixture();
+    edited.targets[0].enabled = false;
+    await React.act(async () => client.saveSettings(model.settingsUpdate(edited)));
     assert.equal(calls.filter(call => call.path.endsWith("/targets")).length, 2);
     assert.equal(container.querySelector("output").textContent, "it_test:false");
     assert.equal(controller, original);

@@ -526,6 +526,9 @@ export function createImageStudioClient(options: ImageStudioClientOptions): Imag
       page(await json(`/jobs${query({ projectId, cursor })}`), parseJob),
     cancelJob: async (id) =>
       parseJobEnvelope(await json(`/jobs/${segment(id)}/cancel`, { method: "POST" })),
+    deleteJob: async (id) => {
+      await json(`/jobs/${segment(id)}`, { method: "DELETE" });
+    },
     subscribe: (id, afterSeq, onEvent, signal) =>
       scoped(signal, async (active) => {
         let lastSeq = safeInteger(afterSeq);

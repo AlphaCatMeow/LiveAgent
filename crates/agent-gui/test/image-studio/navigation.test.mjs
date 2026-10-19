@@ -6,9 +6,9 @@ import { createDomTestEnv } from "../helpers/dom-test-env.mjs";
 let scopes = [];
 const env = await createDomTestEnv({ mocks: {
   "../i18n": { useLocale: () => ({ t: (key) => key }) },
-  "../features/image-studio/ImageStudioPage": { ImageStudioPage: ({ backendId }) => {
+  "../features/image-studio/ImageStudioPage": { ImageStudioPage: ({ backendId, headerActions }) => {
     useEffect(() => { scopes.push(`mount:${backendId}`); return () => scopes.push(`unmount:${backendId}`); }, [backendId]);
-    return React.createElement("div", { "data-image-studio": backendId });
+    return React.createElement("div", { "data-image-studio": backendId }, headerActions);
   } },
   "../pages/mcp-hub/McpHubPage": { McpHubPage: () => null },
   "../pages/planning/PlanningPage": { PlanningPage: () => null },
@@ -47,5 +47,20 @@ test("hub navigation retains chat state and resets image scope; absent host has 
     assert.equal(chat.parentElement.hidden, false);
     assert.equal(mounts, 1);
     assert.equal(unmounts, 0);
+  } finally { await env.act(async () => root.unmount()); }
+});
+
+test("image studio shows exactly the header actions its host supplies (desktop: theme toggle; web: none, its app header has one)", async () => {
+  const container = document.createElement("div");
+  const root = env.createRoot(container);
+  const render = (headerActions) => env.act(async () => root.render(React.createElement(ApplicationView, {
+    settings: { theme: "light" }, setSettings() {}, isAgentMode: true, chat: { content: null }, activeView: "image-studio-hub",
+    imageStudioHost: { client: {}, ownerId: "local", backendId: "t", scopeKey: "t", headerActions },
+  })));
+  try {
+    await render(undefined);
+    assert.equal(container.querySelector("[data-image-studio] button"), null, "no implicit second theme toggle");
+    await render(React.createElement("button", { "data-host-action": "" }, "theme"));
+    assert.ok(container.querySelector("[data-image-studio] [data-host-action]"));
   } finally { await env.act(async () => root.unmount()); }
 });

@@ -748,3 +748,30 @@ test("verification journal rejects corruption, competing keys and resetting unre
   );
   assert.equal(calls, 2);
 });
+
+test("deleteJob sends DELETE to the job path and surfaces 409 as a typed error", async () => {
+  const calls = [];
+  let busy = false;
+  const client = setup(async (url, init) => {
+    calls.push({ url: new URL(url), init });
+    if (busy)
+      return json(
+        {
+          version,
+          error: {
+            code: "IMAGE_PROJECT_BUSY",
+            message: "Image job is still active",
+            retryable: false,
+            requestId: "r",
+          },
+        },
+        409,
+      );
+    return json({ version, deleted: true });
+  });
+  await client.deleteJob("ij_fixture");
+  assert.equal(calls[0].init.method, "DELETE");
+  assert.equal(calls[0].url.pathname, "/proxy/v1/image/jobs/ij_fixture");
+  busy = true;
+  await assert.rejects(client.deleteJob("ij_fixture"), errorCode("IMAGE_PROJECT_BUSY", 409));
+});

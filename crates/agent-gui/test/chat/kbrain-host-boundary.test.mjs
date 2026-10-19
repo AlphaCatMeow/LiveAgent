@@ -21,165 +21,188 @@ test("K-brain capabilities disable the replaced desktop runtime", () => {
 });
 
 for (const executionMode of ["agent", "chat"]) {
-  test(`shipped useSendChatTurn ${executionMode} does not run a second desktop runtime`, async () => {
-    const ipc = [];
-    const forbidden = (name) => () => {
-      ipc.push(name);
-      throw new Error(`Forbidden: ${name}`);
-    };
-    let sent = false;
-    const loader = createTsModuleLoader({
-      mocks: {
-        react: { useCallback: (callback) => callback },
-        [source("lib/host.ts")]: {
-          liveAgentRuntimeCapabilities: () => capabilities,
-          isKBrainBackendEnabled: () => true,
-          isKBrainBrowserHost: () => false,
-          isTauriHost: () => true,
-        },
-        "@tauri-apps/api/core": { invoke: forbidden("native invoke") },
-        [source("lib/trajectory/recorderRegistry.ts")]: {
-          acquireTrajectoryRecorder: forbidden("trajectory recorder"),
-          resolveTrajectoryTurnNumber: forbidden("trajectory number"),
-        },
-        [source("pages/chat/runtime/conversationTitleJob.ts")]: {
-          startConversationTitleJob: () => null,
-        },
-        [source("lib/providers/llm.ts")]: {
-          createProviderRuntimeConfig: () => ({
-            backend: "kbrain",
-            baseUrl: "",
-            modelConfig: {},
+  for (const remote of [false, true]) {
+    for (const workdir of ["/workspace", "C:\\Users\\Tester\\workspace"]) {
+      test(`shipped useSendChatTurn ${executionMode} ${remote ? "remote" : "local"} ${workdir} runs only K-brain`, async () => {
+        const ipc = [];
+        const forbidden = (name) => () => {
+          ipc.push(name);
+          throw new Error(`Forbidden: ${name}`);
+        };
+        let sent = false;
+        const mirrored = [];
+        const loader = createTsModuleLoader({
+          mocks: {
+            react: { useCallback: (callback) => callback },
+            [source("lib/host.ts")]: {
+              liveAgentRuntimeCapabilities: () => capabilities,
+              isKBrainBackendEnabled: () => true,
+              isKBrainBrowserHost: () => false,
+              isTauriHost: () => true,
+            },
+            "@tauri-apps/api/core": { invoke: forbidden("native invoke") },
+            [source("lib/trajectory/recorderRegistry.ts")]: {
+              acquireTrajectoryRecorder: forbidden("trajectory recorder"),
+              resolveTrajectoryTurnNumber: forbidden("trajectory number"),
+            },
+            [source("pages/chat/runtime/conversationTitleJob.ts")]: {
+              startConversationTitleJob: () => null,
+            },
+            [source("lib/providers/llm.ts")]: {
+              createProviderRuntimeConfig: () => ({
+                backend: "kbrain",
+                baseUrl: "",
+                modelConfig: {},
+              }),
+              createModelFromConfig: () => ({
+                id: "model",
+                provider: "openai",
+                api: "openai-completions",
+              }),
+            },
+          },
+        });
+        const { getDefaultSettings } = loader.loadModule("src/lib/settings/index.ts");
+        const settings = getDefaultSettings();
+        settings.system.executionMode = executionMode;
+        settings.system.workdir = workdir;
+        settings.remote = {
+          ...settings.remote,
+          enabled: false,
+          gatewayUrl: "https://old-gateway.invalid",
+          token: "old-token",
+        };
+        settings.skills = {
+          ...settings.skills,
+          enabled: true,
+          selected: ["missing-local-skill"],
+        };
+        settings.selectedModel = { customProviderId: "backend", model: "model" };
+        settings.customProviders = [{ id: "backend", type: "codex", activeModels: ["model"] }];
+        const { createConversationStateFromContext } = loader.loadModule(
+          "src/lib/chat/conversation/conversationState.ts",
+        );
+        const entry = {
+          state: createConversationStateFromContext({
+            systemPrompt: "LOCAL PROMPT MUST NOT LEAK",
+            messages: [],
           }),
-          createModelFromConfig: () => ({
-            id: "model",
-            provider: "openai",
-            api: "openai-completions",
+          sessionId: "s",
+          createdAt: 1,
+          compactionStatus: { phase: "idle" },
+          isSending: false,
+        };
+        const cache = new Map([["conversation", entry]]);
+        const transcriptStore = {
+          getSnapshot: () => ({ liveRounds: [], draftAssistantText: "" }),
+        };
+        const noop = () => {};
+        const { useSendChatTurn } = loader.loadModule("src/pages/chat/runtime/useSendChatTurn.ts");
+        const { send } = useSendChatTurn({
+          settings,
+          workspaceProjects: [{ id: "p", path: workdir }],
+          setSettings: forbidden("settings mutation"),
+          getMcpSettings: forbidden("MCP settings"),
+          getToolPolicies: forbidden("tool policies"),
+          t: (key) => key,
+          sidebarStore: {
+            peek: () => undefined,
+            upsertLocal: noop,
+            removeLocal: noop,
+          },
+          titleJobRef: { current: null },
+          chatRuntimeHost: {
+            runTurn: async ({ params }) => {
+              sent = true;
+              assert.equal(params.runtime.backend, "kbrain");
+              assert.equal(params.conversationCwd, workdir);
+              if (remote) assert.equal(params.clientRequestId, "browser-request");
+              const context = params.buildPreparedContext(params.getNextConversationState());
+              assert.equal(context.systemPrompt, undefined);
+              assert.equal(context.tools, undefined);
+              assert.equal(
+                typeof context.messages.at(-1).content === "string"
+                  ? context.messages.at(-1).content
+                  : context.messages.at(-1).content[0].text,
+                "hello",
+              );
+              assert.equal(params.trajectory, undefined);
+              if (executionMode === "agent") assert.equal(params.effectiveSkillsEnabled, false);
+            },
+          },
+          subagentStoresRef: { current: { get: () => ({}) } },
+          scrollFollowRef: { current: null },
+          composerRef: { current: null },
+          composerDraftCacheRef: { current: new Map() },
+          clearCachedComposerDraft: noop,
+          resetVisibleTransientState: noop,
+          isImportingPastedTextRef: { current: false },
+          setIsImportingPastedText: noop,
+          setErrorMessage: forbidden("error message"),
+          hydration: { isHydrating: () => false, isFailed: () => false },
+          currentConversationIdRef: { current: "conversation" },
+          conversationRuntimeCacheRef: { current: cache },
+          updateConversationRuntimeEntry: (id, update) => cache.set(id, update(cache.get(id))),
+          setConversationAbortController: noop,
+          getConversationStopRequestVersion: () => 0,
+          isConversationStopRequested: () => false,
+          consumeConversationStop: noop,
+          setConversationStopHandler: noop,
+          clearConversationStopHandler: noop,
+          setConversationSendingState: noop,
+          pendingUploadedFiles: [],
+          getPendingUploadsForConversation: () => [],
+          setPendingUploadsForConversation: noop,
+          getConversationLiveTranscriptStore: () => transcriptStore,
+          getCompactionController: forbidden("frontend compaction controller"),
+          clearAbortSnapshot: noop,
+          resetLiveTranscript: noop,
+          settleLiveTranscript: noop,
+          updateToolStatus: noop,
+          queueGatewayBridgeEventForRequest: remote
+            ? (_id, event) => mirrored.push(event)
+            : forbidden("gateway events"),
+          flushGatewayBridgeEventsForRequest: remote ? noop : forbidden("gateway flush"),
+          registerGatewayRunMirror: remote ? noop : forbidden("gateway register"),
+          finishGatewayRunMirror: remote ? noop : forbidden("gateway finish"),
+          gatewayBridgeHistorySummaryRef: { current: new Map() },
+          availableSkills: [],
+          skillsRootDir: "/desktop/skills",
+          refreshSkills: forbidden("skills discovery"),
+          persistConversation: async () => ({}),
+          pruneIdleConversationCaches: noop,
+          requestQueuedChatTurnProcessing: noop,
+        });
+        let markedStarted = false;
+        assert.equal(
+          await send({
+            textOverride: "hello",
+            ...(remote
+              ? {
+                  conversationIdOverride: "conversation",
+                  workdirOverride: workdir,
+                  gatewayBridgeRequestOverride: {
+                    requestId: "remote-request",
+                    conversationId: "conversation",
+                    clientRequestId: "browser-request",
+                    workerId: "worker",
+                    workdirOverride: workdir,
+                  },
+                  beforeRuntimeStart: async () => {
+                    markedStarted = true;
+                  },
+                }
+              : {}),
           }),
-        },
-      },
-    });
-    const { getDefaultSettings } = loader.loadModule(
-      "src/lib/settings/index.ts",
-    );
-    const settings = getDefaultSettings();
-    settings.system.executionMode = executionMode;
-    settings.system.workdir = "/workspace";
-    settings.remote = {
-      ...settings.remote,
-      enabled: false,
-      gatewayUrl: "https://old-gateway.invalid",
-      token: "old-token",
-    };
-    settings.skills = {
-      ...settings.skills,
-      enabled: true,
-      selected: ["missing-local-skill"],
-    };
-    settings.selectedModel = { customProviderId: "backend", model: "model" };
-    settings.customProviders = [
-      { id: "backend", type: "codex", activeModels: ["model"] },
-    ];
-    const { createConversationStateFromContext } = loader.loadModule(
-      "src/lib/chat/conversation/conversationState.ts",
-    );
-    const entry = {
-      state: createConversationStateFromContext({
-        systemPrompt: "LOCAL PROMPT MUST NOT LEAK",
-        messages: [],
-      }),
-      sessionId: "s",
-      createdAt: 1,
-      compactionStatus: { phase: "idle" },
-      isSending: false,
-    };
-    const cache = new Map([["conversation", entry]]);
-    const transcriptStore = {
-      getSnapshot: () => ({ liveRounds: [], draftAssistantText: "" }),
-    };
-    const noop = () => {};
-    const { useSendChatTurn } = loader.loadModule(
-      "src/pages/chat/runtime/useSendChatTurn.ts",
-    );
-    const { send } = useSendChatTurn({
-      settings,
-      workspaceProjects: [{ id: "p", path: "/workspace" }],
-      setSettings: forbidden("settings mutation"),
-      getMcpSettings: forbidden("MCP settings"),
-      getToolPolicies: forbidden("tool policies"),
-      t: (key) => key,
-      sidebarStore: {
-        peek: () => undefined,
-        upsertLocal: noop,
-        removeLocal: noop,
-      },
-      titleJobRef: { current: null },
-      chatRuntimeHost: {
-        runTurn: async ({ params }) => {
-          sent = true;
-          assert.equal(params.runtime.backend, "kbrain");
-          const context = params.buildPreparedContext(
-            params.getNextConversationState(),
-          );
-          assert.equal(context.systemPrompt, undefined);
-          assert.equal(context.tools, undefined);
-          assert.equal(
-            typeof context.messages.at(-1).content === "string"
-              ? context.messages.at(-1).content
-              : context.messages.at(-1).content[0].text,
-            "hello",
-          );
-          assert.equal(params.trajectory, undefined);
-          if (executionMode === "agent")
-            assert.equal(params.effectiveSkillsEnabled, false);
-        },
-      },
-      subagentStoresRef: { current: { get: () => ({}) } },
-      scrollFollowRef: { current: null },
-      composerRef: { current: null },
-      composerDraftCacheRef: { current: new Map() },
-      clearCachedComposerDraft: noop,
-      resetVisibleTransientState: noop,
-      isImportingPastedTextRef: { current: false },
-      setIsImportingPastedText: noop,
-      setErrorMessage: forbidden("error message"),
-      hydration: { isHydrating: () => false, isFailed: () => false },
-      currentConversationIdRef: { current: "conversation" },
-      conversationRuntimeCacheRef: { current: cache },
-      updateConversationRuntimeEntry: (id, update) =>
-        cache.set(id, update(cache.get(id))),
-      setConversationAbortController: noop,
-      getConversationStopRequestVersion: () => 0,
-      isConversationStopRequested: () => false,
-      consumeConversationStop: noop,
-      setConversationStopHandler: noop,
-      clearConversationStopHandler: noop,
-      setConversationSendingState: noop,
-      pendingUploadedFiles: [],
-      getPendingUploadsForConversation: () => [],
-      setPendingUploadsForConversation: noop,
-      getConversationLiveTranscriptStore: () => transcriptStore,
-      getCompactionController: forbidden("frontend compaction controller"),
-      clearAbortSnapshot: noop,
-      resetLiveTranscript: noop,
-      settleLiveTranscript: noop,
-      updateToolStatus: noop,
-      queueGatewayBridgeEventForRequest: forbidden("gateway events"),
-      flushGatewayBridgeEventsForRequest: forbidden("gateway flush"),
-      registerGatewayRunMirror: forbidden("gateway register"),
-      finishGatewayRunMirror: forbidden("gateway finish"),
-      gatewayBridgeHistorySummaryRef: { current: new Map() },
-      availableSkills: [],
-      skillsRootDir: "/desktop/skills",
-      refreshSkills: forbidden("skills discovery"),
-      persistConversation: async () => ({}),
-      pruneIdleConversationCaches: noop,
-      requestQueuedChatTurnProcessing: noop,
-    });
-    assert.equal(await send({ textOverride: "hello" }), true);
-    assert.equal(sent, true);
-    assert.deepEqual(ipc, []);
-  });
+          true,
+        );
+        assert.equal(markedStarted, remote);
+        if (remote) assert(mirrored.some((event) => event.type === "user_message"));
+        assert.equal(sent, true);
+        assert.deepEqual(ipc, []);
+      });
+    }
+  }
 }
 
 test("native K-brain host routes backend-owned memory over HTTP and rejects desktop runtime commands", async (t) => {
@@ -204,7 +227,12 @@ test("native K-brain host routes backend-owned memory over HTTP and rejects desk
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
-  t.after(() => new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))));
+  t.after(
+    () =>
+      new Promise((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      ),
+  );
 
   const host = createTsModuleLoader().loadModule("src/lib/host.ts");
   const loader = createTsModuleLoader({
@@ -233,12 +261,14 @@ test("native K-brain host routes backend-owned memory over HTTP and rejects desk
   const { invoke } = loader.loadModule("src/shims/tauriCore.ts");
   const memoryOverview = await invoke("memory_index_overview", { args: { cwd: "/workspace" } });
   assert.deepEqual(memoryOverview, { overview: "fixture-memory-overview" });
-  assert.deepEqual(memoryRequests, [{
-    method: "POST",
-    path: "/v1/memory/manage",
-    authorization: "Bearer fixture-token",
-    body: { command: "memory_index_overview", args: { cwd: "/workspace" } },
-  }]);
+  assert.deepEqual(memoryRequests, [
+    {
+      method: "POST",
+      path: "/v1/memory/manage",
+      authorization: "Bearer fixture-token",
+      body: { command: "memory_index_overview", args: { cwd: "/workspace" } },
+    },
+  ]);
   assert.deepEqual(native, [], "backend-owned memory must not invoke Tauri");
 
   for (const command of [
@@ -299,9 +329,7 @@ test("K-brain hooks never execute the desktop runner", async () => {
       },
     },
   });
-  const { createHookRunScope } = loader.loadModule(
-    "src/lib/automation/hookRunner.ts",
-  );
+  const { createHookRunScope } = loader.loadModule("src/lib/automation/hookRunner.ts");
   const scope = createHookRunScope({
     conversationId: "c",
     hooks: [
@@ -348,8 +376,9 @@ test("checkpoint action carries an explicit disabled reason to the rendered user
       },
     },
   });
-  const { CheckpointRewindProvider, useCheckpointRewindAction } =
-    loader.loadModule("@liveagent/ui/lib/chat/checkpointRewind");
+  const { CheckpointRewindProvider, useCheckpointRewindAction } = loader.loadModule(
+    "@liveagent/ui/lib/chat/checkpointRewind",
+  );
   const reason = "Checkpoint rewind is not supported in K-brain mode.";
   const element = CheckpointRewindProvider({
     conversationId: "c",
@@ -372,11 +401,6 @@ test("frontend builtin tool registry fails closed in K-brain mode", async () => 
       [source("lib/host.ts")]: { isKBrainBackendEnabled: () => true },
     },
   });
-  const { buildBuiltinToolRegistry } = loader.loadModule(
-    "src/lib/tools/builtinRegistry.ts",
-  );
-  await assert.rejects(
-    buildBuiltinToolRegistry({}),
-    /tools are owned by the backend/,
-  );
+  const { buildBuiltinToolRegistry } = loader.loadModule("src/lib/tools/builtinRegistry.ts");
+  await assert.rejects(buildBuiltinToolRegistry({}), /tools are owned by the backend/);
 });

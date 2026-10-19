@@ -27,7 +27,11 @@ impl GatewayController {
         .await
         .map_err(|e| format!("load gateway settings snapshot join failed: {e}"))??;
 
-        let snapshot = merge_settings_sync_snapshot(db_snapshot, cached_snapshot.as_ref())?;
+        let mut snapshot = merge_settings_sync_snapshot(db_snapshot, cached_snapshot.as_ref())?;
+        let backend =
+            crate::services::gateway_bridge::kbrain_gateway_settings(self.app_handle.clone())
+                .await?;
+        apply_kbrain_model_settings(&mut snapshot, &backend)?;
         self.store_settings_snapshot(snapshot)
     }
 
@@ -41,6 +45,33 @@ impl GatewayController {
         *guard = Some(snapshot.clone());
         Ok(snapshot)
     }
+}
+
+pub(crate) fn apply_kbrain_model_settings(
+    snapshot: &mut Value,
+    backend: &Value,
+) -> Result<(), String> {
+    let providers = backend
+        .get("providers")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "K-brain settings response is missing providers".to_string())?;
+    snapshot["customProviders"] = Value::Array(providers.clone());
+    snapshot["selectedModel"] = match (
+        backend
+            .get("defaultProvider")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty()),
+        backend
+            .get("defaultModel")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty()),
+    ) {
+        (Some(provider), Some(model)) => {
+            serde_json::json!({"customProviderId": provider, "model": model})
+        }
+        _ => Value::Null,
+    };
+    Ok(())
 }
 
 pub(crate) fn merge_settings_sync_snapshot(

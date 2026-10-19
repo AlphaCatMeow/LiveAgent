@@ -95,6 +95,7 @@ export type GatewayComposerActionEvent = {
   prompt: string;
   reasoning: string;
   loopId: string;
+  data?: Record<string, unknown> | null;
 };
 
 export type ActiveGatewayBridgeRequest = {

@@ -58,7 +58,7 @@ import {
 } from "../../../lib/chat/page/chatPageHelpers";
 import { skillMentionInjection } from "../../../lib/chat/skills/mentionInjection";
 import { createStreamDebugLogger } from "../../../lib/debug/agentDebug";
-import { liveAgentRuntimeCapabilities } from "../../../lib/host";
+import { isTauriHost, liveAgentRuntimeCapabilities } from "../../../lib/host";
 import { showGoalProgress } from "../../../lib/kbrain/goalNotice";
 import { createModelFromConfig, createProviderRuntimeConfig } from "../../../lib/providers/llm";
 import {
@@ -328,7 +328,7 @@ export function useSendChatTurn(params: UseSendChatTurnParams) {
     editResendBaseMessageRef?: HistoryMessageRef;
   }) {
     const capabilities = liveAgentRuntimeCapabilities();
-    if (!capabilities.gatewayMirror && overrides?.gatewayBridgeRequestOverride) {
+    if (!isTauriHost() && overrides?.gatewayBridgeRequestOverride) {
       setErrorMessage("LiveAgent Gateway chat requests are unavailable on this host.");
       return false;
     }

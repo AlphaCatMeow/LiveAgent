@@ -27,6 +27,7 @@ import {
   type PrepareEditResend,
 } from "./gatewayBridgeTypes";
 import { runGatewayComposerAction } from "./gatewayComposerActions";
+import { runGatewayHistoryAction } from "./gatewayHistoryActions";
 
 type UseGatewayBridgeListenersParams = GatewayBridgeRuntimeRefs & {
   prepareEditResend?: PrepareEditResend;
@@ -809,7 +810,7 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
       unlistenClarifyTurnRequested = dispose;
     });
 
-    // WebUI 的 /goal clear 与 /loop：对话到 K-brain 会话的映射只在这里，执行后经
+    // WebUI 指令和历史读取复用桌面的 K-brain 会话映射，执行后经
     // gateway_composer_action_respond 把结果交回 Rust（Rust 侧有超时兜底）。
     const composerActionClient = isKBrainBackendEnabled() ? createKBrainClient() : undefined;
     const handleComposerActionRequested = async (event: Event<GatewayComposerActionEvent>) => {
@@ -817,11 +818,14 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
       let result: unknown;
       let errorMessage: string | undefined;
       try {
-        result = await runGatewayComposerAction(event.payload, {
-          client: composerActionClient,
-          getKBrainSessionId: (conversationId) => getKBrainSessionId(conversationId),
-          onGoalState: publishGoalState,
-        });
+        result =
+          event.payload.kind === "history"
+            ? await runGatewayHistoryAction(event.payload)
+            : await runGatewayComposerAction(event.payload, {
+                client: composerActionClient,
+                getKBrainSessionId: (conversationId) => getKBrainSessionId(conversationId),
+                onGoalState: publishGoalState,
+              });
       } catch (error) {
         errorMessage = asErrorMessage(error, "Composer command failed.");
       }

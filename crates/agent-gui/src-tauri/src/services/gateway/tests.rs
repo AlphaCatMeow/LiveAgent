@@ -18,6 +18,40 @@ use serde_json::{json, Value};
 use std::time::{Duration, Instant};
 
 #[test]
+fn remote_chat_failure_preserves_actionable_error_for_webui() {
+    let envelope = super::build_gateway_chat_control_event_envelope(
+        "request-1".into(), "conversation-1".into(), "failed",
+        "desktop_runtime_rejected".into(), "Backend request failed".into(),
+    );
+    let Some(proto::agent_envelope::Payload::ChatControl(event)) = envelope.payload else {
+        panic!("missing chat control event");
+    };
+    assert_eq!(event.state, "failed");
+    assert_eq!(event.request_id, "request-1");
+    assert_eq!(event.error_code, "desktop_runtime_rejected");
+    assert_eq!(event.message, "Backend request failed");
+}
+
+#[test]
+fn gateway_model_snapshot_uses_backend_instead_of_legacy_providers() {
+    let mut snapshot = json!({
+        "customProviders": [{"id": "legacy", "activeModels": ["old-model"]}],
+        "selectedModel": {"customProviderId": "legacy", "model": "old-model"},
+        "system": {"workdir": "C:\\Users\\Tester\\workspace"}
+    });
+    super::apply_kbrain_model_settings(&mut snapshot, &json!({
+        "providers": [{"id": "backend", "activeModels": ["new-model"]}],
+        "defaultProvider": "backend", "defaultModel": "new-model"
+    })).unwrap();
+    assert_eq!(snapshot["customProviders"][0]["id"], "backend");
+    assert_eq!(snapshot["selectedModel"]["model"], "new-model");
+    assert_eq!(snapshot["system"]["workdir"], "C:\\Users\\Tester\\workspace");
+    super::apply_kbrain_model_settings(&mut snapshot, &json!({"providers": []})).unwrap();
+    assert_eq!(snapshot["selectedModel"], Value::Null);
+    assert!(super::apply_kbrain_model_settings(&mut snapshot, &json!({})).is_err());
+}
+
+#[test]
 fn provider_usage_response_serializes_only_result_json() {
     let response = gateway_bridge::provider_usage_response(ProviderUsageResult {
         data: vec![UsageData {

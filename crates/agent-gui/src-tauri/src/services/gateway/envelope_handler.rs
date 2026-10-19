@@ -30,6 +30,31 @@ impl GatewayController {
         envelope: proto::GatewayEnvelope,
     ) -> Result<(), String> {
         let request_id = envelope.request_id.clone();
+        if matches!(
+            envelope.payload.as_ref(),
+            Some(
+                proto::gateway_envelope::Payload::HistoryList(_)
+                    | proto::gateway_envelope::Payload::HistoryWorkdirs(_)
+                    | proto::gateway_envelope::Payload::HistoryGet(_)
+                    | proto::gateway_envelope::Payload::HistoryRename(_)
+                    | proto::gateway_envelope::Payload::HistoryPin(_)
+                    | proto::gateway_envelope::Payload::HistorySetCwd(_)
+                    | proto::gateway_envelope::Payload::HistoryDelete(_)
+            )
+        ) {
+            let controller = Arc::clone(self);
+            tauri::async_runtime::spawn(async move {
+                if let Some(payload) = envelope.payload {
+                    if let Err(error) = controller
+                        .handle_kbrain_history_request(request_id, &payload)
+                        .await
+                    {
+                        eprintln!("gateway K-brain history request failed: {error}");
+                    }
+                }
+            });
+            return Ok(());
+        }
 
         match envelope.payload {
             Some(proto::gateway_envelope::Payload::Ping(ping)) => {
@@ -553,7 +578,7 @@ impl GatewayController {
                 Ok(())
             }
             Some(proto::gateway_envelope::Payload::ProviderList(_request)) => {
-                match gateway_bridge::handle_provider_list().await {
+                match gateway_bridge::handle_provider_list(self.app_handle.clone()).await {
                     Ok(response) => {
                         self.send_agent_envelope(proto::AgentEnvelope {
                             request_id,

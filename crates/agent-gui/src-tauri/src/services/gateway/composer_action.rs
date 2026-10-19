@@ -37,6 +37,7 @@ pub struct GatewayComposerActionEvent {
     pub prompt: String,
     pub reasoning: String,
     pub loop_id: String,
+    pub data: Option<Value>,
 }
 
 /// TS → Rust：result 是 K-brain 的 JSON 响应（goal 状态或 loops 列表）。
@@ -106,7 +107,7 @@ pub(crate) fn loop_response(value: &Value) -> proto::LoopManageResponse {
 }
 
 impl GatewayController {
-    async fn run_composer_action(
+    pub(crate) async fn run_composer_action(
         self: &Arc<Self>,
         event: GatewayComposerActionEvent,
     ) -> ComposerActionOutcome {
@@ -158,6 +159,7 @@ impl GatewayController {
                 prompt: String::new(),
                 reasoning: String::new(),
                 loop_id: String::new(),
+                data: None,
             })
             .await;
         match outcome {
@@ -191,6 +193,7 @@ impl GatewayController {
                 prompt: request.prompt,
                 reasoning: request.reasoning.trim().to_string(),
                 loop_id: request.loop_id.trim().to_string(),
+                data: None,
             })
             .await;
         match outcome {

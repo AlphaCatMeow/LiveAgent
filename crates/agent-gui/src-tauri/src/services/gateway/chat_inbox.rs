@@ -539,6 +539,14 @@ impl GatewayController {
                 &error_code,
                 &message,
             )?;
+            self.send_gateway_chat_control_event_with_details(
+                request_id,
+                conversation_id,
+                "failed",
+                error_code,
+                message,
+            )
+            .await?;
         }
         Ok(())
     }

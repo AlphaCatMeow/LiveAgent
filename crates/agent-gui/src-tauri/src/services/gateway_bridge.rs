@@ -501,13 +501,23 @@ pub async fn handle_history_delete(
     Ok(proto::HistoryDeleteResponse {})
 }
 
-pub async fn handle_provider_list() -> Result<proto::ProviderListResponse, String> {
-    let providers = tauri::async_runtime::spawn_blocking(move || {
-        let conn = open_db()?;
-        load_providers(&conn)
+pub(crate) async fn kbrain_gateway_settings(app: AppHandle) -> Result<Value, String> {
+    let backend = app
+        .try_state::<Arc<KBrainBackendState>>()
+        .ok_or_else(|| "K-brain backend state is unavailable".to_string())?;
+    let connection = tauri::async_runtime::spawn_blocking({
+        let backend = Arc::clone(backend.inner());
+        let app = app.clone();
+        move || backend.ensure_started(&app)
     })
     .await
-    .map_err(|e| format!("gateway provider list join failed: {e}"))??;
+    .map_err(|error| format!("K-brain backend startup task failed: {error}"))??;
+    kbrain_prompt_request(&connection, reqwest::Method::GET, "/v1/settings", None).await
+}
+
+pub async fn handle_provider_list(app: AppHandle) -> Result<proto::ProviderListResponse, String> {
+    let settings = kbrain_gateway_settings(app).await?;
+    let providers = settings.get("providers").cloned();
 
     let providers_json = serde_json::to_string(&sanitize_provider_summaries(providers)?)
         .map_err(|e| format!("serialize gateway provider list failed: {e}"))?;

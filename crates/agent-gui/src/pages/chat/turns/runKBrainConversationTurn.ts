@@ -35,7 +35,8 @@ import {
 } from "../../../lib/kbrain/uploadStagingRoot";
 import { requestBackendQuestion } from "../../../lib/tools/askUserQuestionTools";
 import { projectBackendPlan } from "../../../lib/tools/planModeTools";
-import { requestToolApproval } from "../../../lib/tools/toolApproval";
+import { hasPendingToolApproval, requestToolApproval } from "../../../lib/tools/toolApproval";
+import { buildGatewayToolCallPreviewArguments } from "./gatewayToolPreview";
 import type { RunAgentConversationTurnParams } from "./runAgentConversationTurn";
 import type { RunTextConversationTurnParams } from "./runTextConversationTurn";
 
@@ -109,6 +110,7 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
           .join("");
   const results = new Map<string, ToolResultMessage>();
   const calls = new Map<string, ToolCall>();
+  const callRounds = new Map<string, number>();
   const approvalController = new AbortController();
   const cancelApprovals = () => approvalController.abort();
   cancellation.userStop.signal.addEventListener("abort", cancelApprovals, {
@@ -140,6 +142,7 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
   };
   const onToolCall = (call: ToolCall) => {
     calls.set(call.id, call);
+    callRounds.set(call.id, round);
     update((target) => ({
       ...upsertToolCallToRound(collapseThinking(target), call),
       runningToolCallIds: [...new Set([...target.runningToolCallIds, call.id])],
@@ -269,8 +272,25 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
           }));
         },
         onPermissionRequest: async (request) => {
-          const settlement = await requestToolApproval({
-            toolCallId: request.permission_id,
+          // Key the approval by its tool call so the Gateway preview overlays the
+          // pending marker and scope on that call for WebUI; re-push the call when
+          // the approval starts and settles. Without a known, free call id the
+          // permission id still works for the desktop bar.
+          const call = request.tool_call_id ? calls.get(request.tool_call_id) : undefined;
+          const tiedCall = call && !hasPendingToolApproval(call.id) ? call : undefined;
+          const syncGatewayCall = () => {
+            if (!tiedCall) return;
+            gatewayBridgeEvents.queueEvent({
+              type: "tool_call",
+              id: tiedCall.id,
+              name: tiedCall.name,
+              arguments: buildGatewayToolCallPreviewArguments(tiedCall),
+              conversation_id: params.conversationId,
+              round: callRounds.get(tiedCall.id) ?? round,
+            });
+          };
+          const approval = requestToolApproval({
+            toolCallId: tiedCall?.id ?? request.permission_id,
             toolName: request.tool,
             summary: [request.command, request.description].filter(Boolean).join("\n\n"),
             conversationId: params.conversationId,
@@ -279,6 +299,9 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
             sessionWide: request.scope === "session",
             signal: approvalController.signal,
           });
+          syncGatewayCall();
+          const settlement = await approval;
+          syncGatewayCall();
           if (settlement.kind !== "decided" || settlement.decision === "deny") return "reject";
           return settlement.decision === "approve_session" ? "allow_always" : "allow_once";
         },

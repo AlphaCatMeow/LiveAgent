@@ -144,6 +144,8 @@ export type KBrainPermissionRequest = {
   options?: { id: string; label?: string; kind?: string }[];
   /** "session": approving also allows this kind of action for the rest of the session. */
   scope?: string;
+  /** The model tool call waiting on this decision, when K-brain knows it. */
+  tool_call_id?: string;
 };
 
 export type KBrainTurnParams = {

@@ -30,7 +30,7 @@ export type PendingApprovalItem = {
   summary?: string;
   /** 权威应答截止时间戳(毫秒);缺省以挂载时刻近似。 */
   deadlineAt?: number;
-  /** false 时后端不会记住本会话授权,隐藏 approve_session;缺省保持显示。 */
+  /** 后端会记住本会话授权时为 true 才提供 approve_session;缺省不提供(远端旧数据同样不显示)。 */
   allowSession?: boolean;
   /** approve_session 生效的授权范围(如 call:click),显示在该选项里。 */
   sessionScope?: string;
@@ -119,7 +119,7 @@ export function ToolApprovalBar({
   const displayToolName =
     current.toolName.toLowerCase() === "bash" ? t("chat.toolApproval.terminal") : current.toolName;
   const errorText = submissionError?.toolCallId === current.toolCallId ? submissionError.text : "";
-  const offerSession = current.allowSession !== false;
+  const offerSession = current.allowSession === true;
   const hasMoreActions = offerSession || pending.length > 1;
   const sessionTarget = current.sessionScope
     ? `${displayToolName} · ${current.sessionScope}`
@@ -191,12 +191,12 @@ export function ToolApprovalBar({
         );
       }}
       className={cn(
-        "@container relative flex h-32 w-full flex-col",
+        "@container relative flex min-h-32 w-full flex-col",
         "rounded-3xl border border-black/[0.055] bg-white/72 shadow-ui-toolapprovalbar-18 outline-none backdrop-blur-2xl backdrop-saturate-[165%]",
         "dark:border-white/[0.10] dark:bg-white/[0.06] dark:shadow-ui-toolapprovalbar-19",
       )}
     >
-      <div className="min-h-0 flex-1 overflow-hidden px-4 pt-3">
+      <div className="min-h-0 flex-auto overflow-hidden px-4 pt-3">
         <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
           <Terminal className="size-3.5 shrink-0" />
           <span className="min-w-0 flex-1 truncate text-xs leading-none">{displayToolName}</span>
@@ -210,7 +210,8 @@ export function ToolApprovalBar({
           </span>
         </div>
 
-        <p className="mt-2 truncate text-sm font-medium leading-1p5 text-foreground/92">
+        {/* Wraps instead of truncating: on phones the session-wide explanation must stay readable. */}
+        <p className="mt-2 break-words text-sm font-medium leading-1p5 text-foreground/92">
           {current.sessionWide
             ? t("chat.toolApproval.sessionWideBody")
             : t("chat.toolApproval.body").replace("{tool}", displayToolName)}

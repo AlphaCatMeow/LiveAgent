@@ -10,8 +10,11 @@ import {
   EXIT_PLAN_MODE_TOOL_NAME,
 } from "@liveagent/ui/lib/chat/planMode";
 import {
+  TOOL_APPROVAL_ALLOW_SESSION_ARG,
   TOOL_APPROVAL_DEADLINE_ARG,
   TOOL_APPROVAL_PENDING_ARG,
+  TOOL_APPROVAL_SESSION_SCOPE_ARG,
+  TOOL_APPROVAL_SESSION_WIDE_ARG,
   TOOL_APPROVAL_SUMMARY_ARG,
 } from "@liveagent/ui/lib/chat/toolApprovalArgs";
 import {
@@ -24,7 +27,7 @@ import {
 import { summarizeToolCall } from "../../../lib/chat/messages/uiMessages";
 import { ensureAskUserQuestionDeadlineAt } from "../../../lib/tools/askUserQuestionTools";
 import { isPlanApprovalToolCall, isPlanDecisionPending } from "../../../lib/tools/planModeTools";
-import { getToolApprovalDeadlineAt, hasPendingToolApproval } from "../../../lib/tools/toolApproval";
+import { getPendingToolApproval } from "../../../lib/tools/toolApproval";
 
 const GATEWAY_TOOL_TEXT_PREVIEW_MAX_CHARS = 4000;
 
@@ -131,14 +134,21 @@ export function buildGatewayToolCallPreviewArguments(
   // 待审批标记:任意工具在 beforeToolCall 处挂起等待批准时,盖到同步给 WebUI 的
   // 参数上,让远端渲染审批卡片并显示与桌面同源的倒计时。审批消解后重发的快照
   // 不再带此标记,卡片随之隐藏。__ 前缀合成参数不入展示、不影响本地执行。
-  const approvalOverlay: Record<string, unknown> | null =
-    toolCall.id && hasPendingToolApproval(toolCall.id)
-      ? {
-          [TOOL_APPROVAL_PENDING_ARG]: true,
-          [TOOL_APPROVAL_DEADLINE_ARG]: getToolApprovalDeadlineAt(toolCall.id) ?? undefined,
-          [TOOL_APPROVAL_SUMMARY_ARG]: summarizeToolCallForApproval(toolCall),
-        }
-      : null;
+  // 授权范围随标记同步,远端审批栏与桌面一致地说明"允许"的效果、决定是否提供
+  // "本会话始终允许";摘要优先用审批登记的文本(K-brain 下含 AI 审查说明)。
+  const pending = toolCall.id ? getPendingToolApproval(toolCall.id) : null;
+  const approvalOverlay: Record<string, unknown> | null = pending
+    ? {
+        [TOOL_APPROVAL_PENDING_ARG]: true,
+        [TOOL_APPROVAL_DEADLINE_ARG]: pending.deadlineAt,
+        [TOOL_APPROVAL_SUMMARY_ARG]: pending.summary || summarizeToolCallForApproval(toolCall),
+        [TOOL_APPROVAL_ALLOW_SESSION_ARG]: pending.allowSession,
+        [TOOL_APPROVAL_SESSION_WIDE_ARG]: pending.sessionWide,
+        ...(pending.sessionScope
+          ? { [TOOL_APPROVAL_SESSION_SCOPE_ARG]: pending.sessionScope }
+          : {}),
+      }
+    : null;
   // AskUserQuestion：附带权威应答截止时间，WebUI 卡片倒计时与桌面计时同源
   //（execute 挂起时复用同一预置值；见 askUserQuestionTools）。ask 工具只读、
   // 永不进入审批门,故此处无需叠加 approvalOverlay。

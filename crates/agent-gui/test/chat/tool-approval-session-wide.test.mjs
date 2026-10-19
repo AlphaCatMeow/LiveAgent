@@ -30,6 +30,13 @@ test("a session-wide Computer Use prompt says approving covers the chat", async 
   try {
     assert.match(host.textContent, /允许后，本对话里的 Computer Use 操作不再询问（批量执行和安装类操作除外）。/);
     assert.doesNotMatch(host.textContent, /是否允许执行此/);
+    // On phones the explanation must wrap and the bar grow, not cut the sentence off.
+    const body = [...host.querySelectorAll("p")].find((p) => p.textContent.includes("Computer Use"));
+    assert.match(body.className, /\bbreak-words\b/);
+    assert.doesNotMatch(body.className, /\btruncate\b/);
+    const bar = host.querySelector("section");
+    assert.match(bar.className, /\bmin-h-32\b/);
+    assert.doesNotMatch(bar.className, /(^|\s)h-32\b/);
     const approve = [...host.querySelectorAll("button")].find((b) => b.getAttribute("aria-keyshortcuts") === "Enter");
     assert.equal(approve.textContent.replace("↵", ""), "允许");
     assert.equal(host.querySelector('[aria-label="更多审批选项"]'), null, "no separate session option to choose");

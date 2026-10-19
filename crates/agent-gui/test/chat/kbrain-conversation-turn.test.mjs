@@ -294,7 +294,7 @@ for (const [mode, runTurn, decision, expectedDecision] of [
         event("tool.call", { tool_call: { id: "call", name: "read_file", arguments: { path: "README.md" } } });
         event("permission.requested", { permission_id: "permission", tool: "read_file", command: "README.md", description: "AI review: sensitive information risk",
           ...(mode === "agent-session" ? { rule: "call:click", options: [{ id: "allow_once", kind: "allow_once" }, { id: "allow_always", kind: "allow_always" }, { id: "reject", kind: "reject_once" }] } : {}),
-          ...(mode === "agent-scope-session" ? { rule: "call:click", scope: "session", options: [{ id: "allow_once", label: "Allow for this session", kind: "allow_once" }, { id: "reject", kind: "reject_once" }] } : {}) });
+          ...(mode === "agent-scope-session" ? { tool_call_id: "call", rule: "call:click", scope: "session", options: [{ id: "allow_once", label: "Allow for this session", kind: "allow_once" }, { id: "reject", kind: "reject_once" }] } : {}) });
         return;
       }
       if (request.url === "/v1/sessions/session/permissions/permission") {
@@ -341,15 +341,18 @@ for (const [mode, runTurn, decision, expectedDecision] of [
       server.close();
     });
     const conversationId = `conversation-${mode}`;
-    const dispose = approval.subscribeToolApprovalsForConversation(conversationId, () => {
+    // Answer after the turn has synced the pending call, as a user click would.
+    const dispose = approval.subscribeToolApprovalsForConversation(conversationId, () => queueMicrotask(() => {
       for (const pending of approval.listPendingToolApprovalsForConversation(conversationId)) {
         assert.match(pending.summary, /AI review: sensitive information risk/);
         assert.equal(pending.allowSession, mode === "agent-session");
         assert.equal(pending.sessionScope, mode === "agent-session" || mode === "agent-scope-session" ? "call:click" : "");
         assert.equal(pending.sessionWide, mode === "agent-scope-session");
+        // K-brain names the waiting tool call, so the approval is keyed by it for the Gateway overlay.
+        assert.equal(pending.toolCallId, mode === "agent-scope-session" ? "call" : "permission");
         approval.answerToolApproval(pending.toolCallId, decision, { conversationId });
       }
-    });
+    }));
     t.after(dispose);
     const context = { systemPrompt: "system", messages: [{ role: "user", content: [{ type: "text", text: "inspect" }], timestamp: 1 }] };
     let state = createConversationStateFromContext(context);
@@ -357,6 +360,7 @@ for (const [mode, runTurn, decision, expectedDecision] of [
     let persisted;
     const hooks = [];
     const errors = [];
+    const gatewayEvents = [];
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
     t.after(() => clearTimeout(timeout));
@@ -365,7 +369,7 @@ for (const [mode, runTurn, decision, expectedDecision] of [
       runtime: mode.endsWith("no-backend") ? {} : { backend: mode.endsWith("legacy-direct") ? "direct" : "kbrain", baseUrl: "https://must-not-be-called.invalid", apiKey: "unused-secret", reasoning: mode === "agent-controls" ? "minimal" : "max" }, sessionId: "frontend-session", conversationId,
       trajectoryMessageId: `message-${mode}`, conversationCwd: "/workspace", ...(mode.startsWith("agent") ? { effectiveWorkdir: "/workspace", ...(mode === "agent-controls" ? { additionalRoots: [{ id: "external", alias: "external-root", path: "/tmp/external", access: "read" }], planModeEnabled: mode === "agent-controls", getToolPolicies: () => ({ Read: "allow", Write: "ask", Bash: "deny", Browser: "allow", McpManager: "deny", "group:browser": "ask", "server:cua-driver": "allow" }), commandSafetyMode: "auto" } : {}) } : {}), createdAt: 1, fallbackTitle: "Inspect", titlePromise: null,
       transcriptStore: {}, cancellation: { userStop: controller },
-      gatewayBridgeEvents: { queueToken() {}, queueEvent() {}, queueToolStatus() {}, emitError(message) { errors.push(message); } },
+      gatewayBridgeEvents: { queueToken() {}, queueEvent(event) { gatewayEvents.push(event); }, queueToolStatus() {}, emitError(message) { errors.push(message); } },
       hookLifecycle: Object.fromEntries(["startAgent", "startTurn", "ensureMessageEnded", "endTurn", "endAgent"].map((key) => [key, () => hooks.push(key)])),
       buildPreparedContext: () => context, getNextConversationState: () => state,
       applyConversationState: (value) => { state = value; },
@@ -374,6 +378,11 @@ for (const [mode, runTurn, decision, expectedDecision] of [
       persistConversationWithHistorySync: async (value) => { persisted = value; return true; },
     });
     assert.equal(requests.find((request) => request.path.endsWith("/runs")).body.prompt, "inspect");
+    // The tied approval re-pushes its call to the Gateway: marked while pending, unmarked once settled.
+    const approvalSyncs = gatewayEvents
+      .filter((event) => event.type === "tool_call" && event.id === "call")
+      .map((event) => [event.arguments.__toolApprovalPending === true, event.arguments.__toolApprovalSessionWide === true]);
+    assert.deepEqual(approvalSyncs, mode === "agent-scope-session" ? [[false, false], [true, true], [false, false]] : [[false, false]]);
     assert.equal(requests.find((request) => request.path.endsWith("/runs")).body.model.provider, "fixture");
     const runBody = requests.find((request) => request.path.endsWith("/runs")).body;
     assert.equal(runBody.options.mode, mode.startsWith("agent") ? "agent" : "chat");

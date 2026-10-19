@@ -1,25 +1,19 @@
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
 import test from "node:test";
-import { createDomTestEnv } from "../../../agent-gui/test/helpers/dom-test-env.mjs";
+import { createWebDomTestEnv } from "../helpers/dom-test-env.mjs";
 import { createWebModuleLoader } from "../helpers/load-web-module.mjs";
-
-const require = createRequire(new URL("../../web/package.json", import.meta.url));
 
 for (const home of ["/Users/Tester", "C:\\Users\\Tester", "\\\\Server\\Share\\Tester"]) {
   for (const mode of ["directory", "file"]) {
     test(`remote picker retries roots, opens and selects host ${mode}: ${home}`, async () => {
-      const env = await createDomTestEnv();
       const calls = [];
       const selected = [];
       let rootFailures = 1;
       const separator = home.startsWith("/") ? "/" : "\\";
       const project = `${home}${separator}project`;
-      const loader = createWebModuleLoader({
+      const env = await createWebDomTestEnv({
         mocks: {
           "@liveagent/ui/components/IconSet": new Proxy({}, { get: () => () => null }),
-          react: env.React,
-          "react/jsx-runtime": require("react/jsx-runtime"),
           "@liveagent/app/shims/tauriCore": {
             invoke: async (command, args) => {
               calls.push([command, args]);
@@ -49,7 +43,7 @@ for (const home of ["/Users/Tester", "C:\\Users\\Tester", "\\\\Server\\Share\\Te
           "@liveagent/ui/i18n/index": { useLocale: () => ({ t: (key) => key, locale: "zh-CN" }) },
         },
       });
-      const { RemotePathPickerModal } = loader.loadModule(
+      const { RemotePathPickerModal } = env.loadModule(
         "src/components/RemotePathPickerModal.tsx",
       );
       const host = document.body.appendChild(document.createElement("div"));

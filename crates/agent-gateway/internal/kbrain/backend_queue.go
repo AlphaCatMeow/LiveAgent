@@ -120,7 +120,7 @@ func (r *Relay) startBackendQueuedRun(ctx context.Context, gatewayRunID, convers
 		return false, err
 	}
 	if !out.Accepted || out.Receipt == nil {
-		return false, fmt.Errorf("K-brain queue rejected: %s", out.Message)
+		return false, fmt.Errorf("kbrain queue rejected: %s", out.Message)
 	}
 	r.mu.Lock()
 	current, pending := r.backendRuns[key]

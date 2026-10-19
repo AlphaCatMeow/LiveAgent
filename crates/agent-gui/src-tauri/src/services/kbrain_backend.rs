@@ -83,6 +83,9 @@ pub struct KBrainBackendState {
     start_lock: Mutex<()>,
     shutdown_epoch: AtomicU64,
     exiting: AtomicBool,
+    /// Every listener/token change (start, restart on a new port, shutdown), so
+    /// dependents such as the managed Gateway never keep a stale backend.
+    connection_tx: tokio::sync::watch::Sender<Option<KBrainBackendConnection>>,
 }
 
 impl Default for KBrainBackendState {
@@ -92,6 +95,7 @@ impl Default for KBrainBackendState {
             start_lock: Mutex::new(()),
             shutdown_epoch: AtomicU64::new(0),
             exiting: AtomicBool::new(false),
+            connection_tx: tokio::sync::watch::channel(None).0,
         }
     }
 }
@@ -364,6 +368,7 @@ impl KBrainBackendState {
                 .take();
             if let Some(stale) = stale {
                 stale.shutdown();
+                self.connection_tx.send_replace(None);
             }
         }
 
@@ -386,7 +391,21 @@ impl KBrainBackendState {
             .lock()
             .map_err(|_| "K-brain backend state is poisoned".to_string())?
             .replace(manager);
+        self.connection_tx.send_replace(Some(connection.clone()));
         Ok(connection)
+    }
+
+    /// The live backend, without starting one: callers that merely follow
+    /// K-Brain (the managed Gateway) must never launch it, e.g. during an update.
+    pub fn running_connection(&self) -> Option<KBrainBackendConnection> {
+        let manager = self.manager.lock().ok()?.as_ref().cloned()?;
+        manager.is_running().then(|| manager.connection())
+    }
+
+    pub fn subscribe_connection(
+        &self,
+    ) -> tokio::sync::watch::Receiver<Option<KBrainBackendConnection>> {
+        self.connection_tx.subscribe()
     }
 
     pub fn shutdown(&self) {
@@ -398,6 +417,7 @@ impl KBrainBackendState {
         let manager = self.manager.lock().ok().and_then(|mut guard| guard.take());
         if let Some(manager) = manager {
             manager.shutdown();
+            self.connection_tx.send_replace(None);
         }
     }
 
@@ -980,6 +1000,44 @@ while True:
             state.shutdown();
             assert_fixture_reaped(&data);
         }
+    }
+
+    #[test]
+    fn running_connection_without_a_backend_is_none_and_never_starts_one() {
+        let state = KBrainBackendState::default();
+        assert!(state.running_connection().is_none());
+        assert!(state.manager.lock().unwrap().is_none(), "reading must not launch K-Brain");
+        assert!(state.subscribe_connection().borrow().is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn connection_changes_are_published_for_followers_like_the_gateway() {
+        let _serial = CHILD_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let temp = test_dir();
+        let binary = fixture_binary(&temp, "parent-loss");
+        let data = temp.path().join("data");
+        let state = KBrainBackendState::default();
+        let mut changes = state.subscribe_connection();
+        let started = state
+            .ensure_started_with_binary(binary, data.clone())
+            .expect("backend");
+        assert!(changes.has_changed().unwrap(), "start must notify");
+        assert_eq!(
+            changes.borrow_and_update().as_ref().map(|c| c.base_url.clone()),
+            Some(started.base_url.clone())
+        );
+        assert_eq!(
+            state.running_connection().map(|c| c.token),
+            Some(started.token.clone())
+        );
+        state.shutdown();
+        assert!(changes.has_changed().unwrap(), "shutdown must notify");
+        assert!(changes.borrow_and_update().is_none());
+        assert!(state.running_connection().is_none());
+        assert_fixture_reaped(&data);
     }
 
     #[cfg(unix)]

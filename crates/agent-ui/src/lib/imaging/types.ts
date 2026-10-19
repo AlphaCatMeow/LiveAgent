@@ -256,6 +256,8 @@ export interface ImageStudioClient {
   getJob(id: string): Promise<ImageJob>;
   listJobs(projectId: string, cursor?: string): Promise<Page<ImageJob>>;
   cancelJob(id: string): Promise<ImageJob>;
+  /** Soft-deletes a finished job from history; repeat deletes succeed, active jobs get HTTP 409. */
+  deleteJob(id: string): Promise<void>;
   /** HTTP 409 IMAGE_EVENT_GAP is surfaced without retry: refresh getJob, apply its snapshot,
    * then subscribe from snapshot.lastEventSeq (including zero). Missing metadata requires upgrade.
    * Unknown event types advance the cursor but are not delivered. Resolves on job.finished only. */

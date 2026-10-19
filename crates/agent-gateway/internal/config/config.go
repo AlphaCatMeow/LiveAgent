@@ -20,9 +20,13 @@ const (
 )
 
 type Config struct {
-	// Explicit private single-owner image access; requires a loopback K-Brain URL.
+	// Legacy opt-in that reuses KBrainURL/KBrainToken for Image Studio. Prefer the
+	// image-specific pair below, which needs no switch and never enables the chat relay.
 	ImageSingleUser bool
-	Token           string
+	// Loopback K-Brain that serves Image Studio under the desktop owner's local scope.
+	ImageKBrainURL   string
+	ImageKBrainToken string
+	Token            string
 	// InstanceNonce identifies a desktop-owned child, and is only returned to its authenticated owner.
 	InstanceNonce string
 	// AgentDB 是每 Agent 凭证 SQLite 数据库路径；默认自动创建于用户配置目录。
@@ -60,7 +64,11 @@ func Load() *Config {
 	cfg.InstanceNonce = os.Getenv("LIVEAGENT_GATEWAY_INSTANCE_NONCE")
 
 	flag.BoolVar(&cfg.ImageSingleUser, "image-single-user", getenv("LIVEAGENT_GATEWAY_IMAGE_SINGLE_USER", "") == "true", "enable single-owner Image Studio on an authenticated loopback K-Brain backend")
-	flag.StringVar(&cfg.Token, "token", getenv("LIVEAGENT_GATEWAY_TOKEN", ""), "gateway authentication token")
+	flag.StringVar(&cfg.ImageKBrainURL, "image-kbrain-url", getenv("LIVEAGENT_GATEWAY_IMAGE_KBRAIN_URL", ""), "loopback K-Brain URL serving Image Studio (enables image routes when set with its token)")
+	// Secret flags default to empty and fall back to the environment after Parse, so
+	// -h / usage output never prints a token read from the environment.
+	flag.StringVar(&cfg.ImageKBrainToken, "image-kbrain-token", "", "bearer token for the Image Studio K-Brain (or LIVEAGENT_GATEWAY_IMAGE_KBRAIN_TOKEN)")
+	flag.StringVar(&cfg.Token, "token", "", "gateway authentication token (or LIVEAGENT_GATEWAY_TOKEN)")
 	flag.StringVar(&cfg.AgentDB, "agent-db", getenv("LIVEAGENT_GATEWAY_AGENT_DB", defaultAgentDBPath()), "per-agent token SQLite database path (auto-created by default)")
 	flag.IntVar(&cfg.MaxAgentConnections, "max-agent-connections", getenvInt("LIVEAGENT_GATEWAY_MAX_AGENT_CONNECTIONS", DefaultMaxAgentConnections), "maximum concurrent desktop agent connections")
 	flag.IntVar(&cfg.MaxBrowserConnections, "max-browser-connections", getenvInt("LIVEAGENT_GATEWAY_MAX_BROWSER_CONNECTIONS", DefaultMaxBrowserConnections), "maximum concurrent browser connections")
@@ -89,12 +97,24 @@ func Load() *Config {
 	)
 	flag.IntVar(&cfg.RelayBufferSeconds, "relay-buffer-seconds", getenvInt("LIVEAGENT_GATEWAY_RELAY_BUFFER_SECONDS", 30), "seconds of chat events to buffer for brief reconnections")
 	flag.StringVar(&cfg.KBrainURL, "kbrain-url", getenv("LIVEAGENT_GATEWAY_KBRAIN_URL", ""), "K-brain backend URL for the remote chat target")
-	flag.StringVar(&cfg.KBrainToken, "kbrain-token", getenv("LIVEAGENT_GATEWAY_KBRAIN_TOKEN", ""), "K-brain backend bearer token")
+	flag.StringVar(&cfg.KBrainToken, "kbrain-token", "", "K-brain backend bearer token (or LIVEAGENT_GATEWAY_KBRAIN_TOKEN)")
 	flag.StringVar(&cfg.KBrainAgentID, "kbrain-agent-id", getenv("LIVEAGENT_GATEWAY_KBRAIN_AGENT_ID", "kbrain"), "Gateway target id for K-brain remote chat")
 	flag.StringVar(&cfg.KBrainProvider, "kbrain-provider", getenv("LIVEAGENT_GATEWAY_KBRAIN_PROVIDER", ""), "default K-brain provider for Gateway chat")
 	flag.StringVar(&cfg.KBrainModel, "kbrain-model", getenv("LIVEAGENT_GATEWAY_KBRAIN_MODEL", ""), "default K-brain model for Gateway chat")
 	os.Args = normalizeLegacyArgs(os.Args)
 	flag.Parse()
+	for _, secret := range []struct {
+		value *string
+		env   string
+	}{
+		{&cfg.Token, "LIVEAGENT_GATEWAY_TOKEN"},
+		{&cfg.KBrainToken, "LIVEAGENT_GATEWAY_KBRAIN_TOKEN"},
+		{&cfg.ImageKBrainToken, "LIVEAGENT_GATEWAY_IMAGE_KBRAIN_TOKEN"},
+	} {
+		if *secret.value == "" {
+			*secret.value = getenv(secret.env, "")
+		}
+	}
 
 	cfg.Token = strings.TrimSpace(cfg.Token)
 	cfg.AgentDB = strings.TrimSpace(cfg.AgentDB)
@@ -106,6 +126,8 @@ func Load() *Config {
 	cfg.TLSCert = strings.TrimSpace(cfg.TLSCert)
 	cfg.TLSKey = strings.TrimSpace(cfg.TLSKey)
 	cfg.KBrainURL = strings.TrimRight(strings.TrimSpace(cfg.KBrainURL), "/")
+	cfg.ImageKBrainURL = strings.TrimRight(strings.TrimSpace(cfg.ImageKBrainURL), "/")
+	cfg.ImageKBrainToken = strings.TrimSpace(cfg.ImageKBrainToken)
 	cfg.KBrainToken = strings.TrimSpace(cfg.KBrainToken)
 	cfg.KBrainAgentID = strings.TrimSpace(cfg.KBrainAgentID)
 	cfg.KBrainProvider = strings.TrimSpace(cfg.KBrainProvider)

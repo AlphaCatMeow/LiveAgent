@@ -321,6 +321,7 @@ function summaryForSession(session: KBrainSession, conversationId: string): Chat
     updatedAt: epoch(session.updated_at, createdAt),
     isPinned: session.pinned,
     isShared: session.shared,
+    ...(session.forked_from?.trim() ? { forkedFromSessionId: session.forked_from.trim() } : {}),
   };
 }
 

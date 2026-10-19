@@ -167,6 +167,9 @@ export type KBrainSession = {
   pinned?: boolean;
   archived?: boolean;
   shared?: boolean;
+  /** Source session ID of a branch; older K-brain builds omit it. */
+  forked_from?: string;
+  fork_seq?: number;
   messages?: KBrainMessage[];
   active_messages?: KBrainMessage[];
   tasks?: KBrainSubagent[];

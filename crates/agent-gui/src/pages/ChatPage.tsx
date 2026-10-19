@@ -22,6 +22,7 @@ import {
 import { ThemeToggleButton } from "@liveagent/ui/components/ThemeToggleButton";
 import { useConfirmDialog } from "@liveagent/ui/components/ui/confirm-dialog";
 import { SidebarProvider, useSidebar } from "@liveagent/ui/components/ui/sidebar";
+import { toast } from "@liveagent/ui/components/ui/toast-manager";
 import { PaneChrome } from "@liveagent/ui/components/workbench/PaneChrome";
 import {
   type ProjectToolPaneEnvironment,
@@ -1618,6 +1619,13 @@ function ChatPageContent(props: ChatPageProps) {
         // Activate the child before its run starts. The source session remains
         // available in the sidebar and is never edited.
         await openInitialActionRef.current(summary.id);
+        toast.success(t("chat.editResendBranched"), {
+          id: `edit-resend-branch:${summary.id}`,
+          action: {
+            label: t("chat.editResendOpenSource"),
+            onClick: () => void openInitialActionRef.current(sourceConversationId),
+          },
+        });
       }
       return { conversationId: summary.id, messageRef: childRef };
     },
@@ -1628,6 +1636,7 @@ function ChatPageContent(props: ChatPageProps) {
       kBrainBackendEnabled,
       reloadConversation,
       sidebarStore,
+      t,
     ],
   );
 

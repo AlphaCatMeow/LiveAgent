@@ -200,3 +200,13 @@ test("merge keeps identity when selectedModelJson is unchanged", () => {
   );
   assert.equal(merged, existing);
 });
+
+test("merge keeps branch lineage across partial upserts and reports lineage changes", () => {
+  const existing = { ...conversation("branch", { updatedAt: 5 }), forkedFromSessionId: "source-session" };
+  const partial = conversation("branch", { updatedAt: 5 });
+  assert.equal(reconcile.mergeSidebarConversation(existing, partial), existing);
+  const plain = conversation("branch", { updatedAt: 5 });
+  const merged = reconcile.mergeSidebarConversation(plain, { ...plain, forkedFromSessionId: "source-session" });
+  assert.notEqual(merged, plain);
+  assert.equal(merged.forkedFromSessionId, "source-session");
+});

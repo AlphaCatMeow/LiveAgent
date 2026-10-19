@@ -73,6 +73,7 @@ export function AssetLightbox({
       assetIds.map(async (id, position) => {
         try {
           const blob = await client.readAsset(id, "original", controller.signal);
+          if (controller.signal.aborted) return null;
           const src = URL.createObjectURL(blob);
           urls.push(src);
           const meta = assets[id];

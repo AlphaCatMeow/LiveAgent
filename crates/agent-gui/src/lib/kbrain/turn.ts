@@ -133,6 +133,19 @@ export function contextToKBrainMessages(context: Context): KBrainMessage[] {
   return messages;
 }
 
+/** permission.requested payload. `rule` scopes an allow_always answer, which K-brain only
+ *  remembers when it lists that option; older backends offer allow_once/reject only. */
+export type KBrainPermissionRequest = {
+  permission_id: string;
+  tool: string;
+  command?: string;
+  rule?: string;
+  description?: string;
+  options?: { id: string; label?: string; kind?: string }[];
+  /** "session": approving also allows this kind of action for the rest of the session. */
+  scope?: string;
+};
+
 export type KBrainTurnParams = {
   conversationId: string;
   sessionId: string;
@@ -154,12 +167,7 @@ export type KBrainTurnParams = {
     signal?: AbortSignal,
   ) => Promise<KBrainQuestionAnswer[]>;
   onPermissionRequest?: (
-    request: {
-      permission_id: string;
-      tool: string;
-      command?: string;
-      description?: string;
-    },
+    request: KBrainPermissionRequest,
     signal?: AbortSignal,
   ) => Promise<"allow_once" | "allow_always" | "reject">;
   applyConversationState?: (state: ConversationViewState) => void;
@@ -796,12 +804,7 @@ async function executeKBrainTurn(params: KBrainTurnParams): Promise<AssistantMes
       }
       case "permission.requested": {
         reportStatus("Waiting for permission…");
-        const request = eventPayload<{
-          permission_id: string;
-          tool: string;
-          command?: string;
-          description?: string;
-        }>(event);
+        const request = eventPayload<KBrainPermissionRequest>(event);
         if (!request || !params.onPermissionRequest) {
           permissionFailure = new Error(
             "K-brain requested permission but no permission callback is configured",

@@ -11,7 +11,7 @@ export const TOOL_APPROVAL_DEADLINE_ARG = "__toolApprovalDeadlineAt";
 /** 待审批工具的命令/参数摘要(桌面端算一次同步给 WebUI,审批栏统一展示)。 */
 export const TOOL_APPROVAL_SUMMARY_ARG = "__toolApprovalSummary";
 
-/** 审批决定:allow=本次放行;deny=本次拒绝;approve_session=本对话内该工具后续免审。 */
+/** 审批决定:allow=本次放行;deny=本次拒绝;approve_session=请后端在本对话内记住这条授权范围。 */
 export type ToolApprovalDecision = "approve" | "deny" | "approve_session";
 
 export function readToolApprovalPending(args: unknown): boolean {

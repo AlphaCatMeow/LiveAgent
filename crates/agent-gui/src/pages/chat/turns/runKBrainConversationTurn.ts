@@ -274,6 +274,9 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
             toolName: request.tool,
             summary: [request.command, request.description].filter(Boolean).join("\n\n"),
             conversationId: params.conversationId,
+            allowSession: request.options?.some((option) => option.id === "allow_always") === true,
+            sessionScope: request.rule,
+            sessionWide: request.scope === "session",
             signal: approvalController.signal,
           });
           if (settlement.kind !== "decided" || settlement.decision === "deny") return "reject";

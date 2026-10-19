@@ -246,6 +246,8 @@ for (const [mode, runTurn, decision, expectedDecision] of [
   ["agent-controls", runAgentConversationTurn, "approve", "allow_once"],
   ["agent-deny", runAgentConversationTurn, "deny", "reject"],
   ["agent-session", runAgentConversationTurn, "approve_session", "allow_always"],
+  ["agent-session-unoffered", runAgentConversationTurn, "approve_session", "allow_once"],
+  ["agent-scope-session", runAgentConversationTurn, "approve", "allow_once"],
   ["agent-failed", runAgentConversationTurn, "approve", "allow_once"],
   ["agent-refresh-failed", runAgentConversationTurn, "approve", "allow_once"],
   ["text-legacy-direct", runTextConversationTurn, "approve", "allow_once"],
@@ -290,7 +292,9 @@ for (const [mode, runTurn, decision, expectedDecision] of [
         event("assistant.thinking.delta", { text: "Checking" });
         event("assistant.text.delta", { text: "Hello" });
         event("tool.call", { tool_call: { id: "call", name: "read_file", arguments: { path: "README.md" } } });
-        event("permission.requested", { permission_id: "permission", tool: "read_file", command: "README.md", description: "AI review: sensitive information risk" });
+        event("permission.requested", { permission_id: "permission", tool: "read_file", command: "README.md", description: "AI review: sensitive information risk",
+          ...(mode === "agent-session" ? { rule: "call:click", options: [{ id: "allow_once", kind: "allow_once" }, { id: "allow_always", kind: "allow_always" }, { id: "reject", kind: "reject_once" }] } : {}),
+          ...(mode === "agent-scope-session" ? { rule: "call:click", scope: "session", options: [{ id: "allow_once", label: "Allow for this session", kind: "allow_once" }, { id: "reject", kind: "reject_once" }] } : {}) });
         return;
       }
       if (request.url === "/v1/sessions/session/permissions/permission") {
@@ -340,6 +344,9 @@ for (const [mode, runTurn, decision, expectedDecision] of [
     const dispose = approval.subscribeToolApprovalsForConversation(conversationId, () => {
       for (const pending of approval.listPendingToolApprovalsForConversation(conversationId)) {
         assert.match(pending.summary, /AI review: sensitive information risk/);
+        assert.equal(pending.allowSession, mode === "agent-session");
+        assert.equal(pending.sessionScope, mode === "agent-session" || mode === "agent-scope-session" ? "call:click" : "");
+        assert.equal(pending.sessionWide, mode === "agent-scope-session");
         approval.answerToolApproval(pending.toolCallId, decision, { conversationId });
       }
     });

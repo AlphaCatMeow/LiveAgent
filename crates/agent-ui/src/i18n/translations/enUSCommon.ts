@@ -886,6 +886,9 @@ export const EN_US_COMMON_TRANSLATIONS = {
   "chat.toolApproval.terminal": "Terminal",
   "chat.toolApproval.approve": "Allow once",
   "chat.toolApproval.approveSession": "Always allow {tool} in this chat",
+  "chat.toolApproval.approveForSession": "Allow",
+  "chat.toolApproval.sessionWideBody":
+    "Once allowed, Computer Use actions in this chat stop asking (except batch and install actions).",
   "chat.toolApproval.moreActions": "More approval options",
   "chat.toolApproval.deny": "Deny",
   "chat.toolApproval.timeoutHint": "until it is auto-denied",

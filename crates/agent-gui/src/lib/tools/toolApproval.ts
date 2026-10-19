@@ -12,7 +12,7 @@ import { ASK_USER_QUESTION_TIMEOUT_MS } from "@liveagent/ui/lib/chat/askUserQues
 /** 审批窗口毫秒数:复用 AskUserQuestion 的时长常量,行为口径一致。 */
 export const TOOL_APPROVAL_TIMEOUT_MS = ASK_USER_QUESTION_TIMEOUT_MS;
 
-/** approve:本次放行;deny:本次拒绝;approve_session:本会话内该工具后续免审。 */
+/** approve:本次放行;deny:本次拒绝;approve_session:请后端在本会话内记住这条授权范围。 */
 export type ToolApprovalDecision = "approve" | "deny" | "approve_session";
 
 export type ToolApprovalSettlement =
@@ -27,14 +27,16 @@ type PendingToolApproval = {
   summary: string;
   /** 权威应答截止时间戳(毫秒);卡片倒计时与超时兜底同源。 */
   deadlineAt: number;
+  /** 后端会记住 approve_session 时才为真;记忆由 K-brain 持有,前端不缓存。 */
+  allowSession: boolean;
+  /** approve_session 生效的授权范围(如 computer_exec 的 call:click)。 */
+  sessionScope: string;
+  /** 后端声明:这次允许即对本会话同类操作生效(如 Computer Use)。 */
+  sessionWide: boolean;
   settle: (settlement: ToolApprovalSettlement) => void;
 };
 
 const pendingByToolCallId = new Map<string, PendingToolApproval>();
-
-// 本会话内“记住(approve_session)”的工具名集合,按 conversationId 分区。
-// 只存内存、随会话生命周期存在;持久化的策略走 settings.system.toolPolicies。
-const sessionAllowByConversation = new Map<string, Set<string>>();
 
 // useSyncExternalStore 订阅:pending 表变更时 bump version 并通知,驱动审批卡片
 // 在挂起出现/落定时重渲染(被审批的工具调用本身早已在转录中)。
@@ -103,6 +105,9 @@ export type PendingToolApprovalSummary = {
   toolName: string;
   summary: string;
   deadlineAt: number;
+  allowSession: boolean;
+  sessionScope: string;
+  sessionWide: boolean;
 };
 
 export function listPendingToolApprovalsForConversation(
@@ -117,6 +122,9 @@ export function listPendingToolApprovalsForConversation(
         toolName: pending.toolName,
         summary: pending.summary,
         deadlineAt: pending.deadlineAt,
+        allowSession: pending.allowSession,
+        sessionScope: pending.sessionScope,
+        sessionWide: pending.sessionWide,
       });
     }
   }
@@ -134,19 +142,6 @@ export function getPendingToolApprovalsSnapshot(
   if (pending.length === 0) return EMPTY_PENDING_APPROVALS;
   pendingSnapshotsByConversation.set(key, pending);
   return pending;
-}
-
-export function isSessionApproved(conversationId: string, toolName: string): boolean {
-  return sessionAllowByConversation.get(conversationId)?.has(toolName) ?? false;
-}
-
-function rememberSessionApproval(conversationId: string, toolName: string) {
-  let set = sessionAllowByConversation.get(conversationId);
-  if (!set) {
-    set = new Set();
-    sessionAllowByConversation.set(conversationId, set);
-  }
-  set.add(toolName);
 }
 
 export type AnswerToolApprovalOutcome = { ok: boolean; message?: string };
@@ -178,20 +173,22 @@ export function cancelPendingToolApprovalsForConversation(conversationId: string
       pending.settle({ kind: "cancelled" });
     }
   }
-  sessionAllowByConversation.delete(targetConversationId);
 }
 
 /**
- * 挂起等待用户对一次工具调用作出审批决定。由 beforeToolCall 的审批门调用。
+ * 挂起等待用户对一次工具调用作出审批决定。由 K-brain 的 permission.requested 调用。
  * - AbortSignal(turn 停止)→ 落定为 cancelled。
  * - 超过窗口 → 落定为 timeout(门控按“拒绝”处理)。
- * - approve_session → 记入本会话免审集合。
+ * - allowSession 为假时 approve_session 按 approve 落定:后端不会记住,不能让用户以为记住了。
  */
 export function requestToolApproval(params: {
   toolCallId: string;
   toolName: string;
   summary?: string;
   conversationId: string;
+  allowSession?: boolean;
+  sessionScope?: string;
+  sessionWide?: boolean;
   signal?: AbortSignal;
   timeoutMs?: number;
 }): Promise<ToolApprovalSettlement> {
@@ -212,11 +209,14 @@ export function requestToolApproval(params: {
       }
       params.signal?.removeEventListener("abort", onAbort);
       clearTimeout(timeoutId);
-      if (settlement.kind === "decided" && settlement.decision === "approve_session") {
-        rememberSessionApproval(conversationId, params.toolName);
-      }
       emitChange(conversationId);
-      resolve(settlement);
+      resolve(
+        settlement.kind === "decided" &&
+          settlement.decision === "approve_session" &&
+          !pending.allowSession
+          ? { kind: "decided", decision: "approve" }
+          : settlement,
+      );
     };
     const onAbort = () => settle({ kind: "cancelled" });
     const timeoutId = setTimeout(() => settle({ kind: "timeout" }), Math.max(0, timeoutMs));
@@ -225,6 +225,9 @@ export function requestToolApproval(params: {
       toolName: params.toolName,
       summary: params.summary ?? "",
       deadlineAt,
+      allowSession: params.allowSession === true,
+      sessionScope: params.sessionScope?.trim() ?? "",
+      sessionWide: params.sessionWide === true,
       settle,
     };
     pendingByToolCallId.set(toolCallId, pending);

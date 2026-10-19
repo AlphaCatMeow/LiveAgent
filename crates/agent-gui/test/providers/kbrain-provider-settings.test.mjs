@@ -170,6 +170,44 @@ test("provider settings use real HTTP for load, batch save, reload, and explicit
   }
 });
 
+test("provider reorder saves the complete list in display order and keeps the backend order", async () => {
+  const fixture = await startFixture();
+  const loader = createTsModuleLoader({
+    mocks: {
+      [new URL("../../src/lib/host.ts", import.meta.url).pathname]: {
+        isKBrainBrowserHost: () => true,
+        isKBrainBackendEnabled: () => true,
+      },
+      "@tauri-apps/api/core": { invoke: async () => assert.fail("native storage must not be used") },
+    },
+  });
+  const runtime = loader.loadModule("src/lib/kbrain/runtimeConnection.ts");
+  runtime.setKBrainRuntimeConnection({ baseUrl: fixture.baseUrl, token: "fixture-token", protocolVersion: "kbrain.agent.v1" });
+  const previousStorage = globalThis.localStorage;
+  globalThis.localStorage = { getItem: () => null, setItem: () => {} };
+  try {
+    const settingsStorage = loader.loadModule("src/lib/settings/storage.ts");
+    const settings = loader.loadModule("src/lib/settings/index.ts");
+    const loaded = await settingsStorage.loadPersistedSettings();
+    const [base] = loaded.customProviders;
+    const provider = (id) => ({ ...base, id, name: id });
+    const initial = settings.updateCustomProviders(loaded, [provider("a"), provider("b"), provider("c")]);
+    await settingsStorage.persistSettings(loaded, initial);
+
+    // K-brain treats a list naming every provider as the display order (Stack-Cairn/K-brain#43),
+    // so a reorder must send all providers, in the new order.
+    const reordered = settings.updateCustomProviders(initial, [provider("c"), provider("a"), provider("b")]);
+    const result = await settingsStorage.persistSettings(initial, reordered);
+    const put = fixture.requests.at(-1);
+    assert.deepEqual(put.body.providers.map((item) => item.id), ["c", "a", "b"]);
+    assert.deepEqual(result.customProviders.map((item) => item.id), ["c", "a", "b"]);
+  } finally {
+    runtime.clearKBrainRuntimeConnection();
+    globalThis.localStorage = previousStorage;
+    await fixture.close();
+  }
+});
+
 test("provider settings expose real HTTP failures", async () => {
   const fixture = await startFixture();
   await fixture.close();

@@ -85,6 +85,12 @@ export function summarizeToolCallForApproval(
       .replace(/\s+/g, " ")
       .trim();
   }
+  return clampApprovalSummary(text);
+}
+
+// 同步给 WebUI 的审批摘要统一限长:K-brain 的 AI 审查会把完整工具参数放进
+// command,登记摘要也可能很大,审批开始/落定各重推一次,不能不设上限。
+function clampApprovalSummary(text: string): string {
   if (text.length > TOOL_APPROVAL_SUMMARY_MAX_CHARS) {
     return `${text.slice(0, TOOL_APPROVAL_SUMMARY_MAX_CHARS - 1)}…`;
   }
@@ -141,7 +147,9 @@ export function buildGatewayToolCallPreviewArguments(
     ? {
         [TOOL_APPROVAL_PENDING_ARG]: true,
         [TOOL_APPROVAL_DEADLINE_ARG]: pending.deadlineAt,
-        [TOOL_APPROVAL_SUMMARY_ARG]: pending.summary || summarizeToolCallForApproval(toolCall),
+        [TOOL_APPROVAL_SUMMARY_ARG]: pending.summary
+          ? clampApprovalSummary(pending.summary)
+          : summarizeToolCallForApproval(toolCall),
         [TOOL_APPROVAL_ALLOW_SESSION_ARG]: pending.allowSession,
         [TOOL_APPROVAL_SESSION_WIDE_ARG]: pending.sessionWide,
         ...(pending.sessionScope

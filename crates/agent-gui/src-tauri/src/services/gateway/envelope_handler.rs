@@ -1158,6 +1158,30 @@ impl GatewayController {
                     Err(error) => self.send_error_response(request_id, 500, error).await,
                 }
             }
+            Some(proto::gateway_envelope::Payload::ProxyDetect(request)) => {
+                // 检测要等握手超时（约 1.5s），测速最长 10s；spawn 出去，别让 Ping、
+                // 聊天探活（ChatPrepareTimeout 2s）在单线程调度循环里排队。
+                let this = Arc::clone(self);
+                tauri::async_runtime::spawn(async move {
+                    let result = match gateway_bridge::handle_proxy_detect(request).await {
+                        Ok(response) => {
+                            this.send_agent_envelope(proto::AgentEnvelope {
+                                request_id: request_id.clone(),
+                                timestamp: now_unix_seconds(),
+                                payload: Some(proto::agent_envelope::Payload::ProxyDetectResp(
+                                    response,
+                                )),
+                            })
+                            .await
+                        }
+                        Err(error) => this.send_error_response(request_id, 400, error).await,
+                    };
+                    if let Err(error) = result {
+                        eprintln!("handle proxy detect failed: {error}");
+                    }
+                });
+                Ok(())
+            }
             Some(proto::gateway_envelope::Payload::UploadReadableFiles(request)) => {
                 match gateway_bridge::handle_upload_readable_files(request).await {
                     Ok(response) => {

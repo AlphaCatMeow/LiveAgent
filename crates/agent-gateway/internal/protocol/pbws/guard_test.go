@@ -91,6 +91,58 @@ func TestVetAgentRequestRejectsCuaDriverProvisioning(t *testing.T) {
 	}
 }
 
+func TestVetAgentRequestProxyDetectAllowsOnlyDetectAndTest(t *testing.T) {
+	view := proxyDetectAgentView(t)
+	for _, action := range []string{"detect", "test"} {
+		env := &gatewayv2.GatewayEnvelope{
+			Payload: &gatewayv2.GatewayEnvelope_ProxyDetect{
+				ProxyDetect: &gatewayv2.ProxyDetectRequest{
+					Action:    action,
+					InputJson: `{"type":"http","host":"127.0.0.1","port":7890}`,
+				},
+			},
+		}
+		if err := vetAgentRequest(view, env); err != nil {
+			t.Fatalf("vetAgentRequest(%q) error = %v", action, err)
+		}
+	}
+	for _, req := range []*gatewayv2.ProxyDetectRequest{
+		{Action: "apply"},
+		{Action: ""},
+		{Action: "test", InputJson: strings.Repeat("x", 1025)},
+	} {
+		env := &gatewayv2.GatewayEnvelope{
+			Payload: &gatewayv2.GatewayEnvelope_ProxyDetect{ProxyDetect: req},
+		}
+		if err := vetAgentRequest(view, env); err == nil {
+			t.Fatalf("vetAgentRequest(action=%q, len=%d) expected rejection", req.GetAction(), len(req.GetInputJson()))
+		}
+	}
+}
+
+// 旧桌面端不认识 proxy_detect 载荷臂，会静默丢弃；网关要立即拒绝，别让浏览器等到超时。
+func TestVetAgentRequestProxyDetectRequiresDesktopCapability(t *testing.T) {
+	env := &gatewayv2.GatewayEnvelope{
+		Payload: &gatewayv2.GatewayEnvelope_ProxyDetect{
+			ProxyDetect: &gatewayv2.ProxyDetectRequest{Action: "detect"},
+		},
+	}
+	err := vetAgentRequest(composerAgentView(t), env)
+	if err == nil || !strings.Contains(err.Error(), "update LiveAgent") {
+		t.Fatalf("vetAgentRequest() error = %v, want capability rejection", err)
+	}
+}
+
+func proxyDetectAgentView(t *testing.T) session.AgentView {
+	t.Helper()
+	manager := session.NewManager()
+	agent := session.NewAgentSession(session.AuthSnapshot{AgentID: "agent-1", SessionID: "session-1"})
+	agent.SetCapabilities([]string{gatewayv2.ProxyDetectV1Capability})
+	manager.SetSession(agent)
+	t.Cleanup(func() { manager.ClearSession(agent) })
+	return manager.AgentView("agent-1")
+}
+
 func TestVetAgentRequestAllowsClarifyTurn(t *testing.T) {
 	env := &gatewayv2.GatewayEnvelope{
 		Payload: &gatewayv2.GatewayEnvelope_ClarifyTurn{

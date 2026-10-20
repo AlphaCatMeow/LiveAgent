@@ -12,6 +12,7 @@ pub mod planning;
 pub mod power_activity;
 pub mod provider_usage;
 pub mod proxy;
+pub mod proxy_detect;
 pub mod skills;
 pub mod stt;
 pub mod system_proxy;

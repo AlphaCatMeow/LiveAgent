@@ -75,6 +75,7 @@ message GatewayEnvelope {
     SlashCommandListRequest slash_command_list = 106;
     GoalManageRequest goal_manage = 107;
     LoopManageRequest loop_manage = 108;
+    ProxyDetectRequest proxy_detect = 109;
   }
 
   // Legacy tunnel control/frame payloads (pre-rewrite protocol) and the
@@ -165,6 +166,7 @@ message AgentEnvelope {
     SlashCommandListResponse slash_command_list_resp = 113;
     GoalManageResponse goal_manage_resp = 114;
     LoopManageResponse loop_manage_resp = 115;
+    ProxyDetectResponse proxy_detect_resp = 116;
   }
 
   // Legacy tunnel control/frame payloads (pre-rewrite protocol) and the
@@ -1272,6 +1274,24 @@ message CuaDriverResponse {
   // 与桌面 invoke 同一份序列化：services/cua_driver 的 CuaDriverProbe /
   // CuaDriverPermissions（camelCase）。走 JSON 而不是在 proto 里再刻一份
   // 结构化镜像，是为了让两端拿到的就是同一个对象，不会各自漂移。
+  string result_json = 2;
+}
+
+// 应用代理设置里的「检测到的代理服务」：检测与测速都在桌面宿主上执行，
+// 检测的是运行 LiveAgent 的那台电脑，不是浏览器所在的设备。Gateway 只按
+// action 白名单直通转发。
+message ProxyDetectRequest {
+  // "detect" | "test"。
+  string action = 1;
+  // test 的参数 {"type":"http"|"socks5","host":...,"port":...}；detect 为空。
+  // 桌面端只接受本进程检测到过的代理，不会替请求方连任意地址。
+  string input_json = 2;
+}
+
+message ProxyDetectResponse {
+  string action = 1;
+  // 与桌面 invoke 同一份序列化：services/proxy_detect 的 ProxyDetectResult /
+  // ProxyTestResult（camelCase），不含任何凭据。
   string result_json = 2;
 }
 

@@ -309,6 +309,8 @@ macro_rules! app_invoke_handler {
             commands::git::git_stash_push,
             commands::git::git_stash_pop,
             commands::fonts::system_list_font_families,
+            commands::proxy_detect::system_proxy_detect,
+            commands::proxy_detect::system_proxy_test,
             commands::system::system_pick_folder,
             commands::system::system_resolve_dropped_workspace_folders,
             commands::system::system_classify_dropped_paths,

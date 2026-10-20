@@ -17,6 +17,7 @@ pub mod workspace_commands;
 
 pub use app_commands::app;
 pub use app_commands::fonts;
+pub use app_commands::proxy_detect;
 pub use app_commands::system;
 pub use app_commands::tray;
 pub use app_commands::update;

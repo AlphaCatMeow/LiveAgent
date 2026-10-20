@@ -1153,6 +1153,30 @@ pub async fn handle_cua_driver(
     })
 }
 
+/// 应用代理设置的代理服务检测：与桌面 `system_proxy_detect` / `system_proxy_test`
+/// 同一实现，结果按同一份 camelCase JSON 回给 WebUI。
+pub async fn handle_proxy_detect(
+    request: proto::ProxyDetectRequest,
+) -> Result<proto::ProxyDetectResponse, String> {
+    let action = request.action.trim().to_string();
+    let result_json = match action.as_str() {
+        "detect" => serde_json::to_string(&crate::services::proxy_detect::detect().await)
+            .map_err(|e| format!("proxy detect encode: {e}"))?,
+        "test" => {
+            let input: crate::services::proxy_detect::ProxyTestInput =
+                serde_json::from_str(&request.input_json)
+                    .map_err(|e| format!("proxy test input invalid: {e}"))?;
+            let result = crate::services::proxy_detect::test(input).await?;
+            serde_json::to_string(&result).map_err(|e| format!("proxy test encode: {e}"))?
+        }
+        other => return Err(format!("unsupported proxy detect action: {other}")),
+    };
+    Ok(proto::ProxyDetectResponse {
+        action,
+        result_json,
+    })
+}
+
 pub async fn handle_fs_roots() -> Result<proto::FsRootsResponse, String> {
     tauri::async_runtime::spawn_blocking(fs_roots_sync)
         .await
@@ -3032,5 +3056,35 @@ mod tests {
             );
         }
         assert!(count > 0, "catalog parser found no tools");
+    }
+
+    #[tokio::test]
+    async fn proxy_detect_rejects_unknown_actions_and_bad_test_input() {
+        use crate::services::gateway::proto;
+
+        let unknown = super::handle_proxy_detect(proto::ProxyDetectRequest {
+            action: "apply".to_string(),
+            input_json: String::new(),
+        })
+        .await
+        .unwrap_err();
+        assert!(unknown.contains("unsupported"), "{unknown}");
+
+        let malformed = super::handle_proxy_detect(proto::ProxyDetectRequest {
+            action: "test".to_string(),
+            input_json: r#"{"type":"ftp","host":"127.0.0.1","port":21}"#.to_string(),
+        })
+        .await
+        .unwrap_err();
+        assert!(malformed.contains("input invalid"), "{malformed}");
+
+        // 没被检测到过的地址：桥接层原样带回服务层的拒绝。
+        let undetected = super::handle_proxy_detect(proto::ProxyDetectRequest {
+            action: " test ".to_string(),
+            input_json: r#"{"type":"http","host":"203.0.113.7","port":3128}"#.to_string(),
+        })
+        .await
+        .unwrap_err();
+        assert!(undetected.contains("检测到"), "{undetected}");
     }
 }

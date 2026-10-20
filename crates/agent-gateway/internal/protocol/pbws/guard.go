@@ -23,6 +23,7 @@ const (
 const (
 	errComposerCommandsUnsupported = "desktop app does not support composer commands; update LiveAgent on the desktop"
 	errComposerGoalUnsupported     = "/goal is not available on a direct K-brain target"
+	errProxyDetectUnsupported      = "desktop app does not support proxy detection; update LiveAgent on the desktop"
 )
 
 func requireComposerCommands(sm session.AgentView) error {
@@ -116,6 +117,12 @@ func vetAgentRequest(sm session.AgentView, env *gatewayv2.GatewayEnvelope) error
 			return err
 		}
 		return vetLoopManage(payload.LoopManage)
+	// 代理服务检测：只发给声明了 PROXY_DETECT_V1 的桌面端，理由同上。
+	case *gatewayv2.GatewayEnvelope_ProxyDetect:
+		if !sm.SupportsCapability(gatewayv2.ProxyDetectV1Capability) {
+			return errors.New(errProxyDetectUnsupported)
+		}
+		return vetProxyDetect(payload.ProxyDetect)
 
 	// ---- 带功能门控 / 限额的直通臂 ----
 	case *gatewayv2.GatewayEnvelope_GitRequest:
@@ -176,6 +183,20 @@ func vetCuaDriver(req *gatewayv2.CuaDriverRequest) error {
 		return nil
 	default:
 		return errors.New("unsupported cua_driver action")
+	}
+}
+
+// 代理服务检测：只放行检测与测速两个只读动作，测速参数限长；桌面端另外只接受
+// 自己检测到过的代理地址。
+func vetProxyDetect(req *gatewayv2.ProxyDetectRequest) error {
+	if req == nil || len(req.GetInputJson()) > 1024 {
+		return errors.New("invalid proxy_detect request")
+	}
+	switch strings.TrimSpace(req.GetAction()) {
+	case "detect", "test":
+		return nil
+	default:
+		return errors.New("unsupported proxy_detect action")
 	}
 }
 

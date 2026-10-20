@@ -827,12 +827,13 @@ async function executeKBrainTurn(params: KBrainTurnParams): Promise<AssistantMes
         void decisionPromise
           .then((decision) => {
             if (permissionController.signal.aborted) return;
-            return client.resolvePermission(
-              kbrainSessionId,
-              request.permission_id,
-              decision,
-              accepted.run_id,
-            );
+            return client
+              .resolvePermission(kbrainSessionId, request.permission_id, decision, accepted.run_id)
+              .catch((error) => {
+                // A concurrent session grant can consume this waiter before its SSE resolution arrives.
+                if ((error as { status?: number }).status === 404) return;
+                throw error;
+              });
           })
           .catch((error) => {
             if (permissionController.signal.aborted) return;

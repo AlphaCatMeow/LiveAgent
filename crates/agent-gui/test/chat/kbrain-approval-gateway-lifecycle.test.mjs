@@ -75,7 +75,19 @@ async function runScenario(t, scenario) {
     if (permissionMatch) {
       const permissionId = permissionMatch[1];
       decisions.push([permissionId, JSON.parse(body).decision.decision]);
+      if (scenario.raceResolvedDecision && permissionId === "p-second") {
+        json({ error: "permission request not found" }, 404);
+        setTimeout(() => {
+          event("permission.resolved", { permission_id: "p-second", decision: "allow_once" });
+          finishRun();
+        }, 50);
+        return;
+      }
       json({ ok: true });
+      if (scenario.raceResolvedDecision) {
+        event("permission.resolved", { permission_id: permissionId, decision: "allow_once" });
+        return;
+      }
       if (scenario.resolveExternally && permissionId === "p-first") {
         event("permission.resolved", { permission_id: "p-first", decision: "allow_once" });
         event("permission.resolved", { permission_id: "p-second", decision: "allow_once", reason: "computer use allowed for this session" });
@@ -274,4 +286,24 @@ test("后端结清并发审批后立即清除桌面与 Gateway 标记,无需再�
   assert.deepEqual(run.decisions, [["p-first", "allow_once"]]);
   const syncs = run.gatewayEvents.filter((item) => item.type === "tool_call" && item.id === "second-call");
   assert.deepEqual(syncs.map((item) => item.arguments.__toolApprovalPending === true), [false, true, false]);
+});
+
+test("并发决定遇到已被会话授权结清的 404 时继续读取回合结果", async (t) => {
+  let answered = false;
+  const run = await runScenario(t, {
+    name: "resolved-decision-race",
+    raceResolvedDecision: true,
+    permissions: [
+      { permission_id: "p-first", tool_call_id: "call" },
+      { permission_id: "p-second", tool_call_id: "call" },
+    ],
+    onPending(pendings, { answer }) {
+      if (pendings.length !== 2 || answered) return;
+      answered = true;
+      for (const item of pendings) answer(item.toolCallId);
+    },
+  });
+  assert.equal(run.outcome.ok, true, String(run.outcome.error));
+  assert.deepEqual(run.errors, []);
+  assert.deepEqual(new Set(run.decisions.map(([id]) => id)), new Set(["p-first", "p-second"]));
 });

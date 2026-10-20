@@ -103,13 +103,14 @@ function click(element) {
   act(() => element.dispatchEvent(new MouseEvent("click", { bubbles: true })));
 }
 
-function renderWorkTrace(root, running, attentionRequired = false) {
+function renderWorkTrace(root, running, attentionRequired = false, extra = {}) {
   act(() => {
     root.render(
       React.createElement(AssistantWorkTrace, {
         hasDetails: true,
         attentionRequired,
         running,
+        ...extra,
         children: React.createElement("div", { "data-testid": "work-details" }),
       }),
     );
@@ -287,7 +288,8 @@ test("a new blocking interaction opens the work trace once without stealing late
   const container = document.createElement("div");
   const root = createRoot(container);
 
-  renderWorkTrace(root, false, false);
+  // An answered history turn mounts collapsed; only a blocking interaction reopens it.
+  renderWorkTrace(root, false, false, { collapseAfterAnswer: true });
   const button = container.querySelector("button");
   assert.equal(button.getAttribute("aria-expanded"), "false");
 
@@ -437,3 +439,30 @@ test("a running tool batch names the current operation and caps its expanded hei
 });
 
 test.after(() => env.cleanup());
+
+test("a settled turn without an answer mounts with its trace open, an answered one collapsed", () => {
+  // An interrupted run (queue run-now, Stop) persists only its process: once the
+  // history twin remounts it, a collapsed trace would leave just the header.
+  for (const [collapseAfterAnswer, expanded] of [
+    [false, "true"],
+    [true, "false"],
+  ]) {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    act(() => {
+      root.render(
+        React.createElement(AssistantWorkTrace, {
+          hasDetails: true,
+          running: false,
+          collapseAfterAnswer,
+          durationMs: 18_000,
+          children: React.createElement("div", { "data-testid": "work-details" }),
+        }),
+      );
+    });
+    const button = container.querySelector("button");
+    assert.equal(button.getAttribute("aria-expanded"), expanded);
+    assert.equal(Boolean(container.querySelector('[data-testid="work-details"]')), expanded === "true");
+    act(() => root.unmount());
+  }
+});

@@ -497,12 +497,14 @@ function buildAssistantUnits(input: BuildAssistantUnitsInput): AssistantUnitRow[
       kind: "assistant-unit",
       key: `${replyKey}:work-trace`,
       replyKey,
-      estimate: live
-        ? Math.min(
-            480,
-            42 + workMeasurements.reduce((total, measurement) => total + measurement.estimate, 0),
-          )
-        : 42,
+      // 没有总结文案的回合落定后仍展开（见 AssistantWorkTrace），估算要算上展开的条目。
+      estimate:
+        live || layout.answer.length === 0
+          ? Math.min(
+              480,
+              42 + workMeasurements.reduce((total, measurement) => total + measurement.estimate, 0),
+            )
+          : 42,
       renderCost: Math.min(
         16,
         Math.max(

@@ -448,3 +448,99 @@ test("attaching to a goal round stops early once the backend paused the goal", a
   assert.deepEqual(updates, ["paused"]);
   assert.ok(calls.filter((path) => path.endsWith("/runs")).length >= 2);
 });
+
+test("Stop waits for the backend to settle the cancelled run before the turn returns", async () => {
+  storage.clear();
+  const controller = new AbortController();
+  const order = [];
+  let cancelled = false;
+  await withHttpFixture((req, res) => {
+    if (req.url === "/v1/sessions") {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ id: "backend-session-1", model, messages: [], last_seq: 0 }));
+    } else if (req.method === "POST" && req.url.endsWith("/runs")) {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ version: "kbrain.agent.v1", conversation_id: "backend-session-1", run_id: "run-1", accepted_seq: 1 }));
+    } else if (req.url.endsWith("/cancel")) {
+      cancelled = true;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ ok: true }));
+    } else if (req.url.includes("/events")) {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      if (!cancelled) {
+        res.write(event(2, "assistant.text.delta", { text: "working" }));
+        return;
+      }
+      // The run winds down after the cancel request; its terminal event lands later.
+      setTimeout(() => {
+        order.push("terminal");
+        res.end(event(3, "run.cancelled"));
+      }, 150);
+    } else {
+      res.writeHead(404).end();
+    }
+  }, async (baseUrl) => {
+    const result = await runKBrainTurn({
+      ...baseParams,
+      baseUrl,
+      fetch: globalThis.fetch,
+      signal: controller.signal,
+      onTextDelta: () => controller.abort(),
+    });
+    order.push("returned");
+    assert.equal(result.stopReason, "aborted");
+    assert.deepEqual(order, ["terminal", "returned"]);
+  });
+});
+
+function busyFetch({ calls, busyCount, message = "session already has a running turn" }) {
+  const base = makeFetch({ calls: [], streams: [() => stream(event(2, "assistant.message.created", { content: [{ type: "text", text: "ok" }] }) + event(3, "run.completed"))] });
+  let posts = 0;
+  return async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    if (parsed.pathname.endsWith("/runs") && init.method === "POST") {
+      calls.push(parsed.pathname);
+      posts += 1;
+      if (posts <= busyCount) return json({ error: message }, 409);
+    }
+    return base(url, init);
+  };
+}
+
+test("a session still winding down delays the run instead of failing it", async () => {
+  storage.clear();
+  const calls = [];
+  const statuses = [];
+  const result = await runKBrainTurn({
+    ...baseParams,
+    fetch: busyFetch({ calls, busyCount: 2 }),
+    onStatus: (status) => statuses.push(status),
+  });
+  assert.equal(result.stopReason, "stop");
+  assert.equal(calls.length, 3);
+  assert.ok(statuses.some((status) => String(status).includes('"waiting_session"')));
+});
+
+test("Stop while waiting for a busy session aborts without starting a run", async () => {
+  storage.clear();
+  const calls = [];
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), 400);
+  await assert.rejects(
+    runKBrainTurn({ ...baseParams, fetch: busyFetch({ calls, busyCount: Number.POSITIVE_INFINITY }), signal: controller.signal }),
+    /aborted/i,
+  );
+  const postsAtAbort = calls.length;
+  await new Promise((resolve) => setTimeout(resolve, 600));
+  assert.equal(calls.length, postsAtAbort, "no run may be submitted after Stop");
+});
+
+test("other run conflicts are not retried as a busy session", async () => {
+  storage.clear();
+  const calls = [];
+  await assert.rejects(
+    runKBrainTurn({ ...baseParams, fetch: busyFetch({ calls, busyCount: 1, message: "session has queued work; submit through /queue" }) }),
+    /queued work/,
+  );
+  assert.equal(calls.length, 1);
+});

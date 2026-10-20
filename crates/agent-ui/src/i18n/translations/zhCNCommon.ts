@@ -1,6 +1,7 @@
 export const ZH_CN_COMMON_TRANSLATIONS = {
   "chat.runProgress.connecting": "正在连接后端",
   "chat.runProgress.reconnecting": "正在重新连接后端",
+  "chat.runProgress.waiting_session": "正在等待上一个任务结束",
   "chat.runProgress.preparing": "正在准备上下文",
   "chat.runProgress.compacting": "正在压缩上下文",
   "chat.runProgress.waiting_model": "正在等待模型响应",

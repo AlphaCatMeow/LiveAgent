@@ -194,6 +194,13 @@ export type KBrainTurnParams = {
 
 const api = "kbrain.agent.v1" as AssistantMessage["api"];
 const maxReconnects = 3;
+// 取消只是请求：后端 run 收到取消后还要收尾，发出终止事件前会话仍然占用。停止后
+// 最多等这么久，让下一轮（排队指令插队）不会撞上还在收尾的 run。
+const cancelSettleTimeoutMs = 10_000;
+// K-brain 在上一轮收尾、或后台任务仍在跑时拒绝开始新一轮；按退避重试，直到上限。
+const sessionBusyError = "session already has a running turn";
+const sessionBusyRetryDelaysMs = [250, 500, 1_000, 2_000, 3_000];
+const sessionBusyWaitMs = 180_000;
 // 后端在上一轮终止事件之后才发起目标续跑；按请求标识轮询，直到它被接受。
 const goalAttachPollMs = 150;
 const goalAttachTimeoutMs = 60_000;
@@ -315,6 +322,56 @@ function eventPayload<T>(event: KBrainEvent): T | undefined {
 
 function abortError(): Error {
   return new Error("K-brain turn aborted");
+}
+
+function isSessionBusyError(error: unknown) {
+  return (
+    (error as { status?: number })?.status === 409 &&
+    error instanceof Error &&
+    error.message === sessionBusyError
+  );
+}
+
+/** 停止后等这一轮 run 的终止事件（有超时）；流出错或超时就不再等。 */
+async function waitForCancelledRun(
+  client: ReturnType<typeof createKBrainClient>,
+  sessionId: string,
+  runId: string,
+  afterSeq: number,
+) {
+  const settled = new AbortController();
+  const timer = setTimeout(() => settled.abort(), cancelSettleTimeoutMs);
+  let seq = afterSeq;
+  try {
+    while (!settled.signal.aborted) {
+      const before = seq;
+      await client.subscribe(
+        sessionId,
+        seq,
+        {
+          onEvent: (event: KBrainEvent) => {
+            if (!Number.isInteger(event.seq) || event.seq <= seq) return;
+            seq = event.seq;
+            if (
+              event.run_id === runId &&
+              (event.type === "run.cancelled" ||
+                event.type === "run.completed" ||
+                event.type === "run.failed")
+            ) {
+              settled.abort();
+            }
+          },
+        },
+        settled.signal,
+      );
+      // 流在没有新事件时结束，再订阅也只是空转。
+      if (seq === before) break;
+    }
+  } catch {
+    // 超时或流失败：放弃等待，发送侧仍会按会话忙重试。
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function throwIfAborted(signal: AbortSignal) {
@@ -515,16 +572,40 @@ async function executeKBrainTurn(params: KBrainTurnParams): Promise<AssistantMes
     }
     return client.startRun({ conversation_id: kbrainSessionId, ...run }, params.signal);
   };
+  // 停止上一轮后立刻发出的下一轮（排队指令插队）可能赶上后台任务仍在运行。K-brain
+  // 在登记请求和改动目标之前就拒绝忙会话，所以普通运行和目标设定/续上都可以用同一
+  // 请求标识重试；挂接路径本身就在轮询。用户停止时 waitMs 直接抛出中止。
+  const startRunWhenIdle = async () => {
+    if (params.attachClientRequestId) return startRun();
+    const deadline = Date.now() + sessionBusyWaitMs;
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await startRun();
+      } catch (error) {
+        if (!isSessionBusyError(error)) throw error;
+        if (Date.now() >= deadline) {
+          throw new Error(
+            "The session is still busy (a background task may still be running). Send again after it finishes.",
+          );
+        }
+        reportProgress({ stage: "waiting_session" });
+        const delay =
+          sessionBusyRetryDelaysMs[Math.min(attempt, sessionBusyRetryDelaysMs.length - 1)];
+        await waitMs(delay ?? 3_000, params.signal);
+      }
+    }
+  };
   let accepted: Awaited<ReturnType<typeof client.startRun>>;
   try {
-    accepted = await startRun();
+    accepted = await startRunWhenIdle();
   } catch (error) {
     if ((error as { status?: number }).status !== 404 || !kbrainSessionId) throw error;
     kbrainSessionId = await createSession();
-    accepted = await startRun();
+    accepted = await startRunWhenIdle();
   }
   if (params.signal.aborted) {
     await client.cancelRun(kbrainSessionId, accepted.run_id).catch(() => undefined);
+    await waitForCancelledRun(client, kbrainSessionId, accepted.run_id, accepted.accepted_seq);
     throw abortError();
   }
   if (accepted.conversation_id !== kbrainSessionId || !accepted.run_id) {
@@ -915,6 +996,9 @@ async function executeKBrainTurn(params: KBrainTurnParams): Promise<AssistantMes
     streamAbortController.abort();
     cancelPendingPermissions();
     await client.cancelRun(kbrainSessionId, accepted.run_id).catch(() => undefined);
+    if (params.signal.aborted && !sawTerminal) {
+      await waitForCancelledRun(client, kbrainSessionId, accepted.run_id, afterSeq);
+    }
   }
   if (sawTerminal) cancelPendingPermissions();
   params.signal.removeEventListener("abort", abortStream);

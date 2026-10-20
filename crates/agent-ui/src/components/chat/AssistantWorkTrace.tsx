@@ -94,7 +94,12 @@ export function AssistantWorkTrace({
   const { t } = useLocale();
   const validStartedAt = chatTimestamp(startedAtMs);
   const validDuration = workDuration(durationMs);
-  const [expanded, setExpanded] = useAttentionDisclosure(attentionRequired, running);
+  // 没有总结文案的回合（被打断、失败、只有过程）挂载时展开：折叠后只剩标题，
+  // 用户看不到已经执行过的步骤。有文案的历史回合仍折叠，只露出回答。
+  const [expanded, setExpanded] = useAttentionDisclosure(
+    attentionRequired,
+    running || !collapseAfterAnswer,
+  );
 
   // 有总结文案时，回合完成（running 变 false）后自动折叠「处理中」区块一次；
   // 之后 disclosure 所有权交还给用户，手动展开/折叠不再被强制收回，

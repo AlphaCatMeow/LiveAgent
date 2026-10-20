@@ -65,6 +65,10 @@ import {
   takeNextQueuedChatTurn,
 } from "./chatTurnQueue";
 
+// 比发送侧等待后端终止事件的上限（10 秒）稍长。
+const PREVIOUS_RUN_SETTLE_WAIT_MS = 15_000;
+const PREVIOUS_RUN_SETTLE_POLL_MS = 100;
+
 type UseChatTurnQueueParams = {
   settings: AppSettings;
   currentConversationId: string;
@@ -84,6 +88,8 @@ type UseChatTurnQueueParams = {
   getConversationStopRequestVersion: (conversationId: string) => number;
   isConversationStopRequested: (conversationId: string) => boolean;
   consumeConversationStop: (conversationId: string, expectedVersion?: number) => boolean;
+  /** 这一轮是否还在收尾：强制停止释放界面后，被停的一轮仍持有停止处理器直到结束。 */
+  hasConversationStopHandler: (conversationId: string) => boolean;
   requestActiveConversationStop: (conversationId: string, options: { force: boolean }) => boolean;
   getConversationLiveTranscriptStore: (conversationId: string) => LiveTranscriptStore;
   captureAbortSnapshot: (store: LiveTranscriptStore) => void;
@@ -127,6 +133,7 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
     getConversationStopRequestVersion,
     isConversationStopRequested,
     consumeConversationStop,
+    hasConversationStopHandler,
     requestActiveConversationStop,
     getConversationLiveTranscriptStore,
     captureAbortSnapshot,
@@ -540,6 +547,20 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
     return resolveQueuedChatTurnSlotIndex(queue, slot) <= firstQueuedIndex;
   }
 
+  /**
+   * 强制停止会先释放界面，被停的那一轮仍在收尾（等后端终止事件、回写历史），
+   * 它和下一轮共用同一份实时转写。等它真正结束再发下一条；用户再次停止或已有
+   * 新一轮开始时放弃，返回 false。超时后照常发送，后端仍忙时由发送侧重试。
+   */
+  async function waitForPreviousRunToFinish(conversationId: string, stopped: () => boolean) {
+    const deadline = Date.now() + PREVIOUS_RUN_SETTLE_WAIT_MS;
+    while (hasConversationStopHandler(conversationId) && Date.now() < deadline) {
+      if (stopped() || isConversationRunning(conversationId)) return false;
+      await new Promise((resolve) => setTimeout(resolve, PREVIOUS_RUN_SETTLE_POLL_MS));
+    }
+    return !stopped() && !isConversationRunning(conversationId);
+  }
+
   function requestQueuedChatTurnProcessing(conversationId: string) {
     const targetConversationId = conversationId.trim();
     if (!targetConversationId) return;
@@ -578,6 +599,12 @@ export function useChatTurnQueue(params: UseChatTurnQueueParams) {
       .then(async () => {
         if (isConversationStopRequested(targetConversationId)) return false;
         if (isConversationRunning(targetConversationId)) return;
+        if (!(await waitForPreviousRunToFinish(targetConversationId, wasStoppedDuringProcessing))) {
+          return false;
+        }
+        if (isConversationStopRequested(targetConversationId)) return false;
+        // 等待期间用户可能打开了队首的编辑；和进入处理时一样挡住，提交编辑时会重新触发。
+        if (isQueuedChatTurnEditBlockingProcessing(targetConversationId)) return false;
         const taken = takeNextQueuedChatTurn(queuedChatTurnsRef.current, targetConversationId);
         if (!taken.item) return false;
         const queuedTurn = taken.item;

@@ -171,6 +171,12 @@ export function createSidebarStore(
   // pre-disconnect loadMore failure from landing after the fresh page succeeds
   // and resurrecting a stale listError.
   let listGeneration = 0;
+  // Local upserts newer than a first-page request: that response was computed
+  // before the row existed (an edit-resend branch, a just-created session), so
+  // its absence there proves nothing. Only a request issued after the upsert
+  // may confirm or drop the row.
+  let localUpsertSeq = 0;
+  const localUpsertSeqById = new Map<string, number>();
   let loadedPageCount = 0;
   let listRequestInFlight = false;
   let queuedListRequest: { authoritative: boolean } | null = null;
@@ -372,8 +378,11 @@ export function createSidebarStore(
 
   let revealedConversationId: string | null = null;
 
-  const retainedConversationIds = () => {
+  const retainedConversationIds = (upsertSeqAtRequest = Number.POSITIVE_INFINITY) => {
     const ids = new Set<string>(snapshot.mutations.keys());
+    for (const [id, seq] of localUpsertSeqById) {
+      if (seq > upsertSeqAtRequest) ids.add(id);
+    }
     if (revealedConversationId) ids.add(revealedConversationId);
     for (const id of backend.getProtectedConversationIds?.() ?? []) {
       const trimmed = id.trim();
@@ -584,6 +593,7 @@ export function createSidebarStore(
   const runFirstPageRequest = async (authoritative: boolean) => {
     const seq = requestSeq;
     const generation = ++listGeneration;
+    const upsertSeqAtRequest = localUpsertSeq;
     // Release the current-generation pagination gate immediately. Its
     // transport promise may still settle later, but the generation checks
     // make that result inert and a fresh page-2 request need not wait for it.
@@ -618,8 +628,12 @@ export function createSidebarStore(
         return;
       }
       const authoritativeItems = filterConversationsForScope(page.items, requestScope);
+      // Upserts this response already covers are settled by it either way.
+      for (const [id, upsertSeq] of localUpsertSeqById) {
+        if (upsertSeq <= upsertSeqAtRequest) localUpsertSeqById.delete(id);
+      }
       const reconciled = reconcileSidebarConversations(snapshot.conversations, authoritativeItems, {
-        retainConversationIds: retainedConversationIds(),
+        retainConversationIds: retainedConversationIds(upsertSeqAtRequest),
         preserveUpdatedAtConversationIds: activePositionLockIds(),
         authoritativeComplete: page.items.length < pageSize,
       });
@@ -1027,6 +1041,7 @@ export function createSidebarStore(
 
     upsertLocal: (conversation, options) => {
       if (options?.reveal) revealedConversationId = conversation.id;
+      localUpsertSeqById.set(conversation.id, ++localUpsertSeq);
       const existing = byId.get(conversation.id);
       const merged = mergeSidebarConversation(
         options?.reveal && existing ? { ...existing, cwd: conversation.cwd } : existing,
@@ -1054,6 +1069,7 @@ export function createSidebarStore(
     },
 
     removeLocal: (conversationId) => {
+      localUpsertSeqById.delete(conversationId);
       workspaceDeletedIds.set(conversationId, ++workspaceDeleteVersion);
       if (!byId.has(conversationId)) {
         return;

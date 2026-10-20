@@ -145,7 +145,7 @@ const TRANSCRIPT_ROW_GAP = 18;
 // persisted snapshots outlive releases, and stale heights keyed only by
 // widths would seed wrong layouts (and scroll-compensation churn) after an
 // upgrade. Mirrors the GUI's versioned key.
-const TRANSCRIPT_MEASUREMENT_LAYOUT_VERSION = "gateway-rows-v1";
+const TRANSCRIPT_MEASUREMENT_LAYOUT_VERSION = "gateway-rows-v2";
 
 function buildVersionedTranscriptLayoutKey(viewportWidth: number, contentWidth: number) {
   const layoutKey = buildTranscriptLayoutKey(viewportWidth, contentWidth);

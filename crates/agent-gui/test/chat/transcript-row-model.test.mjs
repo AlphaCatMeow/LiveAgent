@@ -338,6 +338,69 @@ test("a committed twin that races persistence is re-keyed at settle", () => {
   assert.notEqual(blockRows(settled)[0].key, racingBlockKey);
 });
 
+function assistantReplyCount(snapshot) {
+  return snapshot.rows.filter(
+    (row) => row.kind === "assistant-activity" || (row.kind === "assistant-unit" && row.unit.kind === "footer"),
+  ).length;
+}
+
+const streamingLive = {
+  ...idleLive,
+  isSending: true,
+  liveRounds: [{ ...round("r1", "partial"), runningToolCallIds: [], thinkingOpen: false }],
+};
+
+test("a sliding history window still hands the settled reply to the live turn", () => {
+  const model = createTranscriptRowModel();
+  // Long session: the newest-N window drops the oldest exchange while this
+  // turn persists its (tool-heavy) reply, so the list does not grow.
+  const atStart = [
+    userItem("u0"),
+    assistantItem("a0", [round("r1", "old reply")]),
+    userItem("u1"),
+    assistantItem("a1", [round("r1", "previous reply")]),
+    userItem("u2"),
+  ];
+  model.build(atStart, streamingLive);
+  const settled = model.build(
+    [
+      userItem("u1"),
+      assistantItem("a1", [round("r1", "previous reply")]),
+      userItem("u2"),
+      assistantItem("a2", [round("r1", "new reply")]),
+    ],
+    idleLive,
+  );
+  assert.equal(settled.liveStartIndex, -1, "no settling live row may linger next to its twin");
+  assert.equal(assistantReplyCount(settled), 2);
+  assert.ok(blockRows(settled).at(-1).key.startsWith("live-turn-1:"));
+});
+
+test("a reply longer than the window (its prompt slid out) is still adopted once", () => {
+  const model = createTranscriptRowModel();
+  model.build([userItem("u0"), assistantItem("a0", [round("r1", "old")]), userItem("u1")], streamingLive);
+  const settled = model.build([assistantItem("a1", [round("r1", "huge reply")])], idleLive);
+  assert.equal(settled.liveStartIndex, -1);
+  assert.equal(assistantReplyCount(settled), 1);
+  assert.ok(blockRows(settled)[0].key.startsWith("live-turn-1:"));
+});
+
+test("after a window slide a lagging persist never adopts the previous reply", () => {
+  const model = createTranscriptRowModel();
+  model.build([userItem("u0"), assistantItem("a0", [round("r1", "old")]), userItem("u1")], streamingLive);
+  const lagging = model.build([assistantItem("a0", [round("r1", "old")]), userItem("u1")], idleLive);
+  assert.equal(lagging.rows.at(-1).kind, "assistant-activity", "the settling live row waits for its twin");
+  assert.ok(!blockRows(lagging).some((row) => row.key.startsWith("live-turn-1:") && row.unit.block?.text === "old"));
+  const settled = model.build(
+    [assistantItem("a0", [round("r1", "old")]), userItem("u1"), assistantItem("a1", [round("r1", "reply")])],
+    idleLive,
+  );
+  assert.equal(settled.liveStartIndex, -1);
+  assert.equal(assistantReplyCount(settled), 2);
+  assert.ok(blockRows(settled).at(-1).key.startsWith("live-turn-1:"));
+  assert.ok(!blockRows(settled)[0].key.startsWith("live-turn-1:"));
+});
+
 test("terminal settlement removes the live tail before sending clears", () => {
   const model = createTranscriptRowModel();
   const store = createLiveTranscriptStore();

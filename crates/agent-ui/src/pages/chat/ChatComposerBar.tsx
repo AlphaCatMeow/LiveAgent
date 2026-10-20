@@ -1230,14 +1230,16 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
         {goalBar || queuedTurns.length > 0 || queuePaused ? (
           <div
             ref={queuePanelRef}
-            className="relative z-30 mx-auto mb-minus-1px flex w-inset-1p5rem flex-col empty:hidden"
+            className="relative z-30 mx-auto mb-minus-1px flex w-inset-1p5rem flex-col empty:hidden [&>[data-composer-goal-bar]+*]:rounded-t-none"
           >
-            {/* 目标栏与指令队列同在一个纵向容器里：上下排列，不互相覆盖，并一起计入输入区高度。 */}
+            {/* 目标栏与指令队列同在一个纵向容器里：上下排列，不互相覆盖，并一起计入输入区高度。
+                goalBar 宿主没有目标时渲染为空，只有真正渲染出的目标栏才让下方队列去掉上圆角。 */}
             {goalBar}
             {queuedTurns.length > 0 || queuePaused ? (
               <div
                 className={cn(
-                  "rounded-t-lg border border-b-0 border-black/[0.055] bg-white/70",
+                  // 与目标栏同宽：每侧距输入框边缘 30px，底边落在 26px 圆角之外的平直段。
+                  "mx-auto w-inset-2p25rem rounded-t-lg border border-b-0 border-black/[0.055] bg-white/70",
                   "px-1.5 pb-1 pt-1",
                   "shadow-ui-clarifypanel-22 backdrop-blur-2xl backdrop-saturate-[165%]",
                   "dark:border-white/[0.10] dark:bg-white/[0.06] dark:shadow-ui-clarifypanel-23",
@@ -1258,11 +1260,12 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
                     )}
                   >
                     <Clock3 className="size-3 shrink-0" />
-                    <span className="min-w-0 truncate">
+                    {/* 标题很短，窄面板里优先保住条数；"已暂停"先截断（旁边的继续按钮已表明暂停）。 */}
+                    <span className="shrink-0 whitespace-nowrap">
                       {t("chat.queue.title").replace("{count}", String(queuedTurns.length))}
                     </span>
                     {queuePaused ? (
-                      <span className="shrink-0 text-muted-foreground" role="status">
+                      <span className="min-w-0 truncate text-muted-foreground" role="status">
                         {t("chat.queue.paused")}
                       </span>
                     ) : null}
@@ -1321,14 +1324,14 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
                             <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
                               <span
                                 className={cn(
-                                  "block min-w-0 flex-1 overflow-hidden",
+                                  "block min-w-6 flex-1 overflow-hidden",
                                   "text-ellipsis whitespace-nowrap text-xs leading-4 text-foreground/88",
                                 )}
                               >
                                 {item.previewText || t("chat.queue.emptyMessage")}
                               </span>
                               {item.fileCount > 0 ? (
-                                <span className="max-w-18 shrink-0 overflow-hidden text-ellipsis whitespace-nowrap text-tiny leading-4 text-muted-foreground">
+                                <span className="min-w-0 max-w-18 overflow-hidden text-ellipsis whitespace-nowrap text-tiny leading-4 text-muted-foreground">
                                   {t("chat.queue.fileCount").replace(
                                     "{count}",
                                     String(item.fileCount),

@@ -219,7 +219,7 @@ pub fn shell_proxy_envs() -> Result<Vec<(String, String)>, String> {
     shell_proxy_envs_for_mode(&current_snapshot().mode)
 }
 
-fn build_proxy(config: &SystemProxyConfig) -> Result<reqwest::Proxy, String> {
+pub(crate) fn build_proxy(config: &SystemProxyConfig) -> Result<reqwest::Proxy, String> {
     reqwest::Proxy::all(config.proxy_url())
         // 环回地址豁免须与 shell env 注入的 NO_PROXY 一致，
         // 否则本地上游（如 127.0.0.1 的 MCP server）会被错误送进代理。

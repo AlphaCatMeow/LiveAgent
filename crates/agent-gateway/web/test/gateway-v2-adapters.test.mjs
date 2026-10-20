@@ -768,6 +768,58 @@ test("queue edit cancel preserves the original conversation and removed item ide
   assert.equal(encoded.payload.value.payload.value.itemId, "removed-queue-item");
 });
 
+// 代理服务检测：检测与测速都在桌面宿主上执行，测速参数规整成固定三个字段，
+// 返回的 JSON 与桌面 Tauri 命令同一份。
+test("proxy detect requests carry the action and normalized test input", () => {
+  const detect = decodeClientFrame(encodeRequestFrame("proxy-1", "proxy.detect", {}, "agent-1"));
+  assert.equal(detect.payload.value.payload.case, "proxyDetect");
+  assert.equal(detect.payload.value.payload.value.action, "detect");
+  assert.equal(detect.payload.value.payload.value.inputJson, "");
+
+  const probe = decodeClientFrame(
+    encodeRequestFrame(
+      "proxy-2",
+      "proxy.test",
+      { type: "socks5", host: " 127.0.0.1 ", port: 7891, password: "secret" },
+      "agent-1",
+    ),
+  );
+  assert.equal(probe.payload.value.payload.case, "proxyDetect");
+  assert.equal(probe.payload.value.payload.value.action, "test");
+  assert.deepEqual(JSON.parse(probe.payload.value.payload.value.inputJson), {
+    type: "socks5",
+    host: "127.0.0.1",
+    port: 7891,
+  });
+
+  const candidates = [
+    {
+      id: "http://127.0.0.1:7890",
+      type: "http",
+      host: "127.0.0.1",
+      port: 7890,
+      processName: "FlClashCore",
+      sources: ["os", "listen"],
+      authRequired: false,
+    },
+  ];
+  const decoded = decodeServerFrame(
+    roundtrip(
+      serverFrame({
+        request_id: "proxy-1",
+        agent_id: "agent-1",
+        agent_response: {
+          request_id: "proxy-1",
+          proxy_detect_resp: { action: "detect", result_json: JSON.stringify({ candidates }) },
+        },
+      }),
+    ),
+    { agentOnline: true },
+  );
+  assert.equal(decoded.kind, "response");
+  assert.deepEqual(decoded.payload, { candidates });
+});
+
 test("Planning v2 preserves CAS and taxonomy payloads and identifies the invalidated Agent", () => {
   const input = { requestId: "request-stable", action: "todo.update", id: "todo-1", expectedRevision: 7, data: { groupId: "group-1", tagIds: ["tag-1"], projectId: "project-1", reminderMinutes: 15 } };
   const frame = decodeClientFrame(encodeRequestFrame("planning-1", "planning.manage", { action: "mutate", input }, "agent-1"));

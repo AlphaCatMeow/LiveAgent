@@ -29,6 +29,8 @@ pub(crate) const CHAT_INGRESS_V1_CAPABILITY: &str = "CHAT_INGRESS_V1";
 pub(crate) const CONVERSATION_REFERENCES_V1_CAPABILITY: &str = "CONVERSATION_REFERENCES_V1";
 /// WebUI 输入框“/”指令（ChatRequest 的 goal/prompt 语义、指令目录、/goal clear 与 /loop）。
 pub(crate) const COMPOSER_COMMANDS_V1_CAPABILITY: &str = "COMPOSER_COMMANDS_V1";
+/// 应用代理设置的代理服务检测与测速（proxy_detect 请求）。
+pub(crate) const PROXY_DETECT_V1_CAPABILITY: &str = "PROXY_DETECT_V1";
 /// 桌面端主链路路径。
 pub(crate) const GATEWAY_WS_AGENT_PATH: &str = "/ws/v2/agent";
 /// 终端数据面路径。
@@ -89,6 +91,7 @@ pub(crate) fn build_client_hello(
             CONVERSATION_REFERENCES_V1_CAPABILITY.to_string(),
             "planning_v1".to_string(),
             COMPOSER_COMMANDS_V1_CAPABILITY.to_string(),
+            PROXY_DETECT_V1_CAPABILITY.to_string(),
         ],
     }
 }
@@ -436,6 +439,7 @@ mod tests {
                     CONVERSATION_REFERENCES_V1_CAPABILITY,
                     "planning_v1",
                     COMPOSER_COMMANDS_V1_CAPABILITY,
+                    PROXY_DETECT_V1_CAPABILITY,
                 ]
             );
 

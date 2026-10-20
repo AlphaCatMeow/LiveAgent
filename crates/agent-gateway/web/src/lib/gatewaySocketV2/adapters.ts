@@ -80,6 +80,7 @@ import {
   ProviderListRequestSchema,
   ProviderModelsRequestSchema,
   ProviderUsageRequestSchema,
+  ProxyDetectRequestSchema,
   SettingsGetRequestSchema,
   SettingsResetSshKnownHostRequestSchema,
   SettingsUpdateRequestSchema,
@@ -742,6 +743,24 @@ function agentRequestPayload(type: string, body: J): GatewayEnvelope["payload"] 
       return {
         case: "cuaDriver",
         value: create(CuaDriverRequestSchema, { action: "permissions_status" }),
+      };
+    // 应用代理设置的代理服务检测：在桌面宿主上执行，结果与 Tauri 命令同一份 JSON。
+    case "proxy.detect":
+      return {
+        case: "proxyDetect",
+        value: create(ProxyDetectRequestSchema, { action: "detect" }),
+      };
+    case "proxy.test":
+      return {
+        case: "proxyDetect",
+        value: create(ProxyDetectRequestSchema, {
+          action: "test",
+          inputJson: JSON.stringify({
+            type: body.type === "socks5" ? "socks5" : "http",
+            host: trimStr(body.host),
+            port: n32(body.port),
+          }),
+        }),
       };
     case "files.preview":
       return {
@@ -1505,6 +1524,8 @@ function decodeAgentResponse(envelope: AgentEnvelope, options: { agentOnline: bo
     case "gitResponse":
       return unmarshalJsonPayload(payload.value.resultJson);
     case "cuaDriverResp":
+      return unmarshalJsonPayload(payload.value.resultJson);
+    case "proxyDetectResp":
       return unmarshalJsonPayload(payload.value.resultJson);
     case "sftpResponse":
       return sftpResponsePayload(payload.value);

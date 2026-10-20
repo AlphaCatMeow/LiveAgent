@@ -262,6 +262,17 @@ export async function invoke<T>(command: string, args?: Record<string, unknown>)
       return (await getGatewayWebSocketClient(loadToken().trim()).cuaDriverStatus<T>(
         "permissions_status",
       )) as T;
+    // 应用代理设置：检测的是桌面宿主上运行的代理服务，经 Gateway 直通中继。
+    case "system_proxy_detect":
+      return (await getGatewayWebSocketClient(loadToken().trim()).detectProxies<T>()) as T;
+    case "system_proxy_test": {
+      const input = (args?.input ?? {}) as Record<string, unknown>;
+      return (await getGatewayWebSocketClient(loadToken().trim()).testProxy<T>({
+        type: String(input.type ?? ""),
+        host: String(input.host ?? "").trim(),
+        port: typeof input.port === "number" ? input.port : Number(input.port ?? 0),
+      })) as T;
+    }
     case "system_list_skill_files":
       return (await getGatewayWebSocketClient(loadToken().trim()).listSkillFiles()) as T;
     case "system_read_skill_metadata":

@@ -1252,6 +1252,16 @@ export class GatewayWebSocketRpcClient extends GatewayWebSocketTransport {
     return this.requestWithRecovery<T>(`cua.driver.${action}`, {});
   }
 
+  /** 应用代理设置的代理服务检测与测速，在桌面宿主上执行；返回值与 GUI 端
+   *  Tauri 命令 `system_proxy_detect` / `system_proxy_test` 的载荷一致。 */
+  async detectProxies<T>(): Promise<T> {
+    return this.requestWithRecovery<T>("proxy.detect", {});
+  }
+
+  async testProxy<T>(input: { type: string; host: string; port: number }): Promise<T> {
+    return this.request<T>("proxy.test", input);
+  }
+
   async listFsRoots(): Promise<FsRootsResponse> {
     return this.requestWithRecovery<FsRootsResponse>("fs.roots", {});
   }

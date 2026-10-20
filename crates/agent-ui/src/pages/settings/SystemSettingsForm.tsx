@@ -54,6 +54,7 @@ import {
   SettingsRow,
 } from "@liveagent/ui/pages/settings/shared";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type DetectedProxy, DetectedProxyList } from "./DetectedProxyList";
 import { PlanningTimeZoneSetting } from "./PlanningTimeZoneSetting";
 import { SidebarShortcutsSection } from "./SidebarShortcutsSection";
 
@@ -360,6 +361,32 @@ export function SystemSettingsForm(props: SettingsSectionProps) {
     }
   }
 
+  // 点击检测到的代理：填写类型、地址、端口，不动开关。草稿一并清掉，否则输入框
+  // 里残留的旧值会在下次失焦时写回去。换到另一台主机时清掉原来的用户名密码，
+  // 免得把旧代理的凭据发给新地址（passwordConfigured=false 是同步里的显式清除信号）。
+  function applyDetectedProxy(proxy: DetectedProxy) {
+    const sameTarget = effectiveProxyHost === proxy.host && effectiveProxyPort === proxy.port;
+    setProxyHostDraft(null);
+    setProxyPortDraft(null);
+    if (sameTarget) {
+      patchSystemProxy({ type: proxy.type, host: proxy.host, port: proxy.port });
+    } else {
+      setProxyUsernameDraft(null);
+      setProxyPasswordDraft(null);
+      patchSystemProxy({
+        type: proxy.type,
+        host: proxy.host,
+        port: proxy.port,
+        username: "",
+        password: "",
+        passwordConfigured: false,
+      });
+    }
+    if (proxy.authRequired) {
+      document.getElementById("system-proxy-username")?.focus();
+    }
+  }
+
   return (
     <div className="settings-system-section space-y-8 pb-10">
       <SettingsGroup title={t("settings.executionMode")}>
@@ -564,6 +591,14 @@ export function SystemSettingsForm(props: SettingsSectionProps) {
                       onBlur={() => commitProxyPortDraft()}
                     />
                   </FormField>
+                  <DetectedProxyList
+                    current={{
+                      type: systemProxy.type,
+                      host: effectiveProxyHost,
+                      port: effectiveProxyPort,
+                    }}
+                    onSelect={applyDetectedProxy}
+                  />
                 </div>
 
                 <div className="mt-4 space-y-4">

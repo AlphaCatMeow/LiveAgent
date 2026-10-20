@@ -1,6 +1,7 @@
 export const EN_US_COMMON_TRANSLATIONS = {
   "chat.runProgress.connecting": "Connecting to backend",
   "chat.runProgress.reconnecting": "Reconnecting to backend",
+  "chat.runProgress.waiting_session": "Waiting for the previous task to finish",
   "chat.runProgress.preparing": "Preparing context",
   "chat.runProgress.compacting": "Compacting context",
   "chat.runProgress.waiting_model": "Waiting for model",

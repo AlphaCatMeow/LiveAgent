@@ -2,6 +2,7 @@ export type RunProgress = {
   stage:
     | "connecting"
     | "reconnecting"
+    | "waiting_session"
     | "preparing"
     | "compacting"
     | "waiting_model"
@@ -20,6 +21,7 @@ const prefix = "kbrain-progress:";
 const stages = new Set([
   "connecting",
   "reconnecting",
+  "waiting_session",
   "preparing",
   "compacting",
   "waiting_model",

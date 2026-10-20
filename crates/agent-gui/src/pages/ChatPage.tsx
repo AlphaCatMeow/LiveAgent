@@ -656,6 +656,7 @@ function ChatPageContent(props: ChatPageProps) {
     consumeConversationStop,
     setConversationStopHandler,
     clearConversationStopHandler,
+    hasConversationStopHandler,
     requestActiveConversationStop,
     setConversationSendingState,
   } = useChatPageRuntimeStore({
@@ -1039,6 +1040,7 @@ function ChatPageContent(props: ChatPageProps) {
     getConversationStopRequestVersion,
     isConversationStopRequested,
     consumeConversationStop,
+    hasConversationStopHandler,
     requestActiveConversationStop,
     getConversationLiveTranscriptStore,
     captureAbortSnapshot,

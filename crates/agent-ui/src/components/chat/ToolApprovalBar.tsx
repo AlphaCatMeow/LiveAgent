@@ -18,7 +18,7 @@ import { cn } from "@liveagent/ui/lib/shared/utils";
 import { useEffect, useRef, useState } from "react";
 import { ASK_USER_QUESTION_TIMEOUT_MS } from "../../lib/chat/askUserQuestion";
 
-/** approve:本次放行;deny:本次拒绝;approve_session:本会话内该工具后续免审。 */
+/** approve:本次放行;deny:本次拒绝;approve_session:请后端在本会话内记住这条授权范围。 */
 export type ToolApprovalDecision = "approve" | "deny" | "approve_session";
 
 export type ToolApprovalSubmitOutcome = { ok: boolean; message?: string };
@@ -30,6 +30,12 @@ export type PendingApprovalItem = {
   summary?: string;
   /** 权威应答截止时间戳(毫秒);缺省以挂载时刻近似。 */
   deadlineAt?: number;
+  /** 后端会记住本会话授权时为 true 才提供 approve_session;缺省不提供(远端旧数据同样不显示)。 */
+  allowSession?: boolean;
+  /** approve_session 生效的授权范围(如 call:click),显示在该选项里。 */
+  sessionScope?: string;
+  /** 本次允许即对本会话同类操作生效(如 Computer Use);正文与按钮据此说明。 */
+  sessionWide?: boolean;
 };
 
 function formatCountdown(remainingMs: number) {
@@ -113,6 +119,11 @@ export function ToolApprovalBar({
   const displayToolName =
     current.toolName.toLowerCase() === "bash" ? t("chat.toolApproval.terminal") : current.toolName;
   const errorText = submissionError?.toolCallId === current.toolCallId ? submissionError.text : "";
+  const offerSession = current.allowSession === true;
+  const hasMoreActions = offerSession || pending.length > 1;
+  const sessionTarget = current.sessionScope
+    ? `${displayToolName} · ${current.sessionScope}`
+    : displayToolName;
 
   const runGuarded = async (
     action: string,
@@ -180,12 +191,12 @@ export function ToolApprovalBar({
         );
       }}
       className={cn(
-        "@container relative flex h-32 w-full flex-col",
+        "@container relative flex min-h-32 w-full flex-col",
         "rounded-3xl border border-black/[0.055] bg-white/72 shadow-ui-toolapprovalbar-18 outline-none backdrop-blur-2xl backdrop-saturate-[165%]",
         "dark:border-white/[0.10] dark:bg-white/[0.06] dark:shadow-ui-toolapprovalbar-19",
       )}
     >
-      <div className="min-h-0 flex-1 overflow-hidden px-4 pt-3">
+      <div className="min-h-0 flex-auto overflow-hidden px-4 pt-3">
         <div className="flex min-w-0 items-center gap-2 text-muted-foreground">
           <Terminal className="size-3.5 shrink-0" />
           <span className="min-w-0 flex-1 truncate text-xs leading-none">{displayToolName}</span>
@@ -199,8 +210,11 @@ export function ToolApprovalBar({
           </span>
         </div>
 
-        <p className="mt-2 truncate text-sm font-medium leading-1p5 text-foreground/92">
-          {t("chat.toolApproval.body").replace("{tool}", displayToolName)}
+        {/* Wraps instead of truncating: on phones the session-wide explanation must stay readable. */}
+        <p className="mt-2 break-words text-sm font-medium leading-1p5 text-foreground/92">
+          {current.sessionWide
+            ? t("chat.toolApproval.sessionWideBody")
+            : t("chat.toolApproval.body").replace("{tool}", displayToolName)}
         </p>
 
         {current.summary ? (
@@ -260,12 +274,16 @@ export function ToolApprovalBar({
                   onDecide(current.toolCallId, "approve"),
                 )
               }
-              className="h-7 rounded-r-none px-3 text-xs shadow-none"
+              className={cn("h-7 px-3 text-xs shadow-none", hasMoreActions && "rounded-r-none")}
             >
               {submittingAction === `approve:${current.toolCallId}` ? (
                 <Loader2 className="size-3.5 animate-spin" />
               ) : null}
-              {t("chat.toolApproval.approve")}
+              {t(
+                current.sessionWide
+                  ? "chat.toolApproval.approveForSession"
+                  : "chat.toolApproval.approve",
+              )}
               <span
                 aria-hidden="true"
                 className={cn(
@@ -276,30 +294,34 @@ export function ToolApprovalBar({
                 ↵
               </span>
             </Button>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  size="sm"
-                  disabled={submitting}
-                  className="h-7 w-6 rounded-l-none border-l border-primary-foreground/20 px-0 shadow-none"
-                />
-              }
-              aria-label={t("chat.toolApproval.moreActions")}
-            >
-              <ChevronDown className="size-3" />
-            </DropdownMenuTrigger>
+            {hasMoreActions ? (
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    size="sm"
+                    disabled={submitting}
+                    className="h-7 w-6 rounded-l-none border-l border-primary-foreground/20 px-0 shadow-none"
+                  />
+                }
+                aria-label={t("chat.toolApproval.moreActions")}
+              >
+                <ChevronDown className="size-3" />
+              </DropdownMenuTrigger>
+            ) : null}
           </div>
           <DropdownMenuContent variant="soft" side="top" align="end" className="min-w-32">
-            <DropdownMenuItem
-              disabled={submitting}
-              onSelect={() =>
-                void runGuarded(`session:${current.toolCallId}`, () =>
-                  onDecide(current.toolCallId, "approve_session"),
-                )
-              }
-            >
-              {t("chat.toolApproval.approveSession").replace("{tool}", displayToolName)}
-            </DropdownMenuItem>
+            {offerSession ? (
+              <DropdownMenuItem
+                disabled={submitting}
+                onSelect={() =>
+                  void runGuarded(`session:${current.toolCallId}`, () =>
+                    onDecide(current.toolCallId, "approve_session"),
+                  )
+                }
+              >
+                {t("chat.toolApproval.approveSession").replace("{tool}", sessionTarget)}
+              </DropdownMenuItem>
+            ) : null}
             {pending.length > 1 ? (
               <>
                 <DropdownMenuItem

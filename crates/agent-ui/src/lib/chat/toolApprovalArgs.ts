@@ -10,8 +10,14 @@ export const TOOL_APPROVAL_PENDING_ARG = "__toolApprovalPending";
 export const TOOL_APPROVAL_DEADLINE_ARG = "__toolApprovalDeadlineAt";
 /** 待审批工具的命令/参数摘要(桌面端算一次同步给 WebUI,审批栏统一展示)。 */
 export const TOOL_APPROVAL_SUMMARY_ARG = "__toolApprovalSummary";
+/** 后端会记住 approve_session 时为 true;缺省不提供"本会话始终允许"。 */
+export const TOOL_APPROVAL_ALLOW_SESSION_ARG = "__toolApprovalAllowSession";
+/** approve_session 生效的授权范围(如 computer_exec 的 call:click)。 */
+export const TOOL_APPROVAL_SESSION_SCOPE_ARG = "__toolApprovalSessionScope";
+/** 本次允许即对本会话同类操作生效(如 Computer Use);审批栏据此在批准前说明。 */
+export const TOOL_APPROVAL_SESSION_WIDE_ARG = "__toolApprovalSessionWide";
 
-/** 审批决定:allow=本次放行;deny=本次拒绝;approve_session=本对话内该工具后续免审。 */
+/** 审批决定:allow=本次放行;deny=本次拒绝;approve_session=请后端在本对话内记住这条授权范围。 */
 export type ToolApprovalDecision = "approve" | "deny" | "approve_session";
 
 export function readToolApprovalPending(args: unknown): boolean {
@@ -23,6 +29,38 @@ export function readToolApprovalDeadlineAt(args: unknown): number | null {
   if (!args || typeof args !== "object") return null;
   const value = (args as Record<string, unknown>)[TOOL_APPROVAL_DEADLINE_ARG];
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+/** 远端审批栏的一项;与桌面审批栏 PendingApprovalItem 同形。 */
+export type RemoteToolApprovalItem = {
+  toolCallId: string;
+  toolName: string;
+  summary?: string;
+  deadlineAt?: number;
+  allowSession: boolean;
+  sessionScope?: string;
+  sessionWide: boolean;
+};
+
+/** 从同步过来的工具调用参数还原待审批项;未待审批时返回 null。两个 WebUI 收集器共用。 */
+export function pendingToolApprovalFromToolCall(toolCall: {
+  id: string;
+  name: string;
+  arguments?: unknown;
+}): RemoteToolApprovalItem | null {
+  const args = toolCall.arguments;
+  if (!readToolApprovalPending(args)) return null;
+  const record = args as Record<string, unknown>;
+  const scope = record[TOOL_APPROVAL_SESSION_SCOPE_ARG];
+  return {
+    toolCallId: toolCall.id,
+    toolName: toolCall.name,
+    summary: readToolApprovalSummary(args),
+    deadlineAt: readToolApprovalDeadlineAt(args) ?? undefined,
+    allowSession: record[TOOL_APPROVAL_ALLOW_SESSION_ARG] === true,
+    sessionScope: typeof scope === "string" && scope.trim() ? scope.trim() : undefined,
+    sessionWide: record[TOOL_APPROVAL_SESSION_WIDE_ARG] === true,
+  };
 }
 
 export function readToolApprovalSummary(args: unknown): string {

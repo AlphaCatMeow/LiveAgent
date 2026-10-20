@@ -133,6 +133,21 @@ export function contextToKBrainMessages(context: Context): KBrainMessage[] {
   return messages;
 }
 
+/** permission.requested payload. `rule` scopes an allow_always answer, which K-brain only
+ *  remembers when it lists that option; older backends offer allow_once/reject only. */
+export type KBrainPermissionRequest = {
+  permission_id: string;
+  tool: string;
+  command?: string;
+  rule?: string;
+  description?: string;
+  options?: { id: string; label?: string; kind?: string }[];
+  /** "session": approving also allows this kind of action for the rest of the session. */
+  scope?: string;
+  /** The model tool call waiting on this decision, when K-brain knows it. */
+  tool_call_id?: string;
+};
+
 export type KBrainTurnParams = {
   conversationId: string;
   sessionId: string;
@@ -154,12 +169,7 @@ export type KBrainTurnParams = {
     signal?: AbortSignal,
   ) => Promise<KBrainQuestionAnswer[]>;
   onPermissionRequest?: (
-    request: {
-      permission_id: string;
-      tool: string;
-      command?: string;
-      description?: string;
-    },
+    request: KBrainPermissionRequest,
     signal?: AbortSignal,
   ) => Promise<"allow_once" | "allow_always" | "reject">;
   applyConversationState?: (state: ConversationViewState) => void;
@@ -531,14 +541,14 @@ async function executeKBrainTurn(params: KBrainTurnParams): Promise<AssistantMes
   let errorMessage: string | undefined;
   let sawTerminal = false;
   let permissionFailure: Error | undefined;
-  const pendingPermissions = new Set<AbortController>();
+  const pendingPermissions = new Map<string, AbortController>();
   const pendingQuestions = new Map<string, AbortController>();
   const pendingClientTools = new Map<string, AbortController>();
   // Never cleared: replayed events after a reconnect must not run the same action twice.
   const handledClientTools = new Set<string>();
   const streamAbortController = new AbortController();
   const cancelPendingPermissions = () => {
-    for (const controller of pendingPermissions) controller.abort();
+    for (const controller of pendingPermissions.values()) controller.abort();
     pendingPermissions.clear();
     for (const controller of pendingQuestions.values()) controller.abort();
     pendingQuestions.clear();
@@ -796,12 +806,7 @@ async function executeKBrainTurn(params: KBrainTurnParams): Promise<AssistantMes
       }
       case "permission.requested": {
         reportStatus("Waiting for permission…");
-        const request = eventPayload<{
-          permission_id: string;
-          tool: string;
-          command?: string;
-          description?: string;
-        }>(event);
+        const request = eventPayload<KBrainPermissionRequest>(event);
         if (!request || !params.onPermissionRequest) {
           permissionFailure = new Error(
             "K-brain requested permission but no permission callback is configured",
@@ -810,7 +815,7 @@ async function executeKBrainTurn(params: KBrainTurnParams): Promise<AssistantMes
           return;
         }
         const permissionController = new AbortController();
-        pendingPermissions.add(permissionController);
+        pendingPermissions.set(request.permission_id, permissionController);
         let decisionPromise: Promise<"allow_once" | "allow_always" | "reject">;
         try {
           decisionPromise = Promise.resolve(
@@ -822,29 +827,36 @@ async function executeKBrainTurn(params: KBrainTurnParams): Promise<AssistantMes
         void decisionPromise
           .then((decision) => {
             if (permissionController.signal.aborted) return;
-            return client.resolvePermission(
-              kbrainSessionId,
-              request.permission_id,
-              decision,
-              accepted.run_id,
-            );
+            return client
+              .resolvePermission(kbrainSessionId, request.permission_id, decision, accepted.run_id)
+              .catch((error) => {
+                // A concurrent session grant can consume this waiter before its SSE resolution arrives.
+                if ((error as { status?: number }).status === 404) return;
+                throw error;
+              });
           })
           .catch((error) => {
-            if (
-              permissionController.signal.aborted &&
-              (sawTerminal || streamAbortController.signal.aborted)
-            )
-              return;
+            if (permissionController.signal.aborted) return;
             permissionFailure = error instanceof Error ? error : new Error(String(error));
             reportStatus(null);
             streamAbortController.abort();
           })
-          .finally(() => pendingPermissions.delete(permissionController));
+          .finally(() => {
+            if (pendingPermissions.get(request.permission_id) === permissionController) {
+              pendingPermissions.delete(request.permission_id);
+            }
+          });
         break;
       }
-      case "permission.resolved":
+      case "permission.resolved": {
+        const resolution = eventPayload<{ permission_id?: string }>(event);
+        if (resolution?.permission_id) {
+          pendingPermissions.get(resolution.permission_id)?.abort();
+          pendingPermissions.delete(resolution.permission_id);
+        }
         reportStatus(null);
         break;
+      }
       case "run.failed":
         terminal = "error";
         errorMessage = eventPayload<{ error?: string }>(event)?.error ?? "K-brain run failed";

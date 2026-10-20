@@ -832,6 +832,9 @@ export const ZH_CN_COMMON_TRANSLATIONS = {
   "chat.toolApproval.terminal": "终端",
   "chat.toolApproval.approve": "允许本次",
   "chat.toolApproval.approveSession": "本会话始终允许 {tool}",
+  "chat.toolApproval.approveForSession": "允许",
+  "chat.toolApproval.sessionWideBody":
+    "允许后，本对话里的 Computer Use 操作不再询问（批量执行和安装类操作除外）。",
   "chat.toolApproval.moreActions": "更多审批选项",
   "chat.toolApproval.deny": "拒绝",
   "chat.toolApproval.timeoutHint": "后自动拒绝",

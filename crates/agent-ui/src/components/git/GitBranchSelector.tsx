@@ -238,9 +238,10 @@ export function GitBranchSelector(props: {
       } finally {
         if (refreshRequestIdRef.current === requestId) {
           refreshInFlightRef.current = false;
-          if (!options.silent) {
-            setLoading(false);
-          }
+          // The latest request settling means nothing is loading any more. A
+          // forced silent refresh (git watcher after a branch switch) can
+          // overtake the interactive one, whose own finally then skips this.
+          setLoading(false);
         }
       }
     },

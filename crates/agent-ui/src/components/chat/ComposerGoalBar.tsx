@@ -140,7 +140,7 @@ export function ComposerGoalBar({
       data-composer-goal-bar={state.status}
       className={cn(
         // 比输入框窄一圈，落在其圆角以内，也少挡转录区的文字。
-        "mx-auto w-inset-3rem rounded-t-lg border border-b-0 border-black/[0.055] bg-white/70",
+        "mx-auto w-inset-2p25rem rounded-t-lg border border-b-0 border-black/[0.055] bg-white/70",
         "px-2 py-1",
         "shadow-ui-clarifypanel-22 backdrop-blur-2xl backdrop-saturate-[165%]",
         "dark:border-white/[0.10] dark:bg-white/[0.06] dark:shadow-ui-clarifypanel-23",
@@ -195,15 +195,16 @@ export function ComposerGoalBar({
             </>
           ) : (
             <>
+              {/* 与排队指令的操作顺序一致：编辑、执行（暂停/继续）、删除。 */}
               <button
                 type="button"
                 className={iconButton}
                 disabled={locked}
-                onClick={clear}
-                title={t("chat.goalBar.clear")}
-                aria-label={t("chat.goalBar.clear")}
+                onClick={() => setEditing(true)}
+                title={t("chat.goalBar.edit")}
+                aria-label={t("chat.goalBar.edit")}
               >
-                <Trash2 className="size-3.5" />
+                <SquarePen className="size-3.5" />
               </button>
               <button
                 type="button"
@@ -219,11 +220,11 @@ export function ComposerGoalBar({
                 type="button"
                 className={iconButton}
                 disabled={locked}
-                onClick={() => setEditing(true)}
-                title={t("chat.goalBar.edit")}
-                aria-label={t("chat.goalBar.edit")}
+                onClick={clear}
+                title={t("chat.goalBar.clear")}
+                aria-label={t("chat.goalBar.clear")}
               >
-                <SquarePen className="size-3.5" />
+                <Trash2 className="size-3.5" />
               </button>
             </>
           )}

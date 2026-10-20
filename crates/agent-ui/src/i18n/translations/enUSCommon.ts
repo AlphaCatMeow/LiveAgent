@@ -616,8 +616,7 @@ export const EN_US_COMMON_TRANSLATIONS = {
   "chat.commands.goalCleared": "Goal cleared.",
   "chat.commands.goalPaused": "Goal paused.",
   "chat.commands.goalPauseUnsupported": "Pausing a goal from the composer is not available here",
-  "chat.commands.busy":
-    "This conversation is still running; wait for it to finish or stop it, then send the command again.",
+  "chat.commands.busy": "A task is running. Send it after it finishes or stop it first",
   "chat.commands.contextUnsupported":
     "This command cannot carry referenced conversations, large pastes or attachments here; remove them and try again.",
   "chat.commands.loopUsage":

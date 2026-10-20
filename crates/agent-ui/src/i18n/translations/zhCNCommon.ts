@@ -569,7 +569,7 @@ export const ZH_CN_COMMON_TRANSLATIONS = {
   "chat.commands.goalCleared": "目标已清除。",
   "chat.commands.goalPaused": "目标已暂停。",
   "chat.commands.goalPauseUnsupported": "此处暂不支持在输入框暂停目标",
-  "chat.commands.busy": "当前对话仍在运行；请等它结束或先停止，再发送指令。",
+  "chat.commands.busy": "任务进行中，结束或停止后再发送",
   "chat.commands.contextUnsupported":
     "此指令在这里无法附带会话引用、大段粘贴或附件；请移除后重试。",
   "chat.commands.loopUsage":

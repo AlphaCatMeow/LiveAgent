@@ -28,6 +28,7 @@ export async function renderComposerQueue({
   goalState = DEFAULT_GOAL,
   queuedTurns = DEFAULT_QUEUE,
   queuePaused = true,
+  goalEditing = false,
 } = {}) {
   const env = await createDomTestEnv({
     mocks: {
@@ -99,6 +100,12 @@ export async function renderComposerQueue({
         ),
       );
     });
+    if (goalEditing) {
+      const edit = container.querySelector(
+        `[data-composer-goal-bar] button[aria-label="${translate("chat.goalBar.edit", lang)}"]`,
+      );
+      await act(async () => edit.click());
+    }
     const html = container.innerHTML;
     const panel = container.querySelector("ul.chat-queue-scroll")?.closest(".border-b-0");
     const goal = container.querySelector("[data-composer-goal-bar]");

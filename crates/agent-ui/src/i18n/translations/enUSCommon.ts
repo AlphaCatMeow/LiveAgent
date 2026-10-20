@@ -637,7 +637,7 @@ export const EN_US_COMMON_TRANSLATIONS = {
   "chat.commands.loopEveryDays": "Every {count} days",
   "chat.goalBar.active": "Goal in progress",
   "chat.goalBar.paused": "Goal paused",
-  "chat.goalBar.awaitingInput": "Goal waiting for your reply",
+  "chat.goalBar.awaitingInput": "Awaiting your reply",
   "chat.goalBar.round": "round {round}/{max}",
   "chat.goalBar.pause": "Pause goal",
   "chat.goalBar.resume": "Resume goal",

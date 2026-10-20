@@ -63,6 +63,9 @@ async function runScenario(t, scenario) {
       if (scenario.announceCall !== false) {
         event("tool.call", { tool_call: { id: "call", name: "computer_exec", arguments: { action: "call", tool: "click" } } });
       }
+      if (scenario.resolveExternally) {
+        event("tool.call", { tool_call: { id: "second-call", name: "computer_exec", arguments: { action: "call", tool: "click" } } });
+      }
       for (const permission of scenario.permissions.slice(0, scenario.initialPermissions ?? scenario.permissions.length)) {
         event("permission.requested", { tool: "computer_exec", command: '{"action":"call","tool":"click"}', rule: "call:click", scope: "session", options: [{ id: "allow_once", label: "Allow for this session", kind: "allow_once" }, { id: "reject", kind: "reject_once" }], ...permission });
       }
@@ -73,6 +76,16 @@ async function runScenario(t, scenario) {
       const permissionId = permissionMatch[1];
       decisions.push([permissionId, JSON.parse(body).decision.decision]);
       json({ ok: true });
+      if (scenario.resolveExternally && permissionId === "p-first") {
+        event("permission.resolved", { permission_id: "p-first", decision: "allow_once" });
+        event("permission.resolved", { permission_id: "p-second", decision: "allow_once", reason: "computer use allowed for this session" });
+        event("tool.result", { tool_result: { id: "second-call", name: "computer_exec", output: "clicked", failed: false } });
+        setTimeout(() => {
+          scenario.afterExternalResolution?.(approval.listPendingToolApprovalsForConversation(`conversation-${scenario.name}`));
+          finishRun();
+        }, 100);
+        return;
+      }
       event("permission.resolved", { permission_id: permissionId, decision: JSON.parse(body).decision.decision });
       expected.delete(permissionId);
       // 先后两次授权:第一次落定后再推第二次。
@@ -237,4 +250,28 @@ test("同一调用先后两次授权请求:第一次落定后第二次仍按 too
     [false, true, false, true, false],
     "两次审批各自带标记一次、清除一次",
   );
+});
+
+test("后端结清并发审批后立即清除桌面与 Gateway 标记,无需再次决定", async (t) => {
+  let answered = false;
+  let remaining;
+  const run = await runScenario(t, {
+    name: "server-resolved",
+    resolveExternally: true,
+    permissions: [
+      { permission_id: "p-first", tool_call_id: "call" },
+      { permission_id: "p-second", tool_call_id: "second-call" },
+    ],
+    onPending(pendings, { answer }) {
+      if (pendings.length !== 2 || answered) return;
+      answered = true;
+      answer("call");
+    },
+    afterExternalResolution(pendings) { remaining = pendings; },
+  });
+  assert.equal(run.outcome.ok, true, String(run.outcome.error));
+  assert.deepEqual(remaining, [], "run 尚未结束时,后端已解决的审批必须清除");
+  assert.deepEqual(run.decisions, [["p-first", "allow_once"]]);
+  const syncs = run.gatewayEvents.filter((item) => item.type === "tool_call" && item.id === "second-call");
+  assert.deepEqual(syncs.map((item) => item.arguments.__toolApprovalPending === true), [false, true, false]);
 });

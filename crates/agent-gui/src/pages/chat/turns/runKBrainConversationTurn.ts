@@ -271,7 +271,7 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
             ...(answer.custom ? { custom: true } : {}),
           }));
         },
-        onPermissionRequest: async (request) => {
+        onPermissionRequest: async (request, signal) => {
           // Key the approval by its tool call so the Gateway preview overlays the
           // pending marker and scope on that call for WebUI; re-push the call when
           // the approval starts and settles. Without a known, free call id the
@@ -297,7 +297,9 @@ export async function runKBrainConversationTurn(params: Params): Promise<void> {
             allowSession: request.options?.some((option) => option.id === "allow_always") === true,
             sessionScope: request.rule,
             sessionWide: request.scope === "session",
-            signal: approvalController.signal,
+            signal: signal
+              ? AbortSignal.any([approvalController.signal, signal])
+              : approvalController.signal,
           });
           syncGatewayCall();
           const settlement = await approval;

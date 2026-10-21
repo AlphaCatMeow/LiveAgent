@@ -674,6 +674,7 @@ export function GatewayConversationPaneHost(props: GatewayConversationPaneHostPr
           sendComposerCommandTurn(commandLatestRef.current.context.sendChat, t, text, command, {
             conversationId,
             runtimeControls,
+            isBusy: () => commandLatestRef.current.context.isConversationBusy(conversationId),
           }),
       }),
     [commandApi, conversationId, t],

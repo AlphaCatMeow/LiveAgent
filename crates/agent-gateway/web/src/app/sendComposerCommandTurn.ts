@@ -6,14 +6,22 @@ import type { SendChatFn } from "./types";
  * WebUI 的“/”指令发送一轮：把指令语义映射成聊天请求字段。发送没有被接受
  * （会话已有待确认的请求、没有连接或请求失败）时抛错，输入框据此保留草稿并
  * 显示原因，而不是静默吞掉指令。
+ *
+ * 会话在跑时直接报忙、不发送，与桌面端一致：否则网关按 queuePolicy "auto"
+ * 把指令排进等待队列，上一轮一结束（包括出错结束）就自动执行。
  */
 export async function sendComposerCommandTurn(
   sendChat: SendChatFn,
   t: (key: string) => string,
   text: string,
   command: ComposerTurnCommand | undefined,
-  options: { conversationId?: string; runtimeControls?: ChatRuntimeControls } = {},
+  options: {
+    conversationId?: string;
+    runtimeControls?: ChatRuntimeControls;
+    isBusy: () => boolean;
+  },
 ) {
+  if (options.isBusy()) throw new Error(t("chat.commands.busy"));
   const outcome = await sendChat(text, {
     ...(options.conversationId ? { conversationId: options.conversationId } : {}),
     goalAction: command?.kind === "goal" ? command.action : undefined,

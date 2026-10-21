@@ -846,6 +846,7 @@ export function GatewayAppView({
   const composerCommandLatestRef = useRef({
     handleManualCompact,
     handleSelectModel,
+    isConversationBusy,
     modelOptions,
     runtimeControls: chatRuntimeControlsForCurrentProvider,
     sendChat,
@@ -853,6 +854,7 @@ export function GatewayAppView({
   composerCommandLatestRef.current = {
     handleManualCompact,
     handleSelectModel,
+    isConversationBusy,
     modelOptions,
     runtimeControls: chatRuntimeControlsForCurrentProvider,
     sendChat,
@@ -874,7 +876,11 @@ export function GatewayAppView({
             (key) => translate(key, settings.locale),
             text,
             command,
-            { runtimeControls },
+            {
+              runtimeControls,
+              isBusy: () =>
+                composerCommandLatestRef.current.isConversationBusy(getDisplayedConversationId()),
+            },
           ),
         compact: () => composerCommandLatestRef.current.handleManualCompact(),
         getModelOptions: () => composerCommandLatestRef.current.modelOptions,

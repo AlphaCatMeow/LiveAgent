@@ -1714,6 +1714,8 @@ function ChatPageContent(props: ChatPageProps) {
     shouldQueueGatewayChatRequest,
     enqueueGatewayChatRequest,
     isConversationRunning,
+    isQueuedTurnEditOpen: (conversationId) =>
+      queuedChatTurnEditSlotRef.current?.conversationId === conversationId.trim(),
     getConversationAbortController,
     requestConversationStop,
     requestActiveConversationStop,

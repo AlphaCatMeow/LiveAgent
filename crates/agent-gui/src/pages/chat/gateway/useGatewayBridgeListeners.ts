@@ -45,6 +45,11 @@ type UseGatewayBridgeListenersParams = GatewayBridgeRuntimeRefs & {
     conversationId: string,
   ) => Promise<boolean>;
   isConversationRunning: (conversationId: string) => boolean;
+  /**
+   * 桌面输入框正在编辑这个会话的排队项。指令轮次此时按忙拒绝：直跑会清空输入框，
+   * 正在编辑的排队项就丢了；桌面输入框在编辑排队项时同样不执行指令。
+   */
+  isQueuedTurnEditOpen?: (conversationId: string) => boolean;
   getConversationAbortController: (conversationId: string) => AbortController | null;
   requestConversationStop: (conversationId: string) => boolean;
   requestActiveConversationStop: (conversationId: string, options: { force: boolean }) => boolean;
@@ -408,12 +413,26 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
         stopHeartbeat(requestId);
         return;
       }
+      // 指令轮次（/goal、提示词指令）不进等待队列，与桌面输入框一致：会话在跑或
+      // 正在编辑排队项就按忙拒绝，空闲时即使队列里还有项也立即执行。
+      const rejectBusyCommand = () =>
+        failClaimedRequest(
+          requestId,
+          targetConversationId,
+          "conversation_busy",
+          GATEWAY_CHAT_CONVERSATION_BUSY_MESSAGE,
+        );
       const claimResult = claimGatewayBridgeRequest(
         requestId,
         clientRequestId,
         targetConversationId,
       );
       if (claimResult !== "claimed") {
+        if (claimResult === "conversation_busy" && composerCommand) {
+          rejectBusyCommand();
+          stopHeartbeat(requestId);
+          return;
+        }
         if (claimResult === "conversation_busy") {
           if (targetConversationId) {
             try {
@@ -462,20 +481,32 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
         }
         let editResendBaseMessageRef = baseMessageRef;
 
-        if (
-          targetConversationId &&
-          payload.rebased !== true &&
-          (latestParamsRef.current.shouldQueueGatewayChatRequest(
-            targetConversationId,
-            queuePolicy,
-          ) ||
+        if (targetConversationId && payload.rebased !== true) {
+          const running = Boolean(
             latestParamsRef.current.isConversationRunning(targetConversationId) ||
-            latestParamsRef.current.getConversationAbortController(targetConversationId))
-        ) {
-          if (await markQueuedInGui(claimed, targetConversationId)) {
+              latestParamsRef.current.getConversationAbortController(targetConversationId),
+          );
+          const editOpen =
+            latestParamsRef.current.isQueuedTurnEditOpen?.(targetConversationId) === true;
+          if (composerCommand && editOpen) {
+            rejectBusyCommand();
             return;
           }
-          return;
+          if (composerCommand && running) {
+            rejectBusyCommand();
+            return;
+          }
+          if (
+            !composerCommand &&
+            (running ||
+              latestParamsRef.current.shouldQueueGatewayChatRequest(
+                targetConversationId,
+                queuePolicy,
+              ))
+          ) {
+            await markQueuedInGui(claimed, targetConversationId);
+            return;
+          }
         }
 
         resolvedConversationId =
@@ -502,20 +533,28 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
           (clientRequestId
             ? getActiveGatewayBridgeRequestByClientRequestId(clientRequestId)
             : null);
-        if (
-          latestParamsRef.current.shouldQueueGatewayChatRequest(
-            resolvedConversationId,
-            queuePolicy,
-          ) ||
+        const resolvedRunning = Boolean(
           runningRequest ||
-          latestParamsRef.current.isConversationRunning(resolvedConversationId) ||
-          latestParamsRef.current.getConversationAbortController(resolvedConversationId)
+            latestParamsRef.current.isConversationRunning(resolvedConversationId) ||
+            latestParamsRef.current.getConversationAbortController(resolvedConversationId),
+        );
+        if (
+          composerCommand &&
+          (resolvedRunning ||
+            latestParamsRef.current.isQueuedTurnEditOpen?.(resolvedConversationId) === true)
         ) {
-          if (
-            await markQueuedInGui(claimed, runningRequest?.conversationId || resolvedConversationId)
-          ) {
-            return;
-          }
+          rejectBusyCommand();
+          return;
+        }
+        if (
+          !composerCommand &&
+          (resolvedRunning ||
+            latestParamsRef.current.shouldQueueGatewayChatRequest(
+              resolvedConversationId,
+              queuePolicy,
+            ))
+        ) {
+          await markQueuedInGui(claimed, runningRequest?.conversationId || resolvedConversationId);
           return;
         }
 

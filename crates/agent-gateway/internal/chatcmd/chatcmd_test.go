@@ -54,6 +54,7 @@ func TestComposerCommandSurvivesGatewayCommandRoundTrip(t *testing.T) {
 		action  string
 		text    string
 		prompt  bool
+		plan    bool
 	}{
 		{
 			name:    "goal set",
@@ -70,6 +71,11 @@ func TestComposerCommandSurvivesGatewayCommandRoundTrip(t *testing.T) {
 			request: &gatewayv2.ChatRequest{PromptCommand: true},
 			prompt:  true,
 		},
+		{
+			name:    "plan command",
+			request: &gatewayv2.ChatRequest{PlanCommand: true},
+			plan:    true,
+		},
 	}
 	for _, tc := range cases {
 		tc.request.ConversationId = "conversation-1"
@@ -85,7 +91,7 @@ func TestComposerCommandSurvivesGatewayCommandRoundTrip(t *testing.T) {
 		forwarded := buildCommandEnvelope("run-1", "chat.submit", body, nil).GetChatCommand().GetRequest()
 		if forwarded.GetGoalAction() != tc.action ||
 			forwarded.GetGoalText() != tc.text ||
-			forwarded.GetPromptCommand() != tc.prompt {
+			forwarded.GetPromptCommand() != tc.prompt || forwarded.GetPlanCommand() != tc.plan {
 			t.Fatalf("%s: forwarded = action %q text %q prompt %v", tc.name,
 				forwarded.GetGoalAction(), forwarded.GetGoalText(), forwarded.GetPromptCommand())
 		}
@@ -99,6 +105,9 @@ func TestNormalizeRequestBodyRejectsInvalidComposerCommands(t *testing.T) {
 		"goal text too long":       {GoalAction: "set", GoalText: strings.Repeat("g", MaxGoalTextLen+1)},
 		"goal text without action": {GoalText: "ship it"},
 		"goal with prompt command": {GoalAction: "resume", PromptCommand: true},
+		"plan with goal":           {PlanCommand: true, GoalAction: "resume"},
+		"plan with prompt":         {PlanCommand: true, PromptCommand: true},
+		"plan with goal text":      {PlanCommand: true, GoalText: "task"},
 	} {
 		body.ConversationID = "conversation-1"
 		body.ClientRequestID = "client-1"

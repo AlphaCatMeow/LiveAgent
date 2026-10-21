@@ -94,6 +94,9 @@ const MaxGoalTextLen = 16 * 1024
 func normalizeComposerCommand(body *handler.ChatRequestBody) error {
 	body.GoalAction = strings.TrimSpace(body.GoalAction)
 	body.GoalText = strings.TrimSpace(body.GoalText)
+	if body.PlanCommand && (body.GoalAction != "" || body.GoalText != "" || body.PromptCommand) {
+		return errors.New("plan_command cannot be combined with goal or prompt commands")
+	}
 	switch body.GoalAction {
 	case "":
 		if body.GoalText != "" {
@@ -120,7 +123,7 @@ func normalizeComposerCommand(body *handler.ChatRequestBody) error {
 
 // HasComposerCommand 报告请求是否带输入框“/”指令语义（需要桌面端支持 COMPOSER_COMMANDS_V1）。
 func HasComposerCommand(body handler.ChatRequestBody) bool {
-	return body.GoalAction != "" || body.PromptCommand
+	return body.GoalAction != "" || body.PromptCommand || body.PlanCommand
 }
 
 func normalizeQueuePolicy(value string) string {
@@ -375,6 +378,7 @@ func buildProtoRequest(body handler.ChatRequestBody) *gatewayv2.ChatRequest {
 		GoalAction:              body.GoalAction,
 		GoalText:                body.GoalText,
 		PromptCommand:           body.PromptCommand,
+		PlanCommand:             body.PlanCommand,
 	}
 }
 
@@ -410,6 +414,7 @@ func RequestBodyFromProto(req *gatewayv2.ChatRequest) handler.ChatRequestBody {
 		GoalAction:        req.GetGoalAction(),
 		GoalText:          req.GetGoalText(),
 		PromptCommand:     req.GetPromptCommand(),
+		PlanCommand:       req.GetPlanCommand(),
 	}
 	for _, reference := range req.GetReferencedConversations() {
 		body.ReferencedConversations = append(

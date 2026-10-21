@@ -305,7 +305,7 @@ async function deliverToBridge(claim, state, queue, send) {
     );
     hookHarness.render(() =>
       useGatewayBridgeListeners({
-        currentConversationIdRef: { current: CONVERSATION_ID },
+        currentConversationIdRef: { current: state.background ? "other-conversation" : CONVERSATION_ID },
         conversationRuntimeCacheRef: state.cacheRef,
         ensureGatewayBridgeConversationReadyRef: { current: async (id) => id },
         sendActionRef: {
@@ -337,16 +337,17 @@ async function deliverToBridge(claim, state, queue, send) {
   }
 }
 
-function goalClaim() {
+function goalClaim(command) {
   const request = {
     requestId: "goal-req",
     clientRequestId: "client-goal-req",
     conversationId: CONVERSATION_ID,
     message: "/goal ship it",
     queuePolicy: "auto",
-    goalAction: "set",
-    goalText: "ship it",
-    promptCommand: false,
+    goalAction: command.kind === "goal" ? command.action : "",
+    goalText: command.kind === "goal" && command.action === "set" ? "ship it" : "",
+    planCommand: command.kind === "plan",
+    promptCommand: command.kind === "prompt",
   };
   return {
     requestId: request.requestId,
@@ -359,10 +360,11 @@ function goalClaim() {
   };
 }
 
-test("WebUI /goal while the desktop user edits the queue head does not wipe the edited queued turn", async () => {
+for (const background of [false, true]) for (const command of [{kind:"goal",action:"set"},{kind:"goal",action:"resume"},{kind:"prompt"},{kind:"plan"}]) test(`WebUI ${command.kind} ${command.action ?? ""} in ${background ? "background" : "main"} Pane preserves the desktop queue-head edit`, async () => {
   globalThis.window ??= {};
   globalThis.window.requestAnimationFrame ??= () => 0;
   const state = {
+    background,
     composer: createComposer(),
     cacheRef: { current: new Map() },
     invokes: [],
@@ -386,10 +388,11 @@ test("WebUI /goal while the desktop user edits the queue head does not wipe the 
   // 前提 2：普通网关轮次此时会入队（编辑槽挡住处理），基线上 /goal 同样入队。
   assert.equal(queue.shouldQueueGatewayChatRequest(CONVERSATION_ID, "auto"), true);
 
-  await deliverToBridge(goalClaim(), state, queue, send);
+  await deliverToBridge(goalClaim(command), state, queue, send);
 
   const ran = state.runTurns.length > 0;
   assert.equal(ran, false, "the /goal must not run while the queue head is being edited");
+  assert.equal(state.invokes.find(call=>call.command==="gateway_chat_fail")?.payload.error_code,"conversation_busy");
   assert.equal(
     state.composer.getDraft().text,
     "queued follow-up",

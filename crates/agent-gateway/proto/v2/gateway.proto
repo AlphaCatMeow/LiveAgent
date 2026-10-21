@@ -744,6 +744,8 @@ message ChatRequest {
   string goal_action = 13;
   string goal_text = 14;
   bool prompt_command = 15;
+  // A single /plan task, distinct from ordinary chat with plan mode enabled.
+  bool plan_command = 16;
 }
 
 message ChatMessageRef {

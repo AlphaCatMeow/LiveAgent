@@ -7248,6 +7248,8 @@ type ChatRequest struct {
 	GoalAction    string `protobuf:"bytes,13,opt,name=goal_action,json=goalAction,proto3" json:"goal_action,omitempty"`
 	GoalText      string `protobuf:"bytes,14,opt,name=goal_text,json=goalText,proto3" json:"goal_text,omitempty"`
 	PromptCommand bool   `protobuf:"varint,15,opt,name=prompt_command,json=promptCommand,proto3" json:"prompt_command,omitempty"`
+	// A single /plan task, distinct from ordinary chat with plan mode enabled.
+	PlanCommand   bool `protobuf:"varint,16,opt,name=plan_command,json=planCommand,proto3" json:"plan_command,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7376,6 +7378,13 @@ func (x *ChatRequest) GetGoalText() string {
 func (x *ChatRequest) GetPromptCommand() bool {
 	if x != nil {
 		return x.PromptCommand
+	}
+	return false
+}
+
+func (x *ChatRequest) GetPlanCommand() bool {
+	if x != nil {
+		return x.PlanCommand
 	}
 	return false
 }
@@ -16711,7 +16720,7 @@ const file_proto_v2_gateway_proto_rawDesc = "" +
 	"\vGitResponse\x12\x16\n" +
 	"\x06action\x18\x01 \x01(\tR\x06action\x12\x1f\n" +
 	"\vresult_json\x18\x02 \x01(\tR\n" +
-	"resultJson\"\xf3\x05\n" +
+	"resultJson\"\x96\x06\n" +
 	"\vChatRequest\x12'\n" +
 	"\x0fconversation_id\x18\x01 \x01(\tR\x0econversationId\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12N\n" +
@@ -16728,7 +16737,8 @@ const file_proto_v2_gateway_proto_rawDesc = "" +
 	"\vgoal_action\x18\r \x01(\tR\n" +
 	"goalAction\x12\x1b\n" +
 	"\tgoal_text\x18\x0e \x01(\tR\bgoalText\x12%\n" +
-	"\x0eprompt_command\x18\x0f \x01(\bR\rpromptCommandJ\x04\b\x06\x10\aR\x15selected_system_tools\"\xcf\x01\n" +
+	"\x0eprompt_command\x18\x0f \x01(\bR\rpromptCommand\x12!\n" +
+	"\fplan_command\x18\x10 \x01(\bR\vplanCommandJ\x04\b\x06\x10\aR\x15selected_system_tools\"\xcf\x01\n" +
 	"\x0eChatMessageRef\x12#\n" +
 	"\rsegment_index\x18\x01 \x01(\x05R\fsegmentIndex\x12#\n" +
 	"\rmessage_index\x18\x02 \x01(\x05R\fmessageIndex\x12\x1d\n" +

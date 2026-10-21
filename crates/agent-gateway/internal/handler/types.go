@@ -55,6 +55,7 @@ type ChatRequestBody struct {
 	GoalAction    string `json:"goal_action,omitempty"`
 	GoalText      string `json:"goal_text,omitempty"`
 	PromptCommand bool   `json:"prompt_command,omitempty"`
+	PlanCommand   bool   `json:"plan_command,omitempty"`
 }
 
 type CancelChatRequestBody struct {

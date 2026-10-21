@@ -89,6 +89,7 @@ pub struct GatewayChatRequestEvent {
     pub goal_action: String,
     pub goal_text: String,
     pub prompt_command: bool,
+    pub plan_command: bool,
 }
 
 pub(crate) fn is_complete_user_chat_message_ref(ref_value: &proto::ChatMessageRef) -> bool {

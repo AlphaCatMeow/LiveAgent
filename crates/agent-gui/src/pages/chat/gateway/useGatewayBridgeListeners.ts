@@ -565,9 +565,13 @@ export function useGatewayBridgeListeners(params: UseGatewayBridgeListenersParam
           workerId,
           startedAt: Date.now(),
           selectedModelOverride: payload.selectedModel,
-          runtimeControlsOverride: payload.runtimeControls
-            ? normalizeChatRuntimeControls(payload.runtimeControls)
-            : undefined,
+          runtimeControlsOverride:
+            payload.runtimeControls || composerCommand?.kind === "plan"
+              ? normalizeChatRuntimeControls({
+                  ...payload.runtimeControls,
+                  ...(composerCommand?.kind === "plan" ? { planModeEnabled: true } : {}),
+                })
+              : undefined,
           executionModeOverride: normalizeGatewayExecutionMode(payload.executionMode),
           workdirOverride: normalizeGatewayWorkdir(payload.workdir),
           commandSafetyModeOverride: normalizeGatewayCommandSafetyMode(payload.commandSafetyMode),

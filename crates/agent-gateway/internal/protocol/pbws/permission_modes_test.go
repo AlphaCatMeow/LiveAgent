@@ -36,6 +36,17 @@ func TestKBrainPermissionModeTransport(t *testing.T) {
 	}
 }
 
+func TestExplicitPlanCommandOverridesRuntimeControls(t *testing.T) {
+	plan := false
+	options := kbrainOptions(handler.ChatRequestBody{
+		PlanCommand: true, CommandSafetyMode: "auto",
+		RuntimeControls: &handler.ChatRuntimeControlsBody{PlanModeEnabled: &plan},
+	})
+	if !options.PlanModeEnabled || options.PermissionMode != "plan" {
+		t.Fatalf("explicit plan restriction lost: %+v", options)
+	}
+}
+
 func TestPermissionModesOverWebSocketAndHTTP(t *testing.T) {
 	for _, tc := range []struct{ selected, expected string }{
 		{"ask", "normal"}, {"autoEdit", "auto_edit"}, {"autoReview", "auto_review"}, {"auto", "full_access"}, {"always", "always"}, {"plan", "plan"},

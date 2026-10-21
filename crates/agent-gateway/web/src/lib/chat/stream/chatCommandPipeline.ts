@@ -28,6 +28,7 @@ export type ChatCommandRequest = {
   // echo: the prompt belongs in the queue panel, and a transcript bubble
   // would just flash until the queued_in_gui compensation removed it.
   optimistic?: boolean;
+  waitForStart?: boolean;
   submit: () => Promise<ChatCommandAccepted>;
 };
 
@@ -37,6 +38,7 @@ export type PendingChatCommand = {
   conversationId: string;
   isEditResend: boolean;
   submittedAt: number;
+  waitForStart?: boolean;
 };
 
 export type ChatCommandOutcome =
@@ -66,8 +68,43 @@ export class ChatCommandPipeline {
   private settledOutcomes = new WeakMap<PendingChatCommand, ChatCommandOutcome>();
   private boundConversationIds = new Map<string, string>();
   private bindingWaiters = new WeakMap<PendingChatCommand, Set<(id: string | null) => void>>();
+  private startWaiters = new WeakMap<PendingChatCommand, (outcome: ChatCommandOutcome) => void>();
+  private submissions = new WeakMap<PendingChatCommand, () => Promise<ChatCommandAccepted>>();
+
+  resumePendingCommands(): void {
+    for (const pending of this.pending.values()) {
+      if (!pending.waitForStart) continue;
+      // Re-submit the same request identity to replay its command update/watch.
+      void this.submissions
+        .get(pending)?.()
+        .then((accepted) => {
+          this.registerAcceptance(pending, accepted);
+        })
+        .catch(() => undefined);
+    }
+  }
 
   constructor(private readonly hooks: ChatCommandPipelineHooks) {}
+
+  private registerAcceptance(pending: PendingChatCommand, accepted: ChatCommandAccepted): void {
+    if (this.pending.get(pending.conversationId) !== pending) return;
+    pending.runId = accepted.runId;
+    this.byRunId.set(accepted.runId, pending);
+    if (
+      pending.waitForStart &&
+      accepted.conversationId &&
+      accepted.conversationId !== pending.conversationId
+    ) {
+      this.handleCommandUpdate({
+        runId: accepted.runId,
+        clientRequestId: pending.clientRequestId,
+        conversationId: accepted.conversationId,
+        phase: "bound",
+        errorCode: null,
+        message: null,
+      });
+    }
+  }
 
   hasPending(conversationId: string): boolean {
     return this.pending.has(conversationId);
@@ -112,6 +149,8 @@ export class ChatCommandPipeline {
       }
       store.removeOptimisticUserEntry(pending.clientRequestId);
       this.settledOutcomes.set(pending, { kind: "settled" });
+      this.startWaiters.get(pending)?.({ kind: "settled" });
+      this.startWaiters.delete(pending);
       this.settleBindingWaiters(pending, null);
     }
     this.boundConversationIds.clear();
@@ -141,12 +180,16 @@ export class ChatCommandPipeline {
       conversationId: request.conversationId,
       isEditResend: request.isEditResend === true,
       submittedAt: Date.now(),
+      waitForStart: request.waitForStart,
     };
+    const started = request.waitForStart
+      ? new Promise<ChatCommandOutcome>((resolve) => this.startWaiters.set(pending, resolve))
+      : null;
+    this.submissions.set(pending, request.submit);
     this.setPending(request.conversationId, pending);
 
     try {
       const accepted = await request.submit();
-      pending.runId = accepted.runId;
       const settledOutcome = this.settledOutcomes.get(pending);
       if (settledOutcome) {
         return settledOutcome;
@@ -155,9 +198,9 @@ export class ChatCommandPipeline {
         // Only register while the pending is still live: an own run signal
         // (matched by client_request_id) may have settled it before the
         // accept response landed, and a dead registration would leak.
-        this.byRunId.set(accepted.runId, pending);
+        this.registerAcceptance(pending, accepted);
       }
-      return { kind: "accepted", accepted };
+      return started ? await started : { kind: "accepted", accepted };
     } catch (error) {
       const settledOutcome = this.settledOutcomes.get(pending);
       if (settledOutcome) {
@@ -218,6 +261,8 @@ export class ChatCommandPipeline {
         store.removeOptimisticUserEntry(pending.clientRequestId);
         const outcome: ChatCommandOutcome = { kind: "queued_in_gui", update };
         this.settledOutcomes.set(pending, outcome);
+        this.startWaiters.get(pending)?.(outcome);
+        this.startWaiters.delete(pending);
         const boundConversationId = update.conversationId?.trim() ?? "";
         this.settleBindingWaiters(
           pending,
@@ -241,11 +286,17 @@ export class ChatCommandPipeline {
   // strict — a null-runId pending (accept response still in flight) settles
   // only on a signal carrying its own client_request_id; foreign runs (GUI
   // queue auto-sends, another client's commands) never disarm the watchdog.
-  handleRunSignal(conversationId: string, runId: string, clientRequestId?: string): void {
+  handleRunSignal(
+    conversationId: string,
+    runId: string,
+    clientRequestId?: string,
+    started = true,
+  ): void {
     const pending = this.pending.get(conversationId);
     if (!pending) {
       return;
     }
+    if (pending.waitForStart && !started) return;
     const matchesRunId = runId !== "" && pending.runId === runId;
     const matchesClientRequest =
       pending.runId === null &&
@@ -254,6 +305,8 @@ export class ChatCommandPipeline {
       clientRequestId === pending.clientRequestId;
     if (matchesRunId || matchesClientRequest) {
       this.settledOutcomes.set(pending, { kind: "settled" });
+      this.startWaiters.get(pending)?.({ kind: "settled" });
+      this.startWaiters.delete(pending);
       this.clearPending(pending);
     }
   }
@@ -265,6 +318,8 @@ export class ChatCommandPipeline {
   ): Extract<ChatCommandOutcome, { kind: "failed" }> {
     const outcome = { kind: "failed" as const, errorCode, message };
     this.settledOutcomes.set(pending, outcome);
+    this.startWaiters.get(pending)?.(outcome);
+    this.startWaiters.delete(pending);
     const store = this.hooks.getTranscriptStore(pending.conversationId);
     if (pending.isEditResend) {
       // Offline-safe compensation: the command never ran, so the transcript
@@ -273,7 +328,7 @@ export class ChatCommandPipeline {
       store.restoreEditResendTranscript?.(pending.clientRequestId);
     }
     store.removeOptimisticUserEntry(pending.clientRequestId);
-    store.appendLocalError(message);
+    if (!pending.waitForStart) store.appendLocalError(message);
     this.settleBindingWaiters(pending, null);
     this.clearPending(pending);
     this.hooks.onFailed?.(pending, errorCode, message);

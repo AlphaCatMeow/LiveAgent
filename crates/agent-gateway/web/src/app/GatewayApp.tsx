@@ -7,6 +7,10 @@ import { useConfirmDialog } from "@liveagent/ui/components/ui/confirm-dialog";
 import { SidebarProvider, useSidebar } from "@liveagent/ui/components/ui/sidebar";
 import { type ToastTone, toast } from "@liveagent/ui/components/ui/toast-manager";
 import { LocaleContext, t as translate, useLocaleContextValue } from "@liveagent/ui/i18n/index";
+import {
+  clearCommandRecoveries,
+  moveCommandRecovery,
+} from "@liveagent/ui/lib/chat/composerCommandRecovery";
 import { searchMentionConversations } from "@liveagent/ui/lib/chat/conversationSearch";
 import {
   clearSearchJumpTarget,
@@ -923,6 +927,7 @@ function useGatewayAppController() {
       }
 
       transcriptStoreRegistry.move(previousId, nextId);
+      moveCommandRecovery(previousId, nextId);
       workbenchRenameConversationRef.current(previousId, nextId);
 
       const windowState = historyWindowStatesRef.current.get(previousId);
@@ -1088,7 +1093,7 @@ function useGatewayAppController() {
       // transcript keeps the pipeline's error entry.
       sidebarStore.removeLocal(conversationIdValue);
     }
-    if (isDisplayedConversation(conversationIdValue)) {
+    if (!pending.waitForStart && isDisplayedConversation(conversationIdValue)) {
       setChatError(message);
     }
   };
@@ -1504,6 +1509,7 @@ function useGatewayAppController() {
     openController.cancel();
     clearSession();
     chatCommandPipeline.reset();
+    clearCommandRecoveries();
     transcriptStoreRegistry.clear();
     activityStore.clear();
     draftClientRequestsRef.current.clear();
@@ -1570,6 +1576,7 @@ function useGatewayAppController() {
       markVisibleConversationRevision();
       openController.cancel();
       chatCommandPipeline.reset();
+      clearCommandRecoveries();
       transcriptStoreRegistry.clear();
       activityStore.clear();
       draftClientRequestsRef.current.clear();

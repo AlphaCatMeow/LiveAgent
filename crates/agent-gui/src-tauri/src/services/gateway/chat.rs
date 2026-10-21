@@ -177,6 +177,7 @@ impl GatewayController {
             goal_action,
             goal_text,
             prompt_command,
+            plan_command,
         } = request;
         let selected_model = selected_model.map(|selected_model| GatewaySelectedModelEvent {
             custom_provider_id: selected_model.custom_provider_id,
@@ -255,6 +256,7 @@ impl GatewayController {
             goal_action: goal_action.trim().to_string(),
             goal_text: goal_text.trim().to_string(),
             prompt_command,
+            plan_command,
         }
     }
 

@@ -27,9 +27,29 @@ export async function sendComposerCommandTurn(
     goalAction: command?.kind === "goal" ? command.action : undefined,
     goalText: command?.kind === "goal" && command.action === "set" ? command.goal : undefined,
     promptCommand: command?.kind === "prompt" ? true : undefined,
-    runtimeControls: options.runtimeControls,
+    planCommand: command?.kind === "plan" ? true : undefined,
+    waitForStart: true,
+    optimisticEcho: false,
+    runtimeControls:
+      command?.kind === "plan"
+        ? {
+            thinkingEnabled: false,
+            nativeWebSearchEnabled: false,
+            reasoning: "off",
+            reasoningByProvider: {},
+            reasoningByModel: {},
+            ...options.runtimeControls,
+            planModeEnabled: true,
+          }
+        : options.runtimeControls,
   });
   if (outcome === null) throw new Error(t("chat.commands.busy"));
-  if (outcome.kind === "failed") throw new Error(outcome.message || t("chat.commands.failed"));
+  if (outcome.kind === "failed") {
+    throw new Error(
+      outcome.errorCode === "conversation_busy"
+        ? t("chat.commands.busy")
+        : outcome.message || t("chat.commands.failed"),
+    );
+  }
   return outcome;
 }

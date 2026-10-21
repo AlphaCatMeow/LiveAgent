@@ -277,7 +277,7 @@ async function deliverToDesktopBridge(claim, state, queue, recorder) {
     );
     hookHarness.render(() =>
       useGatewayBridgeListeners({
-        currentConversationIdRef: { current: CONVERSATION_ID },
+        currentConversationIdRef: { current: state.background ? "other-conversation" : CONVERSATION_ID },
         conversationRuntimeCacheRef: { current: new Map() },
         ensureGatewayBridgeConversationReadyRef: { current: async (id) => id },
         sendActionRef: {
@@ -318,6 +318,8 @@ function toDesktopClaim(text, sendOptions) {
     goalAction: sendOptions.goalAction ?? "",
     goalText: sendOptions.goalText ?? "",
     promptCommand: sendOptions.promptCommand === true,
+    planCommand: sendOptions.planCommand === true,
+    runtimeControls: sendOptions.runtimeControls,
   };
   return {
     requestId: request.requestId,
@@ -330,7 +332,7 @@ function toDesktopClaim(text, sendOptions) {
   };
 }
 
-async function runWebUiGoalAgainstDesktop(state) {
+async function runWebUiGoalAgainstDesktop(state, command = { kind: "goal", action: "set", goal: "ship it" }) {
   globalThis.window ??= {};
   globalThis.window.requestAnimationFrame ??= () => 0;
   const recorder = createInvokeRecorder([]);
@@ -355,7 +357,7 @@ async function runWebUiGoalAgainstDesktop(state) {
       sendChat,
       t,
       "/goal ship it",
-      { kind: "goal", action: "set", goal: "ship it" },
+      command,
       { conversationId: CONVERSATION_ID, isBusy: () => web.isConversationBusy(CONVERSATION_ID) },
     );
   } catch (error) {
@@ -410,3 +412,10 @@ test("WebUI /goal sent while the desktop already runs a turn the WebUI has not h
   const failed = recorder.calls.find((call) => call.command === "gateway_chat_fail");
   assert.equal(failed?.payload?.error_code, "conversation_busy");
 });
+
+for (const background of [false,true]) for (const command of [{kind:"goal",action:"set",goal:"ship it"},{kind:"goal",action:"resume"},{kind:"prompt"},{kind:"plan"}]) {
+ test(`busy desktop refuses ${command.kind} ${command.action ?? ""} in ${background ? "background" : "main"} Pane without queueing despite stale WebUI`,async()=>{
+  const state={background,running:true,draft:"",sends:[],queued:[]};const {parked,recorder}=await runWebUiGoalAgainstDesktop(state,command);
+  assert.equal(parked,false);assert.equal(state.sends.length,0);assert.equal(recorder.calls.find(c=>c.command==="gateway_chat_fail")?.payload.error_code,"conversation_busy");
+ });
+}

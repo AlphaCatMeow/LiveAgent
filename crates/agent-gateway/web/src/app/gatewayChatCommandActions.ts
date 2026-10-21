@@ -231,6 +231,7 @@ export function createGatewayChatCommandActions(options: GatewayChatCommandActio
       isEditResend: Boolean(sendOptions?.editMessageRef),
       baseMessageRef: sendOptions?.editMessageRef,
       optimistic: sendOptions?.optimisticEcho !== false,
+      waitForStart: sendOptions?.waitForStart,
       submit: async () => {
         await prepareChatRuntime("send", api, CHAT_RUNTIME_PREPARE_TIMEOUT_MS);
         return api.chatCommand({
@@ -248,6 +249,7 @@ export function createGatewayChatCommandActions(options: GatewayChatCommandActio
           goalAction: sendOptions?.goalAction,
           goalText: sendOptions?.goalText,
           promptCommand: sendOptions?.promptCommand,
+          planCommand: sendOptions?.planCommand,
         });
       },
     });

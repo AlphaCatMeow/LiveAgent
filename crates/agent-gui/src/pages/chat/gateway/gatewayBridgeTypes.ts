@@ -44,6 +44,7 @@ export type GatewayChatRequestEvent = {
   goalText?: string;
   /** message 是提示词指令（"/name args"），由 K-brain 展开，历史保留原文。 */
   promptCommand?: boolean;
+  planCommand?: boolean;
 };
 
 export type GatewayChatClaimedRequest = {
@@ -199,11 +200,17 @@ export function normalizeGatewayWorkdir(value: string | null | undefined): strin
  * 不能把 "/goal ..." 当普通消息发给模型。
  */
 export function gatewayComposerTurnCommand(
-  request: Pick<GatewayChatRequestEvent, "goalAction" | "goalText" | "promptCommand">,
+  request: Pick<
+    GatewayChatRequestEvent,
+    "goalAction" | "goalText" | "promptCommand" | "planCommand"
+  >,
 ): ComposerTurnCommand | null | undefined {
   const action = request.goalAction?.trim() ?? "";
   const goal = request.goalText?.trim() ?? "";
   const prompt = request.promptCommand === true;
+  if (request.planCommand) {
+    return action || goal || prompt ? null : { kind: "plan" };
+  }
   if (!action) {
     if (goal) return null;
     return prompt ? { kind: "prompt" } : undefined;

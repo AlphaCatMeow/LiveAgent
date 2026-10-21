@@ -52,12 +52,12 @@
         "computer": "k-brain-computer-darwin-arm64"
       },
       "sha256": {
-        "backend": "f2c34e12122371332a79cc05f2c872009aa55047ab7806bef2cdef8eb34f3bd9",
-        "computer": "76c95272fa43492d4ed5d7a06fc991064c32a2bf8d32912f50cb68fa523e5f35"
+        "backend": "21d3e388af511102ba3ff21ba7b7953cbbfe6c3e57dd7847c9f85fb17e2dfbec",
+        "computer": "f7f0d319b5fc28ee018999b083745decce470a83551b03ded4a261e26c7d3ec1"
       },
       "urls": {
-        "backend": "https://github.com/Stack-Cairn/K-brain/releases/download/v0.107.6-beta.17/k-brain-darwin-arm64",
-        "computer": "https://github.com/Stack-Cairn/K-brain/releases/download/v0.107.6-beta.17/k-brain-computer-darwin-arm64"
+        "backend": "https://github.com/Stack-Cairn/K-brain/releases/download/v0.107.6-beta.18/k-brain-darwin-arm64",
+        "computer": "https://github.com/Stack-Cairn/K-brain/releases/download/v0.107.6-beta.18/k-brain-computer-darwin-arm64"
       }
     },
     "x86_64-apple-darwin": {
@@ -67,12 +67,12 @@
         "computer": "k-brain-computer-darwin-x64"
       },
       "sha256": {
-        "backend": "6e94d129f6bc0037912a89a7ebe815b1b8a01401a400a2759f85bce98b87beac",
-        "computer": "89b7c20ce4f652f6f2910cc7d6eadc50395d0d9112fd45b87675785625e61003"
+        "backend": "06fac1b713d030fe885261e593bca5f1af140dcf23d73357cfe3c0f056f6b5e9",
+        "computer": "ef2e765821fd6b47a40573a1da324d024d79f846a1f79c5e0a965e449400e854"
       },
       "urls": {
-        "backend": "https://github.com/Stack-Cairn/K-brain/releases/download/v0.107.6-beta.17/k-brain-darwin-x64",
-        "computer": "https://github.com/Stack-Cairn/K-brain/releases/download/v0.107.6-beta.17/k-brain-computer-darwin-x64"
+        "backend": "https://github.com/Stack-Cairn/K-brain/releases/download/v0.107.6-beta.18/k-brain-darwin-x64",
+        "computer": "https://github.com/Stack-Cairn/K-brain/releases/download/v0.107.6-beta.18/k-brain-computer-darwin-x64"
       }
     },
     "x86_64-unknown-linux-gnu": {
@@ -82,12 +82,12 @@
         "computer": "k-brain-computer-linux-x64"
       },
       "sha256": {
-        "backend": "350e8ab658aaabd22ae32fa53c0a68689fe7d0c764200214830b3ccc73db6174",
-        "computer": "6bd062222dee7006bd1adaf36f0298c4dc1768884425001e2761857cf70c49c1"
+        "backend": "9c5b06a232c31a5662bc0b9473ed78896c3e709904aa4164d7137e9608e6e271",
+        "computer": "af4b2ea8a5e79171e0053da288aeea36d42036cb7febfe7ee97427304727ef80"
       },
       "urls": {
-        "backend": "https://github.com/Stack-Cairn/K-brain/releases/download/v0.107.6-beta.17/k-brain-linux-x64",
-        "computer": "https://github.com/Stack-Cairn/K-brain/releases/download/v0.107.6-beta.17/k-brain-computer-linux-x64"
+        "backend": "https://github.com/Stack-Cairn/K-brain/releases/download/v0.107.6-beta.18/k-brain-linux-x64",
+        "computer": "https://github.com/Stack-Cairn/K-brain/releases/download/v0.107.6-beta.18/k-brain-computer-linux-x64"
       }
     },
     "x86_64-pc-windows-msvc": {
@@ -97,14 +97,14 @@
         "computer": "k-brain-computer-windows-x64.exe"
       },
       "sha256": {
-        "backend": "cf07f8af9269e39c76f799a384d824eec8df08fcd1ff7514bf9bf5eb6b8e8172",
-        "computer": "8bf1be0e67400f9e1d71d597455e63392d023449af2622b00efd2420c7dc397b"
+        "backend": "a57ef5eaad14191fa7425d090c24810f0a6ecafab3f62cfc59e424f0ebfa3036",
+        "computer": "fd5b366f19392fb0305f2699d02611d584308fbd9151f4e4d87e57d76ee532e1"
       },
       "urls": {
-        "backend": "https://github.com/Stack-Cairn/K-brain/releases/download/v0.107.6-beta.17/k-brain-windows-x64.exe",
-        "computer": "https://github.com/Stack-Cairn/K-brain/releases/download/v0.107.6-beta.17/k-brain-computer-windows-x64.exe"
+        "backend": "https://github.com/Stack-Cairn/K-brain/releases/download/v0.107.6-beta.18/k-brain-windows-x64.exe",
+        "computer": "https://github.com/Stack-Cairn/K-brain/releases/download/v0.107.6-beta.18/k-brain-computer-windows-x64.exe"
       }
     }
   },
-  "releaseTag": "v0.107.6-beta.17"
+  "releaseTag": "v0.107.6-beta.18"
 }

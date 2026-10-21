@@ -93,6 +93,7 @@ export type GatewayChatCommandInput = {
   goalAction?: "set" | "resume";
   goalText?: string;
   promptCommand?: boolean;
+  planCommand?: boolean;
 };
 
 export type SkillListResponse = {
@@ -549,6 +550,7 @@ export function buildChatCommandPayload(input: GatewayChatCommandInput) {
       goal_action: input.goalAction ?? "",
       goal_text: input.goalText ?? "",
       prompt_command: input.promptCommand === true,
+      plan_command: input.planCommand === true,
       runtime_controls: input.runtimeControls
         ? {
             thinking_enabled: input.runtimeControls.thinkingEnabled,

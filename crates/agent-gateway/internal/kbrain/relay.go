@@ -316,8 +316,12 @@ func (r *Relay) Start(ctx context.Context, gatewayRunID, conversationID, clientR
 	return r.StartWithCWD(ctx, gatewayRunID, conversationID, clientRequestID, r.createCWD, prompt, queuePolicy, cb)
 }
 
-func (r *Relay) StartWithCWD(ctx context.Context, gatewayRunID, conversationID, clientRequestID, cwd string, prompt PromptRequest, queuePolicy string, cb Callbacks) (bool, error) {
-	if r.usesBackendQueue() {
+func (r *Relay) StartWithCWD(ctx context.Context, gatewayRunID, conversationID, clientRequestID, cwd string, prompt PromptRequest, queuePolicy string, cb Callbacks, composerCommand ...bool) (bool, error) {
+	command := len(composerCommand) > 0 && composerCommand[0]
+	if command {
+		queuePolicy = "reject"
+	}
+	if r.usesBackendQueue() && !command {
 		return r.startBackendQueuedRun(ctx, gatewayRunID, conversationID, clientRequestID, cwd, prompt, queuePolicy, cb)
 	}
 	gatewayRunID = strings.TrimSpace(gatewayRunID)
@@ -409,7 +413,10 @@ func (r *Relay) StartWithCWD(ctx context.Context, gatewayRunID, conversationID, 
 // Cancel cancels the selected running run or removes a queued run. Running
 // cancellation reaches K-brain's real cancel endpoint when upstream IDs exist.
 func (r *Relay) Cancel(ctx context.Context, conversationID, gatewayRunID string) (bool, error) {
-	if r.usesBackendQueue() {
+	r.mu.Lock()
+	localRun := r.runs[gatewayRunID] != nil || (gatewayRunID == "" && r.runs[r.activeRuns[conversationID]] != nil)
+	r.mu.Unlock()
+	if r.usesBackendQueue() && !localRun {
 		return r.cancelBackendQueuedRun(ctx, conversationID, gatewayRunID)
 	}
 	conversationID = strings.TrimSpace(conversationID)
@@ -555,6 +562,8 @@ func (r *Relay) execute(ctx context.Context, state *runState, cwd string, prompt
 		if !errors.Is(ctx.Err(), context.Canceled) {
 			if status == 409 {
 				err = errors.New("kbrain session is already running")
+				r.emitTerminal(gatewayRunID, conversationID, cb, "failed", "conversation_busy", err.Error())
+				return
 			}
 			r.emitTerminal(gatewayRunID, conversationID, cb, "failed", "kbrain_relay_error", err.Error())
 		}

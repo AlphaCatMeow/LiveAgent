@@ -379,6 +379,7 @@ function buildChatCommand(body: J) {
       goalAction: str(inner.goal_action),
       goalText: str(inner.goal_text),
       promptCommand: bool(inner.prompt_command),
+      planCommand: bool(inner.plan_command),
     }),
     baseMessageRef: inner.base_message_ref
       ? buildMessageRef(rec(inner.base_message_ref))

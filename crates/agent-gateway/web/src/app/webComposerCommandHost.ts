@@ -74,7 +74,7 @@ export function createWebComposerCommandHost(params: {
   host.sendTurn = (text, command, options) =>
     params.sendTurn(
       text,
-      command,
+      options?.planMode ? { kind: "plan" } : command,
       options?.planMode ? { ...params.getRuntimeControls(), planModeEnabled: true } : undefined,
     );
   host.clearGoal = () => client.clearGoal(conversationId());

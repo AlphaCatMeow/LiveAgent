@@ -21,6 +21,7 @@ export type ComposerCatalogCommand = {
 
 /** “/”指令带来的单轮语义，随发送一路传给运行层。 */
 export type ComposerTurnCommand =
+  | { kind: "plan" }
   | { kind: "goal"; action: "set"; goal: string }
   | { kind: "goal"; action: "resume" }
   | { kind: "prompt" };

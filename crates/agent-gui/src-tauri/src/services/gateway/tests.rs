@@ -122,6 +122,7 @@ fn gateway_chat_request(
         goal_action: String::new(),
         goal_text: String::new(),
         prompt_command: false,
+        plan_command: false,
     }
 }
 

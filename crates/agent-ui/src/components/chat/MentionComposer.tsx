@@ -22,6 +22,12 @@ import {
   sortAppsByMentionRecency,
 } from "@liveagent/ui/lib/chat/appMentionRecency";
 import {
+  clearCommandRecovery,
+  getCommandRecovery,
+  saveCommandRecovery,
+  subscribeCommandRecovery,
+} from "@liveagent/ui/lib/chat/composerCommandRecovery";
+import {
   buildComposerCommands,
   type ComposerCatalogCommand,
   type ComposerCommandPanelState,
@@ -59,6 +65,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { readSendShortcut, shouldSendOnEnter } from "../../lib/chat/sendShortcut";
 import { ComposerCommandPanel } from "./ComposerCommandPanel";
@@ -211,6 +218,21 @@ export const MentionComposer = memo(
     const { locale, t } = useLocale();
     const editorRef = useRef<HTMLDivElement>(null);
     const wrapperRef = useRef<HTMLDivElement>(null);
+    const commandOwnerRef = useRef(currentConversationId);
+    const commandPanelOwnerRef = useRef(currentConversationId);
+    commandOwnerRef.current = currentConversationId;
+    const commandMountedRef = useRef(true);
+    useEffect(() => {
+      commandMountedRef.current = true;
+      return () => {
+        commandMountedRef.current = false;
+      };
+    }, []);
+    const commandRecovery = useSyncExternalStore(
+      subscribeCommandRecovery,
+      () => getCommandRecovery(currentConversationId ?? ""),
+      () => undefined,
+    );
 
     const composerContextMenuRangeRef = useRef<Range | null>(null);
     const commitTooltipCloseTimerRef = useRef<number | null>(null);
@@ -1054,21 +1076,44 @@ export const MentionComposer = memo(
       (parsed: ParsedComposerCommand, draft: MentionComposerDraft) => {
         if (!commandHost) return;
         setCommandPanel(null);
+        const owner = currentConversationId ?? "";
+        clearCommandRecovery(owner);
+        let restore = false;
         void runComposerCommand(parsed, {
           host: commandHost,
           t,
           draft,
           consumeDraft: () => setEditorText(""),
           restoreDraft: () => {
-            // 只在输入框仍为空时放回，避免覆盖用户在失败前新输入的内容。
-            const el = editorRef.current;
-            if (el && editorTextIsEmpty(el)) applyDraft(draft);
+            restore = true;
           },
-          showPanel: setCommandPanel,
+          showPanel: (panel) => {
+            if (restore) {
+              saveCommandRecovery(owner, { draft, panel });
+            } else if (commandMountedRef.current && (commandOwnerRef.current ?? "") === owner) {
+              setCommandPanel(panel);
+            }
+          },
         });
       },
-      [applyDraft, commandHost, setEditorText, t],
+      [commandHost, currentConversationId, setEditorText, t],
     );
+
+    useEffect(() => {
+      if (commandPanelOwnerRef.current === currentConversationId) return;
+      commandPanelOwnerRef.current = currentConversationId;
+      setCommandPanel(null);
+    }, [currentConversationId]);
+
+    useEffect(() => {
+      if (!commandRecovery) return;
+      setCommandPanel(commandRecovery.panel);
+      const el = editorRef.current;
+      if (isDomEmpty && el && editorTextIsEmpty(el)) {
+        applyDraft(commandRecovery.draft);
+        clearCommandRecovery(currentConversationId ?? "");
+      }
+    }, [commandRecovery, currentConversationId, isDomEmpty, applyDraft]);
 
     const runCommandDraft = useCallback(() => {
       const el = editorRef.current;
@@ -1853,6 +1898,7 @@ export const MentionComposer = memo(
           return;
         }
         if (commandPanel && e.key === "Escape") {
+          clearCommandRecovery(currentConversationId ?? "");
           e.preventDefault();
           setCommandPanel(null);
           return;
@@ -1976,6 +2022,7 @@ export const MentionComposer = memo(
         onSend,
         runCommandDraft,
         commandPanel,
+        currentConversationId,
         refreshEmptyState,
         refreshMention,
         loadHistoryPrompts,
@@ -2173,7 +2220,13 @@ export const MentionComposer = memo(
     return (
       <div ref={wrapperRef} className="relative w-full min-w-0 max-w-full flex-1">
         {commandPanel ? (
-          <ComposerCommandPanel panel={commandPanel} onClose={() => setCommandPanel(null)} />
+          <ComposerCommandPanel
+            panel={commandPanel}
+            onClose={() => {
+              clearCommandRecovery(currentConversationId ?? "");
+              setCommandPanel(null);
+            }}
+          />
         ) : null}
         <AnimatePresence initial={false}>
           {popupVisible ? (

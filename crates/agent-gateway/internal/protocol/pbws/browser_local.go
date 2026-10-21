@@ -230,6 +230,7 @@ func (c *browserConn) handleChatCommand(requestID, agentID string, cmd *gatewayv
 		body.Workdir,
 		body.ClientRequestID,
 		chatcmd.BuildAcceptedCommandPayloads(body, baseMessageRef),
+		chatcmd.HasComposerCommand(body),
 	)
 	if start.Deduped {
 		c.respondChatCommandDeduped(requestID, start)
@@ -250,7 +251,7 @@ func (c *browserConn) handleKBrainChatCommand(requestID, agentID string, body ha
 		body.ConversationID = uuid.NewString()
 	}
 	runID := "kbrain-command-" + uuid.NewString()
-	start := c.sm.StartChatCommand(agentID, runID, body.ConversationID, body.Workdir, body.ClientRequestID, chatcmd.BuildAcceptedCommandPayloads(body, nil))
+	start := c.sm.StartChatCommand(agentID, runID, body.ConversationID, body.Workdir, body.ClientRequestID, chatcmd.BuildAcceptedCommandPayloads(body, nil), chatcmd.HasComposerCommand(body))
 	if start.Deduped {
 		c.respondChatCommandDeduped(requestID, start)
 		return
@@ -280,14 +281,18 @@ func (c *browserConn) handleKBrainChatCommand(requestID, agentID string, body ha
 		<-ready
 		onControl(runID, control)
 	}
-	queued, err := c.srv.kbrainRelay.StartWithCWD(context.Background(), start.RunID, start.ConversationID, body.ClientRequestID, body.Workdir, kbrain.PromptRequest{Prompt: body.Message, PromptCommand: body.PromptCommand, Model: model, Options: options}, body.QueuePolicy, callbacks)
+	queued, err := c.srv.kbrainRelay.StartWithCWD(context.Background(), start.RunID, start.ConversationID, body.ClientRequestID, body.Workdir, kbrain.PromptRequest{Prompt: body.Message, PromptCommand: body.PromptCommand, Model: model, Options: options}, body.QueuePolicy, callbacks, chatcmd.HasComposerCommand(body))
 	if err == nil && queued {
 		// Settle the browser startup watchdog before a queued run can start.
 		onControl(start.RunID, &gatewayv2.ChatControlEvent{RequestId: start.RunID, ConversationId: start.ConversationID, Type: "queued_in_gui"})
 	}
 	close(ready)
 	if err != nil {
-		c.sm.FailChatCommand(agentID, runID, "kbrain_relay_error", err.Error())
+		code := "kbrain_relay_error"
+		if strings.Contains(err.Error(), "already running") {
+			code = "conversation_busy"
+		}
+		c.sm.FailChatCommand(agentID, runID, code, err.Error())
 	}
 }
 
@@ -328,6 +333,10 @@ func kbrainOptions(body handler.ChatRequestBody) *kbrain.RunOptions {
 				options.PermissionMode = "plan"
 			}
 		}
+	}
+	if body.PlanCommand {
+		options.PlanModeEnabled = true
+		options.PermissionMode = "plan"
 	}
 	if strings.TrimSpace(body.Workdir) != "" {
 		options.WorkspaceRoots = []kbrain.WorkspaceRoot{{Path: body.Workdir, Access: "write"}}

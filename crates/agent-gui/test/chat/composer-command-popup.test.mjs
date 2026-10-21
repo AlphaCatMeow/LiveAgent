@@ -27,6 +27,7 @@ window.HTMLElement.prototype.scrollIntoView = () => {};
 window.Range.prototype.getClientRects = () => [];
 window.Range.prototype.getBoundingClientRect = () => ({left:0,top:0,right:0,bottom:0,width:0,height:0});
 const { MentionComposer } = env.loadModule("@liveagent/ui/components/chat/MentionComposer.tsx");
+const { clearCommandRecoveries, moveCommandRecovery } = env.loadModule("@liveagent/ui/lib/chat/composerCommandRecovery.ts");
 document.execCommand = () => true;
 
 const skill = (name) => ({
@@ -77,7 +78,8 @@ async function type(text) {
     editor.focus();
     editor.textContent = text;
     const range = document.createRange();
-    range.setStart(editor.firstChild, text.length);
+    if (editor.firstChild) range.setStart(editor.firstChild, text.length);
+    else range.setStart(editor, 0);
     range.collapse(true);
     const selection = window.getSelection();
     selection.removeAllRanges();
@@ -113,6 +115,7 @@ const highlighted = () =>
     ?.getAttribute("data-command-name");
 
 test.beforeEach(async () => {
+  await env.act(async () => clearCommandRecoveries());
   calls.length = 0;
   sends = 0;
   await mount({ enabledSkills: [skill("code-review")], commandHost });
@@ -146,6 +149,34 @@ test("rejected command send restores the draft and shows the error",async()=>{
  await mount({enabledSkills:[],commandHost:rejecting});await type("/deploy staging");await key("Enter");
  assert.equal(editor.textContent.replace(/\u200b/g,""),"/deploy staging");assert.equal(sends,0);
  assert.ok(document.querySelector('[data-composer-command-panel="error"]')?.textContent.includes("busy now"));
+});
+test("asynchronous rejection preserves newly typed input until it is empty", async () => {
+ let reject;
+ await mount({currentConversationId:"c1",enabledSkills:[],commandHost:{...commandHost,sendTurn:()=>new Promise((_,fail)=>{reject=fail;})}});
+ await type("/deploy staging");await key("Enter");assert.equal(editor.textContent,"");
+ await type("new draft");await env.act(async()=>reject(new Error("chat.commands.busy")));
+ assert.equal(editor.textContent,"new draft");assert.ok(host.querySelector('[data-composer-command-panel="error"]'));
+ await type("");assert.equal(editor.textContent.replace(/\u200b/g,""),"/deploy staging");
+});
+test("background Pane rejection restores only its own conversation after remount", async () => {
+ let reject;
+ const delayed={...commandHost,sendTurn:()=>new Promise((_,fail)=>{reject=fail;})};
+ await mount({currentConversationId:"background",enabledSkills:[],commandHost:delayed});
+ await type("/plan inspect");await key("Enter");
+ await mount({currentConversationId:"main",enabledSkills:[],commandHost});await type("main draft");
+ await env.act(async()=>reject(new Error("chat.commands.busy")));
+ assert.equal(editor.textContent,"main draft");assert.equal(host.querySelector('[data-composer-command-panel]'),null);
+ await mount({currentConversationId:"background",enabledSkills:[],commandHost});
+ assert.equal(editor.textContent.replace(/\u200b/g,""),"/plan inspect");assert.ok(host.querySelector('[data-composer-command-panel="error"]'));
+});
+test("draft binding keeps late rejection recovery on the real conversation", async () => {
+ let reject;
+ await mount({currentConversationId:"draft",enabledSkills:[],commandHost:{...commandHost,sendTurn:()=>new Promise((_,fail)=>{reject=fail;})}});
+ await type("/plan inspect");await key("Enter");
+ await env.act(async()=>moveCommandRecovery("draft","bound"));
+ await mount({currentConversationId:"bound",enabledSkills:[],commandHost});
+ await env.act(async()=>reject(new Error("chat.commands.busy")));
+ assert.equal(editor.textContent.replace(/\u200b/g,""),"/plan inspect");assert.ok(host.querySelector('[data-composer-command-panel="error"]'));
 });
 test("editing a queued turn keeps slash drafts as plain sends",async()=>{
  await mount({enabledSkills:[],commandHost:{...commandHost,isDraftReserved:()=>true}});await type("/deploy staging");await key("Enter");

@@ -20,6 +20,8 @@ export type SendChatOptions = {
   goalAction?: "set" | "resume";
   goalText?: string;
   promptCommand?: boolean;
+  planCommand?: boolean;
+  waitForStart?: boolean;
 };
 
 export type SendChatFn = (

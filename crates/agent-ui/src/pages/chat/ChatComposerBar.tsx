@@ -1330,8 +1330,9 @@ export const ChatComposerBar = memo(function ChatComposerBar(props: ChatComposer
                               >
                                 {item.previewText || t("chat.queue.emptyMessage")}
                               </span>
+                              {/* 附件数最多占一半：宽屏显示全文，窄 Pane 里和预览对半让位。 */}
                               {item.fileCount > 0 ? (
-                                <span className="min-w-0 max-w-18 overflow-hidden text-ellipsis whitespace-nowrap text-tiny leading-4 text-muted-foreground">
+                                <span className="min-w-0 max-w-[50%] overflow-hidden text-ellipsis whitespace-nowrap text-tiny leading-4 text-muted-foreground">
                                   {t("chat.queue.fileCount").replace(
                                     "{count}",
                                     String(item.fileCount),

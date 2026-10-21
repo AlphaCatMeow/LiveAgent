@@ -153,13 +153,17 @@ export function ComposerGoalBar({
             running ? "text-foreground/80" : "text-muted-foreground",
           )}
         />
-        <span className="shrink-0 font-medium text-foreground/90">{label}</span>
+        {/* 最窄 Pane 里按钮放不下时，状态标签先截断（悬停看全文），
+            目标正文至少留 40px，按钮始终在栏内。 */}
+        <span className="min-w-0 truncate font-medium text-foreground/90" title={label}>
+          {label}
+        </span>
         {editing ? (
-          <span className="min-w-0 flex-1 truncate text-muted-foreground/70">
+          <span className="min-w-10 flex-1 truncate text-muted-foreground/70">
             {t("chat.goalBar.editHint")}
           </span>
         ) : (
-          <span className="min-w-0 flex-1 truncate text-muted-foreground" title={state.goal}>
+          <span className="min-w-10 flex-1 truncate text-muted-foreground" title={state.goal}>
             {state.goal}
             {elapsed || progress ? (
               <span className="text-muted-foreground/70">

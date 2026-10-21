@@ -69,7 +69,7 @@ test("structured draft context is carried by capable hosts and refused otherwise
  const conversation={type:"conversationMention",conversation:{id:"c2",title:"Other"}};
  const draft=draftOf([{type:"text",text:"/DEPLOY with "},conversation]);
  const f=fixture();const restored=await runWith(f,"/deploy with @Other",{draft});
- assert.equal(restored,1);assert.ok(!f.calls.some(c=>c[0]==="send"));assert.equal(f.calls.at(-1)[1].message,"/deploy: chat.commands.contextUnsupported");
+ assert.equal(restored,1);assert.ok(!f.calls.some(c=>c[0]==="send"));assert.equal(f.calls.at(-1)[1].message,"chat.commands.contextUnsupported");assert.equal(f.calls.at(-1)[1].command,"deploy");
  const g=fixture();g.host.carriesComposerContext=true;await runWith(g,"/DEPLOY with @Other",{draft});
  const sent=g.calls.find(c=>c[0]==="send");assert.equal(sent[1],"/deploy with @Other");assert.equal(sent[3].draft.segments[0].text,"/deploy with ");assert.equal(sent[3].draft.segments[1],conversation);
  const h=fixture();h.host.carriesComposerContext=true;await runWith(h,"/goal ship it",{draft:draftOf([{type:"text",text:"/goal ship it "},conversation])});

@@ -337,7 +337,9 @@ export type ComposerCommandPanelState =
   | { type: "loops"; loops: readonly ComposerLoopEntry[] }
   | { type: "loopCreated"; loop: ComposerLoopEntry }
   | { type: "notice"; message: string }
-  | { type: "error"; message: string };
+  // command：出错的指令名（不带"/"），界面上单独显示为标签，文案里不再重复。
+  // tone "warning"：会话忙这类可恢复的提醒，不按失败的红色显示。
+  | { type: "error"; message: string; command?: string; tone?: "warning" };
 
 export type ComposerCommandEffects = {
   host: ComposerCommandHost;
@@ -550,9 +552,12 @@ export async function runComposerCommand(
   } catch (error) {
     // 失败（含会话忙、发送被拒）不吞草稿：放回输入框，让用户改了再发。
     effects.restoreDraft?.();
+    const message = errorMessage(error) || effects.t("chat.commands.failed");
     effects.showPanel({
       type: "error",
-      message: `/${command.name}: ${errorMessage(error) || effects.t("chat.commands.failed")}`,
+      ...(message === effects.t("chat.commands.busy") ? { tone: "warning" as const } : {}),
+      command: command.name,
+      message,
     });
   }
 }

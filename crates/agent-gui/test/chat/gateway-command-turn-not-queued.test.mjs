@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { createTsModuleLoader } from "../../../agent-gui/test/helpers/load-ts-module.mjs";
-import { createWebModuleLoader } from "../../test/helpers/load-web-module.mjs";
+import { createTsModuleLoader } from "../helpers/load-ts-module.mjs";
+import { createWebModuleLoader } from "../../../agent-gateway/test/helpers/load-web-module.mjs";
 
 // WebUI 的“/”指令轮次发出时是 queuePolicy "auto"，由桌面端 bridge 决定直跑还是停进
 // 等待队列。桌面端判“要排队”的口径比 WebUI 的 isBusy 宽：队列里还有项（例如停止后
@@ -24,7 +24,7 @@ const webReact = {
   useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
 };
 const webLoader = createWebModuleLoader({
-  rootDir: fileURLToPath(new URL("../", import.meta.url)),
+  rootDir: fileURLToPath(new URL("../../../agent-gateway/web/", import.meta.url)),
   mocks: { react: webReact },
 });
 const { sendComposerCommandTurn } = webLoader.loadModule("src/app/sendComposerCommandTurn.ts");
@@ -70,7 +70,7 @@ function createIdleWebUiConversationState() {
 
 /* ----------------------------- 桌面侧（真实模块） ----------------------------- */
 
-// 与 agent-gui/test/chat/queue-settle-edit-resume.test.mjs 相同的最小 hook 运行器。
+// 与 queue-settle-edit-resume.test.mjs 相同的最小 hook 运行器。
 function createHookHarness() {
   const refs = [];
   const states = [];

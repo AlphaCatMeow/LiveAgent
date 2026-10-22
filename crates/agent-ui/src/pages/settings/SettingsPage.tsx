@@ -18,14 +18,12 @@ import {
 } from "@liveagent/ui/components/IconSet";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SettingsSectionDefinition, UiExtensionRegistry } from "../../contracts/registry";
-import { useLocale } from "../../i18n";
 import { AgentsSection } from "./AgentsSection";
 import { AIApprovalSection } from "./AIApprovalSection";
 import { CalendarSection } from "./CalendarSection";
 import { CronSection } from "./CronSection";
 import { HooksSection } from "./HooksSection";
 import { MemoryPanel } from "./memory/MemoryPanel";
-import { ProviderImageServices } from "./ProviderImageServices";
 import { ProvidersSection } from "./ProvidersSection";
 import { RemoteSection } from "./RemoteSection";
 import { ResourceHubSection } from "./ResourceHubSection";
@@ -42,14 +40,11 @@ const STT_SELECTED_PROVIDER_CACHE = new WeakMap<
 >();
 
 export function SettingsPage(props: SettingsPageProps) {
-  const { t } = useLocale();
   const {
     settings,
     setSettings,
     saveState,
     onBack,
-    imageClient,
-    registerLeaveGuard,
     initialSection = "system",
     initialProviderId,
     hiddenSections = [],
@@ -59,23 +54,6 @@ export function SettingsPage(props: SettingsPageProps) {
     onRetryRejectedLegacyProviders,
     onDismissRejectedLegacyProviders,
   } = props;
-  const imageLeaveGuard = useRef<(() => boolean) | undefined>(undefined);
-  const registerImageLeaveGuard = useCallback(
-    (guard: () => boolean) => {
-      imageLeaveGuard.current = guard;
-      const unregister = registerLeaveGuard?.(guard);
-      return () => {
-        if (imageLeaveGuard.current === guard) imageLeaveGuard.current = undefined;
-        unregister?.();
-      };
-    },
-    [registerLeaveGuard],
-  );
-  const canLeaveSection = useCallback(() => imageLeaveGuard.current?.() ?? true, []);
-  const handleBack = useCallback(() => {
-    // The root also guards keyboard/actions that close the overlay directly.
-    if (registerLeaveGuard || canLeaveSection()) onBack();
-  }, [registerLeaveGuard, canLeaveSection, onBack]);
   const [pendingProviderId, setPendingProviderId] = useState(initialProviderId);
   const [sttSelectedProvider, setSttSelectedProvider] = useState<SttProviderId>(
     () =>
@@ -122,21 +100,15 @@ export function SettingsPage(props: SettingsPageProps) {
         icon: <Cpu className={extension.iconClassName} />,
         contentMode: "fill",
         render: () => (
-          <ProviderImageServices
-            navigationLabel={t("settings.navProviders")}
-            client={imageClient}
-            registerLeaveGuard={registerImageLeaveGuard}
-          >
-            <ProvidersSection
-              settings={settings}
-              setSettings={setSettings}
-              initialProviderId={pendingProviderId}
-              onInitialProviderHandled={() => setPendingProviderId(undefined)}
-              rejectedLegacyProviders={rejectedLegacyProviders}
-              onRetryRejectedLegacyProviders={onRetryRejectedLegacyProviders}
-              onDismissRejectedLegacyProviders={onDismissRejectedLegacyProviders}
-            />
-          </ProviderImageServices>
+          <ProvidersSection
+            settings={settings}
+            setSettings={setSettings}
+            initialProviderId={pendingProviderId}
+            onInitialProviderHandled={() => setPendingProviderId(undefined)}
+            rejectedLegacyProviders={rejectedLegacyProviders}
+            onRetryRejectedLegacyProviders={onRetryRejectedLegacyProviders}
+            onDismissRejectedLegacyProviders={onDismissRejectedLegacyProviders}
+          />
         ),
       },
       {
@@ -271,9 +243,6 @@ export function SettingsPage(props: SettingsPageProps) {
     [
       extension,
       props.settingsHost,
-      imageClient,
-      t,
-      registerImageLeaveGuard,
       rejectedLegacyProviders,
       onRetryRejectedLegacyProviders,
       onDismissRejectedLegacyProviders,
@@ -298,8 +267,7 @@ export function SettingsPage(props: SettingsPageProps) {
       registry={registry}
       context={undefined}
       saveState={saveState}
-      onBack={handleBack}
-      canLeaveSection={canLeaveSection}
+      onBack={onBack}
       initialSection={initialSection === "image-studio" ? "providers" : initialSection}
       hiddenSections={hiddenSections}
       fontScale={settings.customSettings.fontScale.settings}

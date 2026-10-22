@@ -425,7 +425,7 @@ function ImageSettingsScope({
           {panel === "connections"
             ? "配置图像供应商的地址、认证和凭据。模型与工作流请在创作输入区的目标设置中管理。"
             : panel === "targets"
-              ? "选择已有图像服务，配置生成模型或工作流。新增服务和凭据请使用原有设置中的供应商设置。"
+              ? "选择已有图像连接，配置生成模型或工作流。连接和凭据由后端配置管理。"
               : "配置图像连接和模型或工作流目标。公开配置保存后，再写入连接凭据。"}
         </p>
       </div>
@@ -762,7 +762,7 @@ function ImageSettingsScope({
             </section>
           )}
           {panel === "targets" && draft.connections.length === 0 && (
-            <p role="status">请先在设置 → 供应商设置 → 图像服务中添加连接。</p>
+            <p role="status">当前没有可用的图像连接，请先配置后端图像连接。</p>
           )}
           {panel !== "connections" && (
             <section className="space-y-3 rounded-xl bg-settings-tile p-4">

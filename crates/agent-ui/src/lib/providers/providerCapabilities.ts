@@ -54,8 +54,6 @@ export function providerSupportsNativeWebSearch(
   }
   return (
     options?.nativeWebSearchSupported ??
-    (api === "openai-responses" ||
-      api === "anthropic-messages" ||
-      api === "google-generative-ai")
+    (api === "openai-responses" || api === "anthropic-messages" || api === "google-generative-ai")
   );
 }

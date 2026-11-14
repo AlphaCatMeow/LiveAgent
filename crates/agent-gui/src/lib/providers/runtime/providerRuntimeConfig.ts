@@ -54,6 +54,7 @@ export function createProviderRuntimeConfig(
       providerSupportsNativeWebSearch(
         provider.type,
         resolveProviderApi(provider.type, provider.requestFormat),
+        { modelId: model },
       ),
     useSystemProxy: provider.useSystemProxy,
     ...(provider.retryPolicy ? { retryPolicy: provider.retryPolicy } : {}),

@@ -127,6 +127,7 @@ export function buildModelOptions<TProviderType extends string>(
         nativeWebSearchSupported: providerSupportsNativeWebSearch(
           provider.type,
           resolveProviderApi(provider.type, provider.requestFormat),
+          { modelId: model },
         ),
         reasoning: Boolean(catalog?.thinking),
         vision: (configured?.inputModalities ?? catalog?.inputModalities)?.includes("image"),

@@ -552,6 +552,7 @@ export function normalizeChatRuntimeControlsForProvider(
         providerSupportsNativeWebSearch(
           params.providerId,
           resolveProviderApi(params.providerId, params.requestFormat),
+          { modelId: params.modelId },
         )),
   };
 }

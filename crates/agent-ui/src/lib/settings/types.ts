@@ -89,7 +89,13 @@ export type ChatSidebarSettings = {
   recentCollapsed: boolean;
 };
 
-export const RIGHT_DOCK_TOOL_KINDS = ["fileTree", "gitReview", "tunnel", "sshTunnel"] as const;
+export const RIGHT_DOCK_TOOL_KINDS = [
+  "fileTree",
+  "gitReview",
+  "tunnel",
+  "sshTunnel",
+  "browser",
+] as const;
 
 export type RightDockToolKind = (typeof RIGHT_DOCK_TOOL_KINDS)[number];
 
@@ -663,6 +669,11 @@ export type CustomProvider = {
   /** 仅 Anthropic：ephemeral 缓存保留档位；long 在官方 API 上映射为 1h TTL。 */
   promptCacheRetention?: "short" | "long";
   nativeWebSearchEnabled: boolean;
+  /**
+   * Read-only, from K-brain (`nativeWebSearchSupported`): whether this provider's API searches
+   * natively. Absent on older backends, where the local API rule decides. Never sent back.
+   */
+  nativeWebSearchSupported?: boolean;
   useSystemProxy: boolean;
   /** 流内重试策略；缺省 = 全局默认行为（等价于 mode:"default"）。 */
   retryPolicy?: ProviderRetryPolicy;

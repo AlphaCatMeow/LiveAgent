@@ -45,14 +45,17 @@ export function resolveKBrainRequestFormat(provider: {
 export function providerSupportsNativeWebSearch(
   _providerId: string,
   api: string | undefined,
-  options?: { baseUrl?: string; modelId?: string },
+  options?: { baseUrl?: string; modelId?: string; nativeWebSearchSupported?: boolean },
 ) {
-  // DeepSeek Flash exposes server tools on Chat Completions. Other chat
-  // models (including legacy DeepSeek models) do not share that contract.
+  // K-brain's provider flag describes the API family, not each model. Flash
+  // adds server tools to Chat Completions even when that family reports false.
+  if (api === "openai-completions" && options?.modelId?.toLowerCase() === "deepseek-flash") {
+    return true;
+  }
   return (
-    api === "openai-responses" ||
-    api === "anthropic-messages" ||
-    api === "google-generative-ai" ||
-    (api === "openai-completions" && options?.modelId?.toLowerCase() === "deepseek-flash")
+    options?.nativeWebSearchSupported ??
+    (api === "openai-responses" ||
+      api === "anthropic-messages" ||
+      api === "google-generative-ai")
   );
 }

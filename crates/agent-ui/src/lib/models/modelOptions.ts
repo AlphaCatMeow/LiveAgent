@@ -31,6 +31,8 @@ export type ModelOptionsSettings<TProviderType extends string = string> = {
     name: string;
     type: TProviderType;
     requestFormat?: string;
+    /** K-brain's per-provider answer (capability web_search_fallback); local rule otherwise. */
+    nativeWebSearchSupported?: boolean;
     activeModels: readonly string[];
     models?: readonly {
       id: string;
@@ -127,7 +129,7 @@ export function buildModelOptions<TProviderType extends string>(
         nativeWebSearchSupported: providerSupportsNativeWebSearch(
           provider.type,
           resolveProviderApi(provider.type, provider.requestFormat),
-          { modelId: model },
+          { modelId: model, nativeWebSearchSupported: provider.nativeWebSearchSupported },
         ),
         reasoning: Boolean(catalog?.thinking),
         vision: (configured?.inputModalities ?? catalog?.inputModalities)?.includes("image"),

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "snapshotDate": "2026-11-17",
-  "generatedAt": "2026-11-17T21:19:15.201Z",
+  "snapshotDate": "2026-11-19",
+  "generatedAt": "2026-11-19T07:54:30.857Z",
   "generator": {
     "commit": "f6acec88703fb0c44c7ccfc2a207f6930ffc54e5",
     "sources": [
@@ -806,6 +806,27 @@
       },
       {
         "id": "gemini-4-hydrogen",
+        "contextWindow": 1048576,
+        "maxOutputToken": 65536,
+        "inputModalities": [
+          "text",
+          "image",
+          "audio",
+          "video",
+          "pdf"
+        ],
+        "thinking": {
+          "levels": [
+            "low",
+            "medium",
+            "high",
+            "xhigh"
+          ],
+          "off": false
+        }
+      },
+      {
+        "id": "gemini-4-neon",
         "contextWindow": 1048576,
         "maxOutputToken": 65536,
         "inputModalities": [
@@ -3612,5 +3633,5 @@
     "alibaba": 40,
     "tencent": 4
   },
-  "sha256": "67275c8f7f0112929bde94be7b394353ab88479051ae73c3bf2193f56f61f208"
+  "sha256": "ba776532fae56070f5f9c6a623aa8482fd414d74f5432a6e18a39eb96b164b1e"
 }

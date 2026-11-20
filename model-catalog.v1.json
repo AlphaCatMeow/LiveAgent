@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "snapshotDate": "2026-11-19",
-  "generatedAt": "2026-11-19T07:54:30.857Z",
+  "snapshotDate": "2026-11-20",
+  "generatedAt": "2026-11-20T07:43:46.548Z",
   "generator": {
     "commit": "f6acec88703fb0c44c7ccfc2a207f6930ffc54e5",
     "sources": [
@@ -1860,20 +1860,6 @@
           ],
           "off": false
         }
-      },
-      {
-        "id": "grok-build-0.1",
-        "contextWindow": 256000,
-        "maxOutputToken": 32000,
-        "inputModalities": [
-          "text",
-          "image",
-          "pdf"
-        ],
-        "thinking": {
-          "levels": [],
-          "off": false
-        }
       }
     ],
     "deepseek": [
@@ -3633,5 +3619,5 @@
     "alibaba": 40,
     "tencent": 4
   },
-  "sha256": "ba776532fae56070f5f9c6a623aa8482fd414d74f5432a6e18a39eb96b164b1e"
+  "sha256": "9a50e5c0ee5e5f3f205b9c2fe0e34b4eb1eb91656712188849c36bbce8550a9e"
 }

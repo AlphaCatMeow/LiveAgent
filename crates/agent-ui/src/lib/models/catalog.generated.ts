@@ -26,7 +26,7 @@ export type CatalogModelEntry = {
 
 export type CatalogProviderId = "anthropic" | "google" | "openai" | "xai" | "deepseek" | "zhipuai" | "moonshotai" | "minimax" | "stepfun" | "xiaomi" | "longcat" | "alibaba" | "tencent";
 
-export const MODEL_CATALOG_SNAPSHOT_DATE = "2026-11-14";
+export const MODEL_CATALOG_SNAPSHOT_DATE = "2026-11-24";
 
 export const MODEL_CATALOG: Record<CatalogProviderId, readonly CatalogModelEntry[]> = {
   anthropic: [
@@ -52,7 +52,6 @@ export const MODEL_CATALOG: Record<CatalogProviderId, readonly CatalogModelEntry
   google: [
     { id: "deep-research-max-preview-04-2026", contextWindow: 1048576, maxOutputToken: 65536, inputModalities: ["text", "image", "audio", "video", "pdf"], thinking: { levels: [], off: false } },
     { id: "deep-research-preview-04-2026", contextWindow: 1048576, maxOutputToken: 65536, inputModalities: ["text", "image", "audio", "video", "pdf"], thinking: { levels: [], off: false } },
-    { id: "gemini-2.5-computer-use-preview-10-2025", contextWindow: 128000, maxOutputToken: 64000, inputModalities: ["text", "image"], thinking: { levels: [], off: false } },
     { id: "gemini-2.5-flash", contextWindow: 1048576, maxOutputToken: 65536, inputModalities: ["text", "image", "audio", "video", "pdf"], thinking: { levels: ["minimal", "low", "medium", "high"], off: true } },
     { id: "gemini-2.5-flash-image", contextWindow: 32768, maxOutputToken: 8192, inputModalities: ["text", "image"] },
     { id: "gemini-2.5-flash-lite", contextWindow: 1048576, maxOutputToken: 65536, inputModalities: ["text", "image", "audio", "video", "pdf"], thinking: { levels: ["minimal", "low", "medium", "high"], off: true } },
@@ -62,7 +61,6 @@ export const MODEL_CATALOG: Record<CatalogProviderId, readonly CatalogModelEntry
     { id: "gemini-3.1-flash-image", contextWindow: 131072, maxOutputToken: 32768, inputModalities: ["text", "image", "video", "pdf"], thinking: { levels: ["minimal", "high"], off: false } },
     { id: "gemini-3.1-flash-lite", contextWindow: 1048576, maxOutputToken: 65536, inputModalities: ["text", "image", "audio", "video", "pdf"], thinking: { levels: ["minimal", "low", "medium", "high"], off: false } },
     { id: "gemini-3.1-flash-lite-image", contextWindow: 65536, maxOutputToken: 4096, inputModalities: ["text", "image"], thinking: { levels: ["minimal", "high"], off: false } },
-    { id: "gemini-3.1-flash-lite-preview", contextWindow: 1048576, maxOutputToken: 65536, inputModalities: ["text", "image", "audio", "video", "pdf"], thinking: { levels: ["minimal", "low", "medium", "high"], off: false } },
     { id: "gemini-3.1-flash-live-preview", contextWindow: 131072, maxOutputToken: 65536, inputModalities: ["text", "image", "audio", "video"], thinking: { levels: ["minimal", "low", "medium", "high"], off: false } },
     { id: "gemini-3.1-pro-preview", contextWindow: 1048576, maxOutputToken: 65536, inputModalities: ["text", "image", "audio", "video", "pdf"], thinking: { levels: ["low", "medium", "high"], off: false } },
     { id: "gemini-3.1-pro-preview-customtools", contextWindow: 1048576, maxOutputToken: 65536, inputModalities: ["text", "image", "audio", "video", "pdf"], thinking: { levels: ["low", "medium", "high"], off: false } },
@@ -75,6 +73,7 @@ export const MODEL_CATALOG: Record<CatalogProviderId, readonly CatalogModelEntry
     { id: "gemini-4-argon", contextWindow: 1048576, maxOutputToken: 32768, inputModalities: ["text", "image", "audio", "video", "pdf"], thinking: { levels: ["low", "medium", "high"], off: false } },
     { id: "gemini-4-carbon", contextWindow: 1048576, maxOutputToken: 32768, inputModalities: ["text", "image", "audio", "video", "pdf"], thinking: { levels: ["low", "medium", "high"], off: false } },
     { id: "gemini-4-hydrogen", contextWindow: 1048576, maxOutputToken: 65536, inputModalities: ["text", "image", "audio", "video", "pdf"], thinking: { levels: ["low", "medium", "high", "xhigh"], off: false } },
+    { id: "gemini-4-neon", contextWindow: 1048576, maxOutputToken: 65536, inputModalities: ["text", "image", "audio", "video", "pdf"], thinking: { levels: ["low", "medium", "high", "xhigh"], off: false } },
     { id: "gemini-embedding-001", contextWindow: 2048, maxOutputToken: 1, inputModalities: ["text"] },
     { id: "gemini-embedding-2", contextWindow: 8192, maxOutputToken: 1, inputModalities: ["text", "image", "audio", "video", "pdf"] },
     { id: "gemini-flash-latest", contextWindow: 1048576, maxOutputToken: 65536, inputModalities: ["text", "image", "audio", "video", "pdf"], thinking: { levels: ["low", "medium", "high"], off: false } },
@@ -86,14 +85,9 @@ export const MODEL_CATALOG: Record<CatalogProviderId, readonly CatalogModelEntry
     { id: "lyria-3-pro-preview", contextWindow: 1048576, maxOutputToken: 65536, inputModalities: ["text", "image"] },
   ],
   openai: [
-    { id: "gpt-3.5-turbo", contextWindow: 16385, maxOutputToken: 4096, inputModalities: ["text"] },
-    { id: "gpt-4", contextWindow: 8192, maxOutputToken: 2048, inputModalities: ["text"] },
-    { id: "gpt-4-turbo", contextWindow: 128000, maxOutputToken: 4096, inputModalities: ["text", "image"] },
     { id: "gpt-4.1", contextWindow: 1047576, maxOutputToken: 32768, inputModalities: ["text", "image", "pdf"] },
     { id: "gpt-4.1-mini", contextWindow: 1047576, maxOutputToken: 32768, inputModalities: ["text", "image", "pdf"] },
-    { id: "gpt-4.1-nano", contextWindow: 1047576, maxOutputToken: 32768, inputModalities: ["text", "image"] },
     { id: "gpt-4o", contextWindow: 128000, maxOutputToken: 16384, inputModalities: ["text", "image", "pdf"] },
-    { id: "gpt-4o-2024-05-13", contextWindow: 128000, maxOutputToken: 4096, inputModalities: ["text", "image"] },
     { id: "gpt-4o-2024-08-06", contextWindow: 128000, maxOutputToken: 16384, inputModalities: ["text", "image"] },
     { id: "gpt-4o-2024-11-20", contextWindow: 128000, maxOutputToken: 16384, inputModalities: ["text", "image"] },
     { id: "gpt-4o-mini", contextWindow: 128000, maxOutputToken: 16384, inputModalities: ["text", "image", "pdf"] },
@@ -105,7 +99,6 @@ export const MODEL_CATALOG: Record<CatalogProviderId, readonly CatalogModelEntry
     { id: "gpt-5.2", contextWindow: 400000, maxOutputToken: 128000, inputModalities: ["text", "image"], thinking: { levels: ["low", "medium", "high", "xhigh"], off: true } },
     { id: "gpt-5.2-pro", contextWindow: 400000, maxOutputToken: 128000, inputModalities: ["text", "image"], thinking: { levels: ["medium", "high", "xhigh"], off: false } },
     { id: "gpt-5.3-codex", contextWindow: 400000, maxOutputToken: 128000, inputModalities: ["text", "image", "pdf"], thinking: { levels: ["low", "medium", "high", "xhigh"], off: true } },
-    { id: "gpt-5.3-codex-spark", contextWindow: 128000, maxOutputToken: 32000, inputModalities: ["text", "image", "pdf"], thinking: { levels: ["low", "medium", "high", "xhigh"], off: true } },
     { id: "gpt-5.4", contextWindow: 1050000, maxOutputToken: 128000, inputModalities: ["text", "image", "pdf"], thinking: { levels: ["low", "medium", "high", "xhigh"], off: true } },
     { id: "gpt-5.4-mini", contextWindow: 400000, maxOutputToken: 128000, inputModalities: ["text", "image"], thinking: { levels: ["low", "medium", "high", "xhigh"], off: true } },
     { id: "gpt-5.4-nano", contextWindow: 400000, maxOutputToken: 128000, inputModalities: ["text", "image"], thinking: { levels: ["low", "medium", "high", "xhigh"], off: true } },
@@ -119,17 +112,14 @@ export const MODEL_CATALOG: Record<CatalogProviderId, readonly CatalogModelEntry
     { id: "gpt-6-astra", contextWindow: 400000, maxOutputToken: 128000, inputModalities: ["text", "image"], thinking: { levels: ["low", "medium", "high", "xhigh", "max"], off: false } },
     { id: "gpt-6-luna", contextWindow: 400000, maxOutputToken: 128000, inputModalities: ["text", "image"], thinking: { levels: ["low", "medium", "high", "xhigh", "max"], off: true } },
     { id: "gpt-6-sol", contextWindow: 400000, maxOutputToken: 128000, inputModalities: ["text", "image"], thinking: { levels: ["low", "medium", "high", "xhigh", "max"], off: true } },
-    { id: "gpt-6.1-sol", contextWindow: 400000, maxOutputToken: 128000, inputModalities: ["text", "image"], thinking: { levels: ["low", "medium", "high", "xhigh", "max"], off: false } },
+    { id: "gpt-6.1-sol", contextWindow: 628000, maxOutputToken: 128000, inputModalities: ["text", "image"], thinking: { levels: ["low", "medium", "high", "xhigh", "max"], off: false } },
     { id: "gpt-6.1-terra", contextWindow: 628000, maxOutputToken: 128000, inputModalities: ["text", "image"], thinking: { levels: ["low", "medium", "high", "xhigh", "max"], off: true } },
+    { id: "gpt-6.2-astra", contextWindow: 400000, maxOutputToken: 128000, inputModalities: ["text", "image"], thinking: { levels: ["low", "medium", "high", "xhigh", "max"], off: false } },
+    { id: "gpt-6.2-sol", contextWindow: 628000, maxOutputToken: 128000, inputModalities: ["text", "image"], thinking: { levels: ["low", "medium", "high", "xhigh", "max"], off: false } },
     { id: "gpt-daybreak-blue-latest", contextWindow: 400000, maxOutputToken: 128000, inputModalities: ["text", "image"], thinking: { levels: ["low", "medium", "high", "xhigh", "max"], off: true } },
     { id: "gpt-daybreak-red-latest", contextWindow: 500000, maxOutputToken: 128000, inputModalities: ["text", "image"], thinking: { levels: ["low", "medium", "high", "xhigh", "max"], off: true } },
-    { id: "gpt-realtime-2.1", contextWindow: 128000, maxOutputToken: 32000, inputModalities: ["text", "image", "audio"], thinking: { levels: ["minimal", "low", "medium", "high", "xhigh"], off: false } },
-    { id: "o1", contextWindow: 200000, maxOutputToken: 100000, inputModalities: ["text", "image", "pdf"], thinking: { levels: ["low", "medium", "high"], off: false } },
-    { id: "o1-pro", contextWindow: 200000, maxOutputToken: 100000, inputModalities: ["text", "image"], thinking: { levels: ["low", "medium", "high"], off: false } },
     { id: "o3", contextWindow: 200000, maxOutputToken: 100000, inputModalities: ["text", "image", "pdf"], thinking: { levels: ["low", "medium", "high"], off: false } },
-    { id: "o3-mini", contextWindow: 200000, maxOutputToken: 100000, inputModalities: ["text"], thinking: { levels: ["low", "medium", "high"], off: false } },
     { id: "o3-pro", contextWindow: 200000, maxOutputToken: 100000, inputModalities: ["text", "image"], thinking: { levels: ["low", "medium", "high"], off: false } },
-    { id: "o4-mini", contextWindow: 200000, maxOutputToken: 100000, inputModalities: ["text", "image"], thinking: { levels: ["low", "medium", "high"], off: false } },
     { id: "text-embedding-3-large", contextWindow: 8191, maxOutputToken: 3072, inputModalities: ["text"] },
     { id: "text-embedding-3-small", contextWindow: 8191, maxOutputToken: 1536, inputModalities: ["text"] },
     { id: "text-embedding-ada-002", contextWindow: 8192, maxOutputToken: 1536, inputModalities: ["text"] },
@@ -142,7 +132,6 @@ export const MODEL_CATALOG: Record<CatalogProviderId, readonly CatalogModelEntry
     { id: "grok-4.5", contextWindow: 500000, maxOutputToken: 32000, inputModalities: ["text", "image", "pdf"], thinking: { levels: ["low", "medium", "high", "xhigh"], off: false } },
     { id: "grok-4.6", contextWindow: 500000, maxOutputToken: 32000, inputModalities: ["text", "image", "pdf"], thinking: { levels: ["low", "medium", "high", "xhigh"], off: false } },
     { id: "grok-4.7", contextWindow: 500000, maxOutputToken: 32000, inputModalities: ["text", "image", "pdf"], thinking: { levels: ["low", "medium", "high", "xhigh"], off: false } },
-    { id: "grok-build-0.1", contextWindow: 256000, maxOutputToken: 32000, inputModalities: ["text", "image", "pdf"], thinking: { levels: [], off: false } },
   ],
   deepseek: [
     { id: "deepseek-v4-flash", contextWindow: 1048576, maxOutputToken: 393216, inputModalities: ["text", "image"], thinking: { levels: ["low", "high", "max"], off: true } },
@@ -202,6 +191,7 @@ export const MODEL_CATALOG: Record<CatalogProviderId, readonly CatalogModelEntry
   ],
   longcat: [
     { id: "LongCat-2.0", contextWindow: 1048576, maxOutputToken: 131072, inputModalities: ["text"], thinking: { levels: ["high"], off: true } },
+    { id: "LongCat-2.5", contextWindow: 1048576, maxOutputToken: 262144, inputModalities: ["text", "image", "video"], thinking: { levels: ["high"], off: true } },
     { id: "LongCat-2.5-Preview", contextWindow: 1048576, maxOutputToken: 262144, inputModalities: ["text", "image"], thinking: { levels: ["high"], off: true } },
   ],
   alibaba: [
@@ -258,7 +248,7 @@ export const MODEL_CATALOG: Record<CatalogProviderId, readonly CatalogModelEntry
     { id: "qwen3-omni-flash-realtime", contextWindow: 65536, maxOutputToken: 16384, inputModalities: ["text", "image", "audio"] },
     { id: "qwen3-vl-235b-a22b", contextWindow: 131072, maxOutputToken: 32768, inputModalities: ["text", "image"], thinking: { levels: [], off: false } },
     { id: "qwen3-vl-30b-a3b", contextWindow: 131072, maxOutputToken: 32768, inputModalities: ["text", "image"], thinking: { levels: [], off: false } },
-    { id: "qwen3-vl-plus", contextWindow: 262144, maxOutputToken: 32768, inputModalities: ["text", "image"], thinking: { levels: ["minimal", "low", "medium", "high"], off: true } },
+    { id: "qwen3-vl-plus", contextWindow: 262144, maxOutputToken: 32768, inputModalities: ["text", "image", "video"], thinking: { levels: ["minimal", "low", "medium", "high"], off: true } },
     { id: "qwen3.5-122b-a10b", contextWindow: 262144, maxOutputToken: 65536, inputModalities: ["text", "image", "video"], thinking: { levels: ["minimal", "low", "medium", "high"], off: true } },
     { id: "qwen3.5-27b", contextWindow: 262144, maxOutputToken: 65536, inputModalities: ["text", "image", "video"], thinking: { levels: ["minimal", "low", "medium", "high"], off: true } },
     { id: "qwen3.5-35b-a3b", contextWindow: 262144, maxOutputToken: 65536, inputModalities: ["text", "image", "video"], thinking: { levels: ["minimal", "low", "medium", "high"], off: true } },
